@@ -84,8 +84,23 @@ describe('session contracts', () => {
 
   it('validates create and list response envelopes', () => {
     const session = SessionDtoSchema.parse(sessionInput)
+    const message = {
+      id: 'message-1', sessionId: session.id, sequence: 1, role: 'user' as const,
+      actorId: 'user-1', content: session.summary, attachments: [], createdAt: session.createdAt,
+    }
+    const turn = {
+      id: 'turn-1', sessionId: session.id, ordinal: 1, initiatorType: 'user' as const,
+      initiatorId: 'user-1', inputMessageId: message.id, status: 'queued' as const,
+      queuedAt: session.createdAt, version: 1,
+    }
+    const command = {
+      id: 'command-1', type: 'session.start' as const, status: 'accepted' as const,
+      resourceType: 'turn' as const, resourceId: turn.id, acceptedAt: session.createdAt,
+    }
 
-    expect(CreateSessionResponseSchema.parse({ session })).toEqual({ session })
+    expect(CreateSessionResponseSchema.parse({ session, message, turn, command })).toEqual({
+      session, message, turn, command,
+    })
     expect(SessionListResponseSchema.parse({
       items: [session],
       page: { nextCursor: null, hasMore: false, projectionUpdatedAt: session.updatedAt },

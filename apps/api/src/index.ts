@@ -17,6 +17,7 @@ export {
   AuthorizationChangedError,
   IdempotencyConflictError,
   InMemorySessionRepository,
+  createSessionStartRecords,
   createSessionDto,
   type CreateSessionRecord,
   type CreateSessionResult,

@@ -2,7 +2,11 @@ import { randomUUID } from 'node:crypto'
 import {
   SessionDtoSchema,
   type CreateSessionRequest,
+  type CreateSessionResponse,
+  type SessionCommand,
   type SessionDto,
+  type SessionMessage,
+  type SessionTurn,
 } from '@relay/contracts'
 
 export type CreateSessionRecord = {
@@ -15,6 +19,9 @@ export type CreateSessionRecord = {
 
 export type CreateSessionResult = {
   session: SessionDto
+  message?: SessionMessage
+  turn?: SessionTurn
+  command?: SessionCommand
   replayed: boolean
 }
 
@@ -69,7 +76,7 @@ export function createSessionDto(
     repository: record.request.repository,
     baseBranch: record.request.baseBranch,
     visibility: record.request.visibility,
-    status: record.request.start ? 'active' : 'draft',
+    status: record.request.start ? 'queued' : 'draft',
     attachments: record.request.message.attachments,
     source: 'manual',
     createdAt: timestamp,
@@ -77,6 +84,47 @@ export function createSessionDto(
     lastActivityAt: timestamp,
     version: 1,
   })
+}
+
+export function createSessionStartRecords(
+  record: CreateSessionRecord,
+  session: SessionDto,
+  options: {
+    createId?: () => string
+  } = {},
+): Pick<CreateSessionResponse, 'message' | 'turn' | 'command'> {
+  if (!record.request.start) return {}
+  const createId = options.createId ?? randomUUID
+  const message: SessionMessage = {
+    id: createId(),
+    sessionId: session.id,
+    sequence: 1,
+    role: 'user',
+    actorId: record.actorId,
+    content: record.request.message.content,
+    attachments: [...record.request.message.attachments],
+    createdAt: session.createdAt,
+  }
+  const turn: SessionTurn = {
+    id: createId(),
+    sessionId: session.id,
+    ordinal: 1,
+    initiatorType: 'user',
+    initiatorId: record.actorId,
+    inputMessageId: message.id,
+    status: 'queued',
+    queuedAt: session.createdAt,
+    version: 1,
+  }
+  const command: SessionCommand = {
+    id: createId(),
+    type: 'session.start',
+    status: 'accepted',
+    resourceType: 'turn',
+    resourceId: turn.id,
+    acceptedAt: session.createdAt,
+  }
+  return { message, turn, command }
 }
 
 function cloneSession(session: SessionDto): SessionDto {
@@ -91,7 +139,7 @@ export class InMemorySessionRepository implements SessionRepository {
   private readonly sessionsBySpace = new Map<string, SessionDto[]>()
   private readonly sessionsByIdempotencyKey = new Map<string, {
     requestFingerprint: string
-    session: SessionDto
+    result: CreateSessionResult
   }>()
   private readonly createId: () => string
   private readonly now: () => Date
@@ -123,20 +171,29 @@ export class InMemorySessionRepository implements SessionRepository {
     const existing = this.sessionsByIdempotencyKey.get(idempotencyScope)
     if (existing) {
       if (existing.requestFingerprint !== requestFingerprint) throw new IdempotencyConflictError()
-      return { session: cloneSession(existing.session), replayed: true }
+      return {
+        ...existing.result,
+        session: cloneSession(existing.result.session),
+        message: existing.result.message
+          ? { ...existing.result.message, attachments: [...existing.result.message.attachments] }
+          : undefined,
+        replayed: true,
+      }
     }
 
     const session = createSessionDto(record, {
       id: this.createId(),
       timestamp: this.now().toISOString(),
     })
+    const startRecords = createSessionStartRecords(record, session, { createId: this.createId })
 
     const key = spaceKey(record.organizationId, record.spaceId)
     const sessions = this.sessionsBySpace.get(key) ?? []
     sessions.unshift(session)
     this.sessionsBySpace.set(key, sessions)
-    this.sessionsByIdempotencyKey.set(idempotencyScope, { requestFingerprint, session })
+    const result = { session: cloneSession(session), ...startRecords, replayed: false }
+    this.sessionsByIdempotencyKey.set(idempotencyScope, { requestFingerprint, result })
 
-    return { session: cloneSession(session), replayed: false }
+    return result
   }
 }

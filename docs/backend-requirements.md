@@ -25,7 +25,7 @@
 | --- | --- | --- |
 | 进程与配置 | Fastify API；`/api/health` 公开存活检查；受鉴权的 `/api/ready` 可检查 PostgreSQL；生产模式强制 OIDC、`DATABASE_URL` 和 `CORS_ORIGIN` | 无限流、信任代理、安全 header、优雅排空验收和多区部署 |
 | Session API | `GET/POST /api/v1/organizations/:organizationId/spaces/:spaceId/sessions`；共享 Zod 请求/响应/错误验证 | 无 get/patch/archive/message/turn/command/SSE；列表无真实 cursor 和 filter |
-| 持久化 | `DATABASE_URL` 存在时使用 PostgreSQL，否则开发模式使用内存 repository；有版本化 SQL migration | 物理库仅有 Session/幂等记录；无 Organization、Space、Membership、Expert/Environment revision、Message、Turn、Command、Outbox、Audit 或 RLS |
+| 持久化 | `DATABASE_URL` 存在时使用 PostgreSQL，否则开发模式使用内存 repository；有版本化 SQL migration；已有 Organization/Space/Membership、Session、首条 Message/Turn、Command/Outbox 与完整幂等响应 | 无 Expert/Environment revision、后续 Message/Attempt、Audit 或 RLS |
 | 创建幂等 | Organization + Space + key 作用域；同 key/同 body 重放，不同 body 返回 409；PostgreSQL 使用事务级 advisory lock 处理并发 | 未包含 authenticated actor/method/canonical path；未保存完整 status/body/headers；未校验过期时间或运行清理作业 |
 | 测试 | API/repository/config/JWT 单元测试；配置 `TEST_DATABASE_URL` 时运行 PostgreSQL 并发幂等、HTTP 跨 tenant/Private 隔离和 `001 -> 002` 升级测试 | 数据库测试会在无环境变量时 skip；无 RLS、迁移回滚、备份恢复或负载测试 |
 
@@ -39,7 +39,7 @@
 | --- | --- | --- |
 | Base path | 代码为 `/api/v1`，OpenAPI server 为 `/v1` | 生产边缘对外使用 `/v1`；同源 Web 可经 `/api/v1` 代理。在合同测试中明确两者的 rewrite，不保留两套业务路由 |
 | Create body | 客户端提交 `expertName/expertVersion/environmentId/repository/baseBranch`、title 必填 | 迁移到 OpenAPI `SessionCreate`；客户端只提交 `expertId/message/visibility/advancedOverrides`，服务端解析并固定 Expert/Environment revision |
-| Create transaction | 仅写 Session，`start=true` 直接返回 `active` | 同事务写 Session + first Message + Turn + Command + Outbox + 幂等响应；命令接受后为 `queued` |
+| Create transaction | `start=true` 同事务写 Session + first Message + Turn + Command + Outbox + 完整幂等响应，Session 返回 `queued`；有并发与故障回滚测试 | 尚未服务端解析 Expert/Environment revision，也无 Command consumer/lease/heartbeat |
 | Response | 迁移期 `SessionDto`，没有 revision/message/turn/command、`ETag` 和 `Location` | 按 `SessionCreateResult` 返回服务端快照和并发控制 header |
 | Error | 运行时为 `{code,message,retryable,fieldErrors,correlationId}` | 统一到 `application/problem+json`；迁移期前端适配必须有合同测试，不允许第三套错误格式 |
 | Identifier | 当前接受 1-128 字符串并生成 UUIDv4 | 持久实体改为服务端 UUIDv7；不在 URL 中使用可猜业务标识 |

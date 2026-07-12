@@ -108,10 +108,14 @@ describe('Relay API', () => {
       id: 'session-1',
       organizationId: 'relay',
       spaceId: 'platform',
-      status: 'active',
+      status: 'queued',
       visibility: 'private',
       attachments: [],
     })
+    expect(body.message).toMatchObject({ sessionId: 'session-1', sequence: 1, role: 'user' })
+    expect(body.turn).toMatchObject({ sessionId: 'session-1', ordinal: 1, status: 'queued' })
+    expect(body.command).toMatchObject({ type: 'session.start', status: 'accepted' })
+    expect(response.headers.location).toBe('/api/v1/organizations/relay/spaces/platform/sessions/session-1')
   })
 
   it('lists Sessions only from the requested organization and Space', async () => {

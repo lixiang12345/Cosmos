@@ -68,8 +68,49 @@ export const SessionDtoSchema = z.object({
 
 export type SessionDto = z.infer<typeof SessionDtoSchema>
 
+export const SessionMessageSchema = z.object({
+  id: IdentifierSchema,
+  sessionId: IdentifierSchema,
+  sequence: z.number().int().positive(),
+  role: z.enum(['user', 'agent', 'tool', 'system', 'event']),
+  actorId: IdentifierSchema.nullable(),
+  content: z.string().max(100_000),
+  attachments: z.array(z.string().trim().min(1).max(2_048)).max(10),
+  createdAt: TimestampSchema,
+}).strict()
+
+export type SessionMessage = z.infer<typeof SessionMessageSchema>
+
+export const SessionTurnSchema = z.object({
+  id: IdentifierSchema,
+  sessionId: IdentifierSchema,
+  ordinal: z.number().int().positive(),
+  initiatorType: z.enum(['user', 'event', 'system']),
+  initiatorId: IdentifierSchema.nullable(),
+  inputMessageId: IdentifierSchema,
+  status: z.enum(['queued', 'running', 'waiting_tool', 'waiting_approval', 'completed', 'failed', 'canceled']),
+  queuedAt: TimestampSchema,
+  version: z.number().int().positive(),
+}).strict()
+
+export type SessionTurn = z.infer<typeof SessionTurnSchema>
+
+export const SessionCommandSchema = z.object({
+  id: IdentifierSchema,
+  type: z.literal('session.start'),
+  status: z.enum(['accepted', 'queued', 'running', 'succeeded', 'failed', 'canceled']),
+  resourceType: z.literal('turn'),
+  resourceId: IdentifierSchema,
+  acceptedAt: TimestampSchema,
+}).strict()
+
+export type SessionCommand = z.infer<typeof SessionCommandSchema>
+
 export const CreateSessionResponseSchema = z.object({
   session: SessionDtoSchema,
+  message: SessionMessageSchema.optional(),
+  turn: SessionTurnSchema.optional(),
+  command: SessionCommandSchema.optional(),
 }).strict()
 
 export type CreateSessionResponse = z.infer<typeof CreateSessionResponseSchema>

@@ -1,12 +1,15 @@
 import { createHash, randomUUID } from 'node:crypto'
 import {
+  CreateSessionResponseSchema,
   SessionDtoSchema,
+  type CreateSessionResponse,
   type SessionDto,
 } from '@relay/contracts'
 import type { Pool, PoolClient } from 'pg'
 import {
   AuthorizationChangedError,
   IdempotencyConflictError,
+  createSessionStartRecords,
   createSessionDto,
   type CreateSessionRecord,
   type CreateSessionResult,
@@ -80,6 +83,16 @@ function mapSession(row: SessionRow): SessionDto {
     lastActivityAt: timestamp(row.last_activity_at),
     version: row.version,
   })
+}
+
+function responseToResult(response: CreateSessionResponse, replayed: boolean): CreateSessionResult {
+  return {
+    session: response.session,
+    message: response.message,
+    turn: response.turn,
+    command: response.command,
+    replayed,
+  }
 }
 
 const sessionColumns = `
@@ -171,19 +184,39 @@ export class PostgresSessionRepository implements SessionRepository {
     ])
 
     const now = this.now()
-    const existing = await client.query<{ request_hash: string; session_id: string }>(`
-      SELECT request_hash, session_id
-      FROM relay_idempotency_records
-      WHERE organization_id = $1 AND actor_id = $2 AND method = 'POST'
-        AND canonical_path = $3 AND idempotency_key_hash = $4
-        AND expires_at > $5
+    const existing = await client.query<{
+      request_hash: string
+      session_id: string
+      response_body: unknown | null
+    }>(`
+      SELECT idempotency.request_hash, idempotency.session_id, response.response_body
+      FROM relay_idempotency_records idempotency
+      LEFT JOIN relay_idempotency_responses response
+        ON response.organization_id = idempotency.organization_id
+        AND response.actor_id = idempotency.actor_id
+        AND response.method = idempotency.method
+        AND response.canonical_path = idempotency.canonical_path
+        AND response.idempotency_key_hash = idempotency.idempotency_key_hash
+        AND response.expires_at > $5
+      WHERE idempotency.organization_id = $1 AND idempotency.actor_id = $2
+        AND idempotency.method = 'POST' AND idempotency.canonical_path = $3
+        AND idempotency.idempotency_key_hash = $4 AND idempotency.expires_at > $5
     `, [record.organizationId, record.actorId, canonicalPath, keyHash, now.toISOString()])
 
     if (existing.rowCount) {
       if (existing.rows[0].request_hash !== requestHash) throw new IdempotencyConflictError()
-      return { session: await this.getSession(client, existing.rows[0].session_id), replayed: true }
+      const response = existing.rows[0].response_body
+        ? CreateSessionResponseSchema.parse(existing.rows[0].response_body)
+        : { session: await this.getSession(client, existing.rows[0].session_id) }
+      return responseToResult(response, true)
     }
 
+    await client.query(`
+      DELETE FROM relay_idempotency_responses
+      WHERE organization_id = $1 AND actor_id = $2 AND method = 'POST'
+        AND canonical_path = $3 AND idempotency_key_hash = $4
+        AND expires_at <= $5
+    `, [record.organizationId, record.actorId, canonicalPath, keyHash, now.toISOString()])
     await client.query(`
       DELETE FROM relay_idempotency_records
       WHERE organization_id = $1 AND actor_id = $2 AND method = 'POST'
@@ -191,6 +224,7 @@ export class PostgresSessionRepository implements SessionRepository {
         AND expires_at <= $5
     `, [record.organizationId, record.actorId, canonicalPath, keyHash, now.toISOString()])
     const session = createSessionDto(record, { id: this.createId(), timestamp: now.toISOString() })
+    const startRecords = createSessionStartRecords(record, session, { createId: this.createId })
     await client.query(`
       INSERT INTO relay_sessions (
         ${sessionColumns}, created_by
@@ -205,6 +239,58 @@ export class PostgresSessionRepository implements SessionRepository {
       session.status, JSON.stringify(session.attachments), session.source, session.createdAt,
       session.updatedAt, session.lastActivityAt, session.version, record.actorId,
     ])
+    if (startRecords.message && startRecords.turn && startRecords.command) {
+      await client.query(`
+        INSERT INTO relay_messages (
+          id, organization_id, space_id, session_id, sequence, role,
+          actor_id, content, attachments, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10)
+      `, [
+        startRecords.message.id, session.organizationId, session.spaceId, session.id,
+        startRecords.message.sequence, startRecords.message.role, startRecords.message.actorId,
+        startRecords.message.content, JSON.stringify(startRecords.message.attachments),
+        startRecords.message.createdAt,
+      ])
+      await client.query(`
+        INSERT INTO relay_turns (
+          id, organization_id, space_id, session_id, ordinal, initiator_type,
+          initiator_id, input_message_id, status, queued_at, version
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `, [
+        startRecords.turn.id, session.organizationId, session.spaceId, session.id,
+        startRecords.turn.ordinal, startRecords.turn.initiatorType, startRecords.turn.initiatorId,
+        startRecords.turn.inputMessageId, startRecords.turn.status, startRecords.turn.queuedAt,
+        startRecords.turn.version,
+      ])
+      await client.query(`
+        INSERT INTO relay_commands (
+          id, organization_id, space_id, session_id, type, status,
+          resource_type, resource_id, payload, accepted_at, available_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $10)
+      `, [
+        startRecords.command.id, session.organizationId, session.spaceId, session.id,
+        startRecords.command.type, startRecords.command.status, startRecords.command.resourceType,
+        startRecords.command.resourceId, JSON.stringify({ turnId: startRecords.turn.id }),
+        startRecords.command.acceptedAt,
+      ])
+      await client.query(`
+        INSERT INTO relay_outbox_events (
+          id, organization_id, space_id, session_id, aggregate_type,
+          aggregate_id, event_type, payload, occurred_at
+        ) VALUES ($1, $2, $3, $4, 'session', $4, 'session.created', $5::jsonb, $6)
+      `, [
+        this.createId(), session.organizationId, session.spaceId, session.id,
+        JSON.stringify({
+          sessionId: session.id,
+          messageId: startRecords.message.id,
+          turnId: startRecords.turn.id,
+          commandId: startRecords.command.id,
+        }),
+        session.createdAt,
+      ])
+    }
+    const response = CreateSessionResponseSchema.parse({ session, ...startRecords })
+    const expiresAt = new Date(now.getTime() + this.idempotencyTtlMs).toISOString()
     await client.query(`
       INSERT INTO relay_idempotency_records (
         organization_id, space_id, actor_id, method, canonical_path,
@@ -212,9 +298,18 @@ export class PostgresSessionRepository implements SessionRepository {
       ) VALUES ($1, $2, $3, 'POST', $4, $5, $6, $7, $8)
     `, [
       record.organizationId, record.spaceId, record.actorId, canonicalPath, keyHash, requestHash, session.id,
-      new Date(now.getTime() + this.idempotencyTtlMs).toISOString(),
+      expiresAt,
     ])
-    return { session, replayed: false }
+    await client.query(`
+      INSERT INTO relay_idempotency_responses (
+        organization_id, actor_id, method, canonical_path, idempotency_key_hash,
+        status_code, response_body, response_headers, expires_at
+      ) VALUES ($1, $2, 'POST', $3, $4, 201, $5::jsonb, $6::jsonb, $7)
+    `, [
+      record.organizationId, record.actorId, canonicalPath, keyHash,
+      JSON.stringify(response), JSON.stringify({ location: `${canonicalPath}/${session.id}` }), expiresAt,
+    ])
+    return responseToResult(response, false)
   }
 
   private async getSession(client: PoolClient, sessionId: string) {

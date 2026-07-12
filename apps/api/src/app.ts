@@ -272,7 +272,13 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     const session = SessionDtoSchema.parse(result.session)
 
     reply.header('Idempotency-Replayed', String(result.replayed))
-    return reply.code(201).send(CreateSessionResponseSchema.parse({ session }))
+    reply.header('Location', `/api/v1/organizations/${authorization.organizationId}/spaces/${authorization.spaceId}/sessions/${session.id}`)
+    return reply.code(201).send(CreateSessionResponseSchema.parse({
+      session,
+      message: result.message,
+      turn: result.turn,
+      command: result.command,
+    }))
   })
 
   return app

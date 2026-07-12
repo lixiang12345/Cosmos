@@ -33,7 +33,7 @@ describeWithDatabase('HTTP authentication and tenant isolation', () => {
   beforeAll(async () => {
     await runMigrations(pool)
     await pool.query(`
-      TRUNCATE relay_idempotency_records, relay_sessions, relay_space_memberships,
+      TRUNCATE relay_idempotency_responses, relay_idempotency_records, relay_sessions, relay_space_memberships,
         relay_organization_memberships, relay_spaces, relay_organizations CASCADE;
       INSERT INTO relay_organizations (id, name) VALUES ('org-a', 'Organization A'), ('org-b', 'Organization B');
       INSERT INTO relay_spaces (organization_id, id, name)
