@@ -9,6 +9,7 @@ import {
   History,
   KeyRound,
   LayoutGrid,
+  LogOut,
   MessageCircle,
   Orbit,
   PanelLeftClose,
@@ -26,6 +27,7 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
+import { useAuth } from '../auth/context'
 import { useControlPlane } from '../features/control-plane'
 import { usePreferences } from '../preferences'
 import type { Run } from '../types'
@@ -71,11 +73,6 @@ const fileItems: NavItem[] = [
   { to: '/files/user', label: { zh: '个人', en: 'User' } },
 ]
 
-const spaces = [
-  { id: 'space-platform', name: 'Platform Engineering' },
-  { id: 'space-commerce', name: 'Commerce' },
-]
-
 function SidebarLink({ item, nested = false, badge, onNavigate }: { item: NavItem; nested?: boolean; badge?: number; onNavigate: () => void }) {
   const { locale } = usePreferences()
   const label = item.label[locale]
@@ -96,8 +93,9 @@ function SidebarLink({ item, nested = false, badge, onNavigate }: { item: NavIte
 }
 
 export function Sidebar({ runs, open, collapsed, onClose, onNewTask, onToggleCollapsed }: SidebarProps) {
+  const auth = useAuth()
   const { locale, t } = usePreferences()
-  const { activeSpace, actions } = useControlPlane()
+  const { activeSpace, actions, state } = useControlPlane()
   const location = useLocation()
   const [spaceSwitcherOpen, setSpaceSwitcherOpen] = useState(false)
   const [filesOpen, setFilesOpen] = useState(true)
@@ -106,8 +104,10 @@ export function Sidebar({ runs, open, collapsed, onClose, onNewTask, onToggleCol
   const pinnedRuns = runs.filter((run) => run.favorite && !run.archived).slice(0, 3)
   const recentRuns = runs.filter((run) => !run.archived && !run.favorite).slice(0, 6)
   const copy = locale === 'zh'
-    ? { files: '文件', automations: '自动化', configuration: '配置', pinned: '置顶', recent: '最近会话', expand: '展开导航', collapse: '收起导航', role: '平台工程负责人' }
-    : { files: 'Files', automations: 'Automations', configuration: 'Configuration', pinned: 'Pinned', recent: 'Recent Sessions', expand: 'Expand navigation', collapse: 'Collapse navigation', role: 'Platform engineering lead' }
+    ? { files: '文件', automations: '自动化', configuration: '配置', pinned: '置顶', recent: '最近会话', expand: '展开导航', collapse: '收起导航', role: '已认证组织成员', signOut: '退出登录' }
+    : { files: 'Files', automations: 'Automations', configuration: 'Configuration', pinned: 'Pinned', recent: 'Recent Sessions', expand: 'Expand navigation', collapse: 'Collapse navigation', role: 'Authenticated organization member', signOut: 'Sign out' }
+  const displayName = auth.displayName ?? auth.actorId ?? 'Relay user'
+  const avatar = Array.from(displayName.trim())[0]?.toLocaleUpperCase() ?? 'R'
 
   return (
     <>
@@ -129,7 +129,7 @@ export function Sidebar({ runs, open, collapsed, onClose, onNewTask, onToggleCol
           </button>
           {spaceSwitcherOpen ? (
             <ul className="space-switcher-menu">
-              {spaces.map((space) => (
+              {state.spaces.map((space) => (
                 <li key={space.id}>
                   <button type="button" aria-current={activeSpace.id === space.id} onClick={() => { actions.switchSpace(space.id); setSpaceSwitcherOpen(false) }}>
                     {space.name}
@@ -209,8 +209,9 @@ export function Sidebar({ runs, open, collapsed, onClose, onNewTask, onToggleCol
 
         <div className="sidebar-mobile-preferences"><GlobalControls /></div>
         <div className="sidebar__account">
-          <span className="account-avatar">林</span>
-          <span><strong>林澈</strong><small>{copy.role}</small></span>
+          <span className="account-avatar">{avatar}</span>
+          <span><strong>{displayName}</strong><small>{copy.role}</small></span>
+          {auth.mode === 'oidc' ? <IconButton icon={LogOut} label={copy.signOut} size="sm" onClick={() => { void auth.signOut() }} /> : null}
           <IconButton icon={collapsed ? PanelLeftOpen : PanelLeftClose} label={collapsed ? copy.expand : copy.collapse} size="sm" onClick={onToggleCollapsed} />
         </div>
       </aside>

@@ -10,6 +10,17 @@ import {
 
 const DEFAULT_RELAY_API_BASE_URL = '/api'
 
+export type RelayApiAuthContext = {
+  accessToken?: string
+  onUnauthorized?: () => void | Promise<void>
+}
+
+type RelayApiLocation = {
+  applicationOrigin: string
+  configuredBaseUrl?: string
+  allowedOrigins?: string
+}
+
 type RelayApiErrorInit = {
   code: string
   status?: number
@@ -44,11 +55,98 @@ export class RelayApiError extends Error {
   }
 }
 
-export function getRelayApiBaseUrl() {
-  const meta = import.meta as ImportMeta & { env?: { VITE_API_BASE_URL?: string } }
-  const configured = meta.env?.VITE_API_BASE_URL?.trim()
-  if (!configured) return DEFAULT_RELAY_API_BASE_URL
-  return configured.replace(/\/+$/, '') || DEFAULT_RELAY_API_BASE_URL
+function configuredOrigins(value: string | undefined) {
+  return new Set((value ?? '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const url = new URL(item)
+      if (url.href !== `${url.origin}/`) {
+        throw new RelayApiError('VITE_API_ALLOWED_ORIGINS entries must be origins without paths.', {
+          code: 'API_CONFIGURATION_ERROR',
+        })
+      }
+      return url.origin
+    }))
+}
+
+export function resolveRelayApiBaseUrl(
+  configured: string | undefined,
+  applicationOrigin: string,
+  allowedOrigins: string | undefined,
+) {
+  const value = configured?.trim()
+  if (!value) return DEFAULT_RELAY_API_BASE_URL
+  if (value.includes('\\') || value.startsWith('//')) {
+    throw new RelayApiError('VITE_API_BASE_URL must be an absolute URL or a root-relative path.', {
+      code: 'API_CONFIGURATION_ERROR',
+    })
+  }
+  const rootRelative = value.startsWith('/')
+  if (!rootRelative && !URL.canParse(value)) {
+    throw new RelayApiError('VITE_API_BASE_URL must be an absolute URL or a root-relative path.', {
+      code: 'API_CONFIGURATION_ERROR',
+    })
+  }
+
+  let apiUrl: URL
+  try {
+    apiUrl = new URL(value, `${new URL(applicationOrigin).origin}/`)
+  } catch (cause) {
+    throw new RelayApiError('VITE_API_BASE_URL must be an absolute URL or a root-relative path.', {
+      code: 'API_CONFIGURATION_ERROR', cause,
+    })
+  }
+  const appOrigin = new URL(applicationOrigin).origin
+  if (apiUrl.username || apiUrl.password || apiUrl.search || apiUrl.hash) {
+    throw new RelayApiError('VITE_API_BASE_URL cannot contain credentials, a query, or a fragment.', {
+      code: 'API_CONFIGURATION_ERROR',
+    })
+  }
+  if (apiUrl.origin !== appOrigin) {
+    if (apiUrl.protocol !== 'https:' || !configuredOrigins(allowedOrigins).has(apiUrl.origin)) {
+      throw new RelayApiError('The configured API origin is not allowed to receive access tokens.', {
+        code: 'API_ORIGIN_NOT_ALLOWED',
+      })
+    }
+  }
+  const path = apiUrl.pathname.replace(/\/+$/, '')
+  if (path.startsWith('//')) {
+    throw new RelayApiError('VITE_API_BASE_URL resolves to an ambiguous network path.', {
+      code: 'API_CONFIGURATION_ERROR',
+    })
+  }
+  return rootRelative ? (path || '/') : `${apiUrl.origin}${path}`
+}
+
+function apiLocation(): RelayApiLocation {
+  return {
+    applicationOrigin: window.location.origin,
+    configuredBaseUrl: import.meta.env.VITE_API_BASE_URL,
+    allowedOrigins: import.meta.env.VITE_API_ALLOWED_ORIGINS,
+  }
+}
+
+export function getRelayApiBaseUrl(location: RelayApiLocation = apiLocation()) {
+  return resolveRelayApiBaseUrl(
+    location.configuredBaseUrl,
+    location.applicationOrigin,
+    location.allowedOrigins,
+  )
+}
+
+export function resolveRelayApiRequestUrl(path: string, location: RelayApiLocation = apiLocation()) {
+  const baseUrl = getRelayApiBaseUrl(location)
+  const target = new URL(`${baseUrl === '/' ? '' : baseUrl}${path}`, `${location.applicationOrigin}/`)
+  const allowed = configuredOrigins(location.allowedOrigins)
+  if (target.origin !== new URL(location.applicationOrigin).origin
+    && (target.protocol !== 'https:' || !allowed.has(target.origin))) {
+    throw new RelayApiError('The final API request origin is not allowed to receive access tokens.', {
+      code: 'API_ORIGIN_NOT_ALLOWED',
+    })
+  }
+  return baseUrl.startsWith('/') ? `${baseUrl === '/' ? '' : baseUrl}${path}` : target.toString()
 }
 
 async function readJson(response: Response): Promise<unknown> {
@@ -67,10 +165,18 @@ function getCorrelationId(response: Response, body: unknown) {
   return response.headers.get('x-correlation-id') ?? response.headers.get('x-request-id') ?? undefined
 }
 
-async function request<T>(path: string, init: RequestInit, schema: ResponseSchema<T>): Promise<T> {
+async function request<T>(
+  path: string,
+  init: RequestInit,
+  schema: ResponseSchema<T>,
+  auth: RelayApiAuthContext = {},
+): Promise<T> {
+  const headers = new Headers(init.headers)
+  if (auth.accessToken) headers.set('Authorization', `Bearer ${auth.accessToken}`)
+  const requestUrl = resolveRelayApiRequestUrl(path)
   let response: Response
   try {
-    response = await fetch(`${getRelayApiBaseUrl()}${path}`, init)
+    response = await fetch(requestUrl, { ...init, headers })
   } catch (cause) {
     throw new RelayApiError('Unable to reach the Relay API.', { code: 'NETWORK_ERROR', retryable: true, cause })
   }
@@ -78,6 +184,9 @@ async function request<T>(path: string, init: RequestInit, schema: ResponseSchem
   const body = await readJson(response)
   const correlationId = getCorrelationId(response, body)
   if (!response.ok) {
+    if (response.status === 401 && auth.onUnauthorized) {
+      await Promise.resolve(auth.onUnauthorized()).catch(() => undefined)
+    }
     const parsedError = ApiErrorSchema.safeParse(body)
     if (parsedError.success) {
       throw new RelayApiError(parsedError.data.message, {
@@ -112,17 +221,22 @@ export function createSession(
   spaceId: string,
   input: CreateSessionRequestInput,
   idempotencyKey: string,
+  auth?: RelayApiAuthContext,
 ): Promise<CreateSessionResponse> {
   return request(sessionsPath(organizationId, spaceId), {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
     body: JSON.stringify(input),
-  }, CreateSessionResponseSchema)
+  }, CreateSessionResponseSchema, auth)
 }
 
-export function listSessions(organizationId: string, spaceId: string): Promise<SessionListResponse> {
+export function listSessions(
+  organizationId: string,
+  spaceId: string,
+  auth?: RelayApiAuthContext,
+): Promise<SessionListResponse> {
   return request(sessionsPath(organizationId, spaceId), {
     method: 'GET',
     headers: { Accept: 'application/json' },
-  }, SessionListResponseSchema)
+  }, SessionListResponseSchema, auth)
 }

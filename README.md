@@ -25,7 +25,7 @@ pnpm dev
 - Web：<http://127.0.0.1:5173>
 - API 健康检查：<http://127.0.0.1:8787/api/health>
 
-Vite 会把浏览器发往 `/api` 的请求代理到本地 API。也可以分别运行 `pnpm dev:web` 和 `pnpm dev:api`；如需连接其他 API，设置前端环境变量 `VITE_API_BASE_URL`。
+Vite 会把浏览器发往 `/api` 的请求代理到本地 API。也可以分别运行 `pnpm dev:web` 和 `pnpm dev:api`；如需连接跨域 HTTPS API，同时设置 `VITE_API_BASE_URL` 和逗号分隔的 `VITE_API_ALLOWED_ORIGINS`，否则浏览器会在发送 Bearer token 前拒绝请求。
 
 如果默认 API 端口被占用，可同时覆盖 API 监听端口和 Vite 的开发代理目标：
 
@@ -33,7 +33,7 @@ Vite 会把浏览器发往 `/api` 的请求代理到本地 API。也可以分别
 PORT=8790 VITE_API_PROXY_TARGET=http://127.0.0.1:8790 pnpm dev
 ```
 
-开发脚本会显式选择仅允许绑定 loopback 的固定本地身份；生产 `start` 不会继承该设置。需要验证持久化链路时启动本地 PostgreSQL：
+开发脚本会显式选择仅允许绑定 loopback 的固定本地身份，并开启带 seed 的 demo 模式；生产构建不允许 development 身份，也不会读取 demo Session、Expert 或控制面缓存。生产 Web 使用 OIDC Authorization Code + PKCE，access token 仅驻留 JavaScript 内存，只有一次性授权 state 与 PKCE 数据保存在当前标签页的 `sessionStorage`；401、过期和登出会立即清除身份。需要验证持久化链路时启动本地 PostgreSQL：
 
 ```bash
 pnpm db:up
@@ -41,7 +41,7 @@ DATABASE_URL=postgres://relay:relay-local-only@127.0.0.1:55432/relay pnpm dev:ap
 TEST_DATABASE_URL=postgres://relay:relay-local-only@127.0.0.1:55432/relay pnpm test:integration
 ```
 
-API 使用版本化 SQL migration 自动升级数据库；也可显式运行 `DATABASE_URL=... pnpm db:migrate`。`/api/health` 是唯一公开的进程存活探针；`/api/ready` 受鉴权保护并真实检查数据库依赖。生产启动必须显式设置 `AUTH_MODE=oidc`、`DATABASE_URL`、`CORS_ORIGIN`、`OIDC_ISSUER`、`OIDC_AUDIENCE` 和 `OIDC_JWKS_URI`，配置缺失时立即失败。
+API 使用版本化 SQL migration 自动升级数据库；也可显式运行 `DATABASE_URL=... pnpm db:migrate`。`/api/health` 是唯一公开的进程存活探针；`/api/ready` 受鉴权保护并真实检查数据库依赖。生产 API 必须显式设置 `AUTH_MODE=oidc`、`DATABASE_URL`、`CORS_ORIGIN`、`OIDC_ISSUER`、`OIDC_AUDIENCE` 和 `OIDC_JWKS_URI`；生产 Web 必须设置 `VITE_AUTH_MODE=oidc`、Organization、Space 与 OIDC public-client 配置，缺失时显示配置错误而非进入 demo。
 
 质量检查：
 
@@ -65,7 +65,7 @@ pnpm check
 
 ## 原型范围
 
-- Session 管理：活跃、收藏、归档视图，搜索与状态筛选，重命名、收藏、归档、恢复和删除；状态写入 `localStorage`，刷新后保留。
+- Session 管理原型：显式 demo 模式提供活跃、收藏、归档、搜索、重命名、恢复和删除，状态写入隔离的 `relay.demo.sessions`；生产模式不会读取该缓存。
 - Run 工作台：阶段轨道、事件时间线、追加指令、终端回放、文件 Diff、审批决策。
 - 控制平面：运行记录、自动化、专家库、代码仓库、集成、治理中心和事件日志。
 - 关键交互：新建任务、切换证据视图、批准或退回、失败步骤重试、侧栏折叠和移动端抽屉。

@@ -41,6 +41,8 @@ import type { Run, RunStatus } from '../types'
 
 type SessionsPageProps = {
   runs: Run[]
+  loadState?: 'loading' | 'ready' | 'error'
+  loadError?: string
   onOpenNavigation: () => void
   onNewTask: (expert?: string) => void
   onOpenSession: (id: string) => void
@@ -204,6 +206,8 @@ function FilterSelect({
 
 export function SessionsPage({
   runs,
+  loadState = 'ready',
+  loadError = '',
   onOpenNavigation,
   onNewTask,
   onOpenSession,
@@ -556,7 +560,22 @@ export function SessionsPage({
             </div>
           </div>
 
-          {visibleSelectedIds.size > 0 ? (
+          {loadState === 'loading' ? (
+            <div className="sessions-load-state" role="status">
+              <span className="auth-spinner" aria-hidden="true" />
+              <p>{locale === 'zh' ? '正在加载会话...' : 'Loading Sessions...'}</p>
+            </div>
+          ) : loadState === 'error' ? (
+            <div className="sessions-load-state sessions-load-state--error" role="alert">
+              <AlertTriangle aria-hidden="true" />
+              <div>
+                <strong>{locale === 'zh' ? '无法加载会话' : 'Unable to load Sessions'}</strong>
+                <p>{loadError}</p>
+              </div>
+            </div>
+          ) : null}
+
+          {loadState === 'ready' && visibleSelectedIds.size > 0 ? (
             <div className="session-bulk-bar" role="toolbar" aria-label={t('sessions.bulkArchive')}>
               <strong>{visibleSelectedIds.size} {t('sessions.selected')}</strong>
               <div>
@@ -573,7 +592,7 @@ export function SessionsPage({
             </div>
           ) : null}
 
-          <div className="data-table session-table session-table--managed" role="table" aria-label={t('sessions.title')}>
+          {loadState === 'ready' ? <div className="data-table session-table session-table--managed" role="table" aria-label={t('sessions.title')}>
             <div className="data-table__row data-table__head" role="row">
               <span role="columnheader" className="session-task-heading">
                 <input
@@ -724,7 +743,7 @@ export function SessionsPage({
                 ) : null}
               </div>
             ) : null}
-          </div>
+          </div> : null}
         </section>
       </div>
 

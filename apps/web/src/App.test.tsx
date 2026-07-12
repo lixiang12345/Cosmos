@@ -3,6 +3,8 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import App from './App'
+import { AuthProvider } from './auth/AuthProvider'
+import { AuthContext, type AuthContextValue } from './auth/context'
 import { initialRuns } from './data/mockData'
 import { PREFERENCE_STORAGE_KEYS, PreferencesProvider } from './preferences'
 import { createSession, listSessions } from './services/relayApi'
@@ -33,7 +35,7 @@ function makeApiSession(
     repository: input.repository,
     baseBranch: input.baseBranch,
     visibility: input.visibility ?? 'private',
-    status: input.start === false ? 'draft' : 'active',
+    status: input.start === false ? 'draft' : 'queued',
     attachments: input.message.attachments ?? [],
     source: 'manual',
     createdAt: API_TIMESTAMP,
@@ -47,9 +49,40 @@ function makeApiSession(
 function renderApp(route = '/runs/run-482') {
   return render(
     <PreferencesProvider>
-      <MemoryRouter initialEntries={[route]}>
-        <App />
-      </MemoryRouter>
+      <AuthProvider>
+        <MemoryRouter initialEntries={[route]}>
+          <App />
+        </MemoryRouter>
+      </AuthProvider>
+    </PreferencesProvider>,
+  )
+}
+
+function renderAuthenticatedApp(
+  route: string,
+  overrides: Partial<AuthContextValue> = {},
+) {
+  const auth: AuthContextValue = {
+    status: 'authenticated',
+    mode: 'oidc',
+    actorId: 'user-production',
+    displayName: 'Production User',
+    organizationId: 'organization-production',
+    spaceId: 'space-production',
+    demoMode: false,
+    accessToken: 'production-access-token',
+    handleUnauthorized: async () => undefined,
+    signIn: async () => undefined,
+    signOut: async () => undefined,
+    ...overrides,
+  }
+  return render(
+    <PreferencesProvider>
+      <AuthContext.Provider value={auth}>
+        <MemoryRouter initialEntries={[route]}>
+          <App />
+        </MemoryRouter>
+      </AuthContext.Provider>
     </PreferencesProvider>,
   )
 }
@@ -72,6 +105,7 @@ describe('Relay prototype', () => {
     window.localStorage.setItem(PREFERENCE_STORAGE_KEYS.theme, 'dark')
     window.localStorage.setItem('relay.sidebarCollapsed', 'false')
     window.localStorage.removeItem('relay.sessions')
+    window.localStorage.removeItem('relay.demo.sessions')
     window.localStorage.removeItem('relay.experts')
     window.localStorage.removeItem('relay.controlPlane.v1')
     vi.mocked(createSession).mockReset()
@@ -140,10 +174,12 @@ describe('Relay prototype', () => {
         message: { content: prompt, attachments: [] },
       }),
       expect.any(String),
+      expect.objectContaining({ accessToken: undefined, onUnauthorized: expect.any(Function) }),
     )
-    expect(screen.getByText('正在建立任务上下文')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('等待 Worker 接收命令')
+    expect(screen.queryByText('正在建立任务上下文')).not.toBeInTheDocument()
     await waitFor(() => {
-      const storedSessions = JSON.parse(window.localStorage.getItem('relay.sessions') ?? '[]') as Array<{
+      const storedSessions = JSON.parse(window.localStorage.getItem('relay.demo.sessions') ?? '[]') as Array<{
         id: string
         title: string
         status: string
@@ -153,7 +189,7 @@ describe('Relay prototype', () => {
       }>
       expect(storedSessions.find((session) => session.title === '修复优惠券并发核销')).toMatchObject({
         id: 'session-api-1',
-        status: 'running',
+        status: 'queued',
         updatedAt: API_TIMESTAMP,
         baseBranch: 'main',
         contextItems: [{ kind: 'github' }],
@@ -174,8 +210,9 @@ describe('Relay prototype', () => {
       'space-commerce',
       expect.objectContaining({ expertId: 'expert-cosmos-advisor', start: true }),
       expect.any(String),
+      expect.objectContaining({ accessToken: undefined, onUnauthorized: expect.any(Function) }),
     )
-    const storedSessions = JSON.parse(window.localStorage.getItem('relay.sessions') ?? '[]') as Array<{ title: string; expertId?: string }>
+    const storedSessions = JSON.parse(window.localStorage.getItem('relay.demo.sessions') ?? '[]') as Array<{ title: string; expertId?: string }>
     expect(storedSessions.find((session) => session.title === '评估结算链路迁移方案')).toMatchObject({ expertId: 'expert-cosmos-advisor' })
   })
 
@@ -193,11 +230,56 @@ describe('Relay prototype', () => {
     renderApp('/sessions')
 
     expect((await screen.findAllByText('服务端持久化会话')).length).toBeGreaterThan(0)
-    expect(listSessions).toHaveBeenCalledWith('relay', 'space-commerce')
+    expect(listSessions).toHaveBeenCalledWith(
+      'relay', 'space-commerce',
+      expect.objectContaining({ accessToken: undefined, onUnauthorized: expect.any(Function) }),
+    )
     await waitFor(() => {
-      const stored = JSON.parse(window.localStorage.getItem('relay.sessions') ?? '[]') as Array<{ id: string }>
+      const stored = JSON.parse(window.localStorage.getItem('relay.demo.sessions') ?? '[]') as Array<{ id: string }>
       expect(stored.filter((run) => run.id === 'session-persisted')).toHaveLength(1)
     })
+  })
+
+  it('ignores demo Session storage for an authenticated production identity', async () => {
+    window.localStorage.setItem('relay.demo.sessions', JSON.stringify(initialRuns))
+    vi.mocked(listSessions).mockResolvedValueOnce({
+      items: [], page: { nextCursor: null, hasMore: false, projectionUpdatedAt: null },
+    })
+
+    renderAuthenticatedApp('/sessions')
+
+    const table = await screen.findByRole('table', { name: '会话' })
+    expect(within(table).queryByText('升级支付服务重试策略')).not.toBeInTheDocument()
+    expect(within(table).getByText('暂无活跃会话')).toBeInTheDocument()
+    expect(listSessions).toHaveBeenCalledWith(
+      'organization-production',
+      'space-production',
+      expect.objectContaining({
+        accessToken: 'production-access-token',
+        onUnauthorized: expect.any(Function),
+      }),
+    )
+    expect(JSON.parse(window.localStorage.getItem('relay.demo.sessions') ?? '[]')).toHaveLength(initialRuns.length)
+  })
+
+  it('does not read or overwrite prototype stores for a production identity', async () => {
+    const privateExpert = 'PRIVATE EXPERT FROM ANOTHER USER'
+    window.localStorage.setItem('relay.experts', JSON.stringify({
+      schemaVersion: 1,
+      experts: [{ id: 'private-expert', spaceId: 'space-production', draftConfig: { name: privateExpert } }],
+      versions: [],
+    }))
+    const controlPlaneValue = JSON.stringify({ private: 'control-plane-state' })
+    window.localStorage.setItem('relay.controlPlane.v1', controlPlaneValue)
+
+    renderAuthenticatedApp('/experts')
+
+    await waitFor(() => expect(listSessions).toHaveBeenCalledWith(
+      'organization-production', 'space-production', expect.any(Object),
+    ))
+    expect(screen.queryByText(privateExpert)).not.toBeInTheDocument()
+    expect(window.localStorage.getItem('relay.controlPlane.v1')).toBe(controlPlaneValue)
+    expect(window.localStorage.getItem('relay.experts')).toContain(privateExpert)
   })
 
   it('keeps the task dialog input open and retryable when Session creation fails', async () => {
@@ -361,6 +443,7 @@ describe('Relay prototype', () => {
   it('switches theme and application language', async () => {
     const user = userEvent.setup()
     renderApp('/sessions')
+    await screen.findByRole('table', { name: '会话' })
     const sessionsPage = screen.getByRole('main')
 
     await user.click(within(sessionsPage).getByRole('button', { name: '切换到浅色模式' }))
@@ -376,6 +459,7 @@ describe('Relay prototype', () => {
   it('renames and archives a managed session', async () => {
     const user = userEvent.setup()
     renderApp('/sessions')
+    await screen.findByRole('table', { name: '会话' })
 
     await user.click(screen.getByRole('button', { name: '补齐库存预占链路测试 · 会话操作' }))
     await user.click(screen.getByRole('menuitem', { name: '重命名' }))
@@ -388,20 +472,20 @@ describe('Relay prototype', () => {
     await user.click(screen.getByRole('button', { name: '库存并发测试修复 · 会话操作' }))
     await user.click(screen.getByRole('menuitem', { name: '归档' }))
     expect(screen.queryByText('库存并发测试修复')).not.toBeInTheDocument()
-    const storedSessions = JSON.parse(window.localStorage.getItem('relay.sessions') ?? '[]') as Array<{ title: string; archived?: boolean }>
+    const storedSessions = JSON.parse(window.localStorage.getItem('relay.demo.sessions') ?? '[]') as Array<{ title: string; archived?: boolean }>
     expect(storedSessions.find((session) => session.title === '库存并发测试修复')).toMatchObject({ archived: true })
     await user.click(screen.getByRole('tab', { name: /已归档/ }))
     expect(screen.getByText('库存并发测试修复')).toBeInTheDocument()
   })
 
-  it('prioritizes sessions that need attention', () => {
+  it('prioritizes sessions that need attention', async () => {
     const completedSession = { ...initialRuns.find((run) => run.id === 'run-481')!, archived: false }
     const sessions = [completedSession, ...initialRuns.filter((run) => run.id !== 'run-481')]
-    window.localStorage.setItem('relay.sessions', JSON.stringify(sessions))
+    window.localStorage.setItem('relay.demo.sessions', JSON.stringify(sessions))
 
     renderApp('/sessions')
 
-    const rows = within(screen.getByRole('table', { name: '会话' })).getAllByRole('row').slice(1)
+    const rows = within(await screen.findByRole('table', { name: '会话' })).getAllByRole('row').slice(1)
     expect(rows[0]).toHaveTextContent('升级支付服务重试策略')
     expect(rows[1]).toHaveTextContent('补齐库存预占链路测试')
     expect(rows[2]).toHaveTextContent('审查身份服务依赖升级')
@@ -411,6 +495,7 @@ describe('Relay prototype', () => {
   it('finds sessions by PR details and source filters', async () => {
     const user = userEvent.setup()
     renderApp('/sessions')
+    await screen.findByRole('table', { name: '会话' })
 
     await user.click(screen.getByRole('tab', { name: /已归档/ }))
     const search = screen.getByLabelText('搜索标题、仓库、分支、触发器、步骤或 PR')
@@ -427,6 +512,7 @@ describe('Relay prototype', () => {
   it('archives multiple selected sessions in one action', async () => {
     const user = userEvent.setup()
     renderApp('/sessions')
+    await screen.findByRole('table', { name: '会话' })
 
     await user.click(screen.getByRole('checkbox', { name: '选择会话: 补齐库存预占链路测试' }))
     await user.click(screen.getByRole('checkbox', { name: '选择会话: 审查身份服务依赖升级' }))
@@ -449,7 +535,7 @@ describe('Relay prototype', () => {
     expect(screen.getByRole('status')).toHaveTextContent('事件已匹配 Payments alert investigation')
     expect(screen.getByText('@Cosmos investigate payment timeouts')).toBeInTheDocument()
     await waitFor(() => {
-      const storedSessions = JSON.parse(window.localStorage.getItem('relay.sessions') ?? '[]') as Array<{
+      const storedSessions = JSON.parse(window.localStorage.getItem('relay.demo.sessions') ?? '[]') as Array<{
         title: string
         source: string
         automationId?: string
@@ -474,7 +560,7 @@ describe('Relay prototype', () => {
 
     expect(screen.getByRole('status')).toHaveTextContent('已创建新的 Attempt，重试成功')
     await waitFor(() => {
-      const storedSessions = JSON.parse(window.localStorage.getItem('relay.sessions') ?? '[]') as Array<{
+      const storedSessions = JSON.parse(window.localStorage.getItem('relay.demo.sessions') ?? '[]') as Array<{
         id: string
         status: string
         attempts?: Array<{ number: number; status: string }>

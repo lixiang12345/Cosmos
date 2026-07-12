@@ -51,7 +51,7 @@ export function parseControlPlaneState(serialized: string | null): ControlPlaneS
 }
 
 export function loadControlPlaneState(
-  storage: ControlPlaneStorage | undefined = browserStorage(),
+  storage: ControlPlaneStorage | null | undefined = browserStorage(),
   fallback: ControlPlaneState = createSeededControlPlaneState(),
 ): ControlPlaneState {
   if (!storage) return fallback
@@ -64,7 +64,7 @@ export function loadControlPlaneState(
 
 export function saveControlPlaneState(
   state: ControlPlaneState,
-  storage: ControlPlaneStorage | undefined = browserStorage(),
+  storage: ControlPlaneStorage | null | undefined = browserStorage(),
 ): boolean {
   if (!storage) return false
   try {

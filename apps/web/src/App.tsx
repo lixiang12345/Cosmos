@@ -2,6 +2,7 @@ import type { SessionDto } from '@relay/contracts'
 import { CheckCircle2, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useAuth } from './auth/context'
 import { CommandPalette } from './components/CommandPalette'
 import { NewTaskDialog } from './components/NewTaskDialog'
 import { Sidebar } from './components/Sidebar'
@@ -9,10 +10,12 @@ import { IconButton } from './components/ui'
 import { initialRuns } from './data/mockData'
 import {
   ControlPlaneProvider,
+  createEmptyControlPlaneState,
   useControlPlane,
   type InjectEventResult,
 } from './features/control-plane'
 import {
+  createEmptyExpertStore,
   createBlankExpert,
   createExpertFromTemplate,
   getExpertVersion,
@@ -48,9 +51,6 @@ import { usePreferences } from './preferences'
 import { createSession, listSessions } from './services/relayApi'
 import type { NewTaskInput, Run, RunAttempt, TaskCreateMode } from './types'
 
-const RUNS_STORAGE_KEY = 'relay.sessions'
-const CURRENT_ORGANIZATION_ID = 'relay'
-
 function mapSessionStatus(status: SessionDto['status']): Run['status'] {
   return status === 'draft' ? 'queued' : status === 'active' ? 'running' : status
 }
@@ -82,7 +82,7 @@ function sessionDtoToRun(session: SessionDto, locale: 'zh' | 'en'): Run {
     trigger: copy.trigger,
     updatedAt: session.updatedAt,
     elapsed: '0s',
-    progress: isDraft ? 0 : session.status === 'completed' ? 100 : 12,
+    progress: session.status === 'completed' ? 100 : 0,
     model: 'GPT-5.4',
     summary: session.summary,
     baseBranch: session.baseBranch,
@@ -91,7 +91,7 @@ function sessionDtoToRun(session: SessionDto, locale: 'zh' | 'en'): Run {
     attachments: session.attachments,
     steps: [
       { id: 'trigger', label: copy.triggerStep, detail: isDraft ? copy.pending : copy.context, status: isDraft ? 'pending' : 'completed' },
-      { id: 'plan', label: copy.plan, detail: copy.pending, status: isDraft ? 'pending' : 'active' },
+      { id: 'plan', label: copy.plan, detail: copy.pending, status: 'pending' },
       { id: 'author', label: locale === 'zh' ? '编码' : 'Author', detail: copy.pending, status: 'pending' },
       { id: 'verify', label: locale === 'zh' ? '验证' : 'Verify', detail: copy.pending, status: 'pending' },
       { id: 'approval', label: locale === 'zh' ? '审批' : 'Approval', detail: copy.pending, status: 'pending' },
@@ -103,16 +103,12 @@ function sessionDtoToRun(session: SessionDto, locale: 'zh' | 'en'): Run {
     }],
     files: [],
     terminal: [],
-    attempts: [{
-      id: `${session.id}-attempt-1`, number: 1,
-      status: isDraft ? 'queued' : session.status === 'completed' ? 'succeeded' : 'running',
-      startedAt: session.createdAt,
-    }],
+    attempts: [],
     artifacts: [],
   }
 }
 
-function mergeServerSessions(current: Run[], sessions: SessionDto[], locale: 'zh' | 'en') {
+function mergeDemoSessions(current: Run[], sessions: SessionDto[], locale: 'zh' | 'en') {
   const serverRuns = sessions.map((session) => sessionDtoToRun(session, locale))
   const serverIds = new Set(serverRuns.map((run) => run.id))
   return [...serverRuns, ...current.filter((run) => !serverIds.has(run.id))]
@@ -147,9 +143,9 @@ function hydrateRun(run: Run): Run {
   }
 }
 
-function getInitialRuns() {
+function getDemoRuns() {
   try {
-    const stored = window.localStorage.getItem(RUNS_STORAGE_KEY)
+    const stored = window.localStorage.getItem('relay.demo.sessions')
     if (!stored) return initialRuns.map(hydrateRun)
     const parsed: unknown = JSON.parse(stored)
     return Array.isArray(parsed) ? (parsed as Run[]).map(hydrateRun) : initialRuns.map(hydrateRun)
@@ -229,8 +225,16 @@ function ExpertEditorRoute({
 }
 
 function RelayApp() {
-  const [runs, setRuns] = useState<Run[]>(getInitialRuns)
-  const [expertStore, setExpertStore] = useState<ExpertStore>(loadExpertStore)
+  const { accessToken, demoMode, handleUnauthorized, organizationId = '' } = useAuth()
+  const [runs, setRuns] = useState<Run[]>(() => demoMode ? getDemoRuns() : [])
+  const [sessionsRequest, setSessionsRequest] = useState<{
+    key: string
+    status: 'ready' | 'error'
+    error: string
+  }>()
+  const [expertStore, setExpertStore] = useState<ExpertStore>(() => (
+    demoMode ? loadExpertStore() : createEmptyExpertStore()
+  ))
   const [navigationOpen, setNavigationOpen] = useState(false)
   const [commandOpen, setCommandOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -249,6 +253,9 @@ function RelayApp() {
   const location = useLocation()
   const { locale, t } = usePreferences()
   const { activeSpace, scope } = useControlPlane()
+  const sessionsRequestKey = `${organizationId}\u0000${activeSpace.id}\u0000${locale}`
+  const sessionsState = sessionsRequest?.key === sessionsRequestKey ? sessionsRequest.status : 'loading'
+  const sessionsError = sessionsRequest?.key === sessionsRequestKey ? sessionsRequest.error : ''
 
   const scopedRuns = useMemo(
     () => runs.filter((run) => inferRunSpace(run) === activeSpace.id),
@@ -275,30 +282,40 @@ function RelayApp() {
   }, [sidebarCollapsed])
 
   useEffect(() => {
+    if (!demoMode) return
     try {
-      window.localStorage.setItem(RUNS_STORAGE_KEY, JSON.stringify(runs))
+      window.localStorage.setItem('relay.demo.sessions', JSON.stringify(runs))
     } catch {
-      // Session management still works for the current browser session.
+      // Demo state remains available for the current browser session.
     }
-  }, [runs])
+  }, [demoMode, runs])
 
   useEffect(() => {
-    saveExpertStore(expertStore)
-  }, [expertStore])
+    if (demoMode) saveExpertStore(expertStore)
+  }, [demoMode, expertStore])
 
   useEffect(() => {
     let cancelled = false
-    void listSessions(CURRENT_ORGANIZATION_ID, activeSpace.id)
+    const requestKey = `${organizationId}\u0000${activeSpace.id}\u0000${locale}`
+    void listSessions(organizationId, activeSpace.id, { accessToken, onUnauthorized: handleUnauthorized })
       .then(({ items }) => {
-        if (!cancelled) setRuns((current) => mergeServerSessions(current, items, locale))
+        if (cancelled) return
+        setRuns((current) => demoMode
+          ? mergeDemoSessions(current, items, locale)
+          : items.map((session) => sessionDtoToRun(session, locale)))
+        setSessionsRequest({ key: requestKey, status: 'ready', error: '' })
       })
-      .catch(() => {
-        if (!cancelled) setToast(locale === 'zh'
-          ? '暂时无法同步服务端会话，正在显示本地缓存。'
-          : 'Unable to sync server Sessions. Showing the local cache.')
+      .catch((error: unknown) => {
+        if (cancelled) return
+        if (!demoMode) setRuns([])
+        setSessionsRequest({
+          key: requestKey,
+          status: 'error',
+          error: error instanceof Error ? error.message : (locale === 'zh' ? '无法加载会话。' : 'Unable to load Sessions.'),
+        })
       })
     return () => { cancelled = true }
-  }, [activeSpace.id, locale])
+  }, [accessToken, activeSpace.id, demoMode, handleUnauthorized, locale, organizationId])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -340,7 +357,7 @@ function RelayApp() {
     const requestFingerprint = JSON.stringify({ spaceId: activeSpace.id, mode, input })
     const idempotencyKey = sessionIdempotencyKeys.current.get(requestFingerprint) ?? makeSessionIdempotencyKey()
     sessionIdempotencyKeys.current.set(requestFingerprint, idempotencyKey)
-    const { session } = await createSession(CURRENT_ORGANIZATION_ID, activeSpace.id, {
+    const { session } = await createSession(organizationId, activeSpace.id, {
       expertId: input.expertId,
       expertName: input.expert,
       expertVersion: input.expertVersion,
@@ -354,22 +371,20 @@ function RelayApp() {
       },
       repository: input.repo,
       baseBranch: input.baseBranch,
-    }, idempotencyKey)
+    }, idempotencyKey, { accessToken, onUnauthorized: handleUnauthorized })
     sessionIdempotencyKeys.current.delete(requestFingerprint)
     const id = session.id
     const now = session.updatedAt
     const copy = locale === 'zh'
       ? {
-          trigger: '控制台 / 手动创建', triggerStep: '触发', triggerDetail: isDraft ? '草稿未启动' : '控制台',
-          plan: '规划', planDetail: isDraft ? '等待启动' : '分析中', author: '编码', verify: '验证', approval: '审批', deliver: '交付',
-          pending: '等待中', policy: '按策略', contextTitle: '正在建立任务上下文',
-          contextBody: '正在读取仓库结构、团队规范和相似历史变更，随后会给出执行计划。', console: '来自控制台', connected: '上下文索引已连接',
+          trigger: '控制台 / 手动创建', triggerStep: '触发', triggerDetail: isDraft ? '草稿未启动' : '命令已接受',
+          plan: '规划', planDetail: isDraft ? '等待启动' : '等待 Worker', author: '编码', verify: '验证', approval: '审批', deliver: '交付',
+          pending: '等待中', policy: '按策略', console: '来自控制台',
         }
       : {
-          trigger: 'Console / manual', triggerStep: 'Trigger', triggerDetail: isDraft ? 'Draft not started' : 'Console',
-          plan: 'Plan', planDetail: isDraft ? 'Waiting to start' : 'Analyzing', author: 'Author', verify: 'Verify', approval: 'Approval', deliver: 'Deliver',
-          pending: 'Waiting', policy: 'By policy', contextTitle: 'Building task context',
-          contextBody: 'Reading the repository structure, team standards, and similar changes before preparing an execution plan.', console: 'From console', connected: 'Context index connected',
+          trigger: 'Console / manual', triggerStep: 'Trigger', triggerDetail: isDraft ? 'Draft not started' : 'Command accepted',
+          plan: 'Plan', planDetail: isDraft ? 'Waiting to start' : 'Waiting for Worker', author: 'Author', verify: 'Verify', approval: 'Approval', deliver: 'Deliver',
+          pending: 'Waiting', policy: 'By policy', console: 'From console',
         }
     const run: Run = {
       id,
@@ -388,8 +403,8 @@ function RelayApp() {
       source: session.source,
       trigger: copy.trigger,
       updatedAt: now,
-      elapsed: isDraft ? '0s' : '8s',
-      progress: isDraft ? 0 : 12,
+      elapsed: '0s',
+      progress: 0,
       model,
       summary: session.summary,
       baseBranch: session.baseBranch,
@@ -398,19 +413,18 @@ function RelayApp() {
       attachments: session.attachments,
       steps: [
         { id: 'trigger', label: copy.triggerStep, detail: copy.triggerDetail, status: isDraft ? 'pending' : 'completed' },
-        { id: 'plan', label: copy.plan, detail: copy.planDetail, status: isDraft ? 'pending' : 'active' },
+        { id: 'plan', label: copy.plan, detail: copy.planDetail, status: 'pending' },
         { id: 'author', label: copy.author, detail: copy.pending, status: 'pending' },
         { id: 'verify', label: copy.verify, detail: copy.pending, status: 'pending' },
         { id: 'approval', label: copy.approval, detail: copy.policy, status: 'pending' },
         { id: 'deliver', label: copy.deliver, detail: copy.pending, status: 'pending' },
       ],
       events: [
-        { id: `${id}-request`, kind: 'request', actor: '林澈', title: session.title, body: session.summary, timestamp: session.createdAt, meta: copy.console },
-        ...(!isDraft ? [{ id: `${id}-agent`, kind: 'agent' as const, actor: session.expertName, title: copy.contextTitle, body: copy.contextBody, timestamp: session.updatedAt, meta: copy.connected, status: 'working' as const }] : []),
+        { id: `${id}-request`, kind: 'request', actor: 'User', title: session.title, body: session.summary, timestamp: session.createdAt, meta: copy.console },
       ],
       files: [],
-      terminal: isDraft ? [] : ['$ relay session start', `Loading ${session.repository} in ${session.environmentId ?? 'default environment'}...`],
-      attempts: [{ id: `${id}-attempt-1`, number: 1, status: isDraft ? 'queued' : 'running', startedAt: session.createdAt }],
+      terminal: [],
+      attempts: [],
       artifacts: [],
     }
     setRuns((items) => [run, ...items])
@@ -418,7 +432,7 @@ function RelayApp() {
     setPresetExpertId(undefined)
     setToast(isDraft
       ? (locale === 'zh' ? '会话草稿已保存' : 'Session draft saved')
-      : (locale === 'zh' ? '会话已创建，专家开始建立上下文' : 'Session created. The Expert is building context.'))
+      : (locale === 'zh' ? '会话已创建，等待 Worker 接收命令' : 'Session created and waiting for a Worker.'))
     navigate(isDraft ? '/sessions' : `/runs/${id}`)
   }
 
@@ -740,6 +754,8 @@ function RelayApp() {
         <Route path="/sessions" element={
           <SessionsPage
             runs={scopedRuns}
+            loadState={sessionsState}
+            loadError={sessionsError}
             onOpenNavigation={openNavigation}
             onNewTask={openNewTask}
             onOpenSession={openSession}
@@ -814,8 +830,13 @@ function RelayApp() {
 }
 
 export default function App() {
+  const { demoMode, spaceId = 'unconfigured-space' } = useAuth()
+  const initialState = useMemo(
+    () => demoMode ? undefined : createEmptyControlPlaneState(spaceId),
+    [demoMode, spaceId],
+  )
   return (
-    <ControlPlaneProvider>
+    <ControlPlaneProvider initialState={initialState} storage={demoMode ? undefined : null}>
       <RelayApp />
     </ControlPlaneProvider>
   )

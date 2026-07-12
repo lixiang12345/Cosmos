@@ -512,3 +512,30 @@ export function createSeededControlPlaneState(): ControlPlaneState {
     ],
   }
 }
+
+export function createEmptyControlPlaneState(spaceId: string): ControlPlaneState {
+  return {
+    schemaVersion: CONTROL_PLANE_SCHEMA_VERSION,
+    activeSpaceId: spaceId,
+    spaces: [{
+      id: spaceId,
+      name: 'Authorized Space',
+      slug: spaceId,
+      description: '',
+      region: '',
+      createdAt: new Date(0).toISOString(),
+    }],
+    environments: [],
+    daemons: [],
+    repositories: [],
+    integrations: [],
+    mcpServers: [],
+    secrets: [],
+    webhooks: [],
+    memoryFiles: [],
+    automations: [],
+    inboundEvents: [],
+    sessionDrafts: [],
+    auditEvents: [],
+  }
+}

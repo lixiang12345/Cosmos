@@ -36,12 +36,12 @@
 
 | 范围 | 当前事实 | 状态 | 生产缺口 |
 | --- | --- | --- | --- |
-| Session 列表与创建 | `listSessions` 和 `createSession` 通过共享 Zod 契约调用 `/api/v1`；API 已要求 OIDC/membership | **Partial** | Web 尚未接入真实登录/token；列表无服务端分页/过滤；详情、消息和生命周期命令未接 API |
+| Session 列表与创建 | `listSessions` 和 `createSession` 通过共享 Zod 契约调用 `/api/v1`；Web 已接 OIDC Code + PKCE、Bearer、401 失效和生产 fail-closed；服务端结果替换生产投影 | **Partial** | 尚无 `/me`/Space discovery、服务端分页/过滤；详情、消息和生命周期命令未接 API；真实 IdP E2E 待配置 |
 | 创建失败恢复 | Home 和 Dialog 等待 API 确认，失败保留输入，同一草稿重试复用幂等 key | **Implemented** | 幂等 key 仅存在内存；页面刷新后的安全恢复尚未实现 |
-| Session 视图模型 | 服务端 Session DTO 被适配为旧 `Run`，并与 `relay.sessions` localStorage 合并 | **Partial** | 本地数据仍可驱动归档/删除/重命名等伪写入；必须以服务端版本为权威 |
+| Session 视图模型 | 服务端 Session DTO 被适配为旧 `Run`；生产投影只接受服务端列表，demo 数据使用独立 `relay.demo.sessions` key | **Partial** | 归档/删除/重命名等仍是 demo 本地交互；生产模式必须接入对应服务端命令后再开放 |
 | Experts/控制面 | 页面、seed 和 localStorage repository 可演示 | **Prototype** | 无服务端 revision、权限、审计或真实外部连接 |
 | Run 工作台 | 阶段、事件、Diff、Terminal、Approval 为确定性演示 | **Prototype** | 无 Turn/Attempt/ToolCall/SSE 权威数据；不得向客户表述为真实 Agent 执行 |
-| 身份与权限 | 当前固定 Organization，Space 主要来自本地控制面 | **Target** | 没有登录、token refresh、401/403 恢复、permission predicate 或 tenant 数据隔离 |
+| 身份与权限 | Web 已实现 OIDC Code + PKCE、内存 token、401 失效和生产 fail-closed；API 已校验 token 与 membership | **Partial** | Organization/Space 仍由部署配置固定；缺少 `/me` discovery、permission predicate、真实 IdP E2E 和前端 403 恢复 |
 
 前端显示一个功能不等于该功能已实现。除 Session 创建/列表明确接入 API 的部分外，当前控制面默认按 Prototype/Simulation 处理。
 

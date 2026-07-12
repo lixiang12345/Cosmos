@@ -35,7 +35,7 @@ import type { ControlPlaneState, CreateMcpServerInput } from './types'
 export type ControlPlaneProviderProps = {
   children: ReactNode
   initialState?: ControlPlaneState
-  storage?: ControlPlaneStorage
+  storage?: ControlPlaneStorage | null
   provisioningIntervalMs?: number
 }
 

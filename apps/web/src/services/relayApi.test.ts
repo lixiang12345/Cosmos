@@ -1,6 +1,13 @@
 import type { CreateSessionRequestInput, SessionDto } from '@relay/contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { RelayApiError, createSession, getRelayApiBaseUrl, listSessions } from './relayApi'
+import {
+  RelayApiError,
+  createSession,
+  getRelayApiBaseUrl,
+  listSessions,
+  resolveRelayApiBaseUrl,
+  resolveRelayApiRequestUrl,
+} from './relayApi'
 
 const createInput: CreateSessionRequestInput = {
   title: 'Fix checkout race condition',
@@ -33,21 +40,94 @@ afterEach(() => {
 })
 
 describe('Relay API client', () => {
-  it('uses the same-origin API by default and trims a configured trailing slash', () => {
+  it('uses the same-origin API by default', () => {
     expect(getRelayApiBaseUrl()).toBe('/api')
-    vi.stubEnv('VITE_API_BASE_URL', 'https://relay.example/api/')
-    expect(getRelayApiBaseUrl()).toBe('https://relay.example/api')
+    expect(resolveRelayApiBaseUrl(
+      'https://relay.example/api/', 'https://relay.example', undefined,
+    )).toBe('https://relay.example/api')
+  })
+
+  it('allows only explicitly trusted HTTPS cross-origin APIs', () => {
+    expect(resolveRelayApiBaseUrl(
+      'https://api.relay.example/v1/',
+      'https://app.relay.example',
+      'https://identity.example, https://api.relay.example',
+    )).toBe('https://api.relay.example/v1')
+    expect(() => resolveRelayApiBaseUrl(
+      'https://api.relay.example/v1', 'https://app.relay.example', undefined,
+    )).toThrow(expect.objectContaining({ code: 'API_ORIGIN_NOT_ALLOWED' }))
+    expect(() => resolveRelayApiBaseUrl(
+      'http://api.relay.example/v1', 'https://app.relay.example', 'http://api.relay.example',
+    )).toThrow(expect.objectContaining({ code: 'API_ORIGIN_NOT_ALLOWED' }))
+  })
+
+  it('rejects an untrusted API origin before calling fetch', async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubEnv('VITE_API_BASE_URL', 'https://untrusted.example/api')
+    await expect(listSessions('relay', 'space-platform', { accessToken: 'secret' }))
+      .rejects.toMatchObject({ code: 'API_ORIGIN_NOT_ALLOWED' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    '//evil.example/api',
+    '///evil.example/api',
+    '/\\evil.example/api',
+    '/..//evil.example/api',
+    '/.//evil.example/api',
+    '/%2e%2e//evil.example/api',
+    '/foo/%2e%2e//evil.example/api',
+  ])('rejects ambiguous cross-origin syntax before calling fetch: %s', async (baseUrl) => {
+    const fetchMock = vi.fn<typeof fetch>()
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubEnv('VITE_API_BASE_URL', baseUrl)
+    await expect(listSessions('relay', 'space-platform', { accessToken: 'secret' }))
+      .rejects.toMatchObject({ code: 'API_CONFIGURATION_ERROR' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps a root-only API base on the application origin', () => {
+    expect(resolveRelayApiRequestUrl('/v1/sessions', {
+      configuredBaseUrl: '/', applicationOrigin: 'https://app.relay.example',
+    })).toBe('/v1/sessions')
+  })
+
+  it('joins absolute root API bases without a double slash', () => {
+    expect(resolveRelayApiRequestUrl('/v1/sessions', {
+      configuredBaseUrl: 'https://app.relay.example/', applicationOrigin: 'https://app.relay.example',
+    })).toBe('https://app.relay.example/v1/sessions')
+    expect(resolveRelayApiRequestUrl('/v1/sessions', {
+      configuredBaseUrl: 'https://api.relay.example/',
+      applicationOrigin: 'https://app.relay.example',
+      allowedOrigins: 'https://api.relay.example',
+    })).toBe('https://api.relay.example/v1/sessions')
+  })
+
+  it.each([
+    'https://user:password@api.relay.example/api',
+    'https://api.relay.example/api?target=other',
+    'https://api.relay.example/api#fragment',
+  ])('rejects unsafe absolute API configuration: %s', (baseUrl) => {
+    expect(() => resolveRelayApiBaseUrl(
+      baseUrl, 'https://app.relay.example', 'https://api.relay.example',
+    )).toThrow(expect.objectContaining({ code: 'API_CONFIGURATION_ERROR' }))
   })
 
   it('creates a Session with tenant scope and an idempotency key', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ session }, 201))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(createSession('relay', 'space-platform', createInput, 'create-session-1')).resolves.toEqual({ session })
+    await expect(createSession(
+      'relay', 'space-platform', createInput, 'create-session-1', { accessToken: 'access-token' },
+    )).resolves.toEqual({ session })
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/v1/organizations/relay/spaces/space-platform/sessions',
-      expect.objectContaining({ method: 'POST', headers: expect.objectContaining({ 'Idempotency-Key': 'create-session-1' }) }),
+      expect.objectContaining({ method: 'POST', headers: expect.any(Headers) }),
     )
+    const requestHeaders = new Headers(fetchMock.mock.calls[0][1]?.headers)
+    expect(requestHeaders.get('Idempotency-Key')).toBe('create-session-1')
+    expect(requestHeaders.get('Authorization')).toBe('Bearer access-token')
   })
 
   it('lists Sessions and validates the page envelope', async () => {
@@ -69,6 +149,32 @@ describe('Relay API client', () => {
     }, 409)))
     await expect(createSession('relay', 'space-platform', createInput, 'duplicate-key')).rejects.toMatchObject({
       name: 'RelayApiError', code: 'IDEMPOTENCY_KEY_REUSED', status: 409, correlationId: 'request-409', retryable: false,
+    })
+  })
+
+  it('notifies the auth boundary when the API returns 401', async () => {
+    const onUnauthorized = vi.fn()
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+      code: 'AUTHENTICATION_REQUIRED', message: 'Sign in again.', retryable: false,
+      correlationId: 'request-401',
+    }, 401)))
+
+    await expect(listSessions('relay', 'space-platform', {
+      accessToken: 'expired-token', onUnauthorized,
+    })).rejects.toMatchObject({ status: 401 })
+    expect(onUnauthorized).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves the structured 401 when identity cleanup fails', async () => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+      code: 'AUTHENTICATION_REQUIRED', message: 'Sign in again.', retryable: false,
+      correlationId: 'request-401-cleanup',
+    }, 401)))
+
+    await expect(listSessions('relay', 'space-platform', {
+      accessToken: 'expired-token', onUnauthorized: async () => { throw new Error('storage unavailable') },
+    })).rejects.toMatchObject({
+      code: 'AUTHENTICATION_REQUIRED', status: 401, correlationId: 'request-401-cleanup',
     })
   })
 
