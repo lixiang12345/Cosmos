@@ -33,7 +33,7 @@ Vite 会把浏览器发往 `/api` 的请求代理到本地 API。也可以分别
 PORT=8790 VITE_API_PROXY_TARGET=http://127.0.0.1:8790 pnpm dev
 ```
 
-需要验证持久化链路时启动本地 PostgreSQL：
+开发脚本会显式选择仅允许绑定 loopback 的固定本地身份；生产 `start` 不会继承该设置。需要验证持久化链路时启动本地 PostgreSQL：
 
 ```bash
 pnpm db:up
@@ -41,7 +41,7 @@ DATABASE_URL=postgres://relay:relay-local-only@127.0.0.1:55432/relay pnpm dev:ap
 TEST_DATABASE_URL=postgres://relay:relay-local-only@127.0.0.1:55432/relay pnpm test:integration
 ```
 
-API 使用版本化 SQL migration 自动升级数据库；也可显式运行 `DATABASE_URL=... pnpm db:migrate`。`/api/health` 是进程存活探针，`/api/ready` 会真实检查数据库依赖。生产启动必须设置 `DATABASE_URL` 和 `CORS_ORIGIN`，配置缺失时立即失败。
+API 使用版本化 SQL migration 自动升级数据库；也可显式运行 `DATABASE_URL=... pnpm db:migrate`。`/api/health` 是唯一公开的进程存活探针；`/api/ready` 受鉴权保护并真实检查数据库依赖。生产启动必须显式设置 `AUTH_MODE=oidc`、`DATABASE_URL`、`CORS_ORIGIN`、`OIDC_ISSUER`、`OIDC_AUDIENCE` 和 `OIDC_JWKS_URI`，配置缺失时立即失败。
 
 质量检查：
 
@@ -54,12 +54,13 @@ pnpm check
 ## 当前后端范围
 
 - `GET /api/health`
+- `GET /api/ready`（需鉴权）
 - `GET /api/v1/organizations/:organizationId/spaces/:spaceId/sessions`
 - `POST /api/v1/organizations/:organizationId/spaces/:spaceId/sessions`
 - 创建 Session 使用 `Idempotency-Key`；相同请求可安全重放，不同请求复用同一 key 返回 `409`。
 - API 成功响应与结构化错误均由 `@relay/contracts` 校验。
 
-配置 `DATABASE_URL` 后，Session 与幂等记录写入 PostgreSQL；未配置时开发环境仍使用进程内存 repository。鉴权、任务队列和真实 Agent runtime 尚未实现，不能将当前版本直接暴露到公网。这些能力按 [软件交付计划](./docs/software-delivery-plan.md) 继续演进。
+配置 `DATABASE_URL` 后，Session 与幂等记录写入 PostgreSQL；未配置时仅开发环境使用进程内存 repository。API 已实现 OIDC access token 校验、Organization/Space membership、viewer 写限制、Private Session creator 隔离和 actor/Space 级幂等；Private 分享、RLS/统一 tenant guard、审计、任务队列和真实 Agent runtime 尚未实现，因此当前版本仍不能直接暴露到公网。这些能力按 [软件交付计划](./docs/software-delivery-plan.md) 继续演进。
 
 ## 原型范围
 

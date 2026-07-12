@@ -86,11 +86,11 @@ Relay 是面向研发团队的 Agent 工作系统。用户选择一个可复用 
 | 能力 | 状态 | 当前真实边界 | 进入生产前的必要条件 |
 | --- | --- | --- | --- |
 | Web 原型 | **Partial** | React 页面、主题/语言、响应式导航和主要演示交互可用；多数领域数据仍为 seed/localStorage | 连接真实身份、权限和服务端数据；移除伪成功路径 |
-| Session 创建/列表 | **Partial** | Web 已调用真实 API；API 支持创建、按 Organization/Space 列表和幂等重放 | 服务端解析 Expert/Environment revision、首条 Message/Turn 原子创建、鉴权与分页 |
+| Session 创建/列表 | **Partial** | Web 已调用真实 API；API 支持 OIDC、membership、Private creator 隔离、创建、按 Organization/Space 列表和幂等重放 | 服务端解析 Expert/Environment revision、首条 Message/Turn 原子创建、Private 分享与分页 |
 | PostgreSQL 持久化 | **Implemented (limited)** | 配置 `DATABASE_URL` 时持久化 Session 和幂等记录；未配置的开发模式使用内存 | 备份/恢复、数据库高可用、tenant 隔离、容量与迁移回滚演练 |
 | Expert、Environment、Automation、Files、Approval | **Prototype** | 界面和本地控制面可演示，没有完整服务端权威模型 | 实现 API、不可变 revision、RBAC、审计和失败恢复 |
 | Agent 执行 | **Target** | 未实现真实模型、队列、沙箱、Tool Broker 或流式事件 | 执行面隔离、队列/租约、策略校验、幂等工具调用和实时恢复 |
-| 安全与合规 | **Target** | 生产配置会强制数据库与 CORS，但尚无用户身份、RBAC、Secret 管理与 append-only audit | 完成 [数据模型、权限与 Session 生命周期](./data-model-permissions-session-lifecycle.md) 和 [生产架构基线](./production-architecture.md) 的 P0 门槛 |
+| 安全与合规 | **Partial** | 生产配置强制数据库、OIDC 与 CORS；已有基础 membership/RBAC 和跨 tenant 负向测试 | 补齐 RLS/统一 tenant guard、Private 分享、Secret 管理、operation policy 与 append-only audit，并完成 [数据模型、权限与 Session 生命周期](./data-model-permissions-session-lifecycle.md) 和 [生产架构基线](./production-architecture.md) 的 P0 门槛 |
 
 结论：当前版本是“可验证的全栈纵向切片 + 完整原型”，不是可公网暴露或承载客户数据的生产版。
 

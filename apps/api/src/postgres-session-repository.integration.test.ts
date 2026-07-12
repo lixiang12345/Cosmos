@@ -26,7 +26,27 @@ describeWithDatabase('PostgresSessionRepository', () => {
 
   beforeAll(async () => {
     await runMigrations(pool)
-    await pool.query('TRUNCATE relay_idempotency_records, relay_sessions')
+    await pool.query(`
+      TRUNCATE relay_idempotency_records, relay_sessions, relay_space_memberships,
+        relay_organization_memberships, relay_spaces, relay_organizations CASCADE
+    `)
+    const spaces = [
+      ['relay', 'space-commerce'], ['relay', 'space-platform'], ['relay', 'space-ordering'],
+      ['relay', 'space-conflict'], ['relay', 'space-canonical'], ['relay', 'space-expiry'],
+      ['other', 'space-commerce'],
+    ]
+    for (const [organizationId, spaceId] of spaces) {
+      await pool.query('INSERT INTO relay_organizations (id, name) VALUES ($1, $1) ON CONFLICT DO NOTHING', [organizationId])
+      await pool.query('INSERT INTO relay_spaces (organization_id, id, name) VALUES ($1, $2, $2) ON CONFLICT DO NOTHING', [organizationId, spaceId])
+      await pool.query(`
+        INSERT INTO relay_organization_memberships (organization_id, actor_id, role)
+        VALUES ($1, 'user-local-admin', 'organization_owner') ON CONFLICT DO NOTHING
+      `, [organizationId])
+      await pool.query(`
+        INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
+        VALUES ($1, $2, 'user-local-admin', 'space_manager') ON CONFLICT DO NOTHING
+      `, [organizationId, spaceId])
+    }
   })
 
   afterAll(async () => {
@@ -36,26 +56,26 @@ describeWithDatabase('PostgresSessionRepository', () => {
   it('persists Sessions and isolates list results by organization and Space', async () => {
     const repository = new PostgresSessionRepository(pool)
     const created = await repository.create({
-      organizationId: 'relay', spaceId: 'space-commerce', idempotencyKey: 'persist-1', request,
+      organizationId: 'relay', spaceId: 'space-commerce', actorId: 'user-local-admin', idempotencyKey: 'persist-1', request,
     })
     await repository.create({
-      organizationId: 'other', spaceId: 'space-commerce', idempotencyKey: 'persist-1', request,
+      organizationId: 'other', spaceId: 'space-commerce', actorId: 'user-local-admin', idempotencyKey: 'persist-1', request,
     })
 
     const reconnectedRepository = new PostgresSessionRepository(pool)
-    await expect(reconnectedRepository.listBySpace('relay', 'space-commerce')).resolves.toEqual([created.session])
+    await expect(reconnectedRepository.listBySpace('relay', 'space-commerce', 'user-local-admin')).resolves.toEqual([created.session])
   })
 
   it('creates one Session when the same command arrives concurrently', async () => {
     const repository = new PostgresSessionRepository(pool)
     const record = {
-      organizationId: 'relay', spaceId: 'space-platform', idempotencyKey: 'concurrent-command', request,
+      organizationId: 'relay', spaceId: 'space-platform', actorId: 'user-local-admin', idempotencyKey: 'concurrent-command', request,
     }
 
     const results = await Promise.all(Array.from({ length: 6 }, () => repository.create(record)))
     expect(new Set(results.map((result) => result.session.id)).size).toBe(1)
     expect(results.filter((result) => result.replayed)).toHaveLength(5)
-    await expect(repository.listBySpace('relay', 'space-platform')).resolves.toHaveLength(1)
+    await expect(repository.listBySpace('relay', 'space-platform', 'user-local-admin')).resolves.toHaveLength(1)
 
     const persistedKeys = await pool.query<{
       idempotency_key_hash: string
@@ -73,15 +93,15 @@ describeWithDatabase('PostgresSessionRepository', () => {
     let now = new Date('2026-07-12T12:00:00.000Z')
     const repository = new PostgresSessionRepository(pool, { now: () => now })
     const first = await repository.create({
-      organizationId: 'relay', spaceId: 'space-ordering', idempotencyKey: 'ordering-1', request,
+      organizationId: 'relay', spaceId: 'space-ordering', actorId: 'user-local-admin', idempotencyKey: 'ordering-1', request,
     })
 
     now = new Date('2026-07-12T12:01:00.000Z')
     const second = await repository.create({
-      organizationId: 'relay', spaceId: 'space-ordering', idempotencyKey: 'ordering-2', request,
+      organizationId: 'relay', spaceId: 'space-ordering', actorId: 'user-local-admin', idempotencyKey: 'ordering-2', request,
     })
 
-    await expect(repository.listBySpace('relay', 'space-ordering')).resolves.toEqual([
+    await expect(repository.listBySpace('relay', 'space-ordering', 'user-local-admin')).resolves.toEqual([
       second.session,
       first.session,
     ])
@@ -90,7 +110,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
   it('rejects a different request that reuses the same idempotency key', async () => {
     const repository = new PostgresSessionRepository(pool)
     const record = {
-      organizationId: 'relay', spaceId: 'space-conflict', idempotencyKey: 'conflicting-command', request,
+      organizationId: 'relay', spaceId: 'space-conflict', actorId: 'user-local-admin', idempotencyKey: 'conflicting-command', request,
     }
     await repository.create(record)
     await expect(repository.create({
@@ -101,7 +121,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
   it('replays semantically identical requests regardless of object key order', async () => {
     const repository = new PostgresSessionRepository(pool)
     const record = {
-      organizationId: 'relay', spaceId: 'space-canonical', idempotencyKey: 'canonical-command', request,
+      organizationId: 'relay', spaceId: 'space-canonical', actorId: 'user-local-admin', idempotencyKey: 'canonical-command', request,
     }
     const first = await repository.create(record)
     const reorderedRequest: CreateSessionRequest = {
@@ -122,7 +142,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
     const replay = await repository.create({ ...record, request: reorderedRequest })
 
     expect(replay).toEqual({ session: first.session, replayed: true })
-    await expect(repository.listBySpace('relay', 'space-canonical')).resolves.toHaveLength(1)
+    await expect(repository.listBySpace('relay', 'space-canonical', 'user-local-admin')).resolves.toHaveLength(1)
   })
 
   it('allows a key to create a new Session after its idempotency window expires', async () => {
@@ -132,7 +152,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
       idempotencyTtlMs: 1_000,
     })
     const record = {
-      organizationId: 'relay', spaceId: 'space-expiry', idempotencyKey: 'expiring-command', request,
+      organizationId: 'relay', spaceId: 'space-expiry', actorId: 'user-local-admin', idempotencyKey: 'expiring-command', request,
     }
     const first = await repository.create(record)
 
@@ -143,6 +163,6 @@ describeWithDatabase('PostgresSessionRepository', () => {
 
     expect(afterExpiry.replayed).toBe(false)
     expect(afterExpiry.session.id).not.toBe(first.session.id)
-    await expect(repository.listBySpace('relay', 'space-expiry')).resolves.toHaveLength(2)
+    await expect(repository.listBySpace('relay', 'space-expiry', 'user-local-admin')).resolves.toHaveLength(2)
   })
 })

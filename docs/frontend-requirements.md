@@ -36,7 +36,7 @@
 
 | 范围 | 当前事实 | 状态 | 生产缺口 |
 | --- | --- | --- | --- |
-| Session 列表与创建 | `listSessions` 和 `createSession` 通过共享 Zod 契约调用 `/api/v1` | **Partial** | 列表无服务端分页/过滤，无鉴权；详情、消息和生命周期命令未接 API |
+| Session 列表与创建 | `listSessions` 和 `createSession` 通过共享 Zod 契约调用 `/api/v1`；API 已要求 OIDC/membership | **Partial** | Web 尚未接入真实登录/token；列表无服务端分页/过滤；详情、消息和生命周期命令未接 API |
 | 创建失败恢复 | Home 和 Dialog 等待 API 确认，失败保留输入，同一草稿重试复用幂等 key | **Implemented** | 幂等 key 仅存在内存；页面刷新后的安全恢复尚未实现 |
 | Session 视图模型 | 服务端 Session DTO 被适配为旧 `Run`，并与 `relay.sessions` localStorage 合并 | **Partial** | 本地数据仍可驱动归档/删除/重命名等伪写入；必须以服务端版本为权威 |
 | Experts/控制面 | 页面、seed 和 localStorage repository 可演示 | **Prototype** | 无服务端 revision、权限、审计或真实外部连接 |

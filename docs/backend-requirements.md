@@ -23,11 +23,11 @@
 
 | 范围 | 当前实现 | 未实现/不得声称 |
 | --- | --- | --- |
-| 进程与配置 | Fastify API；`/api/health` 存活检查；`/api/ready` 可检查 PostgreSQL；生产模式强制 `DATABASE_URL` 和 `CORS_ORIGIN` | 无鉴权、限流、信任代理、安全 header、优雅排空验收和多区部署 |
+| 进程与配置 | Fastify API；`/api/health` 公开存活检查；受鉴权的 `/api/ready` 可检查 PostgreSQL；生产模式强制 OIDC、`DATABASE_URL` 和 `CORS_ORIGIN` | 无限流、信任代理、安全 header、优雅排空验收和多区部署 |
 | Session API | `GET/POST /api/v1/organizations/:organizationId/spaces/:spaceId/sessions`；共享 Zod 请求/响应/错误验证 | 无 get/patch/archive/message/turn/command/SSE；列表无真实 cursor 和 filter |
 | 持久化 | `DATABASE_URL` 存在时使用 PostgreSQL，否则开发模式使用内存 repository；有版本化 SQL migration | 物理库仅有 Session/幂等记录；无 Organization、Space、Membership、Expert/Environment revision、Message、Turn、Command、Outbox、Audit 或 RLS |
 | 创建幂等 | Organization + Space + key 作用域；同 key/同 body 重放，不同 body 返回 409；PostgreSQL 使用事务级 advisory lock 处理并发 | 未包含 authenticated actor/method/canonical path；未保存完整 status/body/headers；未校验过期时间或运行清理作业 |
-| 测试 | API/repository/config 单元测试；配置 `TEST_DATABASE_URL` 时运行 PostgreSQL 并发幂等集成测试 | 数据库测试会在无环境变量时 skip；无鉴权/跨 tenant、真实 HTTP + DB、迁移回滚、备份恢复或负载测试 |
+| 测试 | API/repository/config/JWT 单元测试；配置 `TEST_DATABASE_URL` 时运行 PostgreSQL 并发幂等、HTTP 跨 tenant/Private 隔离和 `001 -> 002` 升级测试 | 数据库测试会在无环境变量时 skip；无 RLS、迁移回滚、备份恢复或负载测试 |
 
 这是“PostgreSQL 持久化纵向切片”，不是本文 Phase 1 已完成，也不具备处理客户私密数据的最小安全边界。
 

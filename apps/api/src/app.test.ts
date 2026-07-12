@@ -6,6 +6,7 @@ import {
 } from '@relay/contracts'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createApp } from './app.js'
+import { createDevelopmentAuthenticator } from './auth.js'
 import { InMemorySessionRepository } from './session-repository.js'
 
 const openApps: ReturnType<typeof createApp>[] = []
@@ -21,7 +22,10 @@ const sessionRequest: CreateSessionRequestInput = {
 }
 
 function testApp(repository = new InMemorySessionRepository()) {
-  const app = createApp({ sessionRepository: repository })
+  const app = createApp({
+    sessionRepository: repository,
+    authenticate: createDevelopmentAuthenticator('user-local-admin'),
+  })
   openApps.push(app)
   return app
 }
@@ -32,13 +36,18 @@ afterEach(async () => {
 
 describe('Relay API', () => {
   it('reports health', async () => {
-    const response = await testApp().inject({ method: 'GET', url: '/api/health' })
+    const app = createApp()
+    openApps.push(app)
+    const response = await app.inject({ method: 'GET', url: '/api/health' })
     expect(response.statusCode).toBe(200)
     expect(response.json()).toEqual({ status: 'ok' })
   })
 
   it('reports dependency readiness without changing the liveness signal', async () => {
-    const app = createApp({ readinessCheck: async () => { throw new Error('database unavailable') } })
+    const app = createApp({
+      authenticate: createDevelopmentAuthenticator('user-local-admin'),
+      readinessCheck: async () => { throw new Error('database unavailable') },
+    })
     openApps.push(app)
 
     const health = await app.inject({ method: 'GET', url: '/api/health' })
@@ -49,6 +58,35 @@ describe('Relay API', () => {
     expect(ApiErrorSchema.parse(readiness.json())).toMatchObject({
       code: 'DEPENDENCY_UNAVAILABLE', retryable: true,
     })
+  })
+
+  it('keeps only health public and rejects unauthenticated requests before body parsing', async () => {
+    const app = createApp()
+    openApps.push(app)
+
+    const health = await app.inject({ method: 'GET', url: '/api/health' })
+    const sessions = await app.inject({
+      method: 'GET', url: '/api/v1/organizations/relay/spaces/platform/sessions',
+    })
+    const readiness = await app.inject({ method: 'GET', url: '/api/ready' })
+    const unsupportedHealthMethod = await app.inject({ method: 'POST', url: '/api/health' })
+
+    expect(health.statusCode).toBe(200)
+    expect(sessions.statusCode).toBe(401)
+    expect(sessions.headers['www-authenticate']).toBe('Bearer realm="relay-api"')
+    expect(ApiErrorSchema.parse(sessions.json())).toMatchObject({
+      code: 'AUTHENTICATION_REQUIRED', retryable: false,
+    })
+    expect(readiness.statusCode).toBe(401)
+    expect(unsupportedHealthMethod.statusCode).toBe(401)
+
+    const malformedBody = await app.inject({
+      method: 'POST',
+      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      headers: { 'content-type': 'application/json' },
+      payload: '{not-json',
+    })
+    expect(malformedBody.statusCode).toBe(401)
   })
 
   it('creates a Session with defaults from the shared contract', async () => {
@@ -84,8 +122,8 @@ describe('Relay API', () => {
       visibility: 'private' as const,
       message: { ...sessionRequest.message, attachments: [] },
     }
-    await repository.create({ organizationId: 'relay', spaceId: 'platform', idempotencyKey: 'platform-1', request: normalizedRequest })
-    await repository.create({ organizationId: 'other', spaceId: 'platform', idempotencyKey: 'other-1', request: normalizedRequest })
+    await repository.create({ organizationId: 'relay', spaceId: 'platform', actorId: 'user-local-admin', idempotencyKey: 'platform-1', request: normalizedRequest })
+    await repository.create({ organizationId: 'other', spaceId: 'platform', actorId: 'user-local-admin', idempotencyKey: 'other-1', request: normalizedRequest })
 
     const response = await testApp(repository).inject({
       method: 'GET',

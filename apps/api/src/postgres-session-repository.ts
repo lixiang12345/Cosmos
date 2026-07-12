@@ -5,11 +5,15 @@ import {
 } from '@relay/contracts'
 import type { Pool, PoolClient } from 'pg'
 import {
+  AuthorizationChangedError,
   IdempotencyConflictError,
   createSessionDto,
   type CreateSessionRecord,
   type CreateSessionResult,
+  type OrganizationRole,
   type SessionRepository,
+  type SpaceAccess,
+  type SpaceRole,
 } from './session-repository.js'
 
 type SessionRow = {
@@ -101,13 +105,32 @@ export class PostgresSessionRepository implements SessionRepository {
     this.idempotencyTtlMs = options.idempotencyTtlMs ?? 24 * 60 * 60 * 1_000
   }
 
-  async listBySpace(organizationId: string, spaceId: string): Promise<SessionDto[]> {
+  async getSpaceAccess(organizationId: string, spaceId: string, actorId: string): Promise<SpaceAccess | null> {
+    const result = await this.pool.query<{
+      organization_role: OrganizationRole
+      space_role: SpaceRole
+    }>(`
+      SELECT organization_membership.role AS organization_role, space_membership.role AS space_role
+      FROM relay_organization_memberships organization_membership
+      JOIN relay_space_memberships space_membership
+        ON space_membership.organization_id = organization_membership.organization_id
+        AND space_membership.actor_id = organization_membership.actor_id
+      WHERE organization_membership.organization_id = $1
+        AND space_membership.space_id = $2
+        AND organization_membership.actor_id = $3
+    `, [organizationId, spaceId, actorId])
+    const row = result.rows[0]
+    return row ? { organizationRole: row.organization_role, spaceRole: row.space_role } : null
+  }
+
+  async listBySpace(organizationId: string, spaceId: string, actorId: string): Promise<SessionDto[]> {
     const result = await this.pool.query<SessionRow>(`
       SELECT ${sessionColumns}
       FROM relay_sessions
       WHERE organization_id = $1 AND space_id = $2
+        AND (visibility = 'space' OR created_by = $3)
       ORDER BY last_activity_at DESC, id DESC
-    `, [organizationId, spaceId])
+    `, [organizationId, spaceId, actorId])
     return result.rows.map(mapSession)
   }
 
@@ -127,19 +150,34 @@ export class PostgresSessionRepository implements SessionRepository {
   }
 
   private async createInTransaction(client: PoolClient, record: CreateSessionRecord): Promise<CreateSessionResult> {
+    const access = await client.query<{ role: SpaceRole }>(`
+      SELECT space_membership.role
+      FROM relay_organization_memberships organization_membership
+      JOIN relay_space_memberships space_membership
+        ON space_membership.organization_id = organization_membership.organization_id
+        AND space_membership.actor_id = organization_membership.actor_id
+      WHERE organization_membership.organization_id = $1
+        AND space_membership.space_id = $2
+        AND organization_membership.actor_id = $3
+      FOR UPDATE OF organization_membership, space_membership
+    `, [record.organizationId, record.spaceId, record.actorId])
+    if (!access.rowCount || access.rows[0].role === 'viewer') throw new AuthorizationChangedError()
+
     const keyHash = hash(record.idempotencyKey)
     const requestHash = hash(canonicalJson(record.request))
+    const canonicalPath = `/v1/organizations/${record.organizationId}/spaces/${record.spaceId}/sessions`
     await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
-      JSON.stringify([record.organizationId, record.spaceId, keyHash]),
+      JSON.stringify([record.organizationId, record.actorId, 'POST', canonicalPath, keyHash]),
     ])
 
     const now = this.now()
     const existing = await client.query<{ request_hash: string; session_id: string }>(`
       SELECT request_hash, session_id
       FROM relay_idempotency_records
-      WHERE organization_id = $1 AND space_id = $2 AND idempotency_key_hash = $3
-        AND expires_at > $4
-    `, [record.organizationId, record.spaceId, keyHash, now.toISOString()])
+      WHERE organization_id = $1 AND actor_id = $2 AND method = 'POST'
+        AND canonical_path = $3 AND idempotency_key_hash = $4
+        AND expires_at > $5
+    `, [record.organizationId, record.actorId, canonicalPath, keyHash, now.toISOString()])
 
     if (existing.rowCount) {
       if (existing.rows[0].request_hash !== requestHash) throw new IdempotencyConflictError()
@@ -148,30 +186,32 @@ export class PostgresSessionRepository implements SessionRepository {
 
     await client.query(`
       DELETE FROM relay_idempotency_records
-      WHERE organization_id = $1 AND space_id = $2 AND idempotency_key_hash = $3
-        AND expires_at <= $4
-    `, [record.organizationId, record.spaceId, keyHash, now.toISOString()])
+      WHERE organization_id = $1 AND actor_id = $2 AND method = 'POST'
+        AND canonical_path = $3 AND idempotency_key_hash = $4
+        AND expires_at <= $5
+    `, [record.organizationId, record.actorId, canonicalPath, keyHash, now.toISOString()])
     const session = createSessionDto(record, { id: this.createId(), timestamp: now.toISOString() })
     await client.query(`
       INSERT INTO relay_sessions (
-        ${sessionColumns}
+        ${sessionColumns}, created_by
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-        $14::jsonb, $15, $16, $17, $18, $19
+        $14::jsonb, $15, $16, $17, $18, $19, $20
       )
     `, [
       session.id, session.organizationId, session.spaceId, session.title, session.summary,
       session.expertId, session.expertName, session.expertVersion ?? null,
       session.environmentId ?? null, session.repository, session.baseBranch, session.visibility,
       session.status, JSON.stringify(session.attachments), session.source, session.createdAt,
-      session.updatedAt, session.lastActivityAt, session.version,
+      session.updatedAt, session.lastActivityAt, session.version, record.actorId,
     ])
     await client.query(`
       INSERT INTO relay_idempotency_records (
-        organization_id, space_id, idempotency_key_hash, request_hash, session_id, expires_at
-      ) VALUES ($1, $2, $3, $4, $5, $6)
+        organization_id, space_id, actor_id, method, canonical_path,
+        idempotency_key_hash, request_hash, session_id, expires_at
+      ) VALUES ($1, $2, $3, 'POST', $4, $5, $6, $7, $8)
     `, [
-      record.organizationId, record.spaceId, keyHash, requestHash, session.id,
+      record.organizationId, record.spaceId, record.actorId, canonicalPath, keyHash, requestHash, session.id,
       new Date(now.getTime() + this.idempotencyTtlMs).toISOString(),
     ])
     return { session, replayed: false }

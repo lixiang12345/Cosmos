@@ -8,6 +8,7 @@ import {
 export type CreateSessionRecord = {
   organizationId: string
   spaceId: string
+  actorId: string
   idempotencyKey: string
   request: CreateSessionRequest
 }
@@ -17,6 +18,13 @@ export type CreateSessionResult = {
   replayed: boolean
 }
 
+export type OrganizationRole = 'organization_owner' | 'organization_admin' | 'member' | 'viewer'
+export type SpaceRole = 'space_manager' | 'member' | 'viewer'
+export type SpaceAccess = {
+  organizationRole: OrganizationRole
+  spaceRole: SpaceRole
+}
+
 export class IdempotencyConflictError extends Error {
   constructor() {
     super('The Idempotency-Key was already used with a different request.')
@@ -24,8 +32,16 @@ export class IdempotencyConflictError extends Error {
   }
 }
 
+export class AuthorizationChangedError extends Error {
+  constructor() {
+    super('The actor no longer has permission to create Sessions in this Space.')
+    this.name = 'AuthorizationChangedError'
+  }
+}
+
 export interface SessionRepository {
-  listBySpace(organizationId: string, spaceId: string): Promise<SessionDto[]>
+  getSpaceAccess(organizationId: string, spaceId: string, actorId: string): Promise<SpaceAccess | null>
+  listBySpace(organizationId: string, spaceId: string, actorId: string): Promise<SessionDto[]>
   create(record: CreateSessionRecord): Promise<CreateSessionResult>
 }
 
@@ -93,12 +109,16 @@ export class InMemorySessionRepository implements SessionRepository {
     }
   }
 
+  async getSpaceAccess(): Promise<SpaceAccess> {
+    return { organizationRole: 'organization_owner', spaceRole: 'space_manager' }
+  }
+
   async listBySpace(organizationId: string, spaceId: string): Promise<SessionDto[]> {
     return (this.sessionsBySpace.get(spaceKey(organizationId, spaceId)) ?? []).map(cloneSession)
   }
 
   async create(record: CreateSessionRecord): Promise<CreateSessionResult> {
-    const idempotencyScope = `${spaceKey(record.organizationId, record.spaceId)}\u0000${record.idempotencyKey}`
+    const idempotencyScope = `${spaceKey(record.organizationId, record.spaceId)}\u0000${record.actorId}\u0000${record.idempotencyKey}`
     const requestFingerprint = JSON.stringify(record.request)
     const existing = this.sessionsByIdempotencyKey.get(idempotencyScope)
     if (existing) {

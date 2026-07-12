@@ -14,6 +14,13 @@ import Fastify, {
   type FastifyServerOptions,
 } from 'fastify'
 import {
+  AuthenticationError,
+  rejectAuthentication,
+  type AuthenticateRequest,
+  type AuthenticatedActor,
+} from './auth.js'
+import {
+  AuthorizationChangedError,
   IdempotencyConflictError,
   InMemorySessionRepository,
   type SessionRepository,
@@ -38,6 +45,7 @@ export type CreateAppOptions = {
   logger?: FastifyServerOptions['logger']
   corsOrigin?: boolean | string
   bodyLimit?: number
+  authenticate?: AuthenticateRequest
 }
 
 function validationFieldErrors(issues: readonly ValidationIssue[]): Record<string, string[]> {
@@ -87,9 +95,18 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     bodyLimit: options.bodyLimit ?? 1_048_576,
   })
   const sessionRepository = options.sessionRepository ?? new InMemorySessionRepository()
+  const authenticate = options.authenticate ?? rejectAuthentication
+  const actorsByRequest = new WeakMap<FastifyRequest, AuthenticatedActor>()
 
   void app.register(cors, {
     origin: options.corsOrigin ?? false,
+  })
+
+  app.addHook('onRequest', async (request) => {
+    const path = request.raw.url?.split('?', 1)[0]
+    const isPublicHealthRequest = (request.method === 'GET' || request.method === 'HEAD') && path === '/api/health'
+    if (request.method === 'OPTIONS' || isPublicHealthRequest) return
+    actorsByRequest.set(request, await authenticate(request.headers.authorization))
   })
 
   app.setNotFoundHandler((request, reply) => sendApiError(reply, 404, request, {
@@ -99,8 +116,6 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   }))
 
   app.setErrorHandler((error, request, reply) => {
-    request.log.error({ err: error }, 'Unhandled API request error')
-
     if (error instanceof IdempotencyConflictError) {
       return sendApiError(reply, 409, request, {
         code: 'IDEMPOTENCY_KEY_REUSED',
@@ -108,6 +123,25 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         retryable: false,
       })
     }
+
+    if (error instanceof AuthenticationError) {
+      reply.header('WWW-Authenticate', 'Bearer realm="relay-api"')
+      return sendApiError(reply, 401, request, {
+        code: 'AUTHENTICATION_REQUIRED',
+        message: error.message,
+        retryable: false,
+      })
+    }
+
+    if (error instanceof AuthorizationChangedError) {
+      return sendApiError(reply, 403, request, {
+        code: 'PERMISSION_DENIED',
+        message: error.message,
+        retryable: false,
+      })
+    }
+
+    request.log.error({ err: error }, 'Unhandled API request error')
 
     const statusCode = errorStatusCode(error)
 
@@ -149,19 +183,41 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     }
   })
 
-  app.get<{ Params: SpaceParams }>('/api/v1/organizations/:organizationId/spaces/:spaceId/sessions', async (request, reply) => {
-    const organizationId = parseSpaceId(request.params.organizationId)
-    const spaceId = parseSpaceId(request.params.spaceId)
+  async function authorizeSpace(request: FastifyRequest, reply: FastifyReply, params: SpaceParams) {
+    const actor = actorsByRequest.get(request)
+    if (!actor) throw new AuthenticationError()
+    const organizationId = parseSpaceId(params.organizationId)
+    const spaceId = parseSpaceId(params.spaceId)
     if (!organizationId || !spaceId) {
-      return sendApiError(reply, 400, request, {
+      sendApiError(reply, 400, request, {
         code: 'VALIDATION_FAILED',
         message: 'The request parameters are invalid.',
         retryable: false,
         fieldErrors: { path: ['Organization and Space ids must contain between 1 and 128 characters.'] },
       })
+      return null
     }
+    const access = await sessionRepository.getSpaceAccess(organizationId, spaceId, actor.id)
+    if (!access) {
+      sendApiError(reply, 404, request, {
+        code: 'RESOURCE_NOT_FOUND',
+        message: 'The requested API resource was not found.',
+        retryable: false,
+      })
+      return null
+    }
+    return { access, actor, organizationId, spaceId }
+  }
 
-    const items = await sessionRepository.listBySpace(organizationId, spaceId)
+  app.get<{ Params: SpaceParams }>('/api/v1/organizations/:organizationId/spaces/:spaceId/sessions', async (request, reply) => {
+    const authorization = await authorizeSpace(request, reply, request.params)
+    if (!authorization) return
+
+    const items = await sessionRepository.listBySpace(
+      authorization.organizationId,
+      authorization.spaceId,
+      authorization.actor.id,
+    )
     return SessionListResponseSchema.parse({
       items,
       page: {
@@ -173,14 +229,14 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   })
 
   app.post<{ Params: SpaceParams }>('/api/v1/organizations/:organizationId/spaces/:spaceId/sessions', async (request, reply) => {
-    const organizationId = parseSpaceId(request.params.organizationId)
-    const spaceId = parseSpaceId(request.params.spaceId)
-    if (!organizationId || !spaceId) {
-      return sendApiError(reply, 400, request, {
-        code: 'VALIDATION_FAILED',
-        message: 'The request parameters are invalid.',
+    const authorization = await authorizeSpace(request, reply, request.params)
+    if (!authorization) return
+
+    if (authorization.access.spaceRole === 'viewer') {
+      return sendApiError(reply, 403, request, {
+        code: 'PERMISSION_DENIED',
+        message: 'You do not have permission to create Sessions in this Space.',
         retryable: false,
-        fieldErrors: { path: ['Organization and Space ids must contain between 1 and 128 characters.'] },
       })
     }
 
@@ -207,8 +263,9 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     }
 
     const result = await sessionRepository.create({
-      organizationId,
-      spaceId,
+      organizationId: authorization.organizationId,
+      spaceId: authorization.spaceId,
+      actorId: authorization.actor.id,
       idempotencyKey,
       request: parsed.data,
     })
