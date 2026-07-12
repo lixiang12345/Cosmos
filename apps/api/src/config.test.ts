@@ -3,8 +3,12 @@ import { loadConfig } from './config.js'
 
 describe('API configuration', () => {
   it('supports an explicitly selected loopback-only development identity', () => {
-    expect(loadConfig({ NODE_ENV: 'development', AUTH_MODE: 'development' })).toEqual({
+    expect(loadConfig({ AUTH_MODE: 'development' })).toEqual({
       host: '127.0.0.1', port: 8787, corsOrigin: false, databaseUrl: undefined,
+      databaseConnectionTimeoutMs: 5_000,
+      databaseQueryTimeoutMs: 20_000,
+      databaseStatementTimeoutMs: 15_000,
+      migrateOnStart: true,
       authentication: { mode: 'development', actorId: 'user-local-admin' },
     })
   })
@@ -20,9 +24,77 @@ describe('API configuration', () => {
     })).toThrow('OIDC_ISSUER')
   })
 
+  it('never starts OIDC authentication with an implicit environment or in-memory storage', () => {
+    const oidc = {
+      AUTH_MODE: 'oidc',
+      OIDC_ISSUER: 'https://identity.test/',
+      OIDC_AUDIENCE: 'relay-api',
+      OIDC_JWKS_URI: 'https://identity.test/.well-known/jwks.json',
+    }
+    expect(() => loadConfig({ ...oidc, DATABASE_URL: 'postgres://relay' })).toThrow('NODE_ENV must be explicitly set')
+    expect(() => loadConfig({ ...oidc, NODE_ENV: 'development' })).toThrow('DATABASE_URL')
+  })
+
+  it('requires HTTPS OIDC endpoints in production', () => {
+    const production = {
+      NODE_ENV: 'production',
+      AUTH_MODE: 'oidc',
+      DATABASE_URL: 'postgres://relay',
+      CORS_ORIGIN: 'https://relay.example',
+      OIDC_AUDIENCE: 'relay-api',
+    }
+    expect(() => loadConfig({
+      ...production,
+      OIDC_ISSUER: 'http://identity.test/',
+      OIDC_JWKS_URI: 'https://identity.test/.well-known/jwks.json',
+    })).toThrow('OIDC_ISSUER must be a valid HTTPS URL in production')
+    expect(() => loadConfig({
+      ...production,
+      OIDC_ISSUER: 'https://identity.test/',
+      OIDC_JWKS_URI: 'http://identity.test/.well-known/jwks.json',
+    })).toThrow('OIDC_JWKS_URI must be a valid HTTPS URL in production')
+  })
+
+  it('uses an explicit migration job outside development', () => {
+    const production = {
+      NODE_ENV: 'production',
+      AUTH_MODE: 'oidc',
+      DATABASE_URL: 'postgres://relay',
+      CORS_ORIGIN: 'https://relay.example',
+      OIDC_ISSUER: 'https://identity.test/',
+      OIDC_AUDIENCE: 'relay-api',
+      OIDC_JWKS_URI: 'https://identity.test/.well-known/jwks.json',
+    }
+    expect(loadConfig(production).migrateOnStart).toBe(false)
+    expect(() => loadConfig({ ...production, MIGRATE_ON_START: 'true' })).toThrow('migration job')
+    expect(() => loadConfig({ AUTH_MODE: 'development', MIGRATE_ON_START: 'sometimes' })).toThrow('true or false')
+  })
+
   it('rejects invalid ports', () => {
     expect(() => loadConfig({ AUTH_MODE: 'development', PORT: '0' })).toThrow('PORT')
     expect(() => loadConfig({ AUTH_MODE: 'development', PORT: 'not-a-port' })).toThrow('PORT')
+  })
+
+  it('bounds PostgreSQL connection, query, and server statement timeouts', () => {
+    const config = loadConfig({
+      AUTH_MODE: 'development',
+      DATABASE_CONNECTION_TIMEOUT_MS: '1200',
+      DATABASE_QUERY_TIMEOUT_MS: '2500',
+      DATABASE_STATEMENT_TIMEOUT_MS: '2000',
+    })
+    expect(config.databaseConnectionTimeoutMs).toBe(1_200)
+    expect(config.databaseQueryTimeoutMs).toBe(2_500)
+    expect(config.databaseStatementTimeoutMs).toBe(2_000)
+
+    expect(() => loadConfig({
+      AUTH_MODE: 'development', DATABASE_CONNECTION_TIMEOUT_MS: '0',
+    })).toThrow('DATABASE_CONNECTION_TIMEOUT_MS')
+    expect(() => loadConfig({
+      AUTH_MODE: 'development', DATABASE_QUERY_TIMEOUT_MS: 'forever',
+    })).toThrow('DATABASE_QUERY_TIMEOUT_MS')
+    expect(() => loadConfig({
+      AUTH_MODE: 'development', DATABASE_STATEMENT_TIMEOUT_MS: '300001',
+    })).toThrow('DATABASE_STATEMENT_TIMEOUT_MS')
   })
 
   it('requires an explicit authentication mode and never enables development identity outside development', () => {

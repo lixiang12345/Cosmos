@@ -27,6 +27,8 @@ import { IconButton } from './ui'
 type CommandPaletteProps = {
   open: boolean
   runs: Run[]
+  prototypeNavigation?: boolean
+  sessionCreationEnabled?: boolean
   onClose: () => void
   onNewTask: () => void
 }
@@ -40,7 +42,14 @@ type Command = {
   action: () => void
 }
 
-export function CommandPalette({ open, runs, onClose, onNewTask }: CommandPaletteProps) {
+export function CommandPalette({
+  open,
+  runs,
+  prototypeNavigation = true,
+  sessionCreationEnabled = true,
+  onClose,
+  onNewTask,
+}: CommandPaletteProps) {
   const { locale } = usePreferences()
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
@@ -62,8 +71,10 @@ export function CommandPalette({ open, runs, onClose, onNewTask }: CommandPalett
   }, [closePalette, navigate])
 
   const navigationCommands = useMemo<Command[]>(() => [
-    { id: 'new-session', label: copy.newSession, detail: copy.manual, icon: Plus, keywords: 'new session task create 新建 会话 任务', action: () => { closePalette(); onNewTask() } },
-    { id: 'home', label: locale === 'zh' ? '启动页' : 'Home', detail: locale === 'zh' ? '选择 Expert 开始会话' : 'Choose an Expert and start a session', icon: Home, keywords: 'home launcher expert 启动 首页', action: () => go('/home') },
+    ...(sessionCreationEnabled ? [{ id: 'new-session', label: copy.newSession, detail: copy.manual, icon: Plus, keywords: 'new session task create 新建 会话 任务', action: () => { closePalette(); onNewTask() } }] : []),
+    { id: 'home', label: locale === 'zh' ? '启动页' : 'Home', detail: prototypeNavigation
+      ? (locale === 'zh' ? '选择 Expert 开始会话' : 'Choose an Expert and start a session')
+      : (locale === 'zh' ? '选择 Expert 保存会话草稿' : 'Choose an Expert and save a Session draft'), icon: Home, keywords: 'home launcher expert 启动 首页', action: () => go('/home') },
     { id: 'sessions', label: locale === 'zh' ? '会话' : 'Sessions', detail: locale === 'zh' ? '全部会话' : 'All sessions', icon: Bot, keywords: 'sessions 会话', action: () => go('/sessions') },
     { id: 'files', label: locale === 'zh' ? '文件' : 'Files', detail: 'Organization / User', icon: FileText, keywords: 'files memory 文件 记忆', action: () => go('/files') },
     { id: 'approvals', label: locale === 'zh' ? '待处理' : 'Approvals', detail: locale === 'zh' ? '人工输入与审批' : 'Human input and approvals', icon: Inbox, keywords: 'approvals human input 审批 待处理', action: () => go('/approvals') },
@@ -78,7 +89,7 @@ export function CommandPalette({ open, runs, onClose, onNewTask }: CommandPalett
     { id: 'secrets', label: locale === 'zh' ? '密钥' : 'Secrets', detail: locale === 'zh' ? '安全值存储' : 'Secure value storage', icon: KeyRound, keywords: 'secret credentials 密钥 凭据', action: () => go('/secrets') },
     { id: 'spaces', label: 'Spaces', detail: locale === 'zh' ? '资源隔离' : 'Resource boundaries', icon: Orbit, keywords: 'spaces scope 空间', action: () => go('/spaces') },
     { id: 'settings', label: locale === 'zh' ? '设置' : 'Settings', detail: locale === 'zh' ? '个人与组织' : 'Personal and organization', icon: Settings, keywords: 'settings preferences 设置', action: () => go('/settings') },
-  ], [closePalette, copy.manual, copy.newSession, go, locale, onNewTask])
+  ], [closePalette, copy.manual, copy.newSession, go, locale, onNewTask, prototypeNavigation, sessionCreationEnabled])
 
   const sessionCommands = useMemo<Command[]>(() => runs.slice(0, 12).map((run) => ({
     id: run.id,
@@ -91,7 +102,11 @@ export function CommandPalette({ open, runs, onClose, onNewTask }: CommandPalett
 
   const normalizedQuery = query.trim().toLocaleLowerCase()
   const matches = (command: Command) => !normalizedQuery || `${command.label} ${command.detail} ${command.keywords}`.toLocaleLowerCase().includes(normalizedQuery)
-  const filteredNavigation = navigationCommands.filter(matches)
+  const filteredNavigation = navigationCommands
+    .filter((command) => prototypeNavigation || [
+      'new-session', 'home', 'sessions', 'experts', 'environments',
+    ].includes(command.id))
+    .filter(matches)
   const filteredSessions = sessionCommands.filter(matches)
   const commands = useMemo(() => [...filteredNavigation, ...filteredSessions], [filteredNavigation, filteredSessions])
   const safeActiveIndex = Math.min(activeIndex, Math.max(0, commands.length - 1))

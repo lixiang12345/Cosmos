@@ -68,6 +68,7 @@ const zh = {
   'common.loading': '加载中',
   'common.noData': '暂无数据',
 
+  'status.draft': '草稿',
   'status.queued': '排队中',
   'status.running': '运行中',
   'status.waiting': '待审批',
@@ -297,6 +298,7 @@ const zh = {
   'sessions.entity': '会话',
   'sessions.status': '状态',
   'sessions.allStatuses': '全部状态',
+  'sessions.status.draft': '草稿',
   'sessions.status.queued': '排队中',
   'sessions.status.running': '运行中',
   'sessions.status.waiting': '待审批',
@@ -401,6 +403,7 @@ const en: Record<TranslationKey, string> = {
   'common.loading': 'Loading',
   'common.noData': 'No data',
 
+  'status.draft': 'Draft',
   'status.queued': 'Queued',
   'status.running': 'Running',
   'status.waiting': 'Awaiting approval',
@@ -630,6 +633,7 @@ const en: Record<TranslationKey, string> = {
   'sessions.entity': 'Session',
   'sessions.status': 'Status',
   'sessions.allStatuses': 'All statuses',
+  'sessions.status.draft': 'Draft',
   'sessions.status.queued': 'Queued',
   'sessions.status.running': 'Running',
   'sessions.status.waiting': 'Awaiting approval',
@@ -736,6 +740,13 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
+    let themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
+    if (!themeColor) {
+      themeColor = document.createElement('meta')
+      themeColor.name = 'theme-color'
+      document.head.append(themeColor)
+    }
+    themeColor.content = theme === 'dark' ? '#0e1012' : '#f7f8f7'
     writePreference(PREFERENCE_STORAGE_KEYS.theme, theme)
   }, [theme])
 

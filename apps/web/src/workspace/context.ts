@@ -20,6 +20,12 @@ export type ActiveWorkspace = {
   selectSpace: WorkspaceContextValue['selectSpace']
 }
 
+export function canCreateSessionInWorkspace(
+  workspace: Pick<ActiveWorkspace, 'organization' | 'space'>,
+) {
+  return workspace.organization.role !== 'viewer' && workspace.space.role !== 'viewer'
+}
+
 export const WorkspaceContext = createContext<WorkspaceContextValue | undefined>(undefined)
 
 export function useWorkspace() {

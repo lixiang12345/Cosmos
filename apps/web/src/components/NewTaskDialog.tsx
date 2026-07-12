@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   Bot,
   Check,
   ChevronDown,
@@ -7,6 +8,8 @@ import {
   LoaderCircle,
   LockKeyhole,
   Paperclip,
+  RefreshCw,
+  Save,
   Send,
   ShieldCheck,
   Sparkles,
@@ -27,9 +30,16 @@ type NewTaskDialogProps = {
   experts: NewTaskExpertOption[]
   repositories: Array<{ id: string; fullName: string; defaultBranch: string }>
   environments: Array<{ id: string; name: string; image: string; ready: boolean }>
+  catalogStatus?: SessionCatalogStatus
+  catalogError?: string
+  prototypeTools?: boolean
+  executionEnabled?: boolean
+  onRetryCatalog?: () => void
   onClose: () => void
   onCreate: (input: NewTaskInput, mode: TaskCreateMode) => Promise<void>
 }
+
+export type SessionCatalogStatus = 'loading' | 'ready' | 'empty' | 'error'
 
 export type NewTaskExpertOption = {
   id: string
@@ -61,28 +71,35 @@ export function NewTaskDialog({
   experts,
   repositories,
   environments,
+  catalogStatus,
+  catalogError,
+  prototypeTools = true,
+  executionEnabled = true,
+  onRetryCatalog,
   onClose,
   onCreate,
 }: NewTaskDialogProps) {
   const { locale } = usePreferences()
   const copy = locale === 'zh'
     ? {
-        eyebrow: '新建会话', title: '选择一个 Expert 开始', expert: '执行 Expert', task: '会话任务',
+        eyebrow: '新建会话', title: executionEnabled ? '选择一个 Expert 开始' : '选择 Expert 保存会话草稿', expert: '执行 Expert', task: '会话任务',
         prompt: '描述目标、上下文和期望结果。输入 / 可使用命令…', attach: '添加文件或图片',
-        enhance: '增强提示词', start: '开始会话', checking: '正在启动…',
+        enhance: '增强提示词', start: executionEnabled ? '开始会话' : '保存草稿', checking: executionEnabled ? '正在启动…' : '正在保存…',
         private: '仅自己', shared: '当前 Space', visibility: '可见范围', configured: '由 Expert 配置',
         environment: '运行环境', capabilities: '能力', policy: '策略', noExperts: '当前 Space 没有可用 Expert',
         noExpertsDetail: '请先发布一个 Expert，或切换到包含可用 Expert 的 Space。', remove: '移除附件',
-        shortcut: 'Enter 发送 · Shift + Enter 换行', advisor: '内置',
+        loadingCatalog: '正在加载可用 Expert 与运行环境…', catalogError: '无法加载会话目录', retry: '重试',
+        shortcut: executionEnabled ? 'Enter 发送 · Shift + Enter 换行' : 'Enter 保存 · Shift + Enter 换行', advisor: '内置',
       }
     : {
-        eyebrow: 'New session', title: 'Choose an Expert to begin', expert: 'Expert', task: 'Session task',
+        eyebrow: 'New session', title: executionEnabled ? 'Choose an Expert to begin' : 'Choose an Expert and save a draft', expert: 'Expert', task: 'Session task',
         prompt: 'Describe the outcome, context, and expected result. Type / for commands…', attach: 'Attach files or images',
-        enhance: 'Enhance prompt', start: 'Start session', checking: 'Starting…',
+        enhance: 'Enhance prompt', start: executionEnabled ? 'Start session' : 'Save draft', checking: executionEnabled ? 'Starting…' : 'Saving…',
         private: 'Private', shared: 'Current Space', visibility: 'Visibility', configured: 'Configured by Expert',
         environment: 'Environment', capabilities: 'Capabilities', policy: 'Policy', noExperts: 'No Experts are available in this Space',
         noExpertsDetail: 'Publish an Expert first, or switch to a Space with an available Expert.', remove: 'Remove attachment',
-        shortcut: 'Enter to send · Shift + Enter for a new line', advisor: 'Built-in',
+        loadingCatalog: 'Loading available Experts and Environments…', catalogError: 'Unable to load the session catalog', retry: 'Retry',
+        shortcut: executionEnabled ? 'Enter to send · Shift + Enter for a new line' : 'Enter to save · Shift + Enter for a new line', advisor: 'Built-in',
       }
 
   const initialExpert = experts.find((expert) => expert.id === initialExpertId) ?? experts[0]
@@ -102,6 +119,7 @@ export function NewTaskDialog({
     ?? repositories[0]
   const groups = useMemo(() => [...new Set(experts.map((expert) => expert.group))], [experts])
   const contextItems = useMemo(() => detectTaskContextItems(prompt), [prompt])
+  const resolvedCatalogStatus = catalogStatus ?? (experts.length ? 'ready' : 'empty')
 
   useEffect(() => {
     if (!open) return
@@ -142,13 +160,13 @@ export function NewTaskDialog({
       baseBranch: selectedRepository.defaultBranch,
       acceptanceCriteria: [],
       contextItems,
-      attachments,
+      attachments: prototypeTools ? attachments : [],
     }
 
     setCreateError('')
     setStartState('checking')
     try {
-      await onCreate(input, 'run')
+      await onCreate(input, executionEnabled ? 'run' : 'draft')
     } catch (error) {
       setCreateError(getCreateErrorMessage(error, locale))
     } finally {
@@ -169,7 +187,7 @@ export function NewTaskDialog({
           <IconButton icon={X} label={locale === 'zh' ? '关闭' : 'Close'} onClick={closeDialog} />
         </header>
 
-        {experts.length ? (
+        {resolvedCatalogStatus === 'ready' ? (
           <div className="session-launcher__body">
             <aside className="session-launcher__experts" aria-label={copy.expert}>
               {groups.map((group) => (
@@ -222,12 +240,14 @@ export function NewTaskDialog({
                       startSession()
                     }
                   }}
-                  placeholder={copy.prompt}
+                  placeholder={prototypeTools
+                    ? copy.prompt
+                    : (locale === 'zh' ? '描述目标、上下文和期望结果…' : 'Describe the outcome, context, and expected result…')}
                   rows={7}
                 />
               </label>
 
-              {contextItems.length ? (
+              {prototypeTools && contextItems.length ? (
                 <div className="new-task-context" aria-label={locale === 'zh' ? '已识别上下文' : 'Detected context'}>
                   <div className="new-task-context__chips">
                     {contextItems.map((item) => (
@@ -240,7 +260,7 @@ export function NewTaskDialog({
                 </div>
               ) : null}
 
-              {attachments.length ? (
+              {prototypeTools && attachments.length ? (
                 <div className="session-launcher__attachments">
                   {attachments.map((name) => (
                     <span key={name}>
@@ -255,25 +275,27 @@ export function NewTaskDialog({
 
               <div className="session-launcher__controls">
                 <div>
-                  <input
-                    ref={fileInputRef}
-                    className="visually-hidden"
-                    type="file"
-                    hidden
-                    aria-hidden="true"
-                    tabIndex={-1}
-                    multiple
-                    accept="image/*,.txt,.md,.json,.log,.pdf"
-                    onChange={(event) => {
-                      const names = Array.from(event.target.files ?? []).slice(0, 10).map((file) => file.name)
-                      setAttachments((items) => [...new Set([...items, ...names])].slice(0, 10))
-                      event.target.value = ''
-                    }}
-                  />
-                  <IconButton icon={Paperclip} label={copy.attach} onClick={() => fileInputRef.current?.click()} />
-                  <IconButton icon={WandSparkles} label={copy.enhance} disabled={!prompt.trim()} onClick={() => setPrompt((value) => value.trim()
-                    ? `${value.trim()}\n\n${locale === 'zh' ? '请先确认目标、约束、风险和可验证的完成标准。' : 'First confirm the goal, constraints, risks, and verifiable completion criteria.'}`
-                    : value)} />
+                  {prototypeTools ? <>
+                    <input
+                      ref={fileInputRef}
+                      className="visually-hidden"
+                      type="file"
+                      hidden
+                      aria-hidden="true"
+                      tabIndex={-1}
+                      multiple
+                      accept="image/*,.txt,.md,.json,.log,.pdf"
+                      onChange={(event) => {
+                        const names = Array.from(event.target.files ?? []).slice(0, 10).map((file) => file.name)
+                        setAttachments((items) => [...new Set([...items, ...names])].slice(0, 10))
+                        event.target.value = ''
+                      }}
+                    />
+                    <IconButton icon={Paperclip} label={copy.attach} onClick={() => fileInputRef.current?.click()} />
+                    <IconButton icon={WandSparkles} label={copy.enhance} disabled={!prompt.trim()} onClick={() => setPrompt((value) => value.trim()
+                      ? `${value.trim()}\n\n${locale === 'zh' ? '请先确认目标、约束、风险和可验证的完成标准。' : 'First confirm the goal, constraints, risks, and verifiable completion criteria.'}`
+                      : value)} />
+                  </> : null}
                   <label className="session-visibility-select">
                     {visibility === 'private' ? <LockKeyhole aria-hidden="true" /> : <Users aria-hidden="true" />}
                     <span className="visually-hidden">{copy.visibility}</span>
@@ -292,15 +314,31 @@ export function NewTaskDialog({
                   onClick={startSession}
                 >
                   {startState === 'checking' ? <LoaderCircle className="new-task-submit-spinner" aria-hidden="true" /> : null}
-                  {startState === 'idle' ? <Send aria-hidden="true" /> : null}
+                  {startState === 'idle' ? (executionEnabled ? <Send aria-hidden="true" /> : <Save aria-hidden="true" />) : null}
                   {startState === 'checking' ? copy.checking : copy.start}
                 </button>
               </div>
               <footer><span><ShieldCheck aria-hidden="true" />{copy.configured}</span><kbd>{copy.shortcut}</kbd></footer>
             </div>
           </div>
+        ) : resolvedCatalogStatus === 'loading' ? (
+          <div className="session-launcher__empty" role="status" aria-live="polite">
+            <LoaderCircle className="cosmos-spin" aria-hidden="true" />
+            <h3>{copy.loadingCatalog}</h3>
+          </div>
+        ) : resolvedCatalogStatus === 'error' ? (
+          <div className="session-launcher__empty" role="alert">
+            <AlertTriangle aria-hidden="true" />
+            <h3>{copy.catalogError}</h3>
+            {catalogError ? <p>{catalogError}</p> : null}
+            {onRetryCatalog ? (
+              <button type="button" className="button button--secondary" onClick={onRetryCatalog}>
+                <RefreshCw aria-hidden="true" />{copy.retry}
+              </button>
+            ) : null}
+          </div>
         ) : (
-          <div className="session-launcher__empty"><Bot aria-hidden="true" /><h3>{copy.noExperts}</h3><p>{copy.noExpertsDetail}</p></div>
+          <div className="session-launcher__empty" role="status"><Bot aria-hidden="true" /><h3>{copy.noExperts}</h3><p>{copy.noExpertsDetail}</p></div>
         )}
       </section>
     </div>

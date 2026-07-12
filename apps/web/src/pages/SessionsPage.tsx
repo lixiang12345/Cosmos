@@ -15,6 +15,7 @@ import {
   PencilLine,
   Plus,
   RadioTower,
+  RefreshCw,
   Search,
   ShieldAlert,
   SquareTerminal,
@@ -43,6 +44,9 @@ type SessionsPageProps = {
   runs: Run[]
   loadState?: 'loading' | 'ready' | 'error'
   loadError?: string
+  managementEnabled?: boolean
+  sessionCreationEnabled?: boolean
+  onRetry?: () => void
   onOpenNavigation: () => void
   onNewTask: (expert?: string) => void
   onOpenSession: (id: string) => void
@@ -74,19 +78,21 @@ type FilterOption = {
   label: string
 }
 
-const statusOptions: RunStatus[] = ['queued', 'running', 'paused', 'waiting', 'completed', 'failed', 'canceled']
+const statusOptions: RunStatus[] = ['draft', 'queued', 'running', 'paused', 'waiting', 'completed', 'failed', 'canceled']
 
 const statusPriority: Record<RunStatus, number> = {
+  draft: 5,
   waiting: 0,
   failed: 1,
   running: 2,
   paused: 3,
   queued: 4,
-  completed: 5,
-  canceled: 6,
+  completed: 6,
+  canceled: 7,
 }
 
 const statusCopyKeys: Record<RunStatus, TranslationKey> = {
+  draft: 'sessions.status.draft',
   queued: 'sessions.status.queued',
   running: 'sessions.status.running',
   paused: 'status.paused',
@@ -145,6 +151,8 @@ function getPrReferences(run: Run) {
 
 function getAgeMinutes(updatedAt: string) {
   const value = updatedAt.trim().toLocaleLowerCase()
+  const timestamp = Date.parse(updatedAt)
+  if (Number.isFinite(timestamp)) return Math.max(0, (Date.now() - timestamp) / 60_000)
   if (value.includes('刚刚') || value.includes('just now')) return 0
   if (value.includes('今天') || value.includes('today')) return 12 * 60
   if (value.includes('昨天') || value.includes('yesterday')) return 24 * 60
@@ -174,6 +182,17 @@ function matchesTimeFilter(updatedAt: string, filter: TimeFilter) {
   if (filter === 'hour') return age <= 60
   if (filter === 'day') return age <= 24 * 60
   return age <= 7 * 24 * 60
+}
+
+function formatUpdatedAt(updatedAt: string, locale: Locale) {
+  const timestamp = Date.parse(updatedAt)
+  if (!Number.isFinite(timestamp)) return updatedAt
+  return new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(timestamp)
 }
 
 function unique(values: string[]) {
@@ -208,6 +227,9 @@ export function SessionsPage({
   runs,
   loadState = 'ready',
   loadError = '',
+  managementEnabled = true,
+  sessionCreationEnabled = true,
+  onRetry,
   onOpenNavigation,
   onNewTask,
   onOpenSession,
@@ -266,7 +288,9 @@ export function SessionsPage({
     const normalizedQuery = query.trim().toLocaleLowerCase()
     return indexedSessions
       .filter(({ run, source, searchText }) => {
-        const matchesView = view === 'active'
+        const matchesView = !managementEnabled
+          ? true
+          : view === 'active'
           ? !run.archived
           : view === 'favorites'
             ? Boolean(run.favorite && !run.archived)
@@ -284,7 +308,7 @@ export function SessionsPage({
         const priorityDifference = statusPriority[first.run.status] - statusPriority[second.run.status]
         return priorityDifference || first.originalIndex - second.originalIndex
       })
-  }, [expertFilter, indexedSessions, query, repositoryFilter, sourceFilter, statusFilter, timeFilter, view])
+  }, [expertFilter, indexedSessions, managementEnabled, query, repositoryFilter, sourceFilter, statusFilter, timeFilter, view])
 
   const visibleIds = useMemo(() => new Set(visibleSessions.map(({ run }) => run.id)), [visibleSessions])
   const visibleSelectedIds = useMemo(
@@ -435,15 +459,17 @@ export function SessionsPage({
           <IconButton icon={Menu} label={t('workbench.openNavigation')} className="mobile-menu" onClick={onOpenNavigation} />
           <div>
             <h1>{t('sessions.title')}</h1>
-            <p>{t('sessions.description')}</p>
+            <p>{managementEnabled
+              ? t('sessions.description')
+              : (locale === 'zh' ? '查询当前 Space 中的服务端会话记录' : 'View server Session records in the current Space')}</p>
           </div>
         </div>
         <div className="module-header__actions">
           <GlobalControls />
-          <button type="button" className="button button--primary" onClick={() => onNewTask()}>
+          {sessionCreationEnabled ? <button type="button" className="button button--primary" onClick={() => onNewTask()}>
             <Plus aria-hidden="true" />
             {t('sessions.new')}
-          </button>
+          </button> : null}
         </div>
       </header>
 
@@ -451,7 +477,7 @@ export function SessionsPage({
         <section className="data-section sessions-section" aria-label={t('sessions.title')}>
           <div className="sessions-control-row">
             <div className="template-filters sessions-tabs" role="tablist" aria-label={t('sessions.title')}>
-              {(['active', 'favorites', 'archived'] as const).map((item) => (
+              {(managementEnabled ? ['active', 'favorites', 'archived'] as const : ['active'] as const).map((item) => (
                 <button
                   type="button"
                   role="tab"
@@ -572,10 +598,15 @@ export function SessionsPage({
                 <strong>{locale === 'zh' ? '无法加载会话' : 'Unable to load Sessions'}</strong>
                 <p>{loadError}</p>
               </div>
+              {onRetry ? (
+                <button type="button" className="button button--ghost button--compact" onClick={onRetry}>
+                  <RefreshCw aria-hidden="true" />{locale === 'zh' ? '重试' : 'Retry'}
+                </button>
+              ) : null}
             </div>
           ) : null}
 
-          {loadState === 'ready' && visibleSelectedIds.size > 0 ? (
+          {managementEnabled && loadState === 'ready' && visibleSelectedIds.size > 0 ? (
             <div className="session-bulk-bar" role="toolbar" aria-label={t('sessions.bulkArchive')}>
               <strong>{visibleSelectedIds.size} {t('sessions.selected')}</strong>
               <div>
@@ -595,15 +626,17 @@ export function SessionsPage({
           {loadState === 'ready' ? <div className="data-table session-table session-table--managed" role="table" aria-label={t('sessions.title')}>
             <div className="data-table__row data-table__head" role="row">
               <span role="columnheader" className="session-task-heading">
-                <input
-                  ref={selectAllRef}
-                  type="checkbox"
-                  className="session-select-checkbox session-select-checkbox--all"
-                  checked={allVisibleSelected}
-                  disabled={visibleSessions.length === 0}
-                  aria-label={t('sessions.selectAll')}
-                  onChange={toggleSelectAll}
-                />
+                {managementEnabled ? (
+                  <input
+                    ref={selectAllRef}
+                    type="checkbox"
+                    className="session-select-checkbox session-select-checkbox--all"
+                    checked={allVisibleSelected}
+                    disabled={visibleSessions.length === 0}
+                    aria-label={t('sessions.selectAll')}
+                    onChange={toggleSelectAll}
+                  />
+                ) : null}
                 {t('sessions.task')}
               </span>
               <span role="columnheader">{t('sessions.status')}</span>
@@ -635,14 +668,16 @@ export function SessionsPage({
                   aria-label={`${t('sessions.open')}: ${run.title}`}
                 >
                   <span className="session-task-cell" role="cell">
-                    <input
-                      type="checkbox"
-                      className="session-select-checkbox"
-                      checked={selectedIds.has(run.id)}
-                      aria-label={`${t('sessions.selectSession')}: ${run.title}`}
-                      onClick={(event) => event.stopPropagation()}
-                      onChange={() => toggleSelection(run.id)}
-                    />
+                    {managementEnabled ? (
+                      <input
+                        type="checkbox"
+                        className="session-select-checkbox"
+                        checked={selectedIds.has(run.id)}
+                        aria-label={`${t('sessions.selectSession')}: ${run.title}`}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={() => toggleSelection(run.id)}
+                      />
+                    ) : null}
                     <span className="table-primary">
                       <strong>{run.title}</strong>
                       <small>{run.repo} · {run.branch}</small>
@@ -653,9 +688,9 @@ export function SessionsPage({
                       <span className="status-badge__dot" aria-hidden="true" />
                       {t(statusCopyKeys[run.status])}
                     </span>
-                    <small className="session-status-progress">
+                    {managementEnabled ? <small className="session-status-progress">
                       {completedSteps}/{run.steps.length} · {currentStep?.detail ?? '—'}
-                    </small>
+                    </small> : null}
                   </span>
                   <span role="cell" className="session-expert-cell" data-label={t('sessions.expert')}>{run.expert}</span>
                   <span role="cell" className="session-context-cell session-updated-cell" data-label={t('sessions.sourceArtifacts')}>
@@ -681,8 +716,15 @@ export function SessionsPage({
                       {prReferences.length === 0 && !needsApproval ? <span className="session-signal-empty">—</span> : null}
                     </span>
                   </span>
-                  <time role="cell" className="session-updated-cell" data-label={t('sessions.updated')}>{run.updatedAt}</time>
-                  <span className="session-row__actions" role="cell" onClick={stopRowClick}>
+                  <time
+                    role="cell"
+                    className="session-updated-cell"
+                    data-label={t('sessions.updated')}
+                    dateTime={Number.isFinite(Date.parse(run.updatedAt)) ? run.updatedAt : undefined}
+                  >
+                    {formatUpdatedAt(run.updatedAt, locale)}
+                  </time>
+                  {managementEnabled ? <span className="session-row__actions" role="cell" onClick={stopRowClick}>
                     <button
                       type="button"
                       className={`icon-button icon-button--sm${run.favorite ? ' session-favorite--active' : ''}`}
@@ -723,7 +765,7 @@ export function SessionsPage({
                         </div>
                       ) : null}
                     </div>
-                  </span>
+                  </span> : <span role="cell" />}
                 </div>
               )
             })}
@@ -736,7 +778,7 @@ export function SessionsPage({
                   <button type="button" className="button button--ghost button--compact" onClick={clearFilters}>
                     <X aria-hidden="true" />{t('sessions.clearSearch')}
                   </button>
-                ) : view === 'active' ? (
+                ) : view === 'active' && sessionCreationEnabled ? (
                   <button type="button" className="button button--primary button--compact" onClick={() => onNewTask()}>
                     <Plus aria-hidden="true" />{t('sessions.new')}
                   </button>
@@ -747,7 +789,7 @@ export function SessionsPage({
         </section>
       </div>
 
-      {renameTarget ? (
+      {managementEnabled && renameTarget ? (
         <div className="dialog-backdrop" onMouseDown={(event) => {
           if (event.target === event.currentTarget) setRenameTarget(undefined)
         }}>
@@ -777,7 +819,7 @@ export function SessionsPage({
         </div>
       ) : null}
 
-      {deleteTarget ? (
+      {managementEnabled && deleteTarget ? (
         <div className="dialog-backdrop" onMouseDown={(event) => {
           if (event.target === event.currentTarget) setDeleteTarget(undefined)
         }}>

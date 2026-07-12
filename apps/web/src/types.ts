@@ -1,4 +1,4 @@
-export type RunStatus = 'queued' | 'running' | 'paused' | 'waiting' | 'completed' | 'failed' | 'canceled'
+export type RunStatus = 'draft' | 'queued' | 'running' | 'paused' | 'waiting' | 'completed' | 'failed' | 'canceled'
 
 export type StepStatus = 'completed' | 'active' | 'pending' | 'failed'
 
@@ -68,6 +68,7 @@ export type RunWorker = {
 
 export type Run = {
   id: string
+  serverVersion?: number
   spaceId?: string
   title: string
   favorite?: boolean

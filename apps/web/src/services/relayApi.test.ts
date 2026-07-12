@@ -9,6 +9,7 @@ import type {
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   RelayApiError,
+  RELAY_API_TIMEOUT_MS,
   createSession,
   getEnvironment,
   getExpert,
@@ -123,6 +124,7 @@ function jsonResponse(body: unknown, status = 200, headers?: HeadersInit) {
 }
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   vi.unstubAllEnvs()
   vi.restoreAllMocks()
@@ -231,6 +233,44 @@ describe('Relay API client', () => {
     )
   })
 
+  it('times out a stalled request with a retryable error', async () => {
+    const timeout = new AbortController()
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeout.signal)
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>((_input, init) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true })
+    })))
+
+    const pending = listSessions('relay', 'space-timeout')
+    timeout.abort(new DOMException('Timed out', 'TimeoutError'))
+
+    await expect(pending).rejects.toMatchObject({
+      code: 'REQUEST_TIMEOUT',
+      retryable: true,
+    })
+    expect(timeoutSpy).toHaveBeenCalledWith(RELAY_API_TIMEOUT_MS)
+  })
+
+  it('classifies a stalled response body as a retryable timeout', async () => {
+    const timeout = new AbortController()
+    vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeout.signal)
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (_input, init) => ({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: () => new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true })
+      }),
+    } as Response)))
+
+    const pending = listSessions('relay', 'space-slow-body')
+    timeout.abort(new DOMException('Timed out', 'TimeoutError'))
+
+    await expect(pending).rejects.toMatchObject({
+      code: 'REQUEST_TIMEOUT',
+      retryable: true,
+    })
+  })
+
   it('rejects a list response containing a Session outside the requested tenant scope', async () => {
     const response = {
       items: [{ ...session, organizationId: 'other-organization' }],
@@ -300,7 +340,7 @@ describe('Relay API client', () => {
     )).resolves.toEqual(response)
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/v1/organizations/relay/spaces/space-platform/experts?cursor=cursor+value&limit=25',
-      expect.objectContaining({ method: 'GET', signal: controller.signal }),
+      expect.objectContaining({ method: 'GET', signal: expect.any(AbortSignal) }),
     )
     expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('Authorization')).toBe('Bearer access-token')
   })
@@ -315,7 +355,7 @@ describe('Relay API client', () => {
     )).resolves.toEqual(expertDetail)
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/v1/organizations/relay/spaces/space-platform/experts/expert-pr-author',
-      expect.objectContaining({ method: 'GET', signal: controller.signal }),
+      expect.objectContaining({ method: 'GET', signal: expect.any(AbortSignal) }),
     )
 
     fetchMock.mockResolvedValueOnce(jsonResponse({
@@ -346,7 +386,7 @@ describe('Relay API client', () => {
     )).resolves.toEqual(response)
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/v1/organizations/relay/spaces/space-platform/environments',
-      expect.objectContaining({ method: 'GET', signal: controller.signal }),
+      expect.objectContaining({ method: 'GET', signal: expect.any(AbortSignal) }),
     )
     expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('Authorization')).toBe('Bearer access-token')
   })
@@ -361,7 +401,7 @@ describe('Relay API client', () => {
     )).resolves.toEqual(environmentDetail)
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/v1/organizations/relay/spaces/space-platform/environments/environment-platform',
-      expect.objectContaining({ method: 'GET', signal: controller.signal }),
+      expect.objectContaining({ method: 'GET', signal: expect.any(AbortSignal) }),
     )
 
     fetchMock.mockResolvedValueOnce(jsonResponse({

@@ -188,14 +188,13 @@ export function createSessionDto(
   })
 }
 
-export function createSessionStartRecords(
+export function createSessionRecords(
   record: CreateSessionRecord,
   session: SessionDto,
   options: {
     createId?: () => string
   } = {},
 ): Pick<CreateSessionResponse, 'message' | 'turn' | 'command'> {
-  if (!record.request.start) return {}
   const createId = options.createId ?? randomUUID
   const message: SessionMessage = {
     id: createId(),
@@ -207,6 +206,7 @@ export function createSessionStartRecords(
     attachments: [...record.request.message.attachments],
     createdAt: session.createdAt,
   }
+  if (!record.request.start) return { message }
   const turn: SessionTurn = {
     id: createId(),
     sessionId: session.id,
@@ -462,7 +462,7 @@ export class InMemorySessionRepository implements SessionRepository {
       id: this.createId(),
       timestamp: this.now().toISOString(),
     })
-    const startRecords = createSessionStartRecords(record, session, { createId: this.createId })
+    const startRecords = createSessionRecords(record, session, { createId: this.createId })
 
     const key = spaceKey(record.organizationId, record.spaceId)
     const sessions = this.sessionsBySpace.get(key) ?? []

@@ -5,7 +5,9 @@ import type {
   ExpertDetailDto,
   ExpertSummaryDto,
   MeResponse,
+  OrganizationRole,
   SessionDto,
+  SpaceRole,
 } from '@relay/contracts'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -174,12 +176,17 @@ function renderApp(route = '/runs/run-482') {
   )
 }
 
-function authenticatedAppTree(route: string, auth: AuthContextValue) {
+type WorkspaceRoles = {
+  organizationRole?: OrganizationRole
+  spaceRole?: SpaceRole
+}
+
+function authenticatedAppTree(route: string, auth: AuthContextValue, roles: WorkspaceRoles = {}) {
   const me: MeResponse = {
     actor: { id: auth.actorId ?? 'user-production', kind: 'user' },
     organizations: [{
-      id: 'organization-production', name: 'Production', role: 'member',
-      spaces: [{ id: 'space-production', name: 'Production Space', role: 'member' }],
+      id: 'organization-production', name: 'Production', role: roles.organizationRole ?? 'member',
+      spaces: [{ id: 'space-production', name: 'Production Space', role: roles.spaceRole ?? 'member' }],
     }],
   }
   const workspace: WorkspaceContextValue = {
@@ -205,6 +212,7 @@ function authenticatedAppTree(route: string, auth: AuthContextValue) {
 function renderAuthenticatedApp(
   route: string,
   overrides: Partial<AuthContextValue> = {},
+  roles: WorkspaceRoles = {},
 ) {
   let auth: AuthContextValue = {
     status: 'authenticated',
@@ -219,12 +227,12 @@ function renderAuthenticatedApp(
     signOut: async () => undefined,
     ...overrides,
   }
-  const result = render(authenticatedAppTree(route, auth))
+  const result = render(authenticatedAppTree(route, auth, roles))
   return {
     ...result,
     rerenderAuth(next: Partial<AuthContextValue>) {
       auth = { ...auth, ...next }
-      result.rerender(authenticatedAppTree(route, auth))
+      result.rerender(authenticatedAppTree(route, auth, roles))
     },
   }
 }
@@ -419,6 +427,14 @@ describe('Relay prototype', () => {
     renderAuthenticatedApp('/sessions/session-direct')
 
     expect(await screen.findByRole('heading', { level: 1, name: '直接恢复的生产会话' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '命令已接受，但执行面未接通' })).toBeInTheDocument()
+    expect(screen.queryByText('GPT-5.4')).not.toBeInTheDocument()
+    expect(screen.queryByText('38.2k')).not.toBeInTheDocument()
+    expect(screen.queryByText('￥4.82')).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument()
+    for (const action of ['暂停', '停止', '重试', '批准', '发送']) {
+      expect(screen.queryByRole('button', { name: action })).not.toBeInTheDocument()
+    }
     expect(getSession).toHaveBeenCalledWith(
       'organization-production',
       'space-production',
@@ -483,6 +499,30 @@ describe('Relay prototype', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Token B is not authorized.')
   })
 
+  it('hides Session list snapshots immediately when credentials rotate', async () => {
+    const tokenASession = makeApiSession('organization-production', 'space-production', {
+      title: 'Token A 列表中的会话', expertId: 'expert-authoritative', message: { content: '受限列表内容。' },
+    }, { id: 'session-list-rotation' })
+    const tokenBList = deferred<Awaited<ReturnType<typeof listSessions>>>()
+    vi.mocked(listSessions)
+      .mockResolvedValueOnce({
+        items: [tokenASession],
+        page: { nextCursor: null, hasMore: false, projectionUpdatedAt: tokenASession.updatedAt },
+      })
+      .mockReturnValueOnce(tokenBList.promise)
+
+    const view = renderAuthenticatedApp('/sessions', { accessToken: 'token-a', credentialVersion: 1 })
+    expect((await screen.findAllByText('Token A 列表中的会话')).length).toBeGreaterThan(0)
+
+    view.rerenderAuth({ accessToken: 'token-b', credentialVersion: 2 })
+
+    expect(screen.queryByText('Token A 列表中的会话')).not.toBeInTheDocument()
+    await act(async () => {
+      tokenBList.resolve({ items: [], page: { nextCursor: null, hasMore: false, projectionUpdatedAt: null } })
+    })
+    expect(within(await screen.findByRole('table', { name: '会话' })).getByText('暂无活跃会话')).toBeInTheDocument()
+  })
+
   it('ignores demo Session storage for an authenticated production identity', async () => {
     window.localStorage.setItem('relay.demo.sessions', JSON.stringify(initialRuns))
     vi.mocked(listSessions).mockResolvedValueOnce({
@@ -503,6 +543,41 @@ describe('Relay prototype', () => {
       }),
     )
     expect(JSON.parse(window.localStorage.getItem('relay.demo.sessions') ?? '[]')).toHaveLength(initialRuns.length)
+    expect(screen.queryByRole('tab', { name: /收藏|归档/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+  })
+
+  it('keeps production Session rows free of local mutation controls', async () => {
+    const session = makeApiSession('organization-production', 'space-production', {
+      title: '只读生产会话', expertId: 'expert-authoritative', message: { content: '服务端事实。' },
+    }, { id: 'session-readonly-row', status: 'draft' })
+    vi.mocked(listSessions).mockResolvedValueOnce({
+      items: [session], page: { nextCursor: null, hasMore: false, projectionUpdatedAt: session.updatedAt },
+    })
+
+    renderAuthenticatedApp('/sessions')
+
+    const table = await screen.findByRole('table', { name: '会话' })
+    expect(within(table).getByText('草稿')).toBeInTheDocument()
+    expect(within(table).queryByRole('button', { name: /收藏|更多|重命名|归档|删除/ })).not.toBeInTheDocument()
+    expect(within(table).queryByRole('checkbox')).not.toBeInTheDocument()
+    expect(within(table).queryByText(/0\/0/)).not.toBeInTheDocument()
+  })
+
+  it('retries a failed production Session list request', async () => {
+    const user = userEvent.setup()
+    vi.mocked(listSessions)
+      .mockRejectedValueOnce(new Error('Session projection unavailable.'))
+      .mockResolvedValueOnce({
+        items: [], page: { nextCursor: null, hasMore: false, projectionUpdatedAt: null },
+      })
+
+    renderAuthenticatedApp('/sessions')
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Session projection unavailable.')
+    await user.click(screen.getByRole('button', { name: '重试' }))
+    expect(within(await screen.findByRole('table', { name: '会话' })).getByText('暂无活跃会话')).toBeInTheDocument()
+    expect(listSessions).toHaveBeenCalledTimes(2)
   })
 
   it('does not read or overwrite prototype stores for a production identity', async () => {
@@ -529,7 +604,7 @@ describe('Relay prototype', () => {
     const user = userEvent.setup()
     renderAuthenticatedApp('/experts')
 
-    expect(await screen.findByText('Production Expert')).toBeInTheDocument()
+    expect((await screen.findAllByText('Production Expert')).length).toBeGreaterThan(0)
     expect(listExperts).toHaveBeenCalledWith(
       'organization-production',
       'space-production',
@@ -570,21 +645,20 @@ describe('Relay prototype', () => {
     expect(screen.queryByRole('button', { name: '创建环境' })).not.toBeInTheDocument()
   })
 
-  it('creates a production Session with only authoritative input fields', async () => {
+  it('saves a production Session draft with only authoritative input fields', async () => {
     const user = userEvent.setup()
-    let createdSession: SessionDto | undefined
     vi.mocked(createSession).mockImplementationOnce(async (organizationId, spaceId, input) => {
-      createdSession = makeApiSession(organizationId, spaceId, input, { id: 'session-production-create' })
-      return { session: createdSession }
+      return { session: makeApiSession(organizationId, spaceId, input, { id: 'session-production-create' }) }
     })
-    vi.mocked(getSession).mockImplementationOnce(async () => createdSession!)
     renderAuthenticatedApp('/experts')
     await screen.findByText('Production Expert')
 
-    await user.click(screen.getByRole('button', { name: '发起会话' }))
+    await user.click(screen.getByRole('button', { name: '新建会话草稿' }))
     expect(screen.queryByText('Cosmos Advisor')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '添加文件或图片' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '增强提示词' })).not.toBeInTheDocument()
     await user.type(screen.getByLabelText('会话任务'), '修复生产环境中的结算竞态')
-    await user.click(screen.getByRole('button', { name: '开始会话' }))
+    await user.click(screen.getByRole('button', { name: '保存草稿' }))
 
     await waitFor(() => expect(createSession).toHaveBeenCalled())
     expect(vi.mocked(createSession).mock.calls[0][0]).toBe('organization-production')
@@ -593,10 +667,146 @@ describe('Relay prototype', () => {
       expertId: 'expert-production',
       title: '修复生产环境中的结算竞态',
       visibility: 'private',
-      start: true,
+      start: false,
       message: { content: '修复生产环境中的结算竞态', attachments: [] },
     })
-    expect(await screen.findByRole('heading', { level: 1, name: '修复生产环境中的结算竞态' })).toBeInTheDocument()
+    const table = await screen.findByRole('table', { name: '会话' })
+    expect(within(table).getByText('修复生产环境中的结算竞态')).toBeInTheDocument()
+    expect(within(table).getByText('草稿')).toBeInTheDocument()
+  })
+
+  it('keeps a newly created Session when an older list response arrives later', async () => {
+    const user = userEvent.setup()
+    const delayedList = deferred<Awaited<ReturnType<typeof listSessions>>>()
+    const createInput: CreateSessionRequestInput = {
+      expertId: 'expert-production',
+      title: '新的权威标题',
+      visibility: 'private',
+      start: false,
+      message: { content: '新的权威标题', attachments: [] },
+    }
+    const created = makeApiSession('organization-production', 'space-production', createInput, {
+      id: 'session-race', version: 2,
+    })
+    vi.mocked(listSessions).mockReturnValueOnce(delayedList.promise)
+    vi.mocked(createSession).mockResolvedValueOnce({ session: created })
+
+    renderAuthenticatedApp('/experts')
+    await screen.findByText('Production Expert')
+    await user.click(screen.getByRole('button', { name: '新建会话草稿' }))
+    await user.type(screen.getByLabelText('会话任务'), createInput.message.content)
+    await user.click(screen.getByRole('button', { name: '保存草稿' }))
+    await waitFor(() => expect(createSession).toHaveBeenCalled())
+
+    await act(async () => {
+      delayedList.resolve({
+        items: [],
+        page: { nextCursor: null, hasMore: false, projectionUpdatedAt: null },
+      })
+    })
+
+    const table = await screen.findByRole('table', { name: '会话' })
+    expect(within(table).getAllByText('新的权威标题')).toHaveLength(1)
+  })
+
+  it.each([
+    ['organization viewer', { organizationRole: 'viewer' as const }],
+    ['space viewer', { spaceRole: 'viewer' as const }],
+  ])('hides every production Session creation entry for a %s', async (_name, roles) => {
+    const user = userEvent.setup()
+    renderAuthenticatedApp('/experts', {}, roles)
+
+    expect(await screen.findByText('Production Expert')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '新建会话' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '新建会话草稿' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('link', { name: 'Relay' }))
+    expect(await screen.findByRole('heading', { name: '选择 Expert，保存会话草稿' })).toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: '会话任务' })).not.toBeInTheDocument()
+    expect(screen.getByRole('note')).toHaveTextContent('只有查看权限')
+
+    await user.keyboard('{Control>}k{/Control}')
+    expect(screen.getByRole('dialog', { name: '搜索 Relay' })).toBeInTheDocument()
+    expect(screen.queryByText('手动创建')).not.toBeInTheDocument()
+  })
+
+  it('hides prototype navigation and tools throughout production mode', async () => {
+    renderAuthenticatedApp('/daemons')
+
+    expect(await screen.findByRole('heading', { name: '此模块尚未开放' })).toBeInTheDocument()
+    const navigation = screen.getByRole('navigation')
+    expect(within(navigation).queryByRole('link', { name: '守护进程' })).not.toBeInTheDocument()
+    expect(within(navigation).queryByRole('link', { name: '文件' })).not.toBeInTheDocument()
+    expect(within(navigation).queryByRole('link', { name: '自动化' })).not.toBeInTheDocument()
+    expect(within(navigation).getByRole('link', { name: '专家' })).toBeInTheDocument()
+    expect(within(navigation).getByRole('link', { name: '环境' })).toBeInTheDocument()
+  })
+
+  it('does not expose filename attachments or prompt simulation on production Home', async () => {
+    renderAuthenticatedApp('/home')
+
+    expect(await screen.findByRole('heading', { name: '选择 Expert，保存会话草稿' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '添加附件' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '增强提示词' })).not.toBeInTheDocument()
+  })
+
+  it('keeps production Home in a loading state until both Session Catalog resources are ready', async () => {
+    const user = userEvent.setup()
+    const expertsRequest = deferred<Awaited<ReturnType<typeof listExperts>>>()
+    const environmentsRequest = deferred<Awaited<ReturnType<typeof listEnvironments>>>()
+    vi.mocked(listExperts).mockReturnValueOnce(expertsRequest.promise)
+    vi.mocked(listEnvironments).mockReturnValueOnce(environmentsRequest.promise)
+
+    renderAuthenticatedApp('/home')
+
+    expect(await screen.findByText('正在加载可用 Expert 与运行环境…')).toBeInTheDocument()
+    expect(screen.queryByText('当前 Space 没有可用 Expert')).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: '会话任务' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '新建会话' }))
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByText('正在加载可用 Expert 与运行环境…')).toBeInTheDocument()
+    expect(within(dialog).queryByText('当前 Space 没有可用 Expert')).not.toBeInTheDocument()
+
+    await act(async () => {
+      expertsRequest.resolve({
+        items: [productionExpert],
+        page: { nextCursor: null, hasMore: false, projectionUpdatedAt: productionExpert.updatedAt },
+      })
+    })
+    expect(within(dialog).getByText('正在加载可用 Expert 与运行环境…')).toBeInTheDocument()
+
+    await act(async () => {
+      environmentsRequest.resolve({
+        items: [productionEnvironment],
+        page: { nextCursor: null, hasMore: false, projectionUpdatedAt: productionEnvironment.updatedAt },
+      })
+    })
+    expect(await within(dialog).findByRole('radio', { name: /Production Expert/ })).toBeInTheDocument()
+    expect(within(dialog).getByRole('textbox', { name: '会话任务' })).toBeInTheDocument()
+  })
+
+  it('shows a production Home Catalog error and retries the failed resource', async () => {
+    const user = userEvent.setup()
+    vi.mocked(listExperts)
+      .mockRejectedValueOnce(new Error('Expert Catalog unavailable.'))
+      .mockResolvedValueOnce({
+        items: [productionExpert],
+        page: { nextCursor: null, hasMore: false, projectionUpdatedAt: productionExpert.updatedAt },
+      })
+
+    renderAuthenticatedApp('/home')
+
+    const error = await screen.findByRole('alert')
+    expect(error).toHaveTextContent('无法加载会话目录')
+    expect(error).toHaveTextContent('Expert Catalog unavailable.')
+    expect(screen.queryByText('当前 Space 没有可用 Expert')).not.toBeInTheDocument()
+
+    await user.click(within(error).getByRole('button', { name: '重试' }))
+
+    expect((await screen.findAllByText('Production Expert')).length).toBeGreaterThan(0)
+    expect(listExperts).toHaveBeenCalledTimes(2)
+    expect(listEnvironments).toHaveBeenCalledTimes(1)
   })
 
   it('keeps the task dialog input open and retryable when Session creation fails', async () => {
@@ -765,6 +975,7 @@ describe('Relay prototype', () => {
 
     await user.click(within(sessionsPage).getByRole('button', { name: '切换到浅色模式' }))
     expect(document.documentElement).toHaveAttribute('data-theme', 'light')
+    expect(document.querySelector('meta[name="theme-color"]')).toHaveAttribute('content', '#f7f8f7')
     expect(window.localStorage.getItem(PREFERENCE_STORAGE_KEYS.theme)).toBe('light')
 
     await user.click(within(sessionsPage).getByRole('button', { name: '切换到英文' }))

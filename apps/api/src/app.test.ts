@@ -546,6 +546,33 @@ describe('Relay API', () => {
     expect(response.headers.location).toBe('/api/v1/organizations/relay/spaces/platform/sessions/session-1')
   })
 
+  it('persists the first message in a draft without creating execution records', async () => {
+    const ids = ['session-draft', 'message-draft']
+    const repository = testRepository({
+      createId: () => ids.shift() ?? crypto.randomUUID(),
+      now: () => new Date('2026-07-12T08:00:00.000Z'),
+    })
+    const response = await testApp(repository).inject({
+      method: 'POST',
+      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      headers: { 'idempotency-key': 'create-draft-1' },
+      payload: { ...sessionRequest, start: false },
+    })
+    const body = CreateSessionResponseSchema.parse(response.json())
+
+    expect(response.statusCode).toBe(201)
+    expect(body.session).toMatchObject({ id: 'session-draft', status: 'draft' })
+    expect(body.message).toMatchObject({
+      id: 'message-draft',
+      sessionId: 'session-draft',
+      sequence: 1,
+      role: 'user',
+      content: sessionRequest.message.content,
+    })
+    expect(body.turn).toBeUndefined()
+    expect(body.command).toBeUndefined()
+  })
+
   it('fails closed without an authoritative catalog and ignores forged compatibility metadata', async () => {
     const failClosed = new InMemorySessionRepository({ actorOrganizations: testActorOrganizations })
     await expect(failClosed.create({

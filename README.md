@@ -41,15 +41,32 @@ DATABASE_URL=postgres://relay:relay-local-only@127.0.0.1:55432/relay pnpm dev:ap
 TEST_DATABASE_URL=postgres://relay:relay-local-only@127.0.0.1:55432/relay pnpm test:integration
 ```
 
-API 使用版本化 SQL migration 自动升级数据库；也可显式运行 `DATABASE_URL=... pnpm db:migrate`。`/api/health` 是唯一公开的进程存活探针；`/api/ready` 受鉴权保护并真实检查数据库依赖。生产 API 必须显式设置 `AUTH_MODE=oidc`、`DATABASE_URL`、`CORS_ORIGIN`、`OIDC_ISSUER`、`OIDC_AUDIENCE` 和 `OIDC_JWKS_URI`；生产 Web 必须设置 `VITE_AUTH_MODE=oidc` 与 OIDC public-client 配置，Organization/Space 由受鉴权的 `/api/v1/me` membership discovery 返回，缺失身份配置时显示错误而非进入 demo。
+开发环境默认自动执行版本化 SQL migration；也可显式运行 `AUTH_MODE=development DATABASE_URL=... pnpm db:migrate`。staging/production 禁止 API 启动时迁移，发布流程必须先以独立 migration job 运行同一镜像的 `node dist/migrate.js`。`/api/health` 是唯一公开的进程存活探针；`/api/ready` 受鉴权保护并真实检查数据库依赖。生产 API 必须显式设置 `NODE_ENV=production`、`AUTH_MODE=oidc`、`DATABASE_URL`、`CORS_ORIGIN`、`OIDC_ISSUER`、`OIDC_AUDIENCE` 和 `OIDC_JWKS_URI`；生产 Web 必须设置 `VITE_AUTH_MODE=oidc` 与 OIDC public-client 配置，Organization/Space 由受鉴权的 `/api/v1/me` membership discovery 返回，缺失身份配置时显示错误而非进入 demo。
+
+生产容器从仓库根目录构建：
+
+```bash
+docker build -f apps/api/Dockerfile -t relay-api .
+docker build -f apps/web/Dockerfile -t relay-web \
+  --build-arg VITE_OIDC_AUTHORITY=https://identity.example.com/ \
+  --build-arg VITE_OIDC_CLIENT_ID=relay-web \
+  --build-arg VITE_OIDC_AUDIENCE=relay-api \
+  --build-arg VITE_OIDC_REDIRECT_URI=https://relay.example.com/auth/callback \
+  --build-arg VITE_OIDC_POST_LOGOUT_REDIRECT_URI=https://relay.example.com/ \
+  --build-arg VITE_OIDC_SILENT_REDIRECT_URI=https://relay.example.com/auth/silent-callback .
+```
+
+API 与 Web 运行镜像均使用非 root 用户并包含健康检查。Web 容器在启动时把同源 `/api/*` 反向代理到 `RELAY_API_UPSTREAM`（默认 `http://api:8787`）；部署时必须按服务发现地址覆盖该变量，并用 `RELAY_CSP_CONNECT_SRC`、`RELAY_CSP_FRAME_SRC` 明确列出 IdP/API 所需 HTTPS origin，例如 `RELAY_CSP_CONNECT_SRC="'self' https://identity.example.com"`。TLS、WAF、镜像签名仍由生产 Edge/IaC 落地。API 默认把数据库连接、客户端查询和 PostgreSQL statement 超时分别限制为 5s/20s/15s，可通过 `.env.example` 中的变量收紧但不能禁用。
 
 质量检查：
 
 ```bash
 pnpm check
+pnpm openapi:lint
+pnpm openapi:bundle
 ```
 
-也可单独执行 `pnpm lint`、`pnpm typecheck`、`pnpm test` 或 `pnpm build`。根命令会先构建 `@relay/contracts`，确保 API 与 Web 使用同一份生成类型。
+也可单独执行 `pnpm lint`、`pnpm typecheck`、`pnpm test` 或 `pnpm build`。根命令会先构建 `@relay/contracts`，确保 API 与 Web 使用同一份生成类型。Pull Request 和主分支推送必须通过 `.github/workflows/required-checks.yml`：Node 22 + pnpm 11.7.0 冻结锁文件安装、全量检查、PostgreSQL 17 集成测试、OpenAPI lint/bundle、生产 migration/API/Web 容器与同源代理 smoke、空白错误检查和脱敏 Secret 扫描。
 
 ## 当前后端范围
 
@@ -68,15 +85,16 @@ pnpm check
 - `start=true` 在同一 PostgreSQL 事务中写入 Session、首条 Message、Turn、Command、Outbox 和完整幂等响应；返回状态为 `queued`，不冒充 Agent 已执行。
 - 单 Session 响应和创建响应返回版本 `ETag`；Web 规范详情路由为 `/sessions/:sessionId`，旧 `/runs/:id` 只做兼容重定向。
 - API 成功响应与结构化错误均由 `@relay/contracts` 校验。
-- Expert/Environment Catalog 使用 keyset cursor 分页；详情返回资源版本 `ETag`。生产 Web 只开放查询和从已发布 Expert 发起 Session，不提供本地假编辑。
+- Expert/Environment Catalog 使用 keyset cursor 分页；详情返回资源版本 `ETag`。在真实执行面接通前，生产 Web 只开放查询和从已发布 Expert 保存 Session 草稿，不提供本地假编辑或伪执行。
+- `start=false` 会原子持久化 draft Session 与首条 Message，但不会创建 Turn、Command 或 Outbox；用户输入不会被静默丢弃，也不会误入执行队列。
 
 配置 `DATABASE_URL` 后，Expert/Environment identity 与 immutable revision、Repository binding、Session 和幂等记录写入 PostgreSQL；未配置时仅开发环境使用进程内存 repository。API 已实现 OIDC access token 校验、actor membership discovery、Organization/Space 角色交集写限制、Private creator 隔离、权威配置解析、只读 Catalog 和 actor/路径级幂等；Expert/Environment 写 API、Private 分享、RLS/统一 tenant guard、审计、任务队列 consumer 和真实 Agent runtime 尚未实现，因此当前版本仍不能直接暴露到公网。这些能力按 [软件交付计划](./docs/software-delivery-plan.md) 继续演进。
 
 ## 原型范围
 
-- Session 管理原型：显式 demo 模式提供活跃、收藏、归档、搜索、重命名、恢复和删除，状态写入隔离的 `relay.demo.sessions`；生产模式不会读取该缓存。
-- Run 工作台：阶段轨道、事件时间线、追加指令、终端回放、文件 Diff、审批决策。
-- 控制平面：运行记录、自动化、专家库、代码仓库、集成、治理中心和事件日志。
+- Session 管理原型：显式 demo 模式提供活跃、收藏、归档、搜索、重命名、恢复和删除，状态写入隔离的 `relay.demo.sessions`；生产模式不会读取该缓存，也不显示未接 API 的管理动作。
+- Session 工作台：demo 模式提供阶段轨道、事件时间线、追加指令、终端回放、文件 Diff 和审批决策；生产模式允许保存草稿并只显示 canonical Session metadata 与权威配置引用，明确标记执行面尚未接通。
+- 控制平面：demo 模式包含运行记录、自动化、代码仓库、集成、治理中心和事件日志；生产 capability allowlist 当前仅开放 Sessions、Experts 和 Environments，其他直达路由不渲染模拟操作。
 - 关键交互：新建任务、切换证据视图、批准或退回、失败步骤重试、侧栏折叠和移动端抽屉。
 - 全局偏好：浅色/深色主题与中文/英文切换，偏好跨页面、跨刷新保持一致。
 - 视觉系统：中性 Graphite 基底、受控绿色主色和语义状态色；Lucide 细线图标，4–8px 圆角，无装饰性渐变。

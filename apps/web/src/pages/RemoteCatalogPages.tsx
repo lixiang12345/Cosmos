@@ -19,7 +19,7 @@ import {
   LoaderCircle,
   LockKeyhole,
   Menu,
-  Play,
+  FilePlus2,
   RefreshCw,
   ServerCog,
   ShieldCheck,
@@ -54,6 +54,7 @@ export type RemoteExpertsPageProps = RemoteCatalogListState<ExpertSummaryDto> & 
   onOpenNavigation?: () => void
   onOpenDetail: (expertId: string) => void
   onStartSession: (expertId: string) => void
+  sessionCreationEnabled?: boolean
 }
 
 export type RemoteExpertDetailPageProps = RemoteCatalogRequestProps & {
@@ -61,6 +62,7 @@ export type RemoteExpertDetailPageProps = RemoteCatalogRequestProps & {
   onOpenNavigation?: () => void
   onBack: () => void
   onStartSession: (expertId: string) => void
+  sessionCreationEnabled?: boolean
 }
 
 export type RemoteEnvironmentsPageProps = RemoteCatalogListState<EnvironmentSummaryDto>
@@ -265,6 +267,7 @@ export function RemoteExpertsPage({
   onOpenNavigation,
   onOpenDetail,
   onStartSession,
+  sessionCreationEnabled = true,
 }: RemoteExpertsPageProps) {
   const { locale } = usePreferences()
   const state = listState(loading, ready, error)
@@ -280,8 +283,8 @@ export function RemoteExpertsPage({
       <div className="cosmos-page__scroll">
         <ReadOnlyNote>{text(
           locale,
-          '当前仅开放查询和会话启动；创建、编辑与发布尚未接入生产 API。',
-          'Query and session launch are available. Create, edit, and publish are not connected to the production API.',
+          '当前仅开放查询和会话草稿；执行、创建、编辑与发布尚未接入生产 API。',
+          'Query and Session drafts are available. Execution, create, edit, and publish are not connected to the production API.',
         )}</ReadOnlyNote>
         <section className="cosmos-panel remote-catalog-panel" aria-label={text(locale, '专家列表', 'Expert list')}>
           <header className="cosmos-section-heading">
@@ -314,15 +317,15 @@ export function RemoteExpertsPage({
                       </span>
                       <ChevronRight aria-hidden="true" />
                     </button>
-                    <button
+                    {sessionCreationEnabled ? <button
                       type="button"
                       className="cosmos-button cosmos-button--secondary remote-catalog-row__start"
                       disabled={!startable}
                       title={startable ? undefined : text(locale, '仅已发布且具有版本的 Expert 可发起会话', 'Only a published Expert revision can start a Session')}
                       onClick={() => onStartSession(expert.id)}
                     >
-                      <Play aria-hidden="true" />{text(locale, '发起会话', 'Start Session')}
-                    </button>
+                      <FilePlus2 aria-hidden="true" />{text(locale, '新建会话草稿', 'New Session draft')}
+                    </button> : null}
                   </article>
                 )
               })}
@@ -343,6 +346,7 @@ export function RemoteExpertDetailPage({
   onOpenNavigation,
   onBack,
   onStartSession,
+  sessionCreationEnabled = true,
 }: RemoteExpertDetailPageProps) {
   const { locale } = usePreferences()
   const requestAuth = useMemo<RelayApiAuthContext>(() => ({
@@ -372,9 +376,9 @@ export function RemoteExpertDetailPage({
         title={expert?.name ?? text(locale, '专家详情', 'Expert detail')}
         description={expert ? expert.id : text(locale, '服务端 Expert 配置', 'Server-managed Expert configuration')}
         onOpenNavigation={onOpenNavigation}
-        actions={startable ? (
+        actions={startable && sessionCreationEnabled ? (
           <button type="button" className="cosmos-button cosmos-button--primary" onClick={() => onStartSession(expertId)}>
-            <Play aria-hidden="true" />{text(locale, '发起会话', 'Start Session')}
+            <FilePlus2 aria-hidden="true" />{text(locale, '新建会话草稿', 'New Session draft')}
           </button>
         ) : null}
       />

@@ -2,14 +2,19 @@ import { Pool } from 'pg'
 import { createApp } from './app.js'
 import { createDevelopmentAuthenticator, createJwtAuthenticator } from './auth.js'
 import { loadConfig } from './config.js'
-import { runMigrations } from './migrations.js'
+import { assertMigrationsCurrent, runMigrations } from './migrations.js'
 import { PostgresConfigurationCatalogRepository } from './postgres-configuration-catalog-repository.js'
 import { PostgresSessionRepository } from './postgres-session-repository.js'
 import { InMemorySessionRepository } from './session-repository.js'
 
 const config = loadConfig()
-const pool = config.databaseUrl ? new Pool({ connectionString: config.databaseUrl }) : undefined
-if (pool) await runMigrations(pool)
+const pool = config.databaseUrl ? new Pool({
+  connectionString: config.databaseUrl,
+  connectionTimeoutMillis: config.databaseConnectionTimeoutMs,
+  query_timeout: config.databaseQueryTimeoutMs,
+  statement_timeout: config.databaseStatementTimeoutMs,
+}) : undefined
+if (pool && config.migrateOnStart) await runMigrations(pool)
 const authenticate = config.authentication.mode === 'oidc'
   ? createJwtAuthenticator(config.authentication)
   : createDevelopmentAuthenticator(config.authentication.actorId)
@@ -36,7 +41,10 @@ const app = createApp({
   configurationCatalogRepository: pool
     ? new PostgresConfigurationCatalogRepository(pool)
     : undefined,
-  readinessCheck: pool ? async () => { await pool.query('SELECT 1') } : undefined,
+  readinessCheck: pool ? async () => {
+    await pool.query('SELECT 1')
+    await assertMigrationsCurrent(pool)
+  } : undefined,
   authenticate,
 })
 

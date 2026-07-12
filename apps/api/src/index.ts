@@ -8,7 +8,7 @@ export {
   type JwtAuthenticatorOptions,
 } from './auth.js'
 export { loadConfig, type ApiConfig } from './config.js'
-export { runMigrations } from './migrations.js'
+export { assertMigrationsCurrent, runMigrations } from './migrations.js'
 export {
   PostgresConfigurationCatalogRepository,
 } from './postgres-configuration-catalog-repository.js'
@@ -32,7 +32,7 @@ export {
   SessionConfigurationNotFoundError,
   SessionConfigurationValidationError,
   canWriteSpace,
-  createSessionStartRecords,
+  createSessionRecords,
   createSessionDto,
   orderActorOrganizations,
   resolveInMemorySessionConfiguration,

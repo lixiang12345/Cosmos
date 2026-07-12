@@ -85,7 +85,7 @@ Relay 是面向研发团队的 Agent 工作系统。用户选择一个可复用 
 
 | 能力 | 状态 | 当前真实边界 | 进入生产前的必要条件 |
 | --- | --- | --- | --- |
-| Web 原型 | **Partial** | React 页面、主题/语言、响应式导航和主要演示交互可用；多数领域数据仍为 seed/localStorage | 连接真实身份、权限和服务端数据；移除伪成功路径 |
+| Web 产品壳层 | **Partial** | React 页面、主题/语言和响应式导航可用；生产模式只开放 Session metadata/draft create 与只读 Catalog，按 Organization/Space role 隐藏创建入口；未服务化路由和本地伪成功操作仅保留在显式 demo 模式 | 逐域连接真实权限、审计和服务端数据；以 capability 开放替代页面级模拟 |
 | Session 创建/列表 | **Partial** | Web 已调用真实 API；API 支持 OIDC、membership、Private creator 隔离；服务端解析并固定 Expert/Environment revision，启动时原子创建 Session/Message/Turn/Command/Outbox 并完整幂等重放 | 后续消息、生命周期、Private 分享、分页和真实执行 consumer |
 | PostgreSQL 持久化 | **Implemented (limited)** | 配置 `DATABASE_URL` 时持久化 Expert/Environment identity 与不可变 revision、Session 和幂等记录；未配置的开发模式使用内存 | 备份/恢复、数据库高可用、RLS/统一 tenant guard、容量与迁移回滚演练 |
 | Expert、Environment 查询 | **Implemented (limited)** | 生产 Web 使用 tenant-scoped 只读 Catalog API；列表和详情重检 membership，隐藏 Private/未发布或未就绪资源，并以 version/ETag 表达资源版本 | 创建、编辑、发布、重新配置、审计和 operation policy |

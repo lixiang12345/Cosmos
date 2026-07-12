@@ -1,0 +1,151 @@
+name: Required checks
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: required-checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      TEST_DATABASE_URL: postgresql://relay_ci:relay_ci@127.0.0.1:5432/relay_test
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: relay_ci
+          POSTGRES_PASSWORD: relay_ci
+          POSTGRES_DB: relay_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U relay_ci -d relay_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Scan committed changes for secrets
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: false
+          GITLEAKS_ENABLE_SUMMARY: false
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
+          GITLEAKS_VERSION: 8.30.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.13.0
+
+      - name: Activate pnpm
+        run: |
+          npm install --global pnpm@11.7.0
+          test "$(pnpm --version)" = "11.7.0"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run repository checks
+        run: pnpm check
+
+      - name: Run PostgreSQL integration tests
+        run: pnpm test:integration
+
+      - name: Validate and bundle OpenAPI
+        run: |
+          pnpm openapi:lint
+          pnpm openapi:bundle
+
+      - name: Build API container
+        run: docker build --file apps/api/Dockerfile --tag relay-api:ci .
+
+      - name: Build Web container
+        run: >-
+          docker build
+          --file apps/web/Dockerfile
+          --tag relay-web:ci
+          --build-arg VITE_OIDC_AUTHORITY=https://identity.example.com/
+          --build-arg VITE_OIDC_CLIENT_ID=relay-web
+          --build-arg VITE_OIDC_AUDIENCE=relay-api
+          --build-arg VITE_OIDC_REDIRECT_URI=https://relay.example.com/auth/callback
+          --build-arg VITE_OIDC_POST_LOGOUT_REDIRECT_URI=https://relay.example.com/
+          --build-arg VITE_OIDC_SILENT_REDIRECT_URI=https://relay.example.com/auth/silent-callback
+          .
+
+      - name: Smoke production containers and API proxy
+        run: |
+          cleanup() {
+            docker rm --force relay-web-smoke relay-api-smoke >/dev/null 2>&1 || true
+            docker network rm relay-smoke >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker network create relay-smoke
+          docker run --rm \
+            --network relay-smoke \
+            --add-host host.docker.internal:host-gateway \
+            --env AUTH_MODE=oidc \
+            --env CORS_ORIGIN=https://relay.example.com \
+            --env DATABASE_URL=postgresql://relay_ci:relay_ci@host.docker.internal:5432/relay_test \
+            --env OIDC_AUDIENCE=relay-api \
+            --env OIDC_ISSUER=https://identity.example.com/ \
+            --env OIDC_JWKS_URI=https://identity.example.com/.well-known/jwks.json \
+            relay-api:ci node dist/migrate.js
+          docker run --detach \
+            --name relay-api-smoke \
+            --network relay-smoke \
+            --add-host host.docker.internal:host-gateway \
+            --env AUTH_MODE=oidc \
+            --env CORS_ORIGIN=https://relay.example.com \
+            --env DATABASE_URL=postgresql://relay_ci:relay_ci@host.docker.internal:5432/relay_test \
+            --env OIDC_AUDIENCE=relay-api \
+            --env OIDC_ISSUER=https://identity.example.com/ \
+            --env OIDC_JWKS_URI=https://identity.example.com/.well-known/jwks.json \
+            relay-api:ci
+          docker run --detach \
+            --name relay-web-smoke \
+            --network relay-smoke \
+            --publish 127.0.0.1:18080:8080 \
+            --env RELAY_API_UPSTREAM=http://relay-api-smoke:8787 \
+            --env "RELAY_CSP_CONNECT_SRC='self' https://identity.example.com" \
+            --env "RELAY_CSP_FRAME_SRC='self' https://identity.example.com" \
+            relay-web:ci
+          for _ in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:18080/healthz >/dev/null; then break; fi
+            sleep 1
+          done
+          test "$(docker inspect --format '{{.State.Health.Status}}' relay-api-smoke)" = healthy
+          test "$(docker inspect --format '{{.State.Health.Status}}' relay-web-smoke)" = healthy
+          curl --fail --silent http://127.0.0.1:18080/ >/dev/null
+          curl --fail --silent http://127.0.0.1:18080/theme-init.js >/dev/null
+          curl --fail --silent http://127.0.0.1:18080/api/health | grep --quiet '"status":"ok"'
+          curl --fail --silent --head http://127.0.0.1:18080/ | grep --ignore-case --quiet 'content-security-policy:'
+
+      - name: Check whitespace errors
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            git diff --check "$BASE_SHA" "$HEAD_SHA"
+          else
+            git diff --check "${HEAD_SHA}^" "$HEAD_SHA"
+          fi
+          git diff --check

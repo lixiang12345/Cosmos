@@ -696,6 +696,8 @@ paths:
       description: |
         `start=true` atomically creates the Session, first user Message and first Turn.
         The server resolves and fixes the published Expert and Environment revisions.
+        `start=false` persists the draft Session and first user Message, but creates no
+        Turn, Command, or execution Outbox event.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:

@@ -5,7 +5,7 @@
   "type": "module",
   "packageManager": "pnpm@11.7.0",
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=22.13.0"
   },
   "scripts": {
     "dev": "AUTH_MODE=development VITE_AUTH_MODE=development VITE_DEMO_MODE=true pnpm --parallel --filter @relay/api --filter @relay/web dev",
@@ -17,12 +17,15 @@
     "test:integration": "pnpm --filter @relay/api test:integration",
     "build": "pnpm --filter @relay/contracts build && pnpm --filter @relay/api build && pnpm --filter @relay/web build",
     "lint": "eslint .",
+    "openapi:lint": "redocly lint docs/api-contract.yaml",
+    "openapi:bundle": "redocly bundle docs/api-contract.yaml --output dist/api-contract.yaml",
     "test": "pnpm --filter @relay/contracts build && pnpm --recursive --if-present test",
     "typecheck": "pnpm --filter @relay/contracts build && pnpm --recursive --if-present typecheck",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@redocly/cli": "2.38.0",
     "eslint": "^10.7.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.3",

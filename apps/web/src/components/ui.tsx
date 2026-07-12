@@ -24,6 +24,7 @@ export function IconButton({ icon: Icon, label, size = 'md', className = '', ...
 }
 
 const statusLabels: Record<RunStatus, TranslationKey> = {
+  draft: 'status.draft',
   queued: 'status.queued',
   running: 'status.running',
   paused: 'status.paused',

@@ -37,10 +37,12 @@ import { IconButton, StatusBadge } from './ui'
 
 type SidebarProps = {
   runs: Run[]
+  prototypeNavigation?: boolean
   open: boolean
   collapsed: boolean
   onClose: () => void
   onNewTask: () => void
+  sessionCreationEnabled?: boolean
   onToggleCollapsed: () => void
 }
 
@@ -93,7 +95,16 @@ function SidebarLink({ item, nested = false, badge, onNavigate }: { item: NavIte
   )
 }
 
-export function Sidebar({ runs, open, collapsed, onClose, onNewTask, onToggleCollapsed }: SidebarProps) {
+export function Sidebar({
+  runs,
+  prototypeNavigation = true,
+  open,
+  collapsed,
+  onClose,
+  onNewTask,
+  sessionCreationEnabled = true,
+  onToggleCollapsed,
+}: SidebarProps) {
   const auth = useAuth()
   const { locale, t } = usePreferences()
   const { activeSpace, actions, state } = useControlPlane()
@@ -105,6 +116,9 @@ export function Sidebar({ runs, open, collapsed, onClose, onNewTask, onToggleCol
   const [configurationOpen, setConfigurationOpen] = useState(true)
   const pinnedRuns = runs.filter((run) => run.favorite && !run.archived).slice(0, 3)
   const recentRuns = runs.filter((run) => !run.archived && !run.favorite).slice(0, 6)
+  const visibleConfigurationItems = prototypeNavigation
+    ? configurationItems
+    : configurationItems.filter((item) => item.to === '/experts' || item.to === '/environments')
   const copy = locale === 'zh'
     ? { files: '文件', automations: '自动化', configuration: '配置', pinned: '置顶', recent: '最近会话', expand: '展开导航', collapse: '收起导航', role: '已认证组织成员', signOut: '退出登录' }
     : { files: 'Files', automations: 'Automations', configuration: 'Configuration', pinned: 'Pinned', recent: 'Recent Sessions', expand: 'Expand navigation', collapse: 'Collapse navigation', role: 'Authenticated organization member', signOut: 'Sign out' }
@@ -163,12 +177,12 @@ export function Sidebar({ runs, open, collapsed, onClose, onNewTask, onToggleCol
           ) : null}
         </div>
 
-        <div className="sidebar__quick-actions sidebar__quick-actions--cosmos">
+        {sessionCreationEnabled ? <div className="sidebar__quick-actions sidebar__quick-actions--cosmos">
           <button type="button" className="sidebar-new-session" onClick={onNewTask} aria-label={t('sessions.new')} data-tooltip={t('sessions.new')}>
             <Plus aria-hidden="true" />
             <span>{t('sessions.new')}</span>
           </button>
-        </div>
+        </div> : null}
 
         <nav className="sidebar__nav sidebar__nav--cosmos" aria-label={t('nav.mainLabel')}>
           <SidebarLink item={{ to: '/sessions', label: { zh: '会话', en: 'Sessions' }, icon: MessageCircle }} onNavigate={onClose} />
@@ -189,7 +203,7 @@ export function Sidebar({ runs, open, collapsed, onClose, onNewTask, onToggleCol
             })}
           </div>
 
-          <div className="sidebar__configuration sidebar__files">
+          {prototypeNavigation ? <div className="sidebar__configuration sidebar__files">
             <button type="button" className="sidebar-configuration-toggle" aria-expanded={filesOpen} onClick={() => setFilesOpen((value) => !value)}>
               <FileText aria-hidden="true" />
               <span>{copy.files}</span>
@@ -200,9 +214,9 @@ export function Sidebar({ runs, open, collapsed, onClose, onNewTask, onToggleCol
                 {fileItems.map((item) => <SidebarLink key={item.to} item={item} nested onNavigate={onClose} />)}
               </div>
             ) : null}
-          </div>
+          </div> : null}
 
-          <div className="sidebar__configuration sidebar__automations">
+          {prototypeNavigation ? <div className="sidebar__configuration sidebar__automations">
             <button type="button" className="sidebar-configuration-toggle" aria-expanded={automationsOpen} onClick={() => setAutomationsOpen((value) => !value)}>
               <Workflow aria-hidden="true" />
               <span>{copy.automations}</span>
@@ -213,7 +227,7 @@ export function Sidebar({ runs, open, collapsed, onClose, onNewTask, onToggleCol
                 {automationItems.map((item) => <SidebarLink key={item.to} item={item} nested onNavigate={onClose} />)}
               </div>
             ) : null}
-          </div>
+          </div> : null}
 
           <div className="sidebar__configuration">
             <button type="button" className="sidebar-configuration-toggle" aria-expanded={configurationOpen} onClick={() => setConfigurationOpen((value) => !value)}>
@@ -223,7 +237,7 @@ export function Sidebar({ runs, open, collapsed, onClose, onNewTask, onToggleCol
             </button>
             {configurationOpen ? (
               <div className="sidebar-configuration-list">
-                {configurationItems.map((item) => <SidebarLink key={item.to} item={item} nested onNavigate={onClose} />)}
+                {visibleConfigurationItems.map((item) => <SidebarLink key={item.to} item={item} nested onNavigate={onClose} />)}
               </div>
             ) : null}
           </div>

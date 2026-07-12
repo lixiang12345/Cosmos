@@ -9,14 +9,7 @@
       name="description"
       content="Relay - 面向研发团队的 AI 软件交付编排与治理工作台"
     />
-    <script>
-      try {
-        const theme = localStorage.getItem('relay.theme') || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
-        const locale = localStorage.getItem('relay.locale') || (navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en')
-        document.documentElement.dataset.theme = theme
-        document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en'
-      } catch {}
-    </script>
+    <script src="/theme-init.js"></script>
     <title>Relay Agent Platform</title>
   </head>
   <body>

@@ -611,7 +611,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
     await expect(repository.listBySpace('relay', 'space-expiry', 'user-local-admin')).resolves.toHaveLength(2)
   })
 
-  it('keeps drafts out of the execution queue', async () => {
+  it('persists the draft message while keeping drafts out of the execution queue', async () => {
     const repository = new PostgresSessionRepository(pool)
     const result = await repository.create({
       organizationId: 'relay', spaceId: 'space-draft', actorId: 'user-local-admin',
@@ -619,7 +619,12 @@ describeWithDatabase('PostgresSessionRepository', () => {
     })
 
     expect(result).toMatchObject({ session: { status: 'draft' }, replayed: false })
-    expect(result.message).toBeUndefined()
+    expect(result.message).toMatchObject({
+      sessionId: result.session.id,
+      sequence: 1,
+      role: 'user',
+      content: request.message.content,
+    })
     expect(result.turn).toBeUndefined()
     expect(result.command).toBeUndefined()
     const counts = await pool.query<{
@@ -634,7 +639,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
         (SELECT count(*) FROM relay_commands WHERE session_id = $1) AS commands,
         (SELECT count(*) FROM relay_outbox_events WHERE session_id = $1) AS outbox_events
     `, [result.session.id])
-    expect(counts.rows[0]).toEqual({ messages: '0', turns: '0', commands: '0', outbox_events: '0' })
+    expect(counts.rows[0]).toEqual({ messages: '1', turns: '0', commands: '0', outbox_events: '0' })
   })
 
   it('rolls back every domain and idempotency row when command creation fails', async () => {

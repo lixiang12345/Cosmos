@@ -15,7 +15,7 @@ import {
   IdempotencyConflictError,
   SessionConfigurationNotFoundError,
   canWriteSpace,
-  createSessionStartRecords,
+  createSessionRecords,
   createSessionDto,
   orderActorOrganizations,
   resolveRepositoryBinding,
@@ -330,7 +330,7 @@ export class PostgresSessionRepository implements SessionRepository {
       id: this.createId(),
       timestamp: now.toISOString(),
     })
-    const startRecords = createSessionStartRecords(record, session, { createId: this.createId })
+    const startRecords = createSessionRecords(record, session, { createId: this.createId })
     await client.query(`
       INSERT INTO relay_sessions (
         ${sessionColumns}, created_by
@@ -347,7 +347,7 @@ export class PostgresSessionRepository implements SessionRepository {
       session.visibility, session.status, JSON.stringify(session.attachments), session.source,
       session.createdAt, session.updatedAt, session.lastActivityAt, session.version, record.actorId,
     ])
-    if (startRecords.message && startRecords.turn && startRecords.command) {
+    if (startRecords.message) {
       await client.query(`
         INSERT INTO relay_messages (
           id, organization_id, space_id, session_id, sequence, role,
@@ -359,6 +359,8 @@ export class PostgresSessionRepository implements SessionRepository {
         startRecords.message.content, JSON.stringify(startRecords.message.attachments),
         startRecords.message.createdAt,
       ])
+    }
+    if (startRecords.message && startRecords.turn && startRecords.command) {
       await client.query(`
         INSERT INTO relay_turns (
           id, organization_id, space_id, session_id, ordinal, initiator_type,

@@ -21,6 +21,7 @@ import {
 } from '@relay/contracts'
 
 const DEFAULT_RELAY_API_BASE_URL = '/api'
+export const RELAY_API_TIMEOUT_MS = 20_000
 
 export type RelayApiAuthContext = {
   accessToken?: string
@@ -168,10 +169,12 @@ export function resolveRelayApiRequestUrl(path: string, location: RelayApiLocati
   return baseUrl.startsWith('/') ? `${baseUrl === '/' ? '' : baseUrl}${path}` : target.toString()
 }
 
-async function readJson(response: Response): Promise<unknown> {
+async function readJson(response: Response, signal: AbortSignal): Promise<unknown> {
+  if (signal.aborted) throw signal.reason
   try {
     return await response.json()
-  } catch {
+  } catch (cause) {
+    if (signal.aborted) throw cause
     return undefined
   }
 }
@@ -193,14 +196,29 @@ async function request<T>(
   const headers = new Headers(init.headers)
   if (auth.accessToken) headers.set('Authorization', `Bearer ${auth.accessToken}`)
   const requestUrl = resolveRelayApiRequestUrl(path)
+  const timeoutSignal = AbortSignal.timeout(RELAY_API_TIMEOUT_MS)
+  const signal = init.signal
+    ? AbortSignal.any([init.signal, timeoutSignal])
+    : timeoutSignal
   let response: Response
+  let body: unknown
   try {
-    response = await fetch(requestUrl, { ...init, headers })
+    response = await fetch(requestUrl, { ...init, headers, signal })
+    body = await readJson(response, signal)
   } catch (cause) {
+    if (timeoutSignal.aborted && !init.signal?.aborted) {
+      throw new RelayApiError('The Relay API request timed out.', {
+        code: 'REQUEST_TIMEOUT', retryable: true, cause,
+      })
+    }
+    if (init.signal?.aborted) {
+      throw new RelayApiError('The Relay API request was canceled.', {
+        code: 'REQUEST_CANCELED', retryable: true, cause,
+      })
+    }
     throw new RelayApiError('Unable to reach the Relay API.', { code: 'NETWORK_ERROR', retryable: true, cause })
   }
 
-  const body = await readJson(response)
   const correlationId = getCorrelationId(response, body)
   if (!response.ok) {
     if (response.status === 401 && auth.onUnauthorized) {

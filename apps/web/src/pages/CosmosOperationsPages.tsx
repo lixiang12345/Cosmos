@@ -28,7 +28,9 @@ import {
   Paperclip,
   Pencil,
   Plus,
+  RefreshCw,
   Search,
+  Save,
   Send,
   ShieldCheck,
   Sparkles,
@@ -53,7 +55,7 @@ import {
 } from '../features/control-plane'
 import { usePreferences, type Locale } from '../preferences'
 import type { Run, RunStatus } from '../types'
-import type { NewTaskExpertOption } from '../components/NewTaskDialog'
+import type { NewTaskExpertOption, SessionCatalogStatus } from '../components/NewTaskDialog'
 
 const prototypeLabel = {
   zh: '原型模拟，不会触发真实外部行为',
@@ -85,6 +87,7 @@ function formatTimestamp(value: string | undefined, locale: Locale) {
 
 function getStatusLabel(locale: Locale, status: RunStatus) {
   const labels: Record<RunStatus, { zh: string; en: string }> = {
+    draft: { zh: '草稿', en: 'Draft' },
     queued: { zh: '排队中', en: 'Queued' },
     running: { zh: '运行中', en: 'Running' },
     paused: { zh: '已暂停', en: 'Paused' },
@@ -179,6 +182,12 @@ export type CosmosPageBaseProps = {
 
 export type CosmosHomePageProps = CosmosPageBaseProps & {
   experts: NewTaskExpertOption[]
+  catalogStatus?: SessionCatalogStatus
+  catalogError?: string
+  prototypeTools?: boolean
+  sessionCreationEnabled?: boolean
+  executionEnabled?: boolean
+  onRetryCatalog?: () => void
   onCreateSession?: (draft: { expertId: string; prompt: string; visibility: 'private' | 'space'; attachments: string[] }) => Promise<void>
 }
 
@@ -188,9 +197,16 @@ export function CosmosHomePage({
   onNewTask,
   onOpenSession,
   experts,
+  catalogStatus,
+  catalogError,
+  prototypeTools = true,
+  sessionCreationEnabled = true,
+  executionEnabled = true,
+  onRetryCatalog,
   onCreateSession,
 }: CosmosHomePageProps) {
   const { locale } = usePreferences()
+  const navigate = useNavigate()
   const [selectedExpertId, setSelectedExpertId] = useState(experts[0]?.id ?? '')
   const [prompt, setPrompt] = useState('')
   const [visibility, setVisibility] = useState<'private' | 'space'>('private')
@@ -200,6 +216,7 @@ export function CosmosHomePage({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const selectedExpert = experts.find((expert) => expert.id === selectedExpertId) ?? experts[0]
   const recentRuns = runs.filter((run) => !run.archived).slice(0, 5)
+  const resolvedCatalogStatus = catalogStatus ?? (experts.length ? 'ready' : 'empty')
 
   const submitSession = async (event: FormEvent) => {
     event.preventDefault()
@@ -209,7 +226,12 @@ export function CosmosHomePage({
       setSubmitError('')
       setSubmitting(true)
       try {
-        await onCreateSession({ expertId: selectedExpert.id, prompt: value, visibility, attachments })
+        await onCreateSession({
+          expertId: selectedExpert.id,
+          prompt: value,
+          visibility,
+          attachments: prototypeTools ? attachments : [],
+        })
       } catch (error) {
         setSubmitError(getSubmissionErrorMessage(error, locale))
       } finally {
@@ -222,7 +244,7 @@ export function CosmosHomePage({
 
   const openSession = (runId: string) => {
     if (onOpenSession) onOpenSession(runId)
-    else window.location.assign(`/sessions/${runId}`)
+    else navigate(`/sessions/${runId}`)
   }
 
   return (
@@ -236,25 +258,53 @@ export function CosmosHomePage({
           <header>
             <span className="home-launcher__mark"><Sparkles aria-hidden="true" /></span>
             <p>{localize(locale, 'Relay Agent OS', 'Relay Agent OS')}</p>
-            <h1 id="home-launcher-title">{localize(locale, '选择 Expert，开始一个会话', 'Choose an Expert and start a session')}</h1>
+            <h1 id="home-launcher-title">{executionEnabled
+              ? localize(locale, '选择 Expert，开始一个会话', 'Choose an Expert and start a session')
+              : localize(locale, '选择 Expert，保存会话草稿', 'Choose an Expert and save a Session draft')}</h1>
             <span>{localize(locale, 'Expert 已封装模型、能力和运行环境；你只需要描述想完成的工作。', 'The Expert already packages its model, capabilities, and environment. Just describe the work.')}</span>
           </header>
 
-          <div className="home-expert-grid" role="radiogroup" aria-label={localize(locale, '选择 Expert', 'Choose an Expert')}>
-            {experts.slice(0, 6).map((expert) => (
-              <button type="button" role="radio" aria-checked={expert.id === selectedExpert?.id} className={`home-expert-card${expert.id === selectedExpert?.id ? ' home-expert-card--selected' : ''}`} key={expert.id} onClick={() => setSelectedExpertId(expert.id)}>
-                <span>{expert.builtIn ? <Sparkles aria-hidden="true" /> : <Bot aria-hidden="true" />}</span>
-                <strong>{expert.name}</strong>
-                <small>{expert.description}</small>
-                <em>{expert.environment}</em>
-                {expert.id === selectedExpert?.id ? <Check aria-hidden="true" /> : null}
-              </button>
-            ))}
-          </div>
+          {resolvedCatalogStatus === 'ready' ? (
+            <div className="home-expert-grid" role="radiogroup" aria-label={localize(locale, '选择 Expert', 'Choose an Expert')}>
+              {experts.slice(0, 6).map((expert) => (
+                <button type="button" role="radio" aria-checked={expert.id === selectedExpert?.id} className={`home-expert-card${expert.id === selectedExpert?.id ? ' home-expert-card--selected' : ''}`} key={expert.id} onClick={() => setSelectedExpertId(expert.id)}>
+                  <span>{expert.builtIn ? <Sparkles aria-hidden="true" /> : <Bot aria-hidden="true" />}</span>
+                  <strong>{expert.name}</strong>
+                  <small>{expert.description}</small>
+                  <em>{expert.environment}</em>
+                  {expert.id === selectedExpert?.id ? <Check aria-hidden="true" /> : null}
+                </button>
+              ))}
+            </div>
+          ) : resolvedCatalogStatus === 'loading' ? (
+            <div className="remote-catalog-state" role="status" aria-live="polite">
+              <LoaderCircle className="cosmos-spin" aria-hidden="true" />
+              <p>{localize(locale, '正在加载可用 Expert 与运行环境…', 'Loading available Experts and Environments…')}</p>
+            </div>
+          ) : resolvedCatalogStatus === 'error' ? (
+            <div className="remote-catalog-state remote-catalog-state--error" role="alert">
+              <AlertTriangle aria-hidden="true" />
+              <div>
+                <strong>{localize(locale, '无法加载会话目录', 'Unable to load the session catalog')}</strong>
+                {catalogError ? <p>{catalogError}</p> : null}
+              </div>
+              {onRetryCatalog ? (
+                <button type="button" className="cosmos-button cosmos-button--secondary" onClick={onRetryCatalog}>
+                  <RefreshCw aria-hidden="true" />{localize(locale, '重试', 'Retry')}
+                </button>
+              ) : null}
+            </div>
+          ) : (
+            <div className="remote-catalog-empty" role="status">
+              <Bot aria-hidden="true" />
+              <strong>{localize(locale, '当前 Space 没有可用 Expert', 'No Experts are available in this Space')}</strong>
+              <p>{localize(locale, '请先发布一个绑定了就绪环境的 Expert。', 'Publish an Expert bound to a ready Environment first.')}</p>
+            </div>
+          )}
 
-          <form className="home-session-composer" onSubmit={submitSession}>
+          {resolvedCatalogStatus === 'ready' && sessionCreationEnabled ? <form className="home-session-composer" onSubmit={submitSession}>
             <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder={selectedExpert?.launchGuidance || localize(locale, '描述你想完成的工作…', 'Describe the work you want done…')} rows={3} aria-label={localize(locale, '会话任务', 'Session task')} />
-            {attachments.length ? (
+            {prototypeTools && attachments.length ? (
               <div className="home-session-composer__attachments">
                 {attachments.map((name) => (
                   <span key={name}><Paperclip aria-hidden="true" />{name}<button type="button" aria-label={`${localize(locale, '移除附件', 'Remove attachment')}: ${name}`} onClick={() => setAttachments((items) => items.filter((item) => item !== name))}><X aria-hidden="true" /></button></span>
@@ -264,13 +314,15 @@ export function CosmosHomePage({
             {submitError ? <p className="cosmos-field-error" role="alert">{submitError}</p> : null}
             <footer>
               <div className="home-session-composer__tools">
-                <input ref={fileInputRef} className="cosmos-visually-hidden" type="file" hidden aria-hidden="true" tabIndex={-1} multiple accept="image/*,.txt,.md,.json,.log,.pdf" onChange={(event) => {
-                  const names = Array.from(event.target.files ?? []).slice(0, 10).map((file) => file.name)
-                  setAttachments((items) => [...new Set([...items, ...names])].slice(0, 10))
-                  event.target.value = ''
-                }} />
-                <CosmosIconButton icon={Paperclip} label={localize(locale, '添加附件', 'Attach files')} onClick={() => fileInputRef.current?.click()} />
-                <button type="button" className="cosmos-icon-button" aria-label={localize(locale, '增强提示词', 'Enhance prompt')} title={localize(locale, '增强提示词', 'Enhance prompt')} disabled={!prompt.trim()} onClick={() => setPrompt((value) => `${value.trim()}\n\n${localize(locale, '请确认目标、约束、风险和可验证的完成标准。', 'Confirm the goal, constraints, risks, and verifiable completion criteria.')}`)}><WandSparkles aria-hidden="true" /></button>
+                {prototypeTools ? <>
+                  <input ref={fileInputRef} className="cosmos-visually-hidden" type="file" hidden aria-hidden="true" tabIndex={-1} multiple accept="image/*,.txt,.md,.json,.log,.pdf" onChange={(event) => {
+                    const names = Array.from(event.target.files ?? []).slice(0, 10).map((file) => file.name)
+                    setAttachments((items) => [...new Set([...items, ...names])].slice(0, 10))
+                    event.target.value = ''
+                  }} />
+                  <CosmosIconButton icon={Paperclip} label={localize(locale, '添加附件', 'Attach files')} onClick={() => fileInputRef.current?.click()} />
+                  <button type="button" className="cosmos-icon-button" aria-label={localize(locale, '增强提示词', 'Enhance prompt')} title={localize(locale, '增强提示词', 'Enhance prompt')} disabled={!prompt.trim()} onClick={() => setPrompt((value) => `${value.trim()}\n\n${localize(locale, '请确认目标、约束、风险和可验证的完成标准。', 'Confirm the goal, constraints, risks, and verifiable completion criteria.')}`)}><WandSparkles aria-hidden="true" /></button>
+                </> : null}
                 <label className="home-session-composer__visibility">
                   {visibility === 'private' ? <LockKeyhole aria-hidden="true" /> : <User aria-hidden="true" />}
                   <span className="cosmos-visually-hidden">{localize(locale, '可见范围', 'Visibility')}</span>
@@ -283,17 +335,21 @@ export function CosmosHomePage({
                 <span><ShieldCheck aria-hidden="true" />{selectedExpert?.tools}</span>
               </div>
               <button type="submit" className="cosmos-button cosmos-button--primary" disabled={!prompt.trim() || !selectedExpert || submitting} aria-busy={submitting}>
-                {submitting ? <LoaderCircle className="new-task-submit-spinner" aria-hidden="true" /> : <Send aria-hidden="true" />}
-                {submitting ? localize(locale, '正在启动…', 'Starting…') : localize(locale, '开始会话', 'Start session')}
+                {submitting
+                  ? <LoaderCircle className="new-task-submit-spinner" aria-hidden="true" />
+                  : executionEnabled ? <Send aria-hidden="true" /> : <Save aria-hidden="true" />}
+                {submitting
+                  ? (executionEnabled ? localize(locale, '正在启动…', 'Starting…') : localize(locale, '正在保存…', 'Saving…'))
+                  : (executionEnabled ? localize(locale, '开始会话', 'Start session') : localize(locale, '保存草稿', 'Save draft'))}
               </button>
             </footer>
-          </form>
+          </form> : resolvedCatalogStatus === 'ready' ? <p className="cosmos-empty-state" role="note">{localize(locale, '你在当前 Space 中只有查看权限。', 'You have view-only access in this Space.')}</p> : null}
         </section>
 
         <section className="home-recent" aria-labelledby="cosmos-recent-title">
           <div className="cosmos-section-heading">
             <div><p>{localize(locale, '会话', 'Sessions')}</p><h2 id="cosmos-recent-title">{localize(locale, '最近会话', 'Recent sessions')}</h2></div>
-            <button type="button" className="cosmos-button cosmos-button--ghost" onClick={() => window.location.assign('/sessions')}>{localize(locale, '查看全部', 'View all')}<ChevronRight aria-hidden="true" /></button>
+            <button type="button" className="cosmos-button cosmos-button--ghost" onClick={() => navigate('/sessions')}>{localize(locale, '查看全部', 'View all')}<ChevronRight aria-hidden="true" /></button>
           </div>
           {recentRuns.length ? (
             <div className="cosmos-session-list">

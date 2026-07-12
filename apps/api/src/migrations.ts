@@ -6,8 +6,24 @@ import type { Pool } from 'pg'
 const migrationsDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '../migrations')
 const nonTransactionalMarker = '-- relay-migration: non-transactional'
 
+async function migrationFiles() {
+  return (await readdir(migrationsDirectory)).filter((file) => file.endsWith('.sql')).sort()
+}
+
+export async function assertMigrationsCurrent(pool: Pool) {
+  const files = await migrationFiles()
+  const applied = await pool.query<{ version: string }>(
+    'SELECT version FROM relay_schema_migrations',
+  )
+  const appliedVersions = new Set(applied.rows.map((row) => row.version))
+  const pending = files.filter((file) => !appliedVersions.has(file))
+  if (pending.length > 0) {
+    throw new Error(`Database schema has ${pending.length} pending migration(s).`)
+  }
+}
+
 export async function runMigrations(pool: Pool) {
-  const files = (await readdir(migrationsDirectory)).filter((file) => file.endsWith('.sql')).sort()
+  const files = await migrationFiles()
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS relay_schema_migrations (
