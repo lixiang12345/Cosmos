@@ -1,9 +1,47 @@
+import type { CreateSessionRequestInput, SessionDto } from '@relay/contracts'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import App from './App'
 import { initialRuns } from './data/mockData'
 import { PREFERENCE_STORAGE_KEYS, PreferencesProvider } from './preferences'
+import { createSession } from './services/relayApi'
+
+vi.mock('./services/relayApi', () => ({
+  createSession: vi.fn(),
+}))
+
+const API_TIMESTAMP = '2026-07-12T04:30:00.000Z'
+
+function makeApiSession(
+  organizationId: string,
+  spaceId: string,
+  input: CreateSessionRequestInput,
+  overrides: Partial<SessionDto> = {},
+): SessionDto {
+  return {
+    id: 'session-api-1',
+    organizationId,
+    spaceId,
+    title: input.title,
+    summary: input.message.content,
+    expertId: input.expertId,
+    expertName: input.expertName,
+    expertVersion: input.expertVersion,
+    environmentId: input.environmentId,
+    repository: input.repository,
+    baseBranch: input.baseBranch,
+    visibility: input.visibility ?? 'private',
+    status: input.start === false ? 'draft' : 'active',
+    attachments: input.message.attachments ?? [],
+    source: 'manual',
+    createdAt: API_TIMESTAMP,
+    updatedAt: API_TIMESTAMP,
+    lastActivityAt: API_TIMESTAMP,
+    version: 1,
+    ...overrides,
+  }
+}
 
 function renderApp(route = '/runs/run-482') {
   return render(
@@ -35,6 +73,10 @@ describe('Relay prototype', () => {
     window.localStorage.removeItem('relay.sessions')
     window.localStorage.removeItem('relay.experts')
     window.localStorage.removeItem('relay.controlPlane.v1')
+    vi.mocked(createSession).mockReset()
+    vi.mocked(createSession).mockImplementation(async (organizationId, spaceId, input) => ({
+      session: makeApiSession(organizationId, spaceId, input),
+    }))
   })
 
   it('uses Home as the Expert launcher without adding a sidebar Home item', async () => {
@@ -74,24 +116,40 @@ describe('Relay prototype', () => {
 
   it('creates a new run from the task dialog', async () => {
     const user = userEvent.setup()
+    const prompt = '修复优惠券并发核销。确保同一张优惠券只能成功核销一次，并补充并发测试。参考 https://github.com/acme/commerce/issues/42'
     renderApp('/runs')
 
     await user.click(screen.getAllByRole('button', { name: '新建会话' })[0])
-    await user.type(screen.getByLabelText('会话任务'), '修复优惠券并发核销。确保同一张优惠券只能成功核销一次，并补充并发测试。参考 https://github.com/acme/commerce/issues/42')
+    await user.type(screen.getByLabelText('会话任务'), prompt)
     expect(screen.getByText('GitHub · acme/commerce/issues/42')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '开始会话' }))
 
-    expect(screen.getByRole('button', { name: '正在启动…' })).toBeDisabled()
-
     expect(await screen.findByRole('heading', { level: 1, name: '修复优惠券并发核销' })).toBeInTheDocument()
+    expect(createSession).toHaveBeenCalledWith(
+      'relay',
+      'space-commerce',
+      expect.objectContaining({
+        expertId: 'expert-cosmos-advisor',
+        title: '修复优惠券并发核销',
+        start: true,
+        message: { content: prompt, attachments: [] },
+      }),
+      expect.any(String),
+    )
     expect(screen.getByText('正在建立任务上下文')).toBeInTheDocument()
     await waitFor(() => {
       const storedSessions = JSON.parse(window.localStorage.getItem('relay.sessions') ?? '[]') as Array<{
+        id: string
         title: string
+        status: string
+        updatedAt: string
         baseBranch?: string
         contextItems?: Array<{ kind: string }>
       }>
       expect(storedSessions.find((session) => session.title === '修复优惠券并发核销')).toMatchObject({
+        id: 'session-api-1',
+        status: 'running',
+        updatedAt: API_TIMESTAMP,
         baseBranch: 'main',
         contextItems: [{ kind: 'github' }],
       })
@@ -106,8 +164,52 @@ describe('Relay prototype', () => {
     await user.click(screen.getByRole('button', { name: '开始会话' }))
 
     expect(await screen.findByRole('heading', { level: 1, name: '评估结算链路迁移方案' })).toBeInTheDocument()
+    expect(createSession).toHaveBeenCalledWith(
+      'relay',
+      'space-commerce',
+      expect.objectContaining({ expertId: 'expert-cosmos-advisor', start: true }),
+      expect.any(String),
+    )
     const storedSessions = JSON.parse(window.localStorage.getItem('relay.sessions') ?? '[]') as Array<{ title: string; expertId?: string }>
     expect(storedSessions.find((session) => session.title === '评估结算链路迁移方案')).toMatchObject({ expertId: 'expert-cosmos-advisor' })
+  })
+
+  it('keeps the task dialog input open and retryable when Session creation fails', async () => {
+    const user = userEvent.setup()
+    vi.mocked(createSession).mockRejectedValueOnce(new Error('服务暂时不可用，请稍后重试。'))
+    renderApp('/runs')
+
+    await user.click(screen.getAllByRole('button', { name: '新建会话' })[0])
+    const task = screen.getByLabelText('会话任务')
+    await user.type(task, '保留这段会话任务')
+    await user.click(screen.getByRole('button', { name: '开始会话' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('服务暂时不可用，请稍后重试。')
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(task).toHaveValue('保留这段会话任务')
+    expect(screen.getByRole('button', { name: '开始会话' })).toBeEnabled()
+    expect(createSession).toHaveBeenCalledTimes(1)
+
+    const firstIdempotencyKey = vi.mocked(createSession).mock.calls[0][3]
+    await user.click(screen.getByRole('button', { name: '开始会话' }))
+
+    expect(await screen.findByRole('heading', { level: 1, name: '保留这段会话任务' })).toBeInTheDocument()
+    expect(vi.mocked(createSession).mock.calls[1][3]).toBe(firstIdempotencyKey)
+  })
+
+  it('keeps the Home composer input retryable when Session creation fails', async () => {
+    const user = userEvent.setup()
+    vi.mocked(createSession).mockRejectedValueOnce(new Error('创建会话失败，请重试。'))
+    renderApp('/home')
+
+    const task = screen.getByLabelText('会话任务')
+    await user.type(task, 'Home 中需要保留的任务')
+    await user.click(screen.getByRole('button', { name: '开始会话' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('创建会话失败，请重试。')
+    expect(task).toHaveValue('Home 中需要保留的任务')
+    expect(screen.getByRole('button', { name: '开始会话' })).toBeEnabled()
+    expect(createSession).toHaveBeenCalledTimes(1)
   })
 
   it('filters the template library by category', async () => {

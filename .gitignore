@@ -1,5 +1,7 @@
 node_modules
 dist
+apps/*/dist
+packages/*/dist
 .DS_Store
 coverage
 *.local

@@ -28,7 +28,7 @@ type NewTaskDialogProps = {
   repositories: Array<{ id: string; fullName: string; defaultBranch: string }>
   environments: Array<{ id: string; name: string; image: string; ready: boolean }>
   onClose: () => void
-  onCreate: (input: NewTaskInput, mode: TaskCreateMode) => void
+  onCreate: (input: NewTaskInput, mode: TaskCreateMode) => Promise<void>
 }
 
 export type NewTaskExpertOption = {
@@ -47,7 +47,12 @@ export type NewTaskExpertOption = {
   builtIn?: boolean
 }
 
-type StartState = 'idle' | 'checking' | 'ready'
+type StartState = 'idle' | 'checking'
+
+function getCreateErrorMessage(error: unknown, locale: 'zh' | 'en') {
+  if (error instanceof Error && error.message.trim()) return error.message
+  return locale === 'zh' ? '会话创建失败，请稍后重试。' : 'The session could not be created. Try again.'
+}
 
 export function NewTaskDialog({
   open,
@@ -64,7 +69,7 @@ export function NewTaskDialog({
     ? {
         eyebrow: '新建会话', title: '选择一个 Expert 开始', expert: '执行 Expert', task: '会话任务',
         prompt: '描述目标、上下文和期望结果。输入 / 可使用命令…', attach: '添加文件或图片',
-        enhance: '增强提示词', start: '开始会话', checking: '正在启动…', ready: '环境已就绪',
+        enhance: '增强提示词', start: '开始会话', checking: '正在启动…',
         private: '仅自己', shared: '当前 Space', visibility: '可见范围', configured: '由 Expert 配置',
         environment: '运行环境', capabilities: '能力', policy: '策略', noExperts: '当前 Space 没有可用 Expert',
         noExpertsDetail: '请先发布一个 Expert，或切换到包含可用 Expert 的 Space。', remove: '移除附件',
@@ -73,7 +78,7 @@ export function NewTaskDialog({
     : {
         eyebrow: 'New session', title: 'Choose an Expert to begin', expert: 'Expert', task: 'Session task',
         prompt: 'Describe the outcome, context, and expected result. Type / for commands…', attach: 'Attach files or images',
-        enhance: 'Enhance prompt', start: 'Start session', checking: 'Starting…', ready: 'Environment ready',
+        enhance: 'Enhance prompt', start: 'Start session', checking: 'Starting…',
         private: 'Private', shared: 'Current Space', visibility: 'Visibility', configured: 'Configured by Expert',
         environment: 'Environment', capabilities: 'Capabilities', policy: 'Policy', noExperts: 'No Experts are available in this Space',
         noExpertsDetail: 'Publish an Expert first, or switch to a Space with an available Expert.', remove: 'Remove attachment',
@@ -86,9 +91,9 @@ export function NewTaskDialog({
   const [visibility, setVisibility] = useState<NonNullable<NewTaskInput['visibility']>>('private')
   const [attachments, setAttachments] = useState<string[]>([])
   const [startState, setStartState] = useState<StartState>('idle')
+  const [createError, setCreateError] = useState('')
   const promptRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const startTimerRef = useRef<number | undefined>(undefined)
 
   const selectedExpert = experts.find((expert) => expert.id === selectedExpertId) ?? initialExpert
   const selectedEnvironment = environments.find((environment) => environment.id === selectedExpert?.environmentId)
@@ -112,21 +117,16 @@ export function NewTaskDialog({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [onClose, open])
 
-  useEffect(() => () => {
-    if (startTimerRef.current) window.clearTimeout(startTimerRef.current)
-  }, [])
-
   if (!open) return null
 
   const canStart = Boolean(prompt.trim() && selectedExpert && selectedEnvironment?.ready)
 
   const closeDialog = () => {
-    if (startTimerRef.current) window.clearTimeout(startTimerRef.current)
     setStartState('idle')
     onClose()
   }
 
-  const startSession = () => {
+  const startSession = async () => {
     if (!canStart || !selectedExpert || !selectedEnvironment || !selectedRepository || startState !== 'idle') return
     const value = prompt.trim()
     const input: NewTaskInput = {
@@ -144,11 +144,15 @@ export function NewTaskDialog({
       attachments,
     }
 
+    setCreateError('')
     setStartState('checking')
-    startTimerRef.current = window.setTimeout(() => {
-      setStartState('ready')
-      startTimerRef.current = window.setTimeout(() => onCreate(input, 'run'), 220)
-    }, 420)
+    try {
+      await onCreate(input, 'run')
+    } catch (error) {
+      setCreateError(getCreateErrorMessage(error, locale))
+    } finally {
+      setStartState('idle')
+    }
   }
 
   return (
@@ -246,6 +250,8 @@ export function NewTaskDialog({
                 </div>
               ) : null}
 
+              {createError ? <p className="cosmos-field-error" role="alert">{createError}</p> : null}
+
               <div className="session-launcher__controls">
                 <div>
                   <input
@@ -285,9 +291,8 @@ export function NewTaskDialog({
                   onClick={startSession}
                 >
                   {startState === 'checking' ? <LoaderCircle className="new-task-submit-spinner" aria-hidden="true" /> : null}
-                  {startState === 'ready' ? <Check aria-hidden="true" /> : null}
                   {startState === 'idle' ? <Send aria-hidden="true" /> : null}
-                  {startState === 'checking' ? copy.checking : startState === 'ready' ? copy.ready : copy.start}
+                  {startState === 'checking' ? copy.checking : copy.start}
                 </button>
               </div>
               <footer><span><ShieldCheck aria-hidden="true" />{copy.configured}</span><kbd>{copy.shortcut}</kbd></footer>

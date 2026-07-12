@@ -1,6 +1,17 @@
-# Relay Agent Platform Prototype
+# Relay Agent Platform
 
-Relay 是一个面向研发组织的 AI 软件交付编排与治理原型。首版围绕任务触发、专家执行、代码与测试证据、人工审批和交付结果构建可点击闭环。
+Relay 是一个面向研发组织的 AI 软件交付编排与治理产品。当前仓库在完整交互原型之上，开始以共享契约驱动的前后端分离架构实现 Session 创建纵向链路。
+
+## 工程结构
+
+```text
+apps/
+  web/          React + Vite 前端
+  api/          Fastify + TypeScript API
+packages/
+  contracts/    前后端共享的 Zod DTO 与运行时校验
+docs/           产品、前端、后端、API 契约和交付计划
+```
 
 ## 本地运行
 
@@ -9,11 +20,36 @@ pnpm install
 pnpm dev
 ```
 
+启动后访问：
+
+- Web：<http://127.0.0.1:5173>
+- API 健康检查：<http://127.0.0.1:8787/api/health>
+
+Vite 会把浏览器发往 `/api` 的请求代理到本地 API。也可以分别运行 `pnpm dev:web` 和 `pnpm dev:api`；如需连接其他 API，设置前端环境变量 `VITE_API_BASE_URL`。
+
+如果默认 API 端口被占用，可同时覆盖 API 监听端口和 Vite 的开发代理目标：
+
+```bash
+PORT=8790 VITE_API_PROXY_TARGET=http://127.0.0.1:8790 pnpm dev
+```
+
 质量检查：
 
 ```bash
 pnpm check
 ```
+
+也可单独执行 `pnpm lint`、`pnpm typecheck`、`pnpm test` 或 `pnpm build`。根命令会先构建 `@relay/contracts`，确保 API 与 Web 使用同一份生成类型。
+
+## 当前后端范围
+
+- `GET /api/health`
+- `GET /api/v1/organizations/:organizationId/spaces/:spaceId/sessions`
+- `POST /api/v1/organizations/:organizationId/spaces/:spaceId/sessions`
+- 创建 Session 使用 `Idempotency-Key`；相同请求可安全重放，不同请求复用同一 key 返回 `409`。
+- API 成功响应与结构化错误均由 `@relay/contracts` 校验。
+
+当前 Session repository 是进程内存实现，仅用于打通首条纵向链路；API 重启后数据会丢失，也尚未实现鉴权、PostgreSQL、任务队列和真实 Agent runtime。这些能力按 [软件交付计划](./docs/software-delivery-plan.md) 继续演进。
 
 ## 原型范围
 

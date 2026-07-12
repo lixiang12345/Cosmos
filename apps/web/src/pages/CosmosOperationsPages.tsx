@@ -22,6 +22,7 @@ import {
   FolderOpen,
   GitPullRequest,
   LockKeyhole,
+  LoaderCircle,
   Menu,
   MessageSquareText,
   Paperclip,
@@ -61,6 +62,11 @@ const prototypeLabel = {
 
 function localize(locale: Locale, zh: string, en: string) {
   return locale === 'zh' ? zh : en
+}
+
+function getSubmissionErrorMessage(error: unknown, locale: Locale) {
+  if (error instanceof Error && error.message.trim()) return error.message
+  return localize(locale, '会话创建失败，请稍后重试。', 'The session could not be created. Try again.')
 }
 
 function makeId(prefix: string) {
@@ -173,7 +179,7 @@ export type CosmosPageBaseProps = {
 
 export type CosmosHomePageProps = CosmosPageBaseProps & {
   experts: NewTaskExpertOption[]
-  onCreateSession?: (draft: { expertId: string; prompt: string; visibility: 'private' | 'space'; attachments: string[] }) => void
+  onCreateSession?: (draft: { expertId: string; prompt: string; visibility: 'private' | 'space'; attachments: string[] }) => Promise<void>
 }
 
 export function CosmosHomePage({
@@ -189,16 +195,26 @@ export function CosmosHomePage({
   const [prompt, setPrompt] = useState('')
   const [visibility, setVisibility] = useState<'private' | 'space'>('private')
   const [attachments, setAttachments] = useState<string[]>([])
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const selectedExpert = experts.find((expert) => expert.id === selectedExpertId) ?? experts[0]
   const recentRuns = runs.filter((run) => !run.archived).slice(0, 5)
 
-  const submitSession = (event: FormEvent) => {
+  const submitSession = async (event: FormEvent) => {
     event.preventDefault()
     const value = prompt.trim()
-    if (!value || !selectedExpert) return
+    if (!value || !selectedExpert || submitting) return
     if (onCreateSession) {
-      onCreateSession({ expertId: selectedExpert.id, prompt: value, visibility, attachments })
+      setSubmitError('')
+      setSubmitting(true)
+      try {
+        await onCreateSession({ expertId: selectedExpert.id, prompt: value, visibility, attachments })
+      } catch (error) {
+        setSubmitError(getSubmissionErrorMessage(error, locale))
+      } finally {
+        setSubmitting(false)
+      }
       return
     }
     onNewTask?.(selectedExpert.id, value)
@@ -245,6 +261,7 @@ export function CosmosHomePage({
                 ))}
               </div>
             ) : null}
+            {submitError ? <p className="cosmos-field-error" role="alert">{submitError}</p> : null}
             <footer>
               <div className="home-session-composer__tools">
                 <input ref={fileInputRef} className="cosmos-visually-hidden" type="file" hidden aria-hidden="true" tabIndex={-1} multiple accept="image/*,.txt,.md,.json,.log,.pdf" onChange={(event) => {
@@ -265,7 +282,10 @@ export function CosmosHomePage({
                 </label>
                 <span><ShieldCheck aria-hidden="true" />{selectedExpert?.tools}</span>
               </div>
-              <button type="submit" className="cosmos-button cosmos-button--primary" disabled={!prompt.trim() || !selectedExpert}><Send aria-hidden="true" />{localize(locale, '开始会话', 'Start session')}</button>
+              <button type="submit" className="cosmos-button cosmos-button--primary" disabled={!prompt.trim() || !selectedExpert || submitting} aria-busy={submitting}>
+                {submitting ? <LoaderCircle className="new-task-submit-spinner" aria-hidden="true" /> : <Send aria-hidden="true" />}
+                {submitting ? localize(locale, '正在启动…', 'Starting…') : localize(locale, '开始会话', 'Start session')}
+              </button>
             </footer>
           </form>
         </section>

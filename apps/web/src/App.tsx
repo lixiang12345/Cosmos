@@ -1,5 +1,6 @@
+import type { SessionDto } from '@relay/contracts'
 import { CheckCircle2, X } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { CommandPalette } from './components/CommandPalette'
 import { NewTaskDialog } from './components/NewTaskDialog'
@@ -44,9 +45,19 @@ import { ExpertEditorPage, ExpertsPage } from './pages/ExpertsPage'
 import { RunsOverview } from './pages/OverviewPages'
 import { SessionsPage } from './pages/SessionsPage'
 import { usePreferences } from './preferences'
+import { createSession } from './services/relayApi'
 import type { NewTaskInput, Run, RunAttempt, TaskCreateMode } from './types'
 
 const RUNS_STORAGE_KEY = 'relay.sessions'
+const CURRENT_ORGANIZATION_ID = 'relay'
+
+function mapSessionStatus(status: SessionDto['status']): Run['status'] {
+  return status === 'draft' ? 'queued' : status === 'active' ? 'running' : status
+}
+
+function makeSessionIdempotencyKey() {
+  return `session-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+}
 
 function inferRunSpace(run: Run) {
   return run.spaceId ?? (run.repo.startsWith('platform/') ? 'space-platform' : 'space-commerce')
@@ -174,6 +185,7 @@ function RelayApp() {
   const [presetExpertId, setPresetExpertId] = useState<string>()
   const [presetPrompt, setPresetPrompt] = useState('')
   const [toast, setToast] = useState('')
+  const sessionIdempotencyKeys = useRef(new Map<string, string>())
   const navigate = useNavigate()
   const location = useLocation()
   const { locale, t } = usePreferences()
@@ -244,13 +256,35 @@ function RelayApp() {
     })
   }
 
-  const createTask = (input: NewTaskInput, mode: TaskCreateMode) => {
-    const id = `run-${Date.now().toString().slice(-6)}`
+  const createTask = async (input: NewTaskInput, mode: TaskCreateMode) => {
+    if (!input.expertId) {
+      throw new Error(locale === 'zh' ? '请选择一个可用的 Expert。' : 'Choose an available Expert.')
+    }
     const isDraft = mode === 'draft'
-    const now = locale === 'zh' ? '刚刚' : 'Just now'
     const expert = input.expertId ? scopedExpertStore.experts.find((item) => item.id === input.expertId) : undefined
     const version = expert?.publishedVersionId ? getExpertVersion(scopedExpertStore, expert.publishedVersionId) : undefined
     const model = version?.configSnapshot.model ?? expert?.draftConfig.model ?? 'GPT-5.4'
+    const requestFingerprint = JSON.stringify({ spaceId: activeSpace.id, mode, input })
+    const idempotencyKey = sessionIdempotencyKeys.current.get(requestFingerprint) ?? makeSessionIdempotencyKey()
+    sessionIdempotencyKeys.current.set(requestFingerprint, idempotencyKey)
+    const { session } = await createSession(CURRENT_ORGANIZATION_ID, activeSpace.id, {
+      expertId: input.expertId,
+      expertName: input.expert,
+      expertVersion: input.expertVersion,
+      environmentId: input.environmentId,
+      title: input.title,
+      visibility: input.visibility ?? 'private',
+      start: !isDraft,
+      message: {
+        content: input.description,
+        attachments: input.attachments ?? [],
+      },
+      repository: input.repo,
+      baseBranch: input.baseBranch,
+    }, idempotencyKey)
+    sessionIdempotencyKeys.current.delete(requestFingerprint)
+    const id = session.id
+    const now = session.updatedAt
     const copy = locale === 'zh'
       ? {
           trigger: '控制台 / 手动创建', triggerStep: '触发', triggerDetail: isDraft ? '草稿未启动' : '控制台',
@@ -266,29 +300,29 @@ function RelayApp() {
         }
     const run: Run = {
       id,
-      spaceId: activeSpace.id,
-      title: input.title,
+      spaceId: session.spaceId,
+      title: session.title,
       favorite: false,
       archived: false,
-      repo: input.repo,
-      branch: `relay/${input.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'new-task'}`,
-      expert: input.expert,
-      expertId: input.expertId,
-      expertVersion: input.expertVersion,
-      environmentId: input.environmentId,
-      visibility: input.visibility,
-      status: isDraft ? 'queued' : 'running',
-      source: 'manual',
+      repo: session.repository,
+      branch: `relay/${session.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'new-task'}`,
+      expert: session.expertName,
+      expertId: session.expertId,
+      expertVersion: session.expertVersion,
+      environmentId: session.environmentId,
+      visibility: session.visibility,
+      status: mapSessionStatus(session.status),
+      source: session.source,
       trigger: copy.trigger,
       updatedAt: now,
       elapsed: isDraft ? '0s' : '8s',
       progress: isDraft ? 0 : 12,
       model,
-      summary: input.description,
-      baseBranch: input.baseBranch,
+      summary: session.summary,
+      baseBranch: session.baseBranch,
       acceptanceCriteria: input.acceptanceCriteria,
       contextItems: input.contextItems,
-      attachments: input.attachments,
+      attachments: session.attachments,
       steps: [
         { id: 'trigger', label: copy.triggerStep, detail: copy.triggerDetail, status: isDraft ? 'pending' : 'completed' },
         { id: 'plan', label: copy.plan, detail: copy.planDetail, status: isDraft ? 'pending' : 'active' },
@@ -298,12 +332,12 @@ function RelayApp() {
         { id: 'deliver', label: copy.deliver, detail: copy.pending, status: 'pending' },
       ],
       events: [
-        { id: `${id}-request`, kind: 'request', actor: '林澈', title: input.title, body: input.description, timestamp: now, meta: copy.console },
-        ...(!isDraft ? [{ id: `${id}-agent`, kind: 'agent' as const, actor: input.expert, title: copy.contextTitle, body: copy.contextBody, timestamp: now, meta: copy.connected, status: 'working' as const }] : []),
+        { id: `${id}-request`, kind: 'request', actor: '林澈', title: session.title, body: session.summary, timestamp: session.createdAt, meta: copy.console },
+        ...(!isDraft ? [{ id: `${id}-agent`, kind: 'agent' as const, actor: session.expertName, title: copy.contextTitle, body: copy.contextBody, timestamp: session.updatedAt, meta: copy.connected, status: 'working' as const }] : []),
       ],
       files: [],
-      terminal: isDraft ? [] : ['$ relay session start', `Loading ${input.repo} in ${input.environmentId ?? 'default environment'}...`],
-      attempts: [{ id: `${id}-attempt-1`, number: 1, status: isDraft ? 'queued' : 'running', startedAt: now }],
+      terminal: isDraft ? [] : ['$ relay session start', `Loading ${session.repository} in ${session.environmentId ?? 'default environment'}...`],
+      attempts: [{ id: `${id}-attempt-1`, number: 1, status: isDraft ? 'queued' : 'running', startedAt: session.createdAt }],
       artifacts: [],
     }
     setRuns((items) => [run, ...items])
@@ -511,7 +545,7 @@ function RelayApp() {
   }
   const sessionExpertOptions = [advisorExpertOption, ...publishedExpertOptions]
 
-  const createHomeSession = ({
+  const createHomeSession = async ({
     expertId,
     prompt,
     visibility,
@@ -530,7 +564,7 @@ function RelayApp() {
       setToast(locale === 'zh' ? 'Expert 的仓库或环境尚未就绪' : 'The Expert repository or environment is not ready.')
       return
     }
-    createTask({
+    await createTask({
       title: deriveSessionTitle(prompt),
       description: prompt,
       repo: repository.fullName,
