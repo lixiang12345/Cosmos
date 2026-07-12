@@ -3,6 +3,7 @@ import { createApp } from './app.js'
 import { createDevelopmentAuthenticator, createJwtAuthenticator } from './auth.js'
 import { loadConfig } from './config.js'
 import { runMigrations } from './migrations.js'
+import { PostgresConfigurationCatalogRepository } from './postgres-configuration-catalog-repository.js'
 import { PostgresSessionRepository } from './postgres-session-repository.js'
 import { InMemorySessionRepository } from './session-repository.js'
 
@@ -32,6 +33,9 @@ const app = createApp({
       actorOrganizations: developmentOrganizations,
       allowLegacyDevelopmentConfigurationFallback: config.authentication.mode === 'development',
     }),
+  configurationCatalogRepository: pool
+    ? new PostgresConfigurationCatalogRepository(pool)
+    : undefined,
   readinessCheck: pool ? async () => { await pool.query('SELECT 1') } : undefined,
   authenticate,
 })

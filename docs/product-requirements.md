@@ -1,8 +1,8 @@
 # Relay 产品需求规格
 
 > 文档状态：研发基线（Draft for implementation）  
-> 版本：1.1
-> 日期：2026-07-12  
+> 版本：1.2
+> 日期：2026-07-13
 > 事实基线：[cosmos-evidence-matrix.md](./cosmos-evidence-matrix.md)  
 > 适用范围：Relay Cosmos 风格原型及其后续产品化实现
 
@@ -81,14 +81,15 @@ Relay 是面向研发团队的 Agent 工作系统。用户选择一个可复用 
 - 不允许前端直接修改共享 Files，也不把永久删除 Session 作为普通用户操作。
 - 不为未被证实的 Cosmos 页面结构做“官方原版”声明。
 
-### 3.3 当前交付基线（2026-07-12）
+### 3.3 当前交付基线（2026-07-13）
 
 | 能力 | 状态 | 当前真实边界 | 进入生产前的必要条件 |
 | --- | --- | --- | --- |
 | Web 原型 | **Partial** | React 页面、主题/语言、响应式导航和主要演示交互可用；多数领域数据仍为 seed/localStorage | 连接真实身份、权限和服务端数据；移除伪成功路径 |
-| Session 创建/列表 | **Partial** | Web 已调用真实 API；API 支持 OIDC、membership、Private creator 隔离；启动时原子创建 Session/Message/Turn/Command/Outbox 并完整幂等重放 | 服务端解析 Expert/Environment revision、后续消息/生命周期、Private 分享与分页 |
-| PostgreSQL 持久化 | **Implemented (limited)** | 配置 `DATABASE_URL` 时持久化 Session 和幂等记录；未配置的开发模式使用内存 | 备份/恢复、数据库高可用、tenant 隔离、容量与迁移回滚演练 |
-| Expert、Environment、Automation、Files、Approval | **Prototype** | 界面和本地控制面可演示，没有完整服务端权威模型 | 实现 API、不可变 revision、RBAC、审计和失败恢复 |
+| Session 创建/列表 | **Partial** | Web 已调用真实 API；API 支持 OIDC、membership、Private creator 隔离；服务端解析并固定 Expert/Environment revision，启动时原子创建 Session/Message/Turn/Command/Outbox 并完整幂等重放 | 后续消息、生命周期、Private 分享、分页和真实执行 consumer |
+| PostgreSQL 持久化 | **Implemented (limited)** | 配置 `DATABASE_URL` 时持久化 Expert/Environment identity 与不可变 revision、Session 和幂等记录；未配置的开发模式使用内存 | 备份/恢复、数据库高可用、RLS/统一 tenant guard、容量与迁移回滚演练 |
+| Expert、Environment 查询 | **Implemented (limited)** | 生产 Web 使用 tenant-scoped 只读 Catalog API；列表和详情重检 membership，隐藏 Private/未发布或未就绪资源，并以 version/ETag 表达资源版本 | 创建、编辑、发布、重新配置、审计和 operation policy |
+| Automation、Files、Approval | **Prototype** | 界面和本地控制面仅用于确定性演示，没有服务端权威模型 | 实现 API、RBAC、审计、失败恢复并移除生产假操作 |
 | Agent 执行 | **Target** | 未实现真实模型、队列、沙箱、Tool Broker 或流式事件 | 执行面隔离、队列/租约、策略校验、幂等工具调用和实时恢复 |
 | 安全与合规 | **Partial** | 生产配置强制数据库、OIDC 与 CORS；已有基础 membership/RBAC 和跨 tenant 负向测试 | 补齐 RLS/统一 tenant guard、Private 分享、Secret 管理、operation policy 与 append-only audit，并完成 [数据模型、权限与 Session 生命周期](./data-model-permissions-session-lifecycle.md) 和 [生产架构基线](./production-architecture.md) 的 P0 门槛 |
 

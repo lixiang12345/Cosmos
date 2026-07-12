@@ -1,12 +1,20 @@
 import {
   ApiErrorSchema,
   CreateSessionResponseSchema,
+  EnvironmentDetailDtoSchema,
+  EnvironmentListResponseSchema,
+  ExpertDetailDtoSchema,
+  ExpertListResponseSchema,
   MeResponseSchema,
   SessionDtoSchema,
   SessionListResponseSchema,
   type ApiError,
   type CreateSessionRequestInput,
   type CreateSessionResponse,
+  type EnvironmentDetailDto,
+  type EnvironmentListResponse,
+  type ExpertDetailDto,
+  type ExpertListResponse,
   type MeResponse,
   type SessionDto,
   type SessionListResponse,
@@ -17,6 +25,11 @@ const DEFAULT_RELAY_API_BASE_URL = '/api'
 export type RelayApiAuthContext = {
   accessToken?: string
   onUnauthorized?: (failedAccessToken: string | undefined) => void | Promise<void>
+}
+
+export type RelayCatalogListOptions = {
+  cursor?: string
+  limit?: number
 }
 
 const sessionListRequests = new Map<string, Promise<SessionListResponse>>()
@@ -222,6 +235,46 @@ function sessionsPath(organizationId: string, spaceId: string) {
   return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/sessions`
 }
 
+function expertsPath(organizationId: string, spaceId: string) {
+  return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/experts`
+}
+
+function environmentsPath(organizationId: string, spaceId: string) {
+  return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/environments`
+}
+
+function catalogListPath(path: string, options: RelayCatalogListOptions | undefined) {
+  const query = new URLSearchParams()
+  if (options?.cursor) query.set('cursor', options.cursor)
+  if (options?.limit !== undefined) query.set('limit', String(options.limit))
+  const value = query.toString()
+  return value ? `${path}?${value}` : path
+}
+
+type TenantScopedResource = {
+  id: string
+  organizationId: string
+  spaceId: string
+}
+
+function assertControlPlaneScope(
+  resource: TenantScopedResource,
+  organizationId: string,
+  spaceId: string,
+  resourceType: 'Expert' | 'Environment',
+  resourceId?: string,
+) {
+  if (
+    resource.organizationId !== organizationId
+    || resource.spaceId !== spaceId
+    || (resourceId !== undefined && resource.id !== resourceId)
+  ) {
+    throw new RelayApiError(`Relay API returned an ${resourceType} outside the requested scope.`, {
+      code: 'INVALID_RESPONSE', status: 200,
+    })
+  }
+}
+
 function assertSessionScope(
   session: SessionDto,
   organizationId: string,
@@ -288,6 +341,78 @@ export function getSession(
   }, SessionDtoSchema, auth).then((session) => {
     assertSessionScope(session, organizationId, spaceId, sessionId)
     return session
+  })
+}
+
+export function listExperts(
+  organizationId: string,
+  spaceId: string,
+  auth?: RelayApiAuthContext,
+  signal?: AbortSignal,
+  options?: RelayCatalogListOptions,
+): Promise<ExpertListResponse> {
+  return request(catalogListPath(expertsPath(organizationId, spaceId), options), {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    signal,
+  }, ExpertListResponseSchema, auth).then((response) => {
+    for (const expert of response.items) {
+      assertControlPlaneScope(expert, organizationId, spaceId, 'Expert')
+    }
+    return response
+  })
+}
+
+export function getExpert(
+  organizationId: string,
+  spaceId: string,
+  expertId: string,
+  auth?: RelayApiAuthContext,
+  signal?: AbortSignal,
+): Promise<ExpertDetailDto> {
+  return request(`${expertsPath(organizationId, spaceId)}/${encodeURIComponent(expertId)}`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    signal,
+  }, ExpertDetailDtoSchema, auth).then((expert) => {
+    assertControlPlaneScope(expert, organizationId, spaceId, 'Expert', expertId)
+    return expert
+  })
+}
+
+export function listEnvironments(
+  organizationId: string,
+  spaceId: string,
+  auth?: RelayApiAuthContext,
+  signal?: AbortSignal,
+  options?: RelayCatalogListOptions,
+): Promise<EnvironmentListResponse> {
+  return request(catalogListPath(environmentsPath(organizationId, spaceId), options), {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    signal,
+  }, EnvironmentListResponseSchema, auth).then((response) => {
+    for (const environment of response.items) {
+      assertControlPlaneScope(environment, organizationId, spaceId, 'Environment')
+    }
+    return response
+  })
+}
+
+export function getEnvironment(
+  organizationId: string,
+  spaceId: string,
+  environmentId: string,
+  auth?: RelayApiAuthContext,
+  signal?: AbortSignal,
+): Promise<EnvironmentDetailDto> {
+  return request(`${environmentsPath(organizationId, spaceId)}/${encodeURIComponent(environmentId)}`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    signal,
+  }, EnvironmentDetailDtoSchema, auth).then((environment) => {
+    assertControlPlaneScope(environment, organizationId, spaceId, 'Environment', environmentId)
+    return environment
   })
 }
 

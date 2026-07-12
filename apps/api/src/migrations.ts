@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import type { Pool } from 'pg'
 
 const migrationsDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '../migrations')
+const nonTransactionalMarker = '-- relay-migration: non-transactional'
 
 export async function runMigrations(pool: Pool) {
   const files = (await readdir(migrationsDirectory)).filter((file) => file.endsWith('.sql')).sort()
@@ -19,6 +20,22 @@ export async function runMigrations(pool: Pool) {
   try {
     await client.query("SELECT pg_advisory_lock(hashtextextended('relay-schema-migrations', 0))")
     for (const version of files) {
+      const sql = await readFile(resolve(migrationsDirectory, version), 'utf8')
+      if (sql.startsWith(nonTransactionalMarker)) {
+        const applied = await client.query(
+          'SELECT version FROM relay_schema_migrations WHERE version = $1',
+          [version],
+        )
+        if (applied.rowCount === 0) {
+          await client.query(sql)
+          await client.query(
+            'INSERT INTO relay_schema_migrations (version) VALUES ($1) ON CONFLICT DO NOTHING',
+            [version],
+          )
+        }
+        continue
+      }
+
       await client.query('BEGIN')
       try {
         const applied = await client.query(
@@ -26,7 +43,7 @@ export async function runMigrations(pool: Pool) {
           [version],
         )
         if (applied.rowCount === 0) {
-          await client.query(await readFile(resolve(migrationsDirectory, version), 'utf8'))
+          await client.query(sql)
           await client.query('INSERT INTO relay_schema_migrations (version) VALUES ($1)', [version])
         }
         await client.query('COMMIT')

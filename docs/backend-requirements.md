@@ -26,9 +26,10 @@
 | 进程与配置 | Fastify API；`/api/health` 公开存活检查；受鉴权的 `/api/ready` 可检查 PostgreSQL；生产模式强制 OIDC、`DATABASE_URL` 和 `CORS_ORIGIN` | 无限流、信任代理、安全 header、优雅排空验收和多区部署 |
 | 身份发现与授权 | `GET /api/v1/me` 返回 authenticated actor 及其真实 Organization/Space membership；Session 读写在 repository 查询中重检 membership；写权限取 Organization/Space 角色交集 | 无 operation policy、Private share、合规访问、RLS 或实时撤权通知 |
 | Session API | tenant-scoped list/create/get；单资源与 create 返回版本 `ETag`；共享 Zod 请求/响应/错误验证；Private 资源按 creator conceal | 无 patch/archive/message/lifecycle command/SSE；列表无真实 cursor 和 filter |
+| Catalog API | tenant-scoped Expert/Environment list/get；单条 SQL 重检 Organization/Space membership；Private Expert、未发布 Expert 和未就绪 Environment 按角色隐藏；keyset cursor、资源 version 与 detail ETag 已实现 | 无 create/update/publish/reprovision；service account 暂时拒绝；无 operation policy、Audit 或 RLS |
 | 权威配置与持久化 | PostgreSQL migration 已建立 Expert/Environment identity、immutable revision、Repository binding 和复合 tenant FK；create 在事务中解析 Published/Ready/current revision 后固定三个 authoritative ID；Session/首条 Message/Turn/Command/Outbox/完整幂等响应原子写入 | 无 Expert/Environment CRUD/publish API、ExecutionSnapshot、后续 Message/Attempt、Audit 或 RLS；大表 migration 仍需分阶段上线方案 |
 | 创建幂等 | Organization + authenticated actor + method + canonical path + key 作用域；同 key/同 body 重放，不同 body 返回 409；PostgreSQL 使用事务级 advisory lock 处理并发 | 未运行过期记录清理作业；尚未统一所有写 endpoint 的幂等中间件 |
-| 测试 | API/repository/config/JWT 单元测试；配置 `TEST_DATABASE_URL` 时运行 PostgreSQL 并发幂等、权威配置、跨 tenant/Private 隔离和 `001 -> 004` 新库/升级测试 | 数据库测试会在无环境变量时 skip；无 RLS、在线大表迁移、备份恢复或负载测试 |
+| 测试 | API/repository/config/JWT 单元测试；配置 `TEST_DATABASE_URL` 时运行 PostgreSQL 并发幂等、权威配置、Catalog 分页/可见性、跨 tenant/Private 隔离和 `001 -> 007` 新库/升级测试 | 数据库测试会在无环境变量时 skip；无 RLS、在线大表迁移、备份恢复或负载测试 |
 
 这是“PostgreSQL 持久化纵向切片”，不是本文 Phase 1 已完成，也不具备处理客户私密数据的最小安全边界。
 

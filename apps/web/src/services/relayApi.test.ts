@@ -1,11 +1,22 @@
-import type { CreateSessionRequestInput, SessionDto } from '@relay/contracts'
+import type {
+  CreateSessionRequestInput,
+  EnvironmentDetailDto,
+  EnvironmentSummaryDto,
+  ExpertDetailDto,
+  ExpertSummaryDto,
+  SessionDto,
+} from '@relay/contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   RelayApiError,
   createSession,
+  getEnvironment,
+  getExpert,
   getMe,
   getSession,
   getRelayApiBaseUrl,
+  listEnvironments,
+  listExperts,
   listSessions,
   resolveRelayApiBaseUrl,
   resolveRelayApiRequestUrl,
@@ -31,6 +42,80 @@ const session: SessionDto = {
   baseBranch: createInput.baseBranch, visibility: 'private', status: 'active', attachments: [], source: 'manual',
   createdAt: '2026-07-12T08:00:00.000Z', updatedAt: '2026-07-12T08:00:00.000Z',
   lastActivityAt: '2026-07-12T08:00:00.000Z', version: 1,
+}
+
+const expertRevisionSummary = {
+  id: 'expert-revision-3',
+  expertId: 'expert-pr-author',
+  revision: 3,
+  model: 'relay-default',
+  environmentId: 'environment-platform',
+  environmentRevisionId: 'environment-revision-1',
+  allowRepositoryOverride: true,
+  allowBaseBranchOverride: true,
+  createdAt: '2026-07-13T08:00:00.000Z',
+  status: 'published',
+} as const
+
+const expertSummary: ExpertSummaryDto = {
+  id: 'expert-pr-author',
+  organizationId: 'relay',
+  spaceId: 'space-platform',
+  name: 'PR Author',
+  description: 'Produces reviewed pull requests.',
+  visibility: 'space',
+  status: 'published',
+  publishedRevisionId: expertRevisionSummary.id,
+  publishedRevisionSummary: expertRevisionSummary,
+  createdAt: '2026-07-13T07:00:00.000Z',
+  updatedAt: '2026-07-13T08:00:00.000Z',
+  version: 1,
+}
+
+const expertDetail: ExpertDetailDto = {
+  ...expertSummary,
+  publishedRevision: {
+    ...expertRevisionSummary,
+    instructions: 'Inspect the repository, implement the change, and verify it.',
+  },
+}
+
+const defaultRepository = {
+  repositoryId: 'repository-checkout',
+  repository: 'platform/checkout',
+  baseBranch: 'main',
+  isDefault: true,
+} as const
+
+const environmentRevisionSummary = {
+  id: 'environment-revision-1',
+  environmentId: 'environment-platform',
+  revision: 1,
+  status: 'ready',
+  defaultRepository,
+  createdAt: '2026-07-13T08:00:00.000Z',
+} as const
+
+const environmentSummary: EnvironmentSummaryDto = {
+  id: 'environment-platform',
+  organizationId: 'relay',
+  spaceId: 'space-platform',
+  name: 'Platform runtime',
+  description: 'Isolated runtime for platform repositories.',
+  status: 'ready',
+  activeRevisionId: environmentRevisionSummary.id,
+  activeRevision: environmentRevisionSummary,
+  version: 1,
+  createdAt: '2026-07-13T07:00:00.000Z',
+  updatedAt: '2026-07-13T08:00:00.000Z',
+}
+
+const environmentDetail: EnvironmentDetailDto = {
+  ...environmentSummary,
+  activeRevision: {
+    ...environmentRevisionSummary,
+    repositoryBindings: [defaultRepository],
+  },
 }
 
 function jsonResponse(body: unknown, status = 200, headers?: HeadersInit) {
@@ -195,6 +280,104 @@ describe('Relay API client', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     resolveResponse(jsonResponse(response))
     await expect(Promise.all([first, second])).resolves.toEqual([response, response])
+  })
+
+  it('lists Experts with auth and AbortSignal on the tenant-scoped path', async () => {
+    const response = {
+      items: [expertSummary],
+      page: { nextCursor: null, hasMore: false, projectionUpdatedAt: expertSummary.updatedAt },
+    }
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(response))
+    vi.stubGlobal('fetch', fetchMock)
+    const controller = new AbortController()
+
+    await expect(listExperts(
+      'relay',
+      'space-platform',
+      { accessToken: 'access-token' },
+      controller.signal,
+      { cursor: 'cursor value', limit: 25 },
+    )).resolves.toEqual(response)
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/organizations/relay/spaces/space-platform/experts?cursor=cursor+value&limit=25',
+      expect.objectContaining({ method: 'GET', signal: controller.signal }),
+    )
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('Authorization')).toBe('Bearer access-token')
+  })
+
+  it('gets one Expert and rejects list or detail responses outside the Workspace scope', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(jsonResponse(expertDetail))
+    vi.stubGlobal('fetch', fetchMock)
+    const controller = new AbortController()
+
+    await expect(getExpert(
+      'relay', 'space-platform', expertDetail.id, undefined, controller.signal,
+    )).resolves.toEqual(expertDetail)
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/organizations/relay/spaces/space-platform/experts/expert-pr-author',
+      expect.objectContaining({ method: 'GET', signal: controller.signal }),
+    )
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      items: [expertSummary, { ...expertSummary, organizationId: 'other-organization' }],
+      page: { nextCursor: null, hasMore: false, projectionUpdatedAt: expertSummary.updatedAt },
+    }))
+    await expect(listExperts('relay', 'space-platform')).rejects.toMatchObject({
+      code: 'INVALID_RESPONSE', status: 200,
+    })
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({ ...expertDetail, spaceId: 'space-other' }))
+    await expect(getExpert('relay', 'space-platform', expertDetail.id)).rejects.toMatchObject({
+      code: 'INVALID_RESPONSE', status: 200,
+    })
+  })
+
+  it('lists Environments with auth and AbortSignal on the tenant-scoped path', async () => {
+    const response = {
+      items: [environmentSummary],
+      page: { nextCursor: null, hasMore: false, projectionUpdatedAt: environmentSummary.updatedAt },
+    }
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(response))
+    vi.stubGlobal('fetch', fetchMock)
+    const controller = new AbortController()
+
+    await expect(listEnvironments(
+      'relay', 'space-platform', { accessToken: 'access-token' }, controller.signal,
+    )).resolves.toEqual(response)
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/organizations/relay/spaces/space-platform/environments',
+      expect.objectContaining({ method: 'GET', signal: controller.signal }),
+    )
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('Authorization')).toBe('Bearer access-token')
+  })
+
+  it('gets one Environment and rejects list or detail responses outside the Workspace scope', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(jsonResponse(environmentDetail))
+    vi.stubGlobal('fetch', fetchMock)
+    const controller = new AbortController()
+
+    await expect(getEnvironment(
+      'relay', 'space-platform', environmentDetail.id, undefined, controller.signal,
+    )).resolves.toEqual(environmentDetail)
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/organizations/relay/spaces/space-platform/environments/environment-platform',
+      expect.objectContaining({ method: 'GET', signal: controller.signal }),
+    )
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      items: [environmentSummary, { ...environmentSummary, spaceId: 'space-other' }],
+      page: { nextCursor: null, hasMore: false, projectionUpdatedAt: environmentSummary.updatedAt },
+    }))
+    await expect(listEnvironments('relay', 'space-platform')).rejects.toMatchObject({
+      code: 'INVALID_RESPONSE', status: 200,
+    })
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      ...environmentDetail, organizationId: 'other-organization',
+    }))
+    await expect(getEnvironment('relay', 'space-platform', environmentDetail.id)).rejects.toMatchObject({
+      code: 'INVALID_RESPONSE', status: 200,
+    })
   })
 
   it('discovers the authenticated actor and authorized tenant hierarchy', async () => {

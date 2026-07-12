@@ -39,7 +39,8 @@
 | Session 列表、创建与详情 | `getMe` 发现 actor 的 Organization/Space membership；list/create/get 使用当前合法 scope；详情规范路由为 `/sessions/:sessionId`，直刷读取单资源 API，旧 `/runs/:id` 重定向；Web 已接 OIDC Code + PKCE、Bearer、401 失效和生产 fail-closed | **Partial** | 列表尚无服务端分页/过滤；消息、Artifact、Worker 和生命周期命令未接 API；真实 IdP E2E 待配置 |
 | 创建失败恢复 | Home 和 Dialog 等待 API 确认，失败保留输入，同一草稿重试复用幂等 key | **Implemented** | 幂等 key 仅存在内存；页面刷新后的安全恢复尚未实现 |
 | Session 视图模型 | 服务端 Session DTO 被适配为旧 `Run`；列表逐项校验 Organization/Space，生产详情只接受 canonical get 响应，凭据轮换立即隔离旧详情；demo 数据使用独立 `relay.demo.sessions` key | **Partial** | 仍需移除旧 `Run` 适配；归档/删除/重命名等必须接入服务端命令后才可在生产开放 |
-| Experts/控制面 | 页面、seed 和 localStorage repository 可演示 | **Prototype** | 无服务端 revision、权限、审计或真实外部连接 |
+| Experts/Environments 查询 | 生产模式使用 tenant-scoped Catalog list/detail API，支持分页聚合、身份切换清屏、401 闭锁、只读详情和 Expert 启动入口；demo 模式保留本地编辑原型 | **Implemented (limited)** | 无创建、编辑、发布、重新配置、审计或 service-account policy |
+| 其他控制面 | Daemon、Repository、Integration、MCP、Webhook、Secret、Space、Automation、Files 与 Approval 仍是 seed/本地交互 | **Prototype** | 生产模式必须隐藏假写操作，逐域接入权威 API、权限和审计 |
 | Run 工作台 | 阶段、事件、Diff、Terminal、Approval 为确定性演示 | **Prototype** | 无 Turn/Attempt/ToolCall/SSE 权威数据；不得向客户表述为真实 Agent 执行 |
 | 身份与权限 | Web 已实现 OIDC Code + PKCE、内存 token、`/me` discovery、合法 Space 选择、空权限/错误状态；API 已校验 token、membership 与 Organization/Space 角色交集 | **Partial** | 缺少细粒度 operation policy、真实 IdP E2E、前端 403 恢复和服务端实时权限变更通知 |
 

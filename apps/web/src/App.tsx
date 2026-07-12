@@ -1,6 +1,6 @@
 import type { SessionDto } from '@relay/contracts'
 import { AlertTriangle, CheckCircle2, LoaderCircle, RefreshCw, X } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from './auth/context'
 import { CommandPalette } from './components/CommandPalette'
@@ -15,6 +15,7 @@ import {
   useControlPlane,
   type InjectEventResult,
 } from './features/control-plane'
+import { useCatalog } from './features/catalog'
 import {
   createEmptyExpertStore,
   createBlankExpert,
@@ -24,34 +25,35 @@ import {
   saveExpertStore,
   type ExpertStore,
 } from './features/experts'
-import { RunWorkbench } from './features/run/RunWorkbench'
 import { deriveSessionTitle, detectTaskContextItems } from './features/run/sessionDraft'
-import {
-  DaemonsPage,
-  EnvironmentsPage,
-  IntegrationsControlPage,
-  McpRegistryPage,
-  RepositoriesControlPage,
-  SecretsPage,
-  SettingsPage,
-  SpacesPage,
-  WebhooksPage,
-} from './pages/CosmosConfigurationPages'
-import {
-  CosmosApprovalsPage,
-  CosmosAutomationsPage,
-  CosmosEventLogPage,
-  CosmosFilesPage,
-  CosmosHomePage,
-  CosmosRunHistoryPage,
-} from './pages/CosmosOperationsPages'
-import { ExpertEditorPage, ExpertsPage } from './pages/ExpertsPage'
-import { RunsOverview } from './pages/OverviewPages'
-import { SessionsPage } from './pages/SessionsPage'
 import { usePreferences } from './preferences'
 import { RelayApiError, createSession, getSession, listSessions } from './services/relayApi'
 import type { NewTaskInput, Run, RunAttempt, TaskCreateMode } from './types'
 import { useActiveWorkspace } from './workspace'
+
+const RunWorkbench = lazy(() => import('./features/run/RunWorkbench').then((module) => ({ default: module.RunWorkbench })))
+const RunsOverview = lazy(() => import('./pages/OverviewPages').then((module) => ({ default: module.RunsOverview })))
+const SessionsPage = lazy(() => import('./pages/SessionsPage').then((module) => ({ default: module.SessionsPage })))
+const ExpertsPage = lazy(() => import('./pages/ExpertsPage').then((module) => ({ default: module.ExpertsPage })))
+const ExpertEditorPage = lazy(() => import('./pages/ExpertsPage').then((module) => ({ default: module.ExpertEditorPage })))
+const RemoteExpertsPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteExpertsPage })))
+const RemoteExpertDetailPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteExpertDetailPage })))
+const RemoteEnvironmentsPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteEnvironmentsPage })))
+const CosmosHomePage = lazy(() => import('./pages/CosmosOperationsPages').then((module) => ({ default: module.CosmosHomePage })))
+const CosmosFilesPage = lazy(() => import('./pages/CosmosOperationsPages').then((module) => ({ default: module.CosmosFilesPage })))
+const CosmosApprovalsPage = lazy(() => import('./pages/CosmosOperationsPages').then((module) => ({ default: module.CosmosApprovalsPage })))
+const CosmosAutomationsPage = lazy(() => import('./pages/CosmosOperationsPages').then((module) => ({ default: module.CosmosAutomationsPage })))
+const CosmosEventLogPage = lazy(() => import('./pages/CosmosOperationsPages').then((module) => ({ default: module.CosmosEventLogPage })))
+const CosmosRunHistoryPage = lazy(() => import('./pages/CosmosOperationsPages').then((module) => ({ default: module.CosmosRunHistoryPage })))
+const EnvironmentsPage = lazy(() => import('./pages/CosmosConfigurationPages').then((module) => ({ default: module.EnvironmentsPage })))
+const DaemonsPage = lazy(() => import('./pages/CosmosConfigurationPages').then((module) => ({ default: module.DaemonsPage })))
+const RepositoriesControlPage = lazy(() => import('./pages/CosmosConfigurationPages').then((module) => ({ default: module.RepositoriesControlPage })))
+const IntegrationsControlPage = lazy(() => import('./pages/CosmosConfigurationPages').then((module) => ({ default: module.IntegrationsControlPage })))
+const McpRegistryPage = lazy(() => import('./pages/CosmosConfigurationPages').then((module) => ({ default: module.McpRegistryPage })))
+const WebhooksPage = lazy(() => import('./pages/CosmosConfigurationPages').then((module) => ({ default: module.WebhooksPage })))
+const SecretsPage = lazy(() => import('./pages/CosmosConfigurationPages').then((module) => ({ default: module.SecretsPage })))
+const SpacesPage = lazy(() => import('./pages/CosmosConfigurationPages').then((module) => ({ default: module.SpacesPage })))
+const SettingsPage = lazy(() => import('./pages/CosmosConfigurationPages').then((module) => ({ default: module.SettingsPage })))
 
 function mapSessionStatus(status: SessionDto['status']): Run['status'] {
   return status === 'draft' ? 'queued' : status === 'active' ? 'running' : status
@@ -161,6 +163,18 @@ function inferExpertSpace(expert: ExpertStore['experts'][number]) {
   return expert.draftConfig.repositories.some((repository) => repository.startsWith('platform/'))
     ? 'space-platform'
     : 'space-commerce'
+}
+
+function RouteFallback() {
+  const { locale } = usePreferences()
+  return (
+    <main className="module-page session-detail-state">
+      <section role="status" aria-live="polite">
+        <LoaderCircle className="cosmos-spin" aria-hidden="true" />
+        <p>{locale === 'zh' ? '正在加载...' : 'Loading...'}</p>
+      </section>
+    </main>
+  )
 }
 
 function SessionRoute({
@@ -309,6 +323,50 @@ function ExpertEditorRoute({
   )
 }
 
+function RemoteExpertRoute({
+  organizationId,
+  spaceId,
+  accessToken,
+  credentialVersion,
+  handleUnauthorized,
+  onOpenNavigation,
+  onBack,
+  onStartSession,
+}: {
+  organizationId: string
+  spaceId: string
+  accessToken?: string
+  credentialVersion: number
+  handleUnauthorized: (failedAccessToken: string | undefined) => Promise<void>
+  onOpenNavigation: () => void
+  onBack: () => void
+  onStartSession: (expertId: string) => void
+}) {
+  const { expertId } = useParams()
+  const auth = useMemo(
+    () => ({ accessToken, onUnauthorized: handleUnauthorized }),
+    [accessToken, handleUnauthorized],
+  )
+  if (!expertId) return <Navigate to="/experts" replace />
+  return (
+    <RemoteExpertDetailPage
+      organizationId={organizationId}
+      spaceId={spaceId}
+      expertId={expertId}
+      auth={auth}
+      credentialVersion={credentialVersion}
+      onOpenNavigation={onOpenNavigation}
+      onBack={onBack}
+      onStartSession={onStartSession}
+    />
+  )
+}
+
+function ExpertEditRedirect() {
+  const { expertId } = useParams()
+  return <Navigate to={expertId ? `/experts/${expertId}` : '/experts'} replace />
+}
+
 function RelayApp() {
   const { accessToken, credentialVersion, demoMode, handleUnauthorized } = useAuth()
   const { organization } = useActiveWorkspace()
@@ -340,6 +398,18 @@ function RelayApp() {
   const location = useLocation()
   const { locale, t } = usePreferences()
   const { activeSpace, scope } = useControlPlane()
+  const catalogAuth = useMemo(
+    () => ({ accessToken, onUnauthorized: handleUnauthorized }),
+    [accessToken, handleUnauthorized],
+  )
+  const catalog = useCatalog({
+    organizationId,
+    spaceId: activeSpace.id,
+    accessToken,
+    credentialVersion,
+    onUnauthorized: handleUnauthorized,
+    enabled: !demoMode,
+  })
   const sessionsRequestKey = `${organizationId}\u0000${activeSpace.id}\u0000${locale}`
   const sessionsState = sessionsRequest?.key === sessionsRequestKey ? sessionsRequest.status : 'loading'
   const sessionsError = sessionsRequest?.key === sessionsRequestKey ? sessionsRequest.error : ''
@@ -440,15 +510,15 @@ function RelayApp() {
     const isDraft = mode === 'draft'
     const expert = input.expertId ? scopedExpertStore.experts.find((item) => item.id === input.expertId) : undefined
     const version = expert?.publishedVersionId ? getExpertVersion(scopedExpertStore, expert.publishedVersionId) : undefined
-    const model = version?.configSnapshot.model ?? expert?.draftConfig.model ?? 'GPT-5.4'
+    const remoteExpert = catalog.experts.items.find((item) => item.id === input.expertId)
+    const model = demoMode
+      ? version?.configSnapshot.model ?? expert?.draftConfig.model ?? 'GPT-5.4'
+      : remoteExpert?.publishedRevisionSummary?.model ?? 'default'
     const requestFingerprint = JSON.stringify({ spaceId: activeSpace.id, mode, input })
     const idempotencyKey = sessionIdempotencyKeys.current.get(requestFingerprint) ?? makeSessionIdempotencyKey()
     sessionIdempotencyKeys.current.set(requestFingerprint, idempotencyKey)
-    const { session } = await createSession(organizationId, activeSpace.id, {
+    const authoritativeRequest = {
       expertId: input.expertId,
-      expertName: input.expert,
-      expertVersion: input.expertVersion,
-      environmentId: input.environmentId,
       title: input.title,
       visibility: input.visibility ?? 'private',
       start: !isDraft,
@@ -456,13 +526,25 @@ function RelayApp() {
         content: input.description,
         attachments: input.attachments ?? [],
       },
-      repository: input.repo,
-      baseBranch: input.baseBranch,
-      advancedOverrides: {
-        repositoryId: input.repositoryId,
+    }
+    const { session } = await createSession(
+      organizationId,
+      activeSpace.id,
+      demoMode ? {
+        ...authoritativeRequest,
+        expertName: input.expert,
+        expertVersion: input.expertVersion,
+        environmentId: input.environmentId,
+        repository: input.repo,
         baseBranch: input.baseBranch,
-      },
-    }, idempotencyKey, { accessToken, onUnauthorized: handleUnauthorized })
+        advancedOverrides: {
+          repositoryId: input.repositoryId,
+          baseBranch: input.baseBranch,
+        },
+      } : authoritativeRequest,
+      idempotencyKey,
+      { accessToken, onUnauthorized: handleUnauthorized },
+    )
     sessionIdempotencyKeys.current.delete(requestFingerprint)
     const id = session.id
     const now = session.updatedAt
@@ -721,7 +803,66 @@ function RelayApp() {
     successRate: '—',
     builtIn: true,
   }
-  const sessionExpertOptions = [advisorExpertOption, ...publishedExpertOptions]
+  const demoSessionExpertOptions = [advisorExpertOption, ...publishedExpertOptions]
+  const remoteSessionEnvironments = catalog.environments.items.map((environment) => ({
+    id: environment.id,
+    name: environment.name,
+    image: locale === 'zh' ? '托管运行环境' : 'Managed runtime',
+    ready: environment.status === 'ready' && environment.activeRevision !== null,
+  }))
+  const remoteSessionRepositories = [...new Map(catalog.environments.items.flatMap((environment) => {
+    const repository = environment.activeRevision?.defaultRepository
+    return repository ? [[repository.repositoryId, {
+      id: repository.repositoryId,
+      fullName: repository.repository,
+      defaultBranch: repository.baseBranch,
+    }] as const] : []
+  })).values()]
+  const remoteSessionExpertOptions = catalog.experts.items.flatMap((expert) => {
+    const revision = expert.publishedRevisionSummary
+    if (expert.status !== 'published' || !revision) return []
+    const environment = catalog.environments.items.find((item) => (
+      item.id === revision.environmentId
+      && item.status === 'ready'
+      && item.activeRevision?.id === revision.environmentRevisionId
+    ))
+    if (!environment?.activeRevision) return []
+    const policy = revision.allowRepositoryOverride || revision.allowBaseBranchOverride
+      ? (locale === 'zh' ? '允许受控覆盖' : 'Controlled overrides')
+      : (locale === 'zh' ? '环境与分支已锁定' : 'Environment and branch locked')
+    return [{
+      id: expert.id,
+      version: revision.revision,
+      name: expert.name,
+      description: expert.description,
+      launchGuidance: expert.description,
+      group: expert.visibility === 'private'
+        ? (locale === 'zh' ? '我的 Expert' : 'My Experts')
+        : (locale === 'zh' ? 'Space Expert' : 'Space Experts'),
+      tools: revision.model,
+      environment: environment.name,
+      environmentId: environment.id,
+      repository: environment.activeRevision.defaultRepository.repository,
+      approval: policy,
+      successRate: '—',
+    }]
+  })
+  const sessionExpertOptions = demoMode ? demoSessionExpertOptions : remoteSessionExpertOptions
+  const sessionRepositories = demoMode
+    ? scope.repositories.map((repository) => ({
+        id: repository.id,
+        fullName: repository.fullName,
+        defaultBranch: repository.defaultBranch,
+      }))
+    : remoteSessionRepositories
+  const sessionEnvironments = demoMode
+    ? scope.environments.map((environment) => ({
+        id: environment.id,
+        name: environment.name,
+        image: environment.image,
+        ready: environment.status === 'ready',
+      }))
+    : remoteSessionEnvironments
 
   const createHomeSession = async ({
     expertId,
@@ -735,9 +876,9 @@ function RelayApp() {
     attachments: string[]
   }) => {
     const expert = sessionExpertOptions.find((item) => item.id === expertId)
-    const repository = scope.repositories.find((item) => item.fullName === expert?.repository) ?? scope.repositories[0]
-    const environment = scope.environments.find((item) => item.id === expert?.environmentId)
-      ?? scope.environments.find((item) => item.status === 'ready')
+    const repository = sessionRepositories.find((item) => item.fullName === expert?.repository) ?? sessionRepositories[0]
+    const environment = sessionEnvironments.find((item) => item.id === expert?.environmentId)
+      ?? sessionEnvironments.find((item) => item.ready)
     if (!expert || !repository || !environment) {
       setToast(locale === 'zh' ? 'Expert 的仓库或环境尚未就绪' : 'The Expert repository or environment is not ready.')
       return
@@ -840,7 +981,8 @@ function RelayApp() {
         onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
       />
 
-      <Routes>
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
         <Route path="/" element={<Navigate to="/home" replace />} />
         <Route path="/home" element={<CosmosHomePage {...pageProps} experts={sessionExpertOptions} onOpenSession={openSession} onCreateSession={createHomeSession} />} />
         <Route path="/sessions" element={
@@ -884,20 +1026,50 @@ function RelayApp() {
         <Route path="/automations/events" element={<CosmosEventLogPage onOpenNavigation={openNavigation} onSessionCreated={materializeAutomationSession} />} />
         <Route path="/automations/history" element={<CosmosRunHistoryPage runs={scopedRuns} onOpenNavigation={openNavigation} onOpenSession={openSession} />} />
         <Route path="/experts" element={
-          <ExpertsPage
-            store={scopedExpertStore}
-            onStoreChange={mergeScopedExpertStore}
-            onOpenNavigation={openNavigation}
-            onCreateBlank={createExpert}
-            onForkTemplate={forkExpertTemplate}
-            onEditExpert={(expertId) => navigate(`/experts/${expertId}/edit`)}
-            onStartSession={openNewTask}
-            onNotify={setToast}
-          />
+          demoMode ? (
+            <ExpertsPage
+              store={scopedExpertStore}
+              onStoreChange={mergeScopedExpertStore}
+              onOpenNavigation={openNavigation}
+              onCreateBlank={createExpert}
+              onForkTemplate={forkExpertTemplate}
+              onEditExpert={(expertId) => navigate(`/experts/${expertId}/edit`)}
+              onStartSession={openNewTask}
+              onNotify={setToast}
+            />
+          ) : (
+            <RemoteExpertsPage
+              items={catalog.experts.items}
+              loading={catalog.experts.loading}
+              ready={catalog.experts.ready}
+              error={catalog.experts.error}
+              onRetry={catalog.experts.retry}
+              onOpenNavigation={openNavigation}
+              onOpenDetail={(expertId) => navigate(`/experts/${expertId}`)}
+              onStartSession={openNewTask}
+            />
+          )
         } />
-        <Route path="/experts/:expertId" element={<ExpertEditorRoute store={scopedExpertStore} onStoreChange={mergeScopedExpertStore} onOpenNavigation={openNavigation} onBack={() => navigate('/experts')} onStartSession={openNewTask} onNotify={setToast} />} />
-        <Route path="/experts/:expertId/edit" element={<ExpertEditorRoute store={scopedExpertStore} onStoreChange={mergeScopedExpertStore} onOpenNavigation={openNavigation} onBack={() => navigate('/experts')} onStartSession={openNewTask} onNotify={setToast} />} />
-        <Route path="/environments" element={<EnvironmentsPage onOpenNavigation={openNavigation} />} />
+        <Route path="/experts/:expertId" element={demoMode
+          ? <ExpertEditorRoute store={scopedExpertStore} onStoreChange={mergeScopedExpertStore} onOpenNavigation={openNavigation} onBack={() => navigate('/experts')} onStartSession={openNewTask} onNotify={setToast} />
+          : <RemoteExpertRoute organizationId={organizationId} spaceId={activeSpace.id} accessToken={accessToken} credentialVersion={credentialVersion} handleUnauthorized={handleUnauthorized} onOpenNavigation={openNavigation} onBack={() => navigate('/experts')} onStartSession={openNewTask} />} />
+        <Route path="/experts/:expertId/edit" element={demoMode
+          ? <ExpertEditorRoute store={scopedExpertStore} onStoreChange={mergeScopedExpertStore} onOpenNavigation={openNavigation} onBack={() => navigate('/experts')} onStartSession={openNewTask} onNotify={setToast} />
+          : <ExpertEditRedirect />} />
+        <Route path="/environments" element={demoMode
+          ? <EnvironmentsPage onOpenNavigation={openNavigation} />
+          : <RemoteEnvironmentsPage
+              items={catalog.environments.items}
+              loading={catalog.environments.loading}
+              ready={catalog.environments.ready}
+              error={catalog.environments.error}
+              onRetry={catalog.environments.retry}
+              organizationId={organizationId}
+              spaceId={activeSpace.id}
+              auth={catalogAuth}
+              credentialVersion={credentialVersion}
+              onOpenNavigation={openNavigation}
+            />} />
         <Route path="/daemons" element={<DaemonsPage onOpenNavigation={openNavigation} />} />
         <Route path="/repositories" element={<RepositoriesControlPage onOpenNavigation={openNavigation} />} />
         <Route path="/integrations" element={<IntegrationsControlPage onOpenNavigation={openNavigation} />} />
@@ -909,7 +1081,8 @@ function RelayApp() {
         <Route path="/governance" element={<Navigate to="/approvals" replace />} />
         <Route path="/activity" element={<Navigate to="/automations/events" replace />} />
         <Route path="*" element={<Navigate to="/home" replace />} />
-      </Routes>
+        </Routes>
+      </Suspense>
 
       {newTaskOpen ? (
         <NewTaskDialog
@@ -918,8 +1091,8 @@ function RelayApp() {
           initialExpertId={presetExpertId}
           initialPrompt={presetPrompt}
           experts={sessionExpertOptions}
-          repositories={scope.repositories.map((repository) => ({ id: repository.id, fullName: repository.fullName, defaultBranch: repository.defaultBranch }))}
-          environments={scope.environments.map((environment) => ({ id: environment.id, name: environment.name, image: environment.image, ready: environment.status === 'ready' }))}
+          repositories={sessionRepositories}
+          environments={sessionEnvironments}
           onClose={() => { setNewTaskOpen(false); setPresetExpertId(undefined); setPresetPrompt('') }}
           onCreate={createTask}
         />

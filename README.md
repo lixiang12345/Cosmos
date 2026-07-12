@@ -1,6 +1,6 @@
 # Relay Agent Platform
 
-Relay 是一个面向研发组织的 AI 软件交付编排与治理产品。当前仓库在完整交互原型之上，以共享契约驱动的前后端分离架构实现了带权威配置解析的 Session 创建与读取纵向链路。
+Relay 是一个面向研发组织的 AI 软件交付编排与治理产品。当前仓库在完整交互原型之上，以共享契约驱动的前后端分离架构实现了带权威配置解析的 Session 创建/读取与 Expert/Environment 只读 Catalog 纵向链路。
 
 ## 工程结构
 
@@ -59,13 +59,18 @@ pnpm check
 - `GET /api/v1/organizations/:organizationId/spaces/:spaceId/sessions`
 - `GET /api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId`
 - `POST /api/v1/organizations/:organizationId/spaces/:spaceId/sessions`
+- `GET /api/v1/organizations/:organizationId/spaces/:spaceId/experts`
+- `GET /api/v1/organizations/:organizationId/spaces/:spaceId/experts/:expertId`
+- `GET /api/v1/organizations/:organizationId/spaces/:spaceId/environments`
+- `GET /api/v1/organizations/:organizationId/spaces/:spaceId/environments/:environmentId`
 - 创建 Session 使用 `Idempotency-Key`；相同请求可安全重放，不同请求复用同一 key 返回 `409`。
 - 创建时只把 `expertId` 和允许的 `advancedOverrides` 作为选择输入；服务端解析当前 Published ExpertRevision、Active/Ready EnvironmentRevision 和 Repository binding，并把不可变 ID 与展示快照固定到 Session。
 - `start=true` 在同一 PostgreSQL 事务中写入 Session、首条 Message、Turn、Command、Outbox 和完整幂等响应；返回状态为 `queued`，不冒充 Agent 已执行。
 - 单 Session 响应和创建响应返回版本 `ETag`；Web 规范详情路由为 `/sessions/:sessionId`，旧 `/runs/:id` 只做兼容重定向。
 - API 成功响应与结构化错误均由 `@relay/contracts` 校验。
+- Expert/Environment Catalog 使用 keyset cursor 分页；详情返回资源版本 `ETag`。生产 Web 只开放查询和从已发布 Expert 发起 Session，不提供本地假编辑。
 
-配置 `DATABASE_URL` 后，Expert/Environment identity 与 immutable revision、Repository binding、Session 和幂等记录写入 PostgreSQL；未配置时仅开发环境使用进程内存 repository。API 已实现 OIDC access token 校验、actor membership discovery、Organization/Space 角色交集写限制、Private creator 隔离、权威配置解析和 actor/路径级幂等；Expert/Environment 管理 API、Private 分享、RLS/统一 tenant guard、审计、任务队列 consumer 和真实 Agent runtime 尚未实现，因此当前版本仍不能直接暴露到公网。这些能力按 [软件交付计划](./docs/software-delivery-plan.md) 继续演进。
+配置 `DATABASE_URL` 后，Expert/Environment identity 与 immutable revision、Repository binding、Session 和幂等记录写入 PostgreSQL；未配置时仅开发环境使用进程内存 repository。API 已实现 OIDC access token 校验、actor membership discovery、Organization/Space 角色交集写限制、Private creator 隔离、权威配置解析、只读 Catalog 和 actor/路径级幂等；Expert/Environment 写 API、Private 分享、RLS/统一 tenant guard、审计、任务队列 consumer 和真实 Agent runtime 尚未实现，因此当前版本仍不能直接暴露到公网。这些能力按 [软件交付计划](./docs/software-delivery-plan.md) 继续演进。
 
 ## 原型范围
 

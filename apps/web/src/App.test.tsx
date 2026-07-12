@@ -1,4 +1,12 @@
-import type { CreateSessionRequestInput, MeResponse, SessionDto } from '@relay/contracts'
+import type {
+  CreateSessionRequestInput,
+  EnvironmentDetailDto,
+  EnvironmentSummaryDto,
+  ExpertDetailDto,
+  ExpertSummaryDto,
+  MeResponse,
+  SessionDto,
+} from '@relay/contracts'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
@@ -7,17 +15,99 @@ import { AuthProvider } from './auth/AuthProvider'
 import { AuthContext, type AuthContextValue } from './auth/context'
 import { initialRuns } from './data/mockData'
 import { PREFERENCE_STORAGE_KEYS, PreferencesProvider } from './preferences'
-import { createSession, getSession, listSessions } from './services/relayApi'
+import {
+  createSession,
+  getEnvironment,
+  getExpert,
+  getSession,
+  listEnvironments,
+  listExperts,
+  listSessions,
+} from './services/relayApi'
 import { WorkspaceContext, type WorkspaceContextValue } from './workspace'
 
 vi.mock('./services/relayApi', async (importOriginal) => ({
   ...await importOriginal<typeof import('./services/relayApi')>(),
   createSession: vi.fn(),
+  getEnvironment: vi.fn(),
+  getExpert: vi.fn(),
   getSession: vi.fn(),
+  listEnvironments: vi.fn(),
+  listExperts: vi.fn(),
   listSessions: vi.fn(),
 }))
 
 const API_TIMESTAMP = '2026-07-12T04:30:00.000Z'
+
+const productionDefaultRepository = {
+  repositoryId: 'repository-production',
+  repository: 'production/platform',
+  baseBranch: 'main',
+  isDefault: true as const,
+}
+
+const productionEnvironment: EnvironmentSummaryDto = {
+  id: 'environment-production',
+  organizationId: 'organization-production',
+  spaceId: 'space-production',
+  name: 'Production runtime',
+  description: 'Production execution environment.',
+  status: 'ready',
+  activeRevisionId: 'environment-revision-production',
+  activeRevision: {
+    id: 'environment-revision-production',
+    environmentId: 'environment-production',
+    revision: 3,
+    status: 'ready',
+    defaultRepository: productionDefaultRepository,
+    createdAt: '2026-07-12T04:00:00.000Z',
+  },
+  version: 2,
+  createdAt: '2026-07-12T03:00:00.000Z',
+  updatedAt: '2026-07-12T04:00:00.000Z',
+}
+
+const productionEnvironmentDetail: EnvironmentDetailDto = {
+  ...productionEnvironment,
+  activeRevision: {
+    ...productionEnvironment.activeRevision!,
+    repositoryBindings: [productionDefaultRepository],
+  },
+}
+
+const productionExpert: ExpertSummaryDto = {
+  id: 'expert-production',
+  organizationId: 'organization-production',
+  spaceId: 'space-production',
+  name: 'Production Expert',
+  description: 'Implements production changes with verification.',
+  visibility: 'space',
+  status: 'published',
+  publishedRevisionId: 'expert-revision-production',
+  publishedRevisionSummary: {
+    id: 'expert-revision-production',
+    expertId: 'expert-production',
+    revision: 5,
+    status: 'published',
+    model: 'relay-production',
+    environmentId: productionEnvironment.id,
+    environmentRevisionId: productionEnvironment.activeRevisionId!,
+    allowRepositoryOverride: false,
+    allowBaseBranchOverride: false,
+    createdAt: '2026-07-12T04:00:00.000Z',
+  },
+  version: 4,
+  createdAt: '2026-07-12T03:00:00.000Z',
+  updatedAt: '2026-07-12T04:00:00.000Z',
+}
+
+const productionExpertDetail: ExpertDetailDto = {
+  ...productionExpert,
+  publishedRevision: {
+    ...productionExpert.publishedRevisionSummary!,
+    instructions: 'Implement only the requested change and verify the result.',
+  },
+}
 
 function makeApiSession(
   organizationId: string,
@@ -150,7 +240,7 @@ function deferred<T>() {
 }
 
 async function openTemplateLibrary(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('tab', { name: /工作流模板/ }))
+  await user.click(await screen.findByRole('tab', { name: /工作流模板/ }))
 }
 
 async function forkTemplate(user: ReturnType<typeof userEvent.setup>, templateName: string) {
@@ -159,6 +249,7 @@ async function forkTemplate(user: ReturnType<typeof userEvent.setup>, templateNa
   await user.type(search, templateName)
   expect(screen.getByRole('heading', { name: templateName })).toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: '基于模板创建' }))
+  await screen.findByRole('textbox', { name: '显示名称' })
 }
 
 describe('Relay prototype', () => {
@@ -171,7 +262,11 @@ describe('Relay prototype', () => {
     window.localStorage.removeItem('relay.experts')
     window.localStorage.removeItem('relay.controlPlane.v1')
     vi.mocked(createSession).mockReset()
+    vi.mocked(getEnvironment).mockReset()
+    vi.mocked(getExpert).mockReset()
     vi.mocked(getSession).mockReset()
+    vi.mocked(listEnvironments).mockReset()
+    vi.mocked(listExperts).mockReset()
     vi.mocked(listSessions).mockReset()
     vi.mocked(listSessions).mockResolvedValue({
       items: [], page: { nextCursor: null, hasMore: false, projectionUpdatedAt: null },
@@ -179,6 +274,16 @@ describe('Relay prototype', () => {
     vi.mocked(createSession).mockImplementation(async (organizationId, spaceId, input) => ({
       session: makeApiSession(organizationId, spaceId, input),
     }))
+    vi.mocked(listExperts).mockResolvedValue({
+      items: [productionExpert],
+      page: { nextCursor: null, hasMore: false, projectionUpdatedAt: productionExpert.updatedAt },
+    })
+    vi.mocked(getExpert).mockResolvedValue(productionExpertDetail)
+    vi.mocked(listEnvironments).mockResolvedValue({
+      items: [productionEnvironment],
+      page: { nextCursor: null, hasMore: false, projectionUpdatedAt: productionEnvironment.updatedAt },
+    })
+    vi.mocked(getEnvironment).mockResolvedValue(productionEnvironmentDetail)
   })
 
   it('uses Home as the Expert launcher without adding a sidebar Home item', async () => {
@@ -192,7 +297,7 @@ describe('Relay prototype', () => {
     const user = userEvent.setup()
     renderApp()
 
-    expect(screen.getByRole('heading', { level: 1, name: '升级支付服务重试策略' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: '升级支付服务重试策略' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /变更/ }))
 
     expect(screen.getByRole('button', { name: /src\/retry\/retry-policy\.ts/ })).toBeInTheDocument()
@@ -209,7 +314,7 @@ describe('Relay prototype', () => {
     const user = userEvent.setup()
     renderApp()
 
-    await user.click(screen.getByRole('button', { name: /审批/ }))
+    await user.click(await screen.findByRole('button', { name: /审批/ }))
     await user.click(screen.getByRole('button', { name: '批准并继续' }))
 
     expect(screen.getByText('决策已记录，正在创建 PR')).toBeInTheDocument()
@@ -420,6 +525,80 @@ describe('Relay prototype', () => {
     expect(window.localStorage.getItem('relay.experts')).toContain(privateExpert)
   })
 
+  it('renders production Experts from the tenant-scoped API and opens canonical detail', async () => {
+    const user = userEvent.setup()
+    renderAuthenticatedApp('/experts')
+
+    expect(await screen.findByText('Production Expert')).toBeInTheDocument()
+    expect(listExperts).toHaveBeenCalledWith(
+      'organization-production',
+      'space-production',
+      expect.objectContaining({
+        accessToken: 'production-access-token',
+        onUnauthorized: expect.any(Function),
+      }),
+      expect.any(AbortSignal),
+      { limit: 100 },
+    )
+    expect(screen.queryByRole('button', { name: '创建专家' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: /工作流模板/ })).not.toBeInTheDocument()
+
+    await user.click(screen.getByText('Production Expert'))
+
+    expect(await screen.findByText('Implement only the requested change and verify the result.')).toBeInTheDocument()
+    expect(getExpert).toHaveBeenCalledWith(
+      'organization-production',
+      'space-production',
+      'expert-production',
+      expect.objectContaining({ accessToken: 'production-access-token' }),
+      expect.any(AbortSignal),
+    )
+  })
+
+  it('renders production Environments and repository bindings from canonical detail', async () => {
+    renderAuthenticatedApp('/environments')
+
+    expect((await screen.findAllByText('Production runtime')).length).toBeGreaterThan(0)
+    await waitFor(() => expect(getEnvironment).toHaveBeenCalledWith(
+      'organization-production',
+      'space-production',
+      'environment-production',
+      expect.objectContaining({ accessToken: 'production-access-token' }),
+      expect.any(AbortSignal),
+    ))
+    expect((await screen.findAllByText('production/platform')).length).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: '创建环境' })).not.toBeInTheDocument()
+  })
+
+  it('creates a production Session with only authoritative input fields', async () => {
+    const user = userEvent.setup()
+    let createdSession: SessionDto | undefined
+    vi.mocked(createSession).mockImplementationOnce(async (organizationId, spaceId, input) => {
+      createdSession = makeApiSession(organizationId, spaceId, input, { id: 'session-production-create' })
+      return { session: createdSession }
+    })
+    vi.mocked(getSession).mockImplementationOnce(async () => createdSession!)
+    renderAuthenticatedApp('/experts')
+    await screen.findByText('Production Expert')
+
+    await user.click(screen.getByRole('button', { name: '发起会话' }))
+    expect(screen.queryByText('Cosmos Advisor')).not.toBeInTheDocument()
+    await user.type(screen.getByLabelText('会话任务'), '修复生产环境中的结算竞态')
+    await user.click(screen.getByRole('button', { name: '开始会话' }))
+
+    await waitFor(() => expect(createSession).toHaveBeenCalled())
+    expect(vi.mocked(createSession).mock.calls[0][0]).toBe('organization-production')
+    expect(vi.mocked(createSession).mock.calls[0][1]).toBe('space-production')
+    expect(vi.mocked(createSession).mock.calls[0][2]).toEqual({
+      expertId: 'expert-production',
+      title: '修复生产环境中的结算竞态',
+      visibility: 'private',
+      start: true,
+      message: { content: '修复生产环境中的结算竞态', attachments: [] },
+    })
+    expect(await screen.findByRole('heading', { level: 1, name: '修复生产环境中的结算竞态' })).toBeInTheDocument()
+  })
+
   it('keeps the task dialog input open and retryable when Session creation fails', async () => {
     const user = userEvent.setup()
     vi.mocked(createSession).mockRejectedValueOnce(new Error('服务暂时不可用，请稍后重试。'))
@@ -520,7 +699,7 @@ describe('Relay prototype', () => {
     renderApp('/experts')
 
     const expertName = 'Ticket or task to a merged PR'
-    await user.click(screen.getByRole('button', { name: `停用: ${expertName}` }))
+    await user.click(await screen.findByRole('button', { name: `停用: ${expertName}` }))
     expect(screen.getByRole('status')).toHaveTextContent('专家已停用')
     expect(screen.getByRole('button', { name: `启用: ${expertName}` })).toBeInTheDocument()
 
@@ -541,7 +720,7 @@ describe('Relay prototype', () => {
     renderApp('/experts')
 
     const expertName = 'Ticket or task to a merged PR'
-    await user.click(screen.getByRole('button', { name: `发起会话: ${expertName}` }))
+    await user.click(await screen.findByRole('button', { name: `发起会话: ${expertName}` }))
 
     expect(screen.getByRole('radio', { name: new RegExp(expertName) })).toHaveAttribute('aria-checked', 'true')
   })
@@ -667,7 +846,7 @@ describe('Relay prototype', () => {
     const user = userEvent.setup()
     renderApp('/automations/events')
 
-    await user.click(screen.getByRole('button', { name: 'Slack' }))
+    await user.click(await screen.findByRole('button', { name: 'Slack' }))
     await user.click(screen.getByRole('button', { name: '注入并匹配' }))
 
     expect(screen.getByRole('status')).toHaveTextContent('事件已匹配 Payments alert investigation')
@@ -694,7 +873,7 @@ describe('Relay prototype', () => {
     const user = userEvent.setup()
     renderApp('/runs/run-479')
 
-    await user.click(screen.getByRole('button', { name: '重试步骤' }))
+    await user.click(await screen.findByRole('button', { name: '重试步骤' }))
 
     expect(screen.getByRole('status')).toHaveTextContent('已创建新的 Attempt，重试成功')
     await waitFor(() => {
@@ -717,7 +896,7 @@ describe('Relay prototype', () => {
     const user = userEvent.setup()
     renderApp('/environments')
 
-    await user.click(screen.getByRole('button', { name: '创建环境' }))
+    await user.click(await screen.findByRole('button', { name: '创建环境' }))
     await user.type(screen.getByRole('textbox', { name: '环境名称' }), '支付回归验证')
     await user.click(screen.getByRole('button', { name: '下一步' }))
     await user.click(screen.getByRole('button', { name: '下一步' }))

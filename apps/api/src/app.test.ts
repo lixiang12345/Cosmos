@@ -2,14 +2,24 @@ import {
   ApiErrorSchema,
   CreateSessionRequestSchema,
   CreateSessionResponseSchema,
+  EnvironmentDetailDtoSchema,
+  EnvironmentListResponseSchema,
+  ExpertDetailDtoSchema,
+  ExpertListResponseSchema,
   MeResponseSchema,
   SessionDtoSchema,
   SessionListResponseSchema,
   type CreateSessionRequestInput,
+  type EnvironmentDetailDto,
+  type ExpertDetailDto,
 } from '@relay/contracts'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createApp } from './app.js'
 import { createDevelopmentAuthenticator } from './auth.js'
+import type {
+  ConfigurationCatalogListOptions,
+  ConfigurationCatalogRepository,
+} from './configuration-catalog-repository.js'
 import {
   AuthorizationChangedError,
   InMemorySessionRepository,
@@ -91,6 +101,136 @@ const testAuthoritativeCatalog = [
   catalogEntry('other', 'platform'),
 ]
 
+const expertDetail: ExpertDetailDto = {
+  id: 'expert-pr-author',
+  organizationId: 'relay',
+  spaceId: 'platform',
+  name: 'PR Author',
+  description: 'Produces reviewed pull requests.',
+  visibility: 'space',
+  status: 'published',
+  publishedRevisionId: 'expert-revision-platform',
+  publishedRevisionSummary: {
+    id: 'expert-revision-platform',
+    expertId: 'expert-pr-author',
+    revision: 7,
+    status: 'published',
+    model: 'relay-default',
+    environmentId: 'environment-platform',
+    environmentRevisionId: 'environment-revision-platform',
+    allowRepositoryOverride: true,
+    allowBaseBranchOverride: true,
+    createdAt: '2026-07-13T08:00:00.000Z',
+  },
+  publishedRevision: {
+    id: 'expert-revision-platform',
+    expertId: 'expert-pr-author',
+    revision: 7,
+    status: 'published',
+    model: 'relay-default',
+    environmentId: 'environment-platform',
+    environmentRevisionId: 'environment-revision-platform',
+    allowRepositoryOverride: true,
+    allowBaseBranchOverride: true,
+    instructions: 'Inspect the repository, implement the change, and verify it.',
+    createdAt: '2026-07-13T08:00:00.000Z',
+  },
+  version: 4,
+  createdAt: '2026-07-13T07:00:00.000Z',
+  updatedAt: '2026-07-13T08:00:00.000Z',
+}
+
+const defaultRepository = {
+  repositoryId: 'repository-platform',
+  repository: 'platform/checkout',
+  baseBranch: 'main',
+  isDefault: true as const,
+}
+
+const environmentDetail: EnvironmentDetailDto = {
+  id: 'environment-platform',
+  organizationId: 'relay',
+  spaceId: 'platform',
+  name: 'Platform runtime',
+  description: 'Isolated runtime for platform repositories.',
+  status: 'ready',
+  activeRevisionId: 'environment-revision-platform',
+  activeRevision: {
+    id: 'environment-revision-platform',
+    environmentId: 'environment-platform',
+    revision: 2,
+    status: 'ready',
+    defaultRepository,
+    repositoryBindings: [defaultRepository],
+    createdAt: '2026-07-13T08:00:00.000Z',
+  },
+  version: 3,
+  createdAt: '2026-07-13T07:00:00.000Z',
+  updatedAt: '2026-07-13T08:00:00.000Z',
+}
+
+function testConfigurationCatalog(
+  onListExperts?: (options: ConfigurationCatalogListOptions) => void,
+): ConfigurationCatalogRepository {
+  const expertSummary = {
+    id: expertDetail.id,
+    organizationId: expertDetail.organizationId,
+    spaceId: expertDetail.spaceId,
+    name: expertDetail.name,
+    description: expertDetail.description,
+    visibility: expertDetail.visibility,
+    status: expertDetail.status,
+    publishedRevisionId: expertDetail.publishedRevisionId,
+    publishedRevisionSummary: expertDetail.publishedRevisionSummary,
+    version: expertDetail.version,
+    createdAt: expertDetail.createdAt,
+    updatedAt: expertDetail.updatedAt,
+  }
+  const environmentSummary = {
+    id: environmentDetail.id,
+    organizationId: environmentDetail.organizationId,
+    spaceId: environmentDetail.spaceId,
+    name: environmentDetail.name,
+    description: environmentDetail.description,
+    status: environmentDetail.status,
+    activeRevisionId: environmentDetail.activeRevisionId,
+    activeRevision: environmentDetail.activeRevision && {
+      id: environmentDetail.activeRevision.id,
+      environmentId: environmentDetail.activeRevision.environmentId,
+      revision: environmentDetail.activeRevision.revision,
+      status: environmentDetail.activeRevision.status,
+      defaultRepository: environmentDetail.activeRevision.defaultRepository,
+      createdAt: environmentDetail.activeRevision.createdAt,
+    },
+    version: environmentDetail.version,
+    createdAt: environmentDetail.createdAt,
+    updatedAt: environmentDetail.updatedAt,
+  }
+  return {
+    async listExperts(_organizationId, _spaceId, _actorId, options = {}) {
+      onListExperts?.(options)
+      return {
+        items: [expertSummary],
+        hasMore: true,
+        nextCursor: { id: expertDetail.id, updatedAt: '2026-07-13T08:00:00.000000Z' },
+      }
+    },
+    async getExpert() {
+      return expertDetail
+    },
+    async listEnvironments() {
+      return {
+        items: [environmentSummary],
+        hasMore: false,
+        nextCursor: null,
+      }
+    },
+    async getEnvironment() {
+      return environmentDetail
+    },
+  }
+}
+
 function testRepository(options: InMemorySessionRepositoryOptions = {}) {
   return new InMemorySessionRepository({
     ...options,
@@ -99,9 +239,13 @@ function testRepository(options: InMemorySessionRepositoryOptions = {}) {
   })
 }
 
-function testApp(repository = testRepository()) {
+function testApp(
+  repository = testRepository(),
+  configurationCatalogRepository?: ConfigurationCatalogRepository,
+) {
   const app = createApp({
     sessionRepository: repository,
+    configurationCatalogRepository,
     authenticate: createDevelopmentAuthenticator('user-local-admin'),
   })
   openApps.push(app)
@@ -146,6 +290,9 @@ describe('Relay API', () => {
     const sessions = await app.inject({
       method: 'GET', url: '/api/v1/organizations/relay/spaces/platform/sessions',
     })
+    const experts = await app.inject({
+      method: 'GET', url: '/api/v1/organizations/relay/spaces/platform/experts',
+    })
     const me = await app.inject({ method: 'GET', url: '/api/v1/me' })
     const readiness = await app.inject({ method: 'GET', url: '/api/ready' })
     const unsupportedHealthMethod = await app.inject({ method: 'POST', url: '/api/health' })
@@ -156,6 +303,9 @@ describe('Relay API', () => {
     expect(ApiErrorSchema.parse(sessions.json())).toMatchObject({
       code: 'AUTHENTICATION_REQUIRED', retryable: false,
     })
+    expect(experts.statusCode).toBe(401)
+    expect(experts.headers['cache-control']).toBe('private, no-store')
+    expect(experts.headers.vary).toBe('Authorization')
     expect(readiness.statusCode).toBe(401)
     expect(me.statusCode).toBe(401)
     expect(unsupportedHealthMethod.statusCode).toBe(401)
@@ -221,6 +371,138 @@ describe('Relay API', () => {
       actor: { id: 'user-local-admin', kind: 'user' },
       organizations: [],
     })
+  })
+
+  it('serves paginated Expert and Environment catalogs with canonical private headers', async () => {
+    const listOptions: ConfigurationCatalogListOptions[] = []
+    const app = testApp(testRepository(), testConfigurationCatalog((options) => listOptions.push(options)))
+    const experts = await app.inject({
+      method: 'GET',
+      url: '/api/v1/organizations/relay/spaces/platform/experts?limit=1',
+    })
+    const expertList = ExpertListResponseSchema.parse(experts.json())
+
+    expect(experts.statusCode).toBe(200)
+    expect(experts.headers['cache-control']).toBe('private, no-store')
+    expect(experts.headers.vary).toBe('Authorization')
+    expect(expertList.items).toHaveLength(1)
+    expect(expertList.page).toMatchObject({ hasMore: true })
+    expect(expertList.page.nextCursor).toEqual(expect.any(String))
+    expect(listOptions).toEqual([{ limit: 1 }])
+
+    const nextPage = await app.inject({
+      method: 'GET',
+      url: `/api/v1/organizations/relay/spaces/platform/experts?limit=1&cursor=${encodeURIComponent(expertList.page.nextCursor!)}`,
+    })
+    expect(nextPage.statusCode).toBe(200)
+    expect(listOptions[1]).toEqual({
+      limit: 1,
+      cursor: { id: expertDetail.id, updatedAt: '2026-07-13T08:00:00.000000Z' },
+    })
+
+    const expert = await app.inject({
+      method: 'GET',
+      url: `/api/v1/organizations/relay/spaces/platform/experts/${expertDetail.id}`,
+    })
+    expect(expert.statusCode).toBe(200)
+    expect(expert.headers.etag).toBe('"4"')
+    expect(ExpertDetailDtoSchema.parse(expert.json())).toEqual(expertDetail)
+
+    const environments = await app.inject({
+      method: 'GET',
+      url: '/api/v1/organizations/relay/spaces/platform/environments',
+    })
+    const environment = await app.inject({
+      method: 'GET',
+      url: `/api/v1/organizations/relay/spaces/platform/environments/${environmentDetail.id}`,
+    })
+    expect(environments.statusCode).toBe(200)
+    expect(EnvironmentListResponseSchema.parse(environments.json()).items).toHaveLength(1)
+    expect(environment.statusCode).toBe(200)
+    expect(environment.headers.etag).toBe('"3"')
+    expect(EnvironmentDetailDtoSchema.parse(environment.json())).toEqual(environmentDetail)
+  })
+
+  it('rejects invalid or cross-resource catalog pagination before reading data', async () => {
+    let reads = 0
+    const repository = testConfigurationCatalog(() => { reads += 1 })
+    const app = testApp(testRepository(), repository)
+    const first = await app.inject({
+      method: 'GET',
+      url: '/api/v1/organizations/relay/spaces/platform/experts?limit=1',
+    })
+    const cursor = ExpertListResponseSchema.parse(first.json()).page.nextCursor
+    expect(cursor).toEqual(expect.any(String))
+
+    const invalidLimit = await app.inject({
+      method: 'GET',
+      url: '/api/v1/organizations/relay/spaces/platform/experts?limit=101',
+    })
+    const crossResourceCursor = await app.inject({
+      method: 'GET',
+      url: `/api/v1/organizations/relay/spaces/platform/environments?cursor=${encodeURIComponent(cursor!)}`,
+    })
+
+    expect(invalidLimit.statusCode).toBe(400)
+    expect(ApiErrorSchema.parse(invalidLimit.json())).toMatchObject({ code: 'VALIDATION_FAILED' })
+    expect(crossResourceCursor.statusCode).toBe(400)
+    expect(ApiErrorSchema.parse(crossResourceCursor.json())).toMatchObject({ code: 'VALIDATION_FAILED' })
+    expect(reads).toBe(1)
+  })
+
+  it('conceals missing, hidden, and revoked catalog resources with the same 404 response', async () => {
+    const repository: ConfigurationCatalogRepository = {
+      ...testConfigurationCatalog(),
+      async listExperts() { return null },
+      async getExpert() { return null },
+    }
+    const app = testApp(testRepository(), repository)
+    const revokedList = await app.inject({
+      method: 'GET',
+      url: '/api/v1/organizations/relay/spaces/platform/experts',
+    })
+    const hidden = await app.inject({
+      method: 'GET',
+      url: '/api/v1/organizations/relay/spaces/platform/experts/private-expert',
+    })
+    const missing = await app.inject({
+      method: 'GET',
+      url: '/api/v1/organizations/relay/spaces/platform/experts/missing-expert',
+    })
+
+    expect(revokedList.statusCode).toBe(404)
+    expect(hidden.statusCode).toBe(404)
+    expect(missing.statusCode).toBe(404)
+    expect(revokedList.json()).toMatchObject({
+      code: 'RESOURCE_NOT_FOUND',
+      message: missing.json().message,
+    })
+    expect(hidden.json()).toMatchObject({
+      code: 'RESOURCE_NOT_FOUND',
+      message: missing.json().message,
+    })
+  })
+
+  it('denies service accounts until control-plane operation scopes are enforced', async () => {
+    let reads = 0
+    const catalog = testConfigurationCatalog(() => { reads += 1 })
+    const app = createApp({
+      sessionRepository: testRepository(),
+      configurationCatalogRepository: catalog,
+      authenticate: async () => ({ id: 'service-catalog-reader', kind: 'service_account' }),
+    })
+    openApps.push(app)
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/organizations/relay/spaces/platform/experts',
+    })
+
+    expect(response.statusCode).toBe(403)
+    expect(ApiErrorSchema.parse(response.json())).toMatchObject({
+      code: 'PERMISSION_DENIED', retryable: false,
+    })
+    expect(response.headers['cache-control']).toBe('private, no-store')
+    expect(reads).toBe(0)
   })
 
   it('creates a Session with defaults from the shared contract', async () => {

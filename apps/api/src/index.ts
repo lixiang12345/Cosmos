@@ -10,6 +10,16 @@ export {
 export { loadConfig, type ApiConfig } from './config.js'
 export { runMigrations } from './migrations.js'
 export {
+  PostgresConfigurationCatalogRepository,
+} from './postgres-configuration-catalog-repository.js'
+export {
+  EmptyConfigurationCatalogRepository,
+  type ConfigurationCatalogCursor,
+  type ConfigurationCatalogListOptions,
+  type ConfigurationCatalogPage,
+  type ConfigurationCatalogRepository,
+} from './configuration-catalog-repository.js'
+export {
   PostgresSessionRepository,
   type PostgresSessionRepositoryOptions,
 } from './postgres-session-repository.js'

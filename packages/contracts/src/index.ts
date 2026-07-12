@@ -31,6 +31,52 @@ export {
 export { ApiErrorSchema, type ApiError } from './api-error.js'
 
 export {
+  ExpertDetailDtoSchema,
+  ExpertDraftRevisionDtoSchema,
+  ExpertKindSchema,
+  ExpertListResponseSchema,
+  ExpertPublishedRevisionDtoSchema,
+  ExpertPublishedRevisionSummarySchema,
+  ExpertRevisionStatusSchema,
+  ExpertStatusSchema,
+  ExpertSummaryDtoSchema,
+  ExpertVisibilitySchema,
+  type ExpertDetailDto,
+  type ExpertDraftRevisionDto,
+  type ExpertKind,
+  type ExpertListResponse,
+  type ExpertPublishedRevisionDto,
+  type ExpertPublishedRevisionSummary,
+  type ExpertRevisionStatus,
+  type ExpertStatus,
+  type ExpertSummaryDto,
+  type ExpertVisibility,
+} from './expert.js'
+
+export {
+  EnvironmentActiveRevisionDetailSchema,
+  EnvironmentActiveRevisionSummarySchema,
+  EnvironmentDefaultRepositorySchema,
+  EnvironmentDetailDtoSchema,
+  EnvironmentListResponseSchema,
+  EnvironmentRepositoryBindingSchema,
+  EnvironmentStatusSchema,
+  EnvironmentSummaryDtoSchema,
+  EnvironmentTypeSchema,
+  EnvironmentVisibilitySchema,
+  type EnvironmentActiveRevisionDetail,
+  type EnvironmentActiveRevisionSummary,
+  type EnvironmentDefaultRepository,
+  type EnvironmentDetailDto,
+  type EnvironmentListResponse,
+  type EnvironmentRepositoryBinding,
+  type EnvironmentStatus,
+  type EnvironmentSummaryDto,
+  type EnvironmentType,
+  type EnvironmentVisibility,
+} from './environment.js'
+
+export {
   ActorKindSchema,
   MeActorSchema,
   MeOrganizationSchema,
