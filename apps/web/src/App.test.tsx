@@ -5,10 +5,11 @@ import { MemoryRouter } from 'react-router-dom'
 import App from './App'
 import { initialRuns } from './data/mockData'
 import { PREFERENCE_STORAGE_KEYS, PreferencesProvider } from './preferences'
-import { createSession } from './services/relayApi'
+import { createSession, listSessions } from './services/relayApi'
 
 vi.mock('./services/relayApi', () => ({
   createSession: vi.fn(),
+  listSessions: vi.fn(),
 }))
 
 const API_TIMESTAMP = '2026-07-12T04:30:00.000Z'
@@ -74,6 +75,10 @@ describe('Relay prototype', () => {
     window.localStorage.removeItem('relay.experts')
     window.localStorage.removeItem('relay.controlPlane.v1')
     vi.mocked(createSession).mockReset()
+    vi.mocked(listSessions).mockReset()
+    vi.mocked(listSessions).mockResolvedValue({
+      items: [], page: { nextCursor: null, hasMore: false, projectionUpdatedAt: null },
+    })
     vi.mocked(createSession).mockImplementation(async (organizationId, spaceId, input) => ({
       session: makeApiSession(organizationId, spaceId, input),
     }))
@@ -172,6 +177,27 @@ describe('Relay prototype', () => {
     )
     const storedSessions = JSON.parse(window.localStorage.getItem('relay.sessions') ?? '[]') as Array<{ title: string; expertId?: string }>
     expect(storedSessions.find((session) => session.title === '评估结算链路迁移方案')).toMatchObject({ expertId: 'expert-cosmos-advisor' })
+  })
+
+  it('hydrates server Sessions for the active Space without duplicating local projections', async () => {
+    const serverSession = makeApiSession('relay', 'space-commerce', {
+      title: '服务端持久化会话', expertId: 'expert-pr-author', expertName: 'PR Author',
+      repository: 'commerce/checkout', baseBranch: 'main',
+      message: { content: '从 PostgreSQL 恢复的会话。' },
+    }, { id: 'session-persisted' })
+    vi.mocked(listSessions).mockResolvedValueOnce({
+      items: [serverSession],
+      page: { nextCursor: null, hasMore: false, projectionUpdatedAt: serverSession.updatedAt },
+    })
+
+    renderApp('/sessions')
+
+    expect((await screen.findAllByText('服务端持久化会话')).length).toBeGreaterThan(0)
+    expect(listSessions).toHaveBeenCalledWith('relay', 'space-commerce')
+    await waitFor(() => {
+      const stored = JSON.parse(window.localStorage.getItem('relay.sessions') ?? '[]') as Array<{ id: string }>
+      expect(stored.filter((run) => run.id === 'session-persisted')).toHaveLength(1)
+    })
   })
 
   it('keeps the task dialog input open and retryable when Session creation fails', async () => {

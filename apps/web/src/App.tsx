@@ -45,7 +45,7 @@ import { ExpertEditorPage, ExpertsPage } from './pages/ExpertsPage'
 import { RunsOverview } from './pages/OverviewPages'
 import { SessionsPage } from './pages/SessionsPage'
 import { usePreferences } from './preferences'
-import { createSession } from './services/relayApi'
+import { createSession, listSessions } from './services/relayApi'
 import type { NewTaskInput, Run, RunAttempt, TaskCreateMode } from './types'
 
 const RUNS_STORAGE_KEY = 'relay.sessions'
@@ -57,6 +57,65 @@ function mapSessionStatus(status: SessionDto['status']): Run['status'] {
 
 function makeSessionIdempotencyKey() {
   return `session-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+function sessionDtoToRun(session: SessionDto, locale: 'zh' | 'en'): Run {
+  const isDraft = session.status === 'draft'
+  const copy = locale === 'zh'
+    ? { trigger: '控制台 / 手动创建', triggerStep: '触发', plan: '规划', pending: '等待中', context: '会话已从服务端恢复' }
+    : { trigger: 'Console / manual', triggerStep: 'Trigger', plan: 'Plan', pending: 'Waiting', context: 'Session restored from the server' }
+  return {
+    id: session.id,
+    spaceId: session.spaceId,
+    title: session.title,
+    favorite: false,
+    archived: false,
+    repo: session.repository,
+    branch: `relay/${session.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'session'}`,
+    expert: session.expertName,
+    expertId: session.expertId,
+    expertVersion: session.expertVersion,
+    environmentId: session.environmentId,
+    visibility: session.visibility,
+    status: mapSessionStatus(session.status),
+    source: session.source,
+    trigger: copy.trigger,
+    updatedAt: session.updatedAt,
+    elapsed: '0s',
+    progress: isDraft ? 0 : session.status === 'completed' ? 100 : 12,
+    model: 'GPT-5.4',
+    summary: session.summary,
+    baseBranch: session.baseBranch,
+    acceptanceCriteria: [],
+    contextItems: [],
+    attachments: session.attachments,
+    steps: [
+      { id: 'trigger', label: copy.triggerStep, detail: isDraft ? copy.pending : copy.context, status: isDraft ? 'pending' : 'completed' },
+      { id: 'plan', label: copy.plan, detail: copy.pending, status: isDraft ? 'pending' : 'active' },
+      { id: 'author', label: locale === 'zh' ? '编码' : 'Author', detail: copy.pending, status: 'pending' },
+      { id: 'verify', label: locale === 'zh' ? '验证' : 'Verify', detail: copy.pending, status: 'pending' },
+      { id: 'approval', label: locale === 'zh' ? '审批' : 'Approval', detail: copy.pending, status: 'pending' },
+      { id: 'deliver', label: locale === 'zh' ? '交付' : 'Deliver', detail: copy.pending, status: 'pending' },
+    ],
+    events: [{
+      id: `${session.id}-request`, kind: 'request', actor: session.expertName, title: session.title,
+      body: session.summary, timestamp: session.createdAt, meta: copy.context,
+    }],
+    files: [],
+    terminal: [],
+    attempts: [{
+      id: `${session.id}-attempt-1`, number: 1,
+      status: isDraft ? 'queued' : session.status === 'completed' ? 'succeeded' : 'running',
+      startedAt: session.createdAt,
+    }],
+    artifacts: [],
+  }
+}
+
+function mergeServerSessions(current: Run[], sessions: SessionDto[], locale: 'zh' | 'en') {
+  const serverRuns = sessions.map((session) => sessionDtoToRun(session, locale))
+  const serverIds = new Set(serverRuns.map((run) => run.id))
+  return [...serverRuns, ...current.filter((run) => !serverIds.has(run.id))]
 }
 
 function inferRunSpace(run: Run) {
@@ -226,6 +285,20 @@ function RelayApp() {
   useEffect(() => {
     saveExpertStore(expertStore)
   }, [expertStore])
+
+  useEffect(() => {
+    let cancelled = false
+    void listSessions(CURRENT_ORGANIZATION_ID, activeSpace.id)
+      .then(({ items }) => {
+        if (!cancelled) setRuns((current) => mergeServerSessions(current, items, locale))
+      })
+      .catch(() => {
+        if (!cancelled) setToast(locale === 'zh'
+          ? '暂时无法同步服务端会话，正在显示本地缓存。'
+          : 'Unable to sync server Sessions. Showing the local cache.')
+      })
+    return () => { cancelled = true }
+  }, [activeSpace.id, locale])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

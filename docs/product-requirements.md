@@ -1,7 +1,7 @@
 # Relay 产品需求规格
 
 > 文档状态：研发基线（Draft for implementation）  
-> 版本：1.0  
+> 版本：1.1
 > 日期：2026-07-12  
 > 事实基线：[cosmos-evidence-matrix.md](./cosmos-evidence-matrix.md)  
 > 适用范围：Relay Cosmos 风格原型及其后续产品化实现
@@ -19,6 +19,19 @@
 | **Relay extension** | Relay 为治理、交付、本地化或团队运营新增 | 使用 Relay 命名、权限和审计，不冒充官方功能 |
 
 凡未标记的条目默认属于 Relay 的实现约束，而不是 Cosmos 官方事实。
+
+### 1.2 实现状态标记
+
+证据等级回答“为什么做”，实现状态回答“现在能否真实交付”，两者不得混用。
+
+| 标记 | 含义 | 对外口径 |
+| --- | --- | --- |
+| **Implemented** | 已有持久化代码路径和自动化验证 | 只能声称表中列出的有限能力 |
+| **Partial** | 只实现了主路径的一部分，仍依赖本地投影、mock 或信任客户端数据 | 不得称为生产可用 |
+| **Prototype** | 可点击的界面和确定性模拟 | 必须在界面与演示材料中标记 Simulation |
+| **Target** | 已批准但尚未实现的产品/工程合同 | 仅可用于计划和验收，不可对客户承诺已上线 |
+
+实现状态以仓库代码和可复现验证为准，不以截图、原型文案或 OpenAPI 目标定义为准。
 
 ## 2. 产品定义
 
@@ -67,6 +80,19 @@ Relay 是面向研发团队的 Agent 工作系统。用户选择一个可复用 
 - 不把移动端作为复杂管理配置主入口；小屏优先查看、继续 Session 和处理决策。
 - 不允许前端直接修改共享 Files，也不把永久删除 Session 作为普通用户操作。
 - 不为未被证实的 Cosmos 页面结构做“官方原版”声明。
+
+### 3.3 当前交付基线（2026-07-12）
+
+| 能力 | 状态 | 当前真实边界 | 进入生产前的必要条件 |
+| --- | --- | --- | --- |
+| Web 原型 | **Partial** | React 页面、主题/语言、响应式导航和主要演示交互可用；多数领域数据仍为 seed/localStorage | 连接真实身份、权限和服务端数据；移除伪成功路径 |
+| Session 创建/列表 | **Partial** | Web 已调用真实 API；API 支持创建、按 Organization/Space 列表和幂等重放 | 服务端解析 Expert/Environment revision、首条 Message/Turn 原子创建、鉴权与分页 |
+| PostgreSQL 持久化 | **Implemented (limited)** | 配置 `DATABASE_URL` 时持久化 Session 和幂等记录；未配置的开发模式使用内存 | 备份/恢复、数据库高可用、tenant 隔离、容量与迁移回滚演练 |
+| Expert、Environment、Automation、Files、Approval | **Prototype** | 界面和本地控制面可演示，没有完整服务端权威模型 | 实现 API、不可变 revision、RBAC、审计和失败恢复 |
+| Agent 执行 | **Target** | 未实现真实模型、队列、沙箱、Tool Broker 或流式事件 | 执行面隔离、队列/租约、策略校验、幂等工具调用和实时恢复 |
+| 安全与合规 | **Target** | 生产配置会强制数据库与 CORS，但尚无用户身份、RBAC、Secret 管理与 append-only audit | 完成 [数据模型、权限与 Session 生命周期](./data-model-permissions-session-lifecycle.md) 和 [生产架构基线](./production-architecture.md) 的 P0 门槛 |
+
+结论：当前版本是“可验证的全栈纵向切片 + 完整原型”，不是可公网暴露或承载客户数据的生产版。
 
 ## 4. 用户与权限角色
 
@@ -256,10 +282,10 @@ Organization
 
 ### 9.1 目标状态模型
 
-- Session lifecycle：`active | completed | failed | cancelled`；`archived` 是独立属性，`visibility` 为 `private | space`。
-- Run Attempt：`queued | running | waiting_for_input | succeeded | failed | cancelled`；Retry 新建 Attempt。
-- Message：`draft | queued | sending | accepted | failed | cancelled`。
-- Tool Call：`requested | awaiting_permission | running | succeeded | failed | cancelled`。
+- Session lifecycle：`draft | queued | active | waiting | paused | completed | failed | canceled`；`archivedAt` 是独立属性，`visibility` 为 `private | space`。
+- Run Attempt：`queued | running | waiting_for_input | succeeded | failed | canceled`；Retry 新建 Attempt。
+- Message：`draft | queued | sending | accepted | failed | canceled`。
+- Tool Call：`requested | awaiting_permission | running | succeeded | failed | canceled`。
 - Expert：`draft | published | disabled | archived`，并带 `managed_template | custom | built_in` 类型。
 - Environment：`provisioning | ready | failed | disabled`，Provisioning 保留阶段与错误详情。
 - Trigger：`disabled | enabled | degraded`；Event：`matched | unmatched | ignored | duplicate`。
@@ -305,7 +331,9 @@ Organization
 
 ## 12. 产品级完成标准
 
-本阶段只有同时满足以下条件才可称为“完整原型”：
+### 12.1 完整原型
+
+只有同时满足以下条件才可称为“完整原型”：
 
 1. P0 每条需求有自动化测试或记录在册的人工视觉用例，且通过。
 2. Home → Session → 消息队列 → Artifact/Files/Worker → 恢复会话的主路径无死路。
@@ -315,6 +343,20 @@ Organization
 6. `pnpm check` 通过；关键路径无 P0/P1 无障碍、布局或数据一致性缺陷。
 7. 所有后端模拟点有明确标签、确定性结果和未来接口契约，不伪造真实外部成功。
 
+### 12.2 生产发布（GA）
+
+对客户开放前必须同时满足：
+
+1. 不存在未鉴权的领域 API；Organization/Space/Private Session 隔离有跨 tenant 集成测试和第三方安全复核证据。
+2. Session 创建、首条 Message/Turn、Command、Outbox 和幂等响应在同一事务中提交；并发重放不产生重复外部副作用。
+3. 已上线备份、恢复、回滚、密钥轮换、依赖降级和重大故障处置 Runbook，并完成预发环境演练。
+4. 生产 SLO、告警、分布式追踪和脱敏审计可用；无 Secret、prompt 正文或附件内容进入默认日志。
+5. 关键旅程有浏览器 E2E、API 契约、PostgreSQL 集成、权限矩阵和恢复测试；所有 P0/P1 缺陷关闭。
+6. 数据处理、保留/删除、客户导出、支持访问和子处理商边界已经法务/安全确认，且产品界面与政策一致。
+7. 发布候选版完成容量、压力、渗透、可访问性、双语与主题视觉验收，由产品、设计、工程、安全共同签署 Go/No-Go。
+
+任一条未满足时，版本只能进入内部、设计合作伙伴或明确隔离的测试环境，不能使用“生产可用”标记。
+
 ## 13. 待确认事项
 
 1. 官方 UI 是否存在独立 Home 侧栏文字项；当前决策是不添加，仅保留品牌、根路由和命令面板入口。
@@ -322,3 +364,4 @@ Organization
 3. Session 的自动归档默认值、Pinned 文件夹上限和 Artifact 搜索范围。
 4. Managed Template 的可追加字段和上游更新冲突解决方式。
 5. Relay Approvals、Files 写入治理和高级 Environment Policy 的商业版本边界。
+6. 二级搜索结果曾出现“Open Sessions”描述，但 2026-07-12 直接核验时该页返回 404，且当前官方 `llms.txt`、`sessions-overview.md` 和 `getting-started.md` 均将 Session 定义为与 Expert 的对话。在新的一手证据出现前，Relay 保持 `expertId` 必填，不将 Open Session 宣称为现行 Cosmos 能力。

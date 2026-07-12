@@ -34,6 +34,7 @@ type ValidationIssue = {
 
 export type CreateAppOptions = {
   sessionRepository?: SessionRepository
+  readinessCheck?: () => Promise<void>
   logger?: FastifyServerOptions['logger']
   corsOrigin?: boolean | string
   bodyLimit?: number
@@ -134,6 +135,19 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   })
 
   app.get('/api/health', async () => ({ status: 'ok' as const }))
+
+  app.get('/api/ready', async (request, reply) => {
+    try {
+      await options.readinessCheck?.()
+      return { status: 'ready' as const }
+    } catch {
+      return sendApiError(reply, 503, request, {
+        code: 'DEPENDENCY_UNAVAILABLE',
+        message: 'A required service is unavailable.',
+        retryable: true,
+      })
+    }
+  })
 
   app.get<{ Params: SpaceParams }>('/api/v1/organizations/:organizationId/spaces/:spaceId/sessions', async (request, reply) => {
     const organizationId = parseSpaceId(request.params.organizationId)

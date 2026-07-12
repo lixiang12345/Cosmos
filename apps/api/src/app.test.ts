@@ -37,6 +37,20 @@ describe('Relay API', () => {
     expect(response.json()).toEqual({ status: 'ok' })
   })
 
+  it('reports dependency readiness without changing the liveness signal', async () => {
+    const app = createApp({ readinessCheck: async () => { throw new Error('database unavailable') } })
+    openApps.push(app)
+
+    const health = await app.inject({ method: 'GET', url: '/api/health' })
+    const readiness = await app.inject({ method: 'GET', url: '/api/ready' })
+
+    expect(health.statusCode).toBe(200)
+    expect(readiness.statusCode).toBe(503)
+    expect(ApiErrorSchema.parse(readiness.json())).toMatchObject({
+      code: 'DEPENDENCY_UNAVAILABLE', retryable: true,
+    })
+  })
+
   it('creates a Session with defaults from the shared contract', async () => {
     const repository = new InMemorySessionRepository({
       createId: () => 'session-1',

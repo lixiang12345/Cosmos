@@ -1,7 +1,7 @@
 # Relay 前端工程与交互需求
 
 > 文档状态：研发基线（Draft for implementation）  
-> 版本：1.0  
+> 版本：1.1
 > 日期：2026-07-12  
 > 上游产品合同：[product-requirements.md](./product-requirements.md)  
 > 证据基线：[cosmos-evidence-matrix.md](./cosmos-evidence-matrix.md)
@@ -31,6 +31,19 @@
 - 同一动作只有一个业务 handler；Home、Sidebar、Sessions 和 Cmd+K 共用 Session launcher/controller。
 - 异步写操作必须有 idle/submitting/succeeded/failed 状态和幂等标识。
 - 先实现明确需求，不提前引入状态框架或设计系统依赖；出现跨三个以上页面的真实重复后再抽象。
+
+### 2.2 当前实现边界
+
+| 范围 | 当前事实 | 状态 | 生产缺口 |
+| --- | --- | --- | --- |
+| Session 列表与创建 | `listSessions` 和 `createSession` 通过共享 Zod 契约调用 `/api/v1` | **Partial** | 列表无服务端分页/过滤，无鉴权；详情、消息和生命周期命令未接 API |
+| 创建失败恢复 | Home 和 Dialog 等待 API 确认，失败保留输入，同一草稿重试复用幂等 key | **Implemented** | 幂等 key 仅存在内存；页面刷新后的安全恢复尚未实现 |
+| Session 视图模型 | 服务端 Session DTO 被适配为旧 `Run`，并与 `relay.sessions` localStorage 合并 | **Partial** | 本地数据仍可驱动归档/删除/重命名等伪写入；必须以服务端版本为权威 |
+| Experts/控制面 | 页面、seed 和 localStorage repository 可演示 | **Prototype** | 无服务端 revision、权限、审计或真实外部连接 |
+| Run 工作台 | 阶段、事件、Diff、Terminal、Approval 为确定性演示 | **Prototype** | 无 Turn/Attempt/ToolCall/SSE 权威数据；不得向客户表述为真实 Agent 执行 |
+| 身份与权限 | 当前固定 Organization，Space 主要来自本地控制面 | **Target** | 没有登录、token refresh、401/403 恢复、permission predicate 或 tenant 数据隔离 |
+
+前端显示一个功能不等于该功能已实现。除 Session 创建/列表明确接入 API 的部分外，当前控制面默认按 Prototype/Simulation 处理。
 
 ## 3. 路由与页面合同
 
@@ -219,6 +232,14 @@ AppShell
 - 列表接口支持 cursor/page、filter、sort；实时事件包含 entity ID 和 monotonic sequence/version。
 - UI 仅在可安全回滚时乐观更新；创建 Session、审批、Trigger 启用和 Space 迁移必须等待服务端确认。
 
+### 7.4 服务端权威与离线投影
+
+- 服务端 ID、scope、visibility、status、version 和 timestamp 为权威值；前端不得在写入成功后重新推导它们。
+- localStorage 只能保存主题、语言、侧栏、Pin 等账户 UI 偏好，不能作为 Session、Expert、Environment、Approval 或权限的最终数据源。
+- 如需离线缓存，必须使用包含 schema version、actor ID、organization ID、space ID 和 server version 的独立存储；退出登录和切换 Organization 时清除敏感投影。
+- 对领域写入不做“本地成功、后台同步”；可安全乐观更新的偏好类操作也必须在后端拒绝时回滚。
+- 后台刷新保留上次有权数据时，必须同时标记 stale；401/403 后不得继续显示已失效的私密内容。
+
 ## 8. 视觉系统
 
 ### 8.1 设计方向
@@ -330,3 +351,18 @@ AppShell
 - 视觉截图由产品/设计确认；无重叠、截断、布局跳动或不可读 tooltip。
 - Simulation 有明确标记；未实现后端能力不伪装成功。
 - 更新迁移说明、测试 fixture 和相关文档；不遗留无 owner 的 TODO。
+
+### 13.4 生产 Web 发布门槛
+
+| ID | 门槛 | 验收证据 |
+| --- | --- | --- |
+| FE-GA01 | 身份会话安全 | OIDC 登录/登出、token 刷新、安全 return path、超时与撤销的 E2E；不在 localStorage 存 access token |
+| FE-GA02 | 权限边界 | 每个受限 route/action 有 allowed/403/revoked 测试；快速 Space 切换不泄漏上一 scope 内容 |
+| FE-GA03 | 真实领域数据 | P0 旅程不以 seed/localStorage 产生成功结果；所有 Simulation 入口在生产 build 禁用或持续可识别 |
+| FE-GA04 | 错误与恢复 | 断网、5xx、429、超时、契约错误、版本冲突和 SSE 重连有自动化用例；用户输入不丢失 |
+| FE-GA05 | 安全渲染 | Markdown、Tool output、Diff、Event payload、URL 和附件预览经过恶意 fixture 测试；CSP 无高风险例外 |
+| FE-GA06 | 性能 | 目标客户数据量下 Core Web Vitals 按 p75 验收；Sessions/事件/文件长列表无无界 DOM 增长 |
+| FE-GA07 | 可访问性与视觉 | WCAG 2.2 AA 自动 + 人工验收；Light/Dark、中/英、5 视口的核心页面无 P0/P1 视觉回归 |
+| FE-GA08 | 观测与隐私 | 前端错误和旅程指标含 release/request ID；采集 allowlist 经隐私审查，不上报 prompt、Secret、附件和私密 payload |
+
+生产发布还必须同时满足 [产品 GA 门槛](./product-requirements.md#122-生产发布ga)、[生产架构基线](./production-architecture.md) 和 [数据/权限/Session 生命周期](./data-model-permissions-session-lifecycle.md)。

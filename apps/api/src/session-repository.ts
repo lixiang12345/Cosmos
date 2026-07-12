@@ -35,6 +35,34 @@ export type InMemorySessionRepositoryOptions = {
   now?: () => Date
 }
 
+export function createSessionDto(
+  record: CreateSessionRecord,
+  options: { id?: string; timestamp?: string } = {},
+): SessionDto {
+  const timestamp = options.timestamp ?? new Date().toISOString()
+  return SessionDtoSchema.parse({
+    id: options.id ?? randomUUID(),
+    organizationId: record.organizationId,
+    spaceId: record.spaceId,
+    title: record.request.title,
+    summary: record.request.message.content,
+    expertId: record.request.expertId,
+    expertName: record.request.expertName,
+    expertVersion: record.request.expertVersion,
+    environmentId: record.request.environmentId,
+    repository: record.request.repository,
+    baseBranch: record.request.baseBranch,
+    visibility: record.request.visibility,
+    status: record.request.start ? 'active' : 'draft',
+    attachments: record.request.message.attachments,
+    source: 'manual',
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    lastActivityAt: timestamp,
+    version: 1,
+  })
+}
+
 function cloneSession(session: SessionDto): SessionDto {
   return { ...session, attachments: [...session.attachments] }
 }
@@ -78,27 +106,9 @@ export class InMemorySessionRepository implements SessionRepository {
       return { session: cloneSession(existing.session), replayed: true }
     }
 
-    const timestamp = this.now().toISOString()
-    const session = SessionDtoSchema.parse({
+    const session = createSessionDto(record, {
       id: this.createId(),
-      organizationId: record.organizationId,
-      spaceId: record.spaceId,
-      title: record.request.title,
-      summary: record.request.message.content,
-      expertId: record.request.expertId,
-      expertName: record.request.expertName,
-      expertVersion: record.request.expertVersion,
-      environmentId: record.request.environmentId,
-      repository: record.request.repository,
-      baseBranch: record.request.baseBranch,
-      visibility: record.request.visibility,
-      status: record.request.start ? 'active' : 'draft',
-      attachments: record.request.message.attachments,
-      source: 'manual',
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      lastActivityAt: timestamp,
-      version: 1,
+      timestamp: this.now().toISOString(),
     })
 
     const key = spaceKey(record.organizationId, record.spaceId)
