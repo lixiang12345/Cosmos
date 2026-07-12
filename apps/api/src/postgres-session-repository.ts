@@ -38,6 +38,18 @@ function hash(value: string) {
   return createHash('sha256').update(value).digest('hex')
 }
 
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  if (value !== null && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, child]) => child !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, child]) => `${JSON.stringify(key)}:${canonicalJson(child)}`)
+    return `{${entries.join(',')}}`
+  }
+  return JSON.stringify(value) ?? 'null'
+}
+
 function timestamp(value: Date | string) {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString()
 }
@@ -116,7 +128,7 @@ export class PostgresSessionRepository implements SessionRepository {
 
   private async createInTransaction(client: PoolClient, record: CreateSessionRecord): Promise<CreateSessionResult> {
     const keyHash = hash(record.idempotencyKey)
-    const requestHash = hash(JSON.stringify(record.request))
+    const requestHash = hash(canonicalJson(record.request))
     await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
       JSON.stringify([record.organizationId, record.spaceId, keyHash]),
     ])

@@ -56,6 +56,35 @@ describeWithDatabase('PostgresSessionRepository', () => {
     expect(new Set(results.map((result) => result.session.id)).size).toBe(1)
     expect(results.filter((result) => result.replayed)).toHaveLength(5)
     await expect(repository.listBySpace('relay', 'space-platform')).resolves.toHaveLength(1)
+
+    const persistedKeys = await pool.query<{
+      idempotency_key_hash: string
+    }>(`
+      SELECT idempotency_key_hash
+      FROM relay_idempotency_records
+      WHERE organization_id = $1 AND space_id = $2
+    `, [record.organizationId, record.spaceId])
+    expect(persistedKeys.rows).toHaveLength(1)
+    expect(persistedKeys.rows[0].idempotency_key_hash).toMatch(/^[a-f0-9]{64}$/)
+    expect(persistedKeys.rows[0].idempotency_key_hash).not.toBe(record.idempotencyKey)
+  })
+
+  it('orders Sessions by most recent activity', async () => {
+    let now = new Date('2026-07-12T12:00:00.000Z')
+    const repository = new PostgresSessionRepository(pool, { now: () => now })
+    const first = await repository.create({
+      organizationId: 'relay', spaceId: 'space-ordering', idempotencyKey: 'ordering-1', request,
+    })
+
+    now = new Date('2026-07-12T12:01:00.000Z')
+    const second = await repository.create({
+      organizationId: 'relay', spaceId: 'space-ordering', idempotencyKey: 'ordering-2', request,
+    })
+
+    await expect(repository.listBySpace('relay', 'space-ordering')).resolves.toEqual([
+      second.session,
+      first.session,
+    ])
   })
 
   it('rejects a different request that reuses the same idempotency key', async () => {
@@ -67,6 +96,33 @@ describeWithDatabase('PostgresSessionRepository', () => {
     await expect(repository.create({
       ...record, request: { ...request, title: 'A different request' },
     })).rejects.toBeInstanceOf(IdempotencyConflictError)
+  })
+
+  it('replays semantically identical requests regardless of object key order', async () => {
+    const repository = new PostgresSessionRepository(pool)
+    const record = {
+      organizationId: 'relay', spaceId: 'space-canonical', idempotencyKey: 'canonical-command', request,
+    }
+    const first = await repository.create(record)
+    const reorderedRequest: CreateSessionRequest = {
+      message: {
+        attachments: [...request.message.attachments],
+        content: request.message.content,
+      },
+      start: request.start,
+      visibility: request.visibility,
+      baseBranch: request.baseBranch,
+      repository: request.repository,
+      environmentId: request.environmentId,
+      expertVersion: request.expertVersion,
+      expertName: request.expertName,
+      expertId: request.expertId,
+      title: request.title,
+    }
+    const replay = await repository.create({ ...record, request: reorderedRequest })
+
+    expect(replay).toEqual({ session: first.session, replayed: true })
+    await expect(repository.listBySpace('relay', 'space-canonical')).resolves.toHaveLength(1)
   })
 
   it('allows a key to create a new Session after its idempotency window expires', async () => {
