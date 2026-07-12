@@ -1,0 +1,3542 @@
+openapi: 3.1.0
+info:
+  title: Relay Agent OS API
+  version: 0.1.0
+  summary: Multi-tenant control-plane and Session API for Relay.
+  description: |
+    Contract for the Relay prototype backend. A Session is a persistent conversation;
+    a Turn is one queued unit of Agent work; an Attempt is one execution of a Turn.
+    Expert and Environment revisions are immutable once used by a Session.
+
+    All timestamps are UTC RFC 3339. All list endpoints use opaque cursor pagination.
+    POST operations that create a resource, enqueue a command, or cause an external
+    side effect require `Idempotency-Key`. PATCH and one-time decisions require
+    `If-Match` where documented.
+  contact:
+    name: Relay Engineering
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+servers:
+  - url: https://api.relay.example/v1
+    description: Production
+  - url: http://127.0.0.1:8787/v1
+    description: Local development
+security:
+  - bearerAuth: []
+tags:
+  - name: Organizations
+    description: Tenant identity, lifecycle, region, and retention policy.
+  - name: Spaces
+    description: Resource boundaries, defaults, membership scope, and migration.
+  - name: Experts
+    description: Stable Expert identities and immutable executable revisions.
+  - name: Environments
+    description: Cloud or daemon execution templates and immutable revisions.
+  - name: Sessions
+    description: Persistent Expert conversations, messages, sharing, and lifecycle commands.
+  - name: Turns
+    description: FIFO units of Agent work and their retry Attempts.
+  - name: Workers
+    description: Delegated child Agent work within a parent Session.
+  - name: ToolCalls
+    description: Redacted, policy-controlled calls to external capabilities.
+  - name: Files
+    description: Read-only browsing of Workspace, User, and Organization Files and versions.
+  - name: Artifacts
+    description: Searchable Session deliverables and external references.
+  - name: Automations
+    description: Management projections over the canonical Triggers stored in Expert revisions.
+  - name: Events
+    description: Immutable external inputs, matching, dispatch, and replay diagnostics.
+  - name: Subscriptions
+    description: Runtime listeners that deliver future Events into an existing Session.
+  - name: Approvals
+    description: Human decisions that gate an exact high-risk ToolCall input.
+
+paths:
+  /organizations/{organizationId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags: [Organizations]
+      operationId: getOrganization
+      summary: Get an organization
+      responses:
+        '200':
+          description: Organization
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Organizations]
+      operationId: updateOrganization
+      summary: Update an organization
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: '#/components/schemas/OrganizationPatch'
+      responses:
+        '200':
+          description: Updated organization
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+
+  /organizations/{organizationId}/spaces:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+    get:
+      tags: [Spaces]
+      operationId: listSpaces
+      summary: List accessible spaces
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Search'
+      responses:
+        '200':
+          description: Space page
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Space'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Spaces]
+      operationId: createSpace
+      summary: Create a space
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SpaceCreate'
+      responses:
+        '201':
+          description: Space created
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Space'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /organizations/{organizationId}/spaces/{spaceId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+    get:
+      tags: [Spaces]
+      operationId: getSpace
+      summary: Get a space
+      responses:
+        '200':
+          description: Space
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Space'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Spaces]
+      operationId: updateSpace
+      summary: Update defaults or metadata for a space
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: '#/components/schemas/SpacePatch'
+      responses:
+        '200':
+          description: Updated space
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Space'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+    delete:
+      tags: [Spaces]
+      operationId: deleteSpace
+      summary: Migrate resources and delete a non-default space
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - name: migrationTargetSpaceId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '202':
+          $ref: '#/components/responses/CommandAccepted'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+
+  /organizations/{organizationId}/spaces/{spaceId}/experts:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+    get:
+      tags: [Experts]
+      operationId: listExperts
+      summary: List Experts
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Search'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/ExpertStatus'
+        - name: kind
+          in: query
+          schema:
+            $ref: '#/components/schemas/ExpertKind'
+      responses:
+        '200':
+          description: Expert page
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Expert'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Experts]
+      operationId: createExpert
+      summary: Create a Custom Expert draft or managed-template customization
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExpertCreate'
+      responses:
+        '201':
+          description: Expert created
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Expert'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /organizations/{organizationId}/spaces/{spaceId}/experts/{expertId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/ExpertId'
+    get:
+      tags: [Experts]
+      operationId: getExpert
+      summary: Get an Expert and its draft/published revision pointers
+      responses:
+        '200':
+          description: Expert
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Expert'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Experts]
+      operationId: updateExpertDraft
+      summary: Update the mutable draft revision
+      description: Managed-template base instructions cannot be changed by this operation.
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: '#/components/schemas/ExpertPatch'
+      responses:
+        '200':
+          description: Updated Expert draft
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Expert'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+    delete:
+      tags: [Experts]
+      operationId: archiveExpert
+      summary: Archive an Expert
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '204':
+          description: Expert archived
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+
+  /organizations/{organizationId}/spaces/{spaceId}/experts/{expertId}/publish:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/ExpertId'
+    post:
+      tags: [Experts]
+      operationId: publishExpert
+      summary: Validate and publish the current draft as an immutable revision
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '201':
+          description: Published revision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpertRevision'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+
+  /organizations/{organizationId}/spaces/{spaceId}/experts/{expertId}/revisions:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/ExpertId'
+    get:
+      tags: [Experts]
+      operationId: listExpertRevisions
+      summary: List immutable Expert revisions
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Expert revision page
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ExpertRevision'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /organizations/{organizationId}/spaces/{spaceId}/environments:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+    get:
+      tags: [Environments]
+      operationId: listEnvironments
+      summary: List Cloud and self-hosted Environments
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Search'
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [cloud, daemon]
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/EnvironmentStatus'
+      responses:
+        '200':
+          description: Environment page
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Environment'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Environments]
+      operationId: createEnvironment
+      summary: Create and provision an Environment
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnvironmentCreate'
+      responses:
+        '202':
+          description: Environment and provisioning command accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [environment, command]
+                properties:
+                  environment:
+                    $ref: '#/components/schemas/Environment'
+                  command:
+                    $ref: '#/components/schemas/Command'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /organizations/{organizationId}/spaces/{spaceId}/environments/{environmentId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/EnvironmentId'
+    get:
+      tags: [Environments]
+      operationId: getEnvironment
+      summary: Get an Environment
+      responses:
+        '200':
+          description: Environment
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Environment'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Environments]
+      operationId: updateEnvironment
+      summary: Create and provision a new immutable Environment revision
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: '#/components/schemas/EnvironmentPatch'
+      responses:
+        '202':
+          description: Update accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Command'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+    delete:
+      tags: [Environments]
+      operationId: deleteEnvironment
+      summary: Schedule deletion of an unreferenced Environment
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202':
+          $ref: '#/components/responses/CommandAccepted'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /organizations/{organizationId}/spaces/{spaceId}/sessions:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+    get:
+      tags: [Sessions]
+      operationId: listSessions
+      summary: List current or archived Sessions visible to the caller
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Search'
+        - name: archived
+          in: query
+          schema:
+            type: boolean
+            default: false
+        - name: status
+          in: query
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/SessionStatus'
+          style: form
+          explode: false
+        - name: expertId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: source
+          in: query
+          schema:
+            type: string
+            enum: [manual, automation, worker_import]
+        - name: visibility
+          in: query
+          schema:
+            $ref: '#/components/schemas/SessionVisibility'
+        - name: updatedAfter
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Session page
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Session'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Sessions]
+      operationId: createSession
+      summary: Create a draft or queued Session from a published Expert
+      description: |
+        `start=true` atomically creates the Session, first user Message and first Turn.
+        The server resolves and fixes the published Expert and Environment revisions.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionCreate'
+      responses:
+        '201':
+          description: Session created
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionCreateResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+
+  /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/SessionId'
+    get:
+      tags: [Sessions]
+      operationId: getSession
+      summary: Get a Session
+      responses:
+        '200':
+          description: Session
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Sessions]
+      operationId: updateSession
+      summary: Rename, pin, or change allowed Session metadata
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: '#/components/schemas/SessionPatch'
+      responses:
+        '200':
+          description: Updated Session
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+
+  /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/start:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/SessionId'
+    post:
+      tags: [Sessions]
+      operationId: startSession
+      summary: Start a draft Session with its first message
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MessageCreate'
+      responses:
+        '202':
+          description: First Turn queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TurnCommandResult'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+
+  /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/messages:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/SessionId'
+    get:
+      tags: [Sessions]
+      operationId: listSessionMessages
+      summary: List Session messages in timeline order
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Message page
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Message'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [Sessions]
+      operationId: sendSessionMessage
+      summary: Send or queue a message and create the next Turn
+      description: If an Agent Turn is active, the new Turn is appended to the Session FIFO queue.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MessageCreate'
+      responses:
+        '202':
+          description: Message accepted and Turn queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TurnCommandResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+
+  /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/pause:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/SessionId'
+    post:
+      tags: [Sessions]
+      operationId: pauseSession
+      summary: Pause a Session at the next safe point
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '202':
+          $ref: '#/components/responses/CommandAccepted'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/resume:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/SessionId'
+    post:
+      tags: [Sessions]
+      operationId: resumeSession
+      summary: Resume a paused Session without replaying completed ToolCalls
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '202':
+          $ref: '#/components/responses/CommandAccepted'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/SessionId'
+    post:
+      tags: [Sessions]
+      operationId: cancelSession
+      summary: Cancel active and queued work in a Session
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  maxLength: 1000
+      responses:
+        '202':
+          $ref: '#/components/responses/CommandAccepted'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/archive:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/SessionId'
+    post:
+      tags: [Sessions]
+      operationId: archiveSession
+      summary: Archive a Session without deleting its content
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Archived Session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/restore:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/SessionId'
+    post:
+      tags: [Sessions]
+      operationId: restoreSession
+      summary: Restore an archived Session
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Restored Session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/shares:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/SessionId'
+    get:
+      tags: [Sessions]
+      operationId: listSessionShares
+      summary: List explicit Session share grants
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Share grants
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ShareGrant'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [Sessions]
+      operationId: shareSession
+      summary: Grant a user or group access to a Session
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShareGrantCreate'
+      responses:
+        '201':
+          description: Share grant created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareGrant'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/shares/{shareId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/SessionId'
+      - name: shareId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      tags: [Sessions]
+      operationId: revokeSessionShare
+      summary: Revoke a Session share grant
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: Share revoked
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/events:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/SessionId'
+    get:
+      tags: [Sessions]
+      operationId: streamSessionEvents
+      summary: Stream ordered Session events
+      description: |
+        Server-Sent Events. Reconnect with `Last-Event-ID`. Delivery is at least once;
+        clients deduplicate by eventId and apply by monotonically increasing sequence.
+      parameters:
+        - name: Last-Event-ID
+          in: header
+          required: false
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+      responses:
+        '200':
+          description: SSE event stream
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-cache
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                event:
+                  value: |-
+                    id: 42
+                    event: turn.started
+                    data: {"eventId":"019...","sequence":42,"occurredAt":"2026-07-12T08:00:00Z","resourceType":"turn","resourceId":"019...","payload":{}}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/turns:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/SessionId'
+    get:
+      tags: [Turns]
+      operationId: listSessionTurns
+      summary: List Turns and their current Attempt
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Turn page
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Turn'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/turns/{turnId}/retry:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/TurnId'
+    post:
+      tags: [Turns]
+      operationId: retryTurn
+      summary: Append and enqueue a new Attempt for a failed Turn
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '202':
+          description: New Attempt queued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [attempt, command]
+                properties:
+                  attempt:
+                    $ref: '#/components/schemas/Attempt'
+                  command:
+                    $ref: '#/components/schemas/Command'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/workers:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/SessionId'
+    get:
+      tags: [Workers]
+      operationId: listSessionWorkers
+      summary: List the Session Worker tree
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Worker page
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Worker'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/tool-calls:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/SessionId'
+    get:
+      tags: [ToolCalls]
+      operationId: listSessionToolCalls
+      summary: List redacted ToolCall metadata
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: turnId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/ToolCallStatus'
+      responses:
+        '200':
+          description: ToolCall page
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ToolCall'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /organizations/{organizationId}/spaces/{spaceId}/files:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+    get:
+      tags: [Files]
+      operationId: listFiles
+      summary: Browse Workspace, User, or Organization Files
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: scope
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/FileScope'
+        - name: sessionId
+          in: query
+          description: Required for workspace scope.
+          schema:
+            type: string
+            format: uuid
+        - name: ownerUserId
+          in: query
+          description: Defaults to the caller for user scope; privileged callers may specify another user.
+          schema:
+            type: string
+            format: uuid
+        - name: prefix
+          in: query
+          schema:
+            type: string
+            maxLength: 1024
+        - $ref: '#/components/parameters/Search'
+      responses:
+        '200':
+          description: File page
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/File'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /organizations/{organizationId}/spaces/{spaceId}/files/{fileId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/FileId'
+    get:
+      tags: [Files]
+      operationId: getFile
+      summary: Get File metadata
+      responses:
+        '200':
+          description: File metadata
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/File'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /organizations/{organizationId}/spaces/{spaceId}/files/{fileId}/content:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/FileId'
+    get:
+      tags: [Files]
+      operationId: downloadFileContent
+      summary: Preview or download an authorized File version
+      parameters:
+        - name: version
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: disposition
+          in: query
+          schema:
+            type: string
+            enum: [inline, attachment]
+            default: inline
+      responses:
+        '200':
+          description: File bytes
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /organizations/{organizationId}/spaces/{spaceId}/files/{fileId}/versions:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/FileId'
+    get:
+      tags: [Files]
+      operationId: listFileVersions
+      summary: List immutable File versions
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: File version page
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/FileVersion'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/artifacts:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/SessionId'
+    get:
+      tags: [Artifacts]
+      operationId: listSessionArtifacts
+      summary: List Session Artifacts
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: type
+          in: query
+          schema:
+            $ref: '#/components/schemas/ArtifactType'
+      responses:
+        '200':
+          description: Artifact page
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Artifact'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [Artifacts]
+      operationId: createSessionArtifact
+      summary: Associate a manually supplied Artifact reference with a Session
+      description: This does not mutate the external provider object.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ArtifactCreate'
+      responses:
+        '201':
+          description: Artifact created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Artifact'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/artifacts/{artifactId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/ArtifactId'
+    patch:
+      tags: [Artifacts]
+      operationId: updateSessionArtifact
+      summary: Update Relay metadata for an Artifact reference
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: '#/components/schemas/ArtifactPatch'
+      responses:
+        '200':
+          description: Artifact updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Artifact'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+    delete:
+      tags: [Artifacts]
+      operationId: removeSessionArtifact
+      summary: Remove the association while retaining audit history
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: Artifact association removed
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+
+  /organizations/{organizationId}/spaces/{spaceId}/automations:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+    get:
+      tags: [Automations]
+      operationId: listAutomations
+      summary: List the management projection of Expert Triggers
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Search'
+        - name: expertId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/AutomationStatus'
+      responses:
+        '200':
+          description: Automation page
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Automation'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Automations]
+      operationId: createAutomation
+      summary: Add a paused Trigger to an Expert draft and publish its projection
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutomationCreate'
+      responses:
+        '201':
+          description: Paused Automation created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Automation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /organizations/{organizationId}/spaces/{spaceId}/automations/{automationId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/AutomationId'
+    get:
+      tags: [Automations]
+      operationId: getAutomation
+      summary: Get an Automation projection
+      responses:
+        '200':
+          description: Automation
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Automation'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Automations]
+      operationId: updateAutomation
+      summary: Update the underlying Expert Trigger through a new Expert revision
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: '#/components/schemas/AutomationPatch'
+      responses:
+        '200':
+          description: Updated Automation projection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Automation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+    delete:
+      tags: [Automations]
+      operationId: deleteAutomation
+      summary: Remove the underlying Trigger through a new Expert revision
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: Trigger removed
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /organizations/{organizationId}/spaces/{spaceId}/automations/{automationId}/activate:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/AutomationId'
+    post:
+      tags: [Automations]
+      operationId: activateAutomation
+      summary: Activate a tested Automation
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Active Automation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Automation'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /organizations/{organizationId}/spaces/{spaceId}/automations/{automationId}/pause:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/AutomationId'
+    post:
+      tags: [Automations]
+      operationId: pauseAutomation
+      summary: Pause an Automation
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Paused Automation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Automation'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /organizations/{organizationId}/spaces/{spaceId}/events:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+    get:
+      tags: [Events]
+      operationId: listEvents
+      summary: List redacted inbound Event records
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: source
+          in: query
+          schema:
+            $ref: '#/components/schemas/EventSource'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/EventStatus'
+      responses:
+        '200':
+          description: Event page
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Event'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Events]
+      operationId: ingestTestEvent
+      summary: Inject a signed or development-mode Event
+      description: Production provider webhooks use source-specific credentials and signatures.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventCreate'
+      responses:
+        '202':
+          description: Event persisted for asynchronous matching
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/subscriptions:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/SessionId'
+    get:
+      tags: [Subscriptions]
+      operationId: listSessionSubscriptions
+      summary: List runtime Subscriptions created by the Agent
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Subscription page
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Subscription'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [Subscriptions]
+      operationId: createSessionSubscription
+      summary: Create a Subscription on behalf of an authorized Agent ToolCall
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubscriptionCreate'
+      responses:
+        '201':
+          description: Subscription created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/subscriptions/{subscriptionId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/SubscriptionId'
+    patch:
+      tags: [Subscriptions]
+      operationId: updateSessionSubscription
+      summary: Pause, resume, or change the expiry of a Subscription
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: '#/components/schemas/SubscriptionPatch'
+      responses:
+        '200':
+          description: Updated Subscription
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+    delete:
+      tags: [Subscriptions]
+      operationId: cancelSessionSubscription
+      summary: Cancel a Subscription
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '204':
+          description: Subscription canceled
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+
+  /organizations/{organizationId}/spaces/{spaceId}/approvals:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+    get:
+      tags: [Approvals]
+      operationId: listApprovals
+      summary: List approvals visible or assigned to the caller
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/ApprovalStatus'
+        - name: assignedToMe
+          in: query
+          schema:
+            type: boolean
+        - name: sessionId
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Approval page
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Approval'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /organizations/{organizationId}/spaces/{spaceId}/approvals/{approvalId}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/ApprovalId'
+    get:
+      tags: [Approvals]
+      operationId: getApproval
+      summary: Get an Approval and redacted evidence
+      responses:
+        '200':
+          description: Approval
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Approval'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /organizations/{organizationId}/spaces/{spaceId}/approvals/{approvalId}/decision:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/ApprovalId'
+    post:
+      tags: [Approvals]
+      operationId: decideApproval
+      summary: Atomically decide a pending Approval
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalDecision'
+      responses:
+        '200':
+          description: Decided Approval
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Approval'
+        '409':
+          description: Approval already decided or invalid transition
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    OrganizationId:
+      name: organizationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SpaceId:
+      name: spaceId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ExpertId:
+      name: expertId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    EnvironmentId:
+      name: environmentId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    TurnId:
+      name: turnId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    FileId:
+      name: fileId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ArtifactId:
+      name: artifactId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    AutomationId:
+      name: automationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SubscriptionId:
+      name: subscriptionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ApprovalId:
+      name: approvalId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque, signed cursor returned by the previous page.
+      schema:
+        type: string
+        maxLength: 2048
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 25
+    Search:
+      name: search
+      in: query
+      required: false
+      schema:
+        type: string
+        maxLength: 256
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Unique key scoped to organization, actor, method, and canonical path. Retained
+        for at least 24 hours. Reuse with a different request body returns 409.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+        pattern: '^[\x21-\x7E]+$'
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: ETag from the last successful GET; required for optimistic concurrency.
+      schema:
+        type: string
+        pattern: '^"[1-9][0-9]*"$'
+
+  headers:
+    ETag:
+      description: Quoted integer resource version.
+      schema:
+        type: string
+        example: '"7"'
+    Location:
+      description: Canonical URL of the created resource.
+      schema:
+        type: string
+        format: uri-reference
+    RequestId:
+      description: Correlation ID for logs and support.
+      schema:
+        type: string
+    IdempotencyReplayed:
+      description: True when the server replayed a stored idempotent response.
+      schema:
+        type: boolean
+
+  responses:
+    BadRequest:
+      description: Validation failed
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: Authentication required or token invalid
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Forbidden:
+      description: Permission denied
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: Resource not found or intentionally concealed by authorization
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Conflict:
+      description: Resource conflict, invalid state transition, or idempotency-key reuse
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    PreconditionFailed:
+      description: If-Match does not equal the current resource version
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unprocessable:
+      description: Semantic precondition such as unpublished Expert or unready Environment failed
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    PayloadTooLarge:
+      description: Request or attachment exceeds the configured limit
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    CommandAccepted:
+      description: Durable asynchronous command accepted
+      headers:
+        Idempotency-Replayed:
+          $ref: '#/components/headers/IdempotencyReplayed'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Command'
+
+  schemas:
+    Timestamp:
+      type: string
+      format: date-time
+      examples: ['2026-07-12T08:00:00Z']
+    JsonObject:
+      type: object
+      additionalProperties: true
+      maxProperties: 128
+    ResourceBase:
+      type: object
+      required: [id, organizationId, createdAt, updatedAt, version]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        updatedAt:
+          $ref: '#/components/schemas/Timestamp'
+        version:
+          type: integer
+          minimum: 1
+        metadata:
+          $ref: '#/components/schemas/JsonObject'
+    Page:
+      type: object
+      required: [page]
+      properties:
+        page:
+          type: object
+          required: [hasMore]
+          properties:
+            nextCursor:
+              type: [string, 'null']
+            hasMore:
+              type: boolean
+            projectionUpdatedAt:
+              type: [string, 'null']
+              format: date-time
+    FieldError:
+      type: object
+      required: [reason]
+      properties:
+        field:
+          type: string
+        reason:
+          type: string
+        code:
+          type: string
+    Problem:
+      type: object
+      required: [type, title, status, code, requestId]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        code:
+          type: string
+          enum:
+            - VALIDATION_FAILED
+            - AUTHENTICATION_REQUIRED
+            - PERMISSION_DENIED
+            - RESOURCE_NOT_FOUND
+            - RESOURCE_CONFLICT
+            - PRECONDITION_REQUIRED
+            - VERSION_MISMATCH
+            - INVALID_STATE_TRANSITION
+            - IDEMPOTENCY_KEY_REUSED
+            - RATE_LIMITED
+            - QUOTA_EXCEEDED
+            - APPROVAL_REQUIRED
+            - APPROVAL_ALREADY_DECIDED
+            - ENVIRONMENT_NOT_READY
+            - EXPERT_NOT_PUBLISHED
+            - EVENT_SIGNATURE_INVALID
+            - EVENT_DUPLICATE
+            - PAYLOAD_TOO_LARGE
+            - INTERNAL_ERROR
+            - DEPENDENCY_UNAVAILABLE
+        detail:
+          type: string
+        instance:
+          type: string
+          format: uri-reference
+        requestId:
+          type: string
+        retryAfterSeconds:
+          type: integer
+          minimum: 0
+        currentState:
+          type: string
+        allowedActions:
+          type: array
+          items:
+            type: string
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldError'
+    Command:
+      type: object
+      required: [id, type, status, resourceType, resourceId, acceptedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+        status:
+          type: string
+          enum: [accepted, queued, running, succeeded, failed, canceled]
+        resourceType:
+          type: string
+        resourceId:
+          type: string
+          format: uuid
+        queuePosition:
+          type: integer
+          minimum: 0
+        acceptedAt:
+          $ref: '#/components/schemas/Timestamp'
+
+    Organization:
+      allOf:
+        - $ref: '#/components/schemas/ResourceBase'
+        - type: object
+          required: [name, slug, status, defaultSpaceId, region]
+          properties:
+            name:
+              type: string
+            slug:
+              type: string
+            status:
+              type: string
+              enum: [active, suspended, deleting]
+            defaultSpaceId:
+              type: string
+              format: uuid
+            region:
+              type: string
+            retentionPolicyId:
+              type: [string, 'null']
+              format: uuid
+    OrganizationPatch:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        retentionPolicyId:
+          type: [string, 'null']
+          format: uuid
+      additionalProperties: false
+
+    Space:
+      allOf:
+        - $ref: '#/components/schemas/ResourceBase'
+        - type: object
+          required: [name, slug, description, isDefault, status]
+          properties:
+            name:
+              type: string
+            slug:
+              type: string
+            description:
+              type: string
+            isDefault:
+              type: boolean
+            status:
+              type: string
+              enum: [active, migrating, archived]
+            defaultExpertId:
+              type: [string, 'null']
+              format: uuid
+            defaultEnvironmentId:
+              type: [string, 'null']
+              format: uuid
+            settings:
+              $ref: '#/components/schemas/JsonObject'
+    SpaceCreate:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        slug:
+          type: string
+          pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+        description:
+          type: string
+          maxLength: 2000
+        defaultExpertId:
+          type: string
+          format: uuid
+        defaultEnvironmentId:
+          type: string
+          format: uuid
+      additionalProperties: false
+    SpacePatch:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 2000
+        defaultExpertId:
+          type: [string, 'null']
+          format: uuid
+        defaultEnvironmentId:
+          type: [string, 'null']
+          format: uuid
+        settings:
+          $ref: '#/components/schemas/JsonObject'
+      additionalProperties: false
+
+    ExpertStatus:
+      type: string
+      enum: [draft, published, disabled, archived]
+    ExpertKind:
+      type: string
+      enum: [managed_template, custom, built_in]
+    Expert:
+      allOf:
+        - $ref: '#/components/schemas/ResourceBase'
+        - type: object
+          required: [spaceId, kind, name, description, status, visibility]
+          properties:
+            spaceId:
+              type: string
+              format: uuid
+            kind:
+              $ref: '#/components/schemas/ExpertKind'
+            name:
+              type: string
+            description:
+              type: string
+            status:
+              $ref: '#/components/schemas/ExpertStatus'
+            visibility:
+              type: string
+              enum: [private, space]
+            publishedRevisionId:
+              type: [string, 'null']
+              format: uuid
+            draftRevisionId:
+              type: [string, 'null']
+              format: uuid
+            upstreamTemplateId:
+              type: [string, 'null']
+            draftRevision:
+              oneOf:
+                - $ref: '#/components/schemas/ExpertRevision'
+                - type: 'null'
+    ExpertRevision:
+      type: object
+      required:
+        - id
+        - expertId
+        - revision
+        - organizationInstructions
+        - model
+        - capabilities
+        - toolPolicy
+        - launchGuidance
+        - workerDefinitions
+        - triggerDefinitions
+        - approvalPolicy
+        - checksum
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        expertId:
+          type: string
+          format: uuid
+        revision:
+          type: integer
+          minimum: 1
+        baseRevisionId:
+          type: [string, 'null']
+          format: uuid
+        managedInstructions:
+          type: [string, 'null']
+          readOnly: true
+        organizationInstructions:
+          type: string
+          maxLength: 100000
+        model:
+          type: string
+        capabilities:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        toolPolicy:
+          $ref: '#/components/schemas/JsonObject'
+        environmentId:
+          type: [string, 'null']
+          format: uuid
+        environmentRevisionId:
+          type: [string, 'null']
+          format: uuid
+        launchGuidance:
+          type: string
+          maxLength: 10000
+        workerDefinitions:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkerDefinition'
+        triggerDefinitions:
+          type: array
+          items:
+            $ref: '#/components/schemas/TriggerDefinition'
+        approvalPolicy:
+          $ref: '#/components/schemas/JsonObject'
+        checksum:
+          type: string
+        publishedAt:
+          type: [string, 'null']
+          format: date-time
+        publishedBy:
+          type: [string, 'null']
+          format: uuid
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+    ExpertCreate:
+      type: object
+      required: [kind, name]
+      properties:
+        kind:
+          type: string
+          enum: [managed_template, custom]
+        upstreamTemplateId:
+          type: string
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 2000
+        visibility:
+          type: string
+          enum: [private, space]
+          default: space
+        draft:
+          $ref: '#/components/schemas/ExpertDraftInput'
+      additionalProperties: false
+    ExpertPatch:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 2000
+        visibility:
+          type: string
+          enum: [private, space]
+        status:
+          type: string
+          enum: [published, disabled]
+        draft:
+          $ref: '#/components/schemas/ExpertDraftInput'
+      additionalProperties: false
+    ExpertDraftInput:
+      type: object
+      properties:
+        organizationInstructions:
+          type: string
+          maxLength: 100000
+        model:
+          type: string
+        capabilities:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        toolPolicy:
+          $ref: '#/components/schemas/JsonObject'
+        environmentId:
+          type: [string, 'null']
+          format: uuid
+        launchGuidance:
+          type: string
+          maxLength: 10000
+        workerDefinitions:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkerDefinition'
+        triggerDefinitions:
+          type: array
+          items:
+            $ref: '#/components/schemas/TriggerDefinition'
+        approvalPolicy:
+          $ref: '#/components/schemas/JsonObject'
+      additionalProperties: false
+    WorkerDefinition:
+      type: object
+      required: [id, name, instructions, concurrency]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        expertId:
+          type: [string, 'null']
+          format: uuid
+        instructions:
+          type: string
+        concurrency:
+          type: integer
+          minimum: 1
+          maximum: 32
+    TriggerDefinition:
+      type: object
+      required: [id, source, eventType, enabled, filter]
+      properties:
+        id:
+          type: string
+        source:
+          $ref: '#/components/schemas/EventSource'
+        eventType:
+          type: string
+        enabled:
+          type: boolean
+        filter:
+          $ref: '#/components/schemas/JsonObject'
+        autoArchive:
+          type: boolean
+
+    EnvironmentStatus:
+      type: string
+      enum: [draft, provisioning, ready, updating, failed, disabled]
+    Environment:
+      allOf:
+        - $ref: '#/components/schemas/ResourceBase'
+        - type: object
+          required: [spaceId, type, name, slug, status]
+          properties:
+            spaceId:
+              type: string
+              format: uuid
+            type:
+              type: string
+              enum: [cloud, daemon]
+            name:
+              type: string
+            slug:
+              type: string
+            status:
+              $ref: '#/components/schemas/EnvironmentStatus'
+            activeRevisionId:
+              type: [string, 'null']
+              format: uuid
+            provisioning:
+              $ref: '#/components/schemas/EnvironmentProvisioning'
+            activeRevision:
+              oneOf:
+                - $ref: '#/components/schemas/EnvironmentRevision'
+                - type: 'null'
+    EnvironmentRevision:
+      type: object
+      required: [id, environmentId, revision, image, repositoryBindings, variableReferences, hooks, networkPolicy, sharing, checksum, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        environmentId:
+          type: string
+          format: uuid
+        revision:
+          type: integer
+          minimum: 1
+        image:
+          type: string
+        repositoryBindings:
+          type: array
+          items:
+            $ref: '#/components/schemas/RepositoryBinding'
+        variableReferences:
+          type: array
+          items:
+            $ref: '#/components/schemas/VariableReference'
+        hooks:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnvironmentHook'
+        networkPolicy:
+          $ref: '#/components/schemas/NetworkPolicy'
+        sharing:
+          type: string
+          enum: [private, space]
+        daemonPoolId:
+          type: [string, 'null']
+          format: uuid
+        enterpriseResourcePolicy:
+          oneOf:
+            - $ref: '#/components/schemas/JsonObject'
+            - type: 'null'
+        checksum:
+          type: string
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+    EnvironmentProvisioning:
+      type: object
+      required: [phase, progress, message, updatedAt]
+      properties:
+        phase:
+          type: string
+          enum: [queued, pulling_image, configuring, ready, failed]
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        message:
+          type: string
+        updatedAt:
+          $ref: '#/components/schemas/Timestamp'
+    EnvironmentCreate:
+      type: object
+      required: [type, name, image]
+      properties:
+        type:
+          type: string
+          enum: [cloud, daemon]
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        slug:
+          type: string
+          pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+        image:
+          type: string
+          minLength: 1
+        repositoryBindings:
+          type: array
+          items:
+            $ref: '#/components/schemas/RepositoryBinding'
+        variableReferences:
+          type: array
+          items:
+            $ref: '#/components/schemas/VariableReference'
+        hooks:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnvironmentHook'
+        networkPolicy:
+          $ref: '#/components/schemas/NetworkPolicy'
+        sharing:
+          type: string
+          enum: [private, space]
+          default: space
+        daemonPoolId:
+          type: string
+          format: uuid
+        enterpriseResourcePolicy:
+          $ref: '#/components/schemas/JsonObject'
+      additionalProperties: false
+    EnvironmentPatch:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        image:
+          type: string
+        repositoryBindings:
+          type: array
+          items:
+            $ref: '#/components/schemas/RepositoryBinding'
+        variableReferences:
+          type: array
+          items:
+            $ref: '#/components/schemas/VariableReference'
+        hooks:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnvironmentHook'
+        networkPolicy:
+          $ref: '#/components/schemas/NetworkPolicy'
+        sharing:
+          type: string
+          enum: [private, space]
+        status:
+          type: string
+          enum: [ready, disabled]
+        enterpriseResourcePolicy:
+          oneOf:
+            - $ref: '#/components/schemas/JsonObject'
+            - type: 'null'
+      additionalProperties: false
+    RepositoryBinding:
+      type: object
+      required: [repositoryId, defaultBranch, mountPath]
+      properties:
+        repositoryId:
+          type: string
+          format: uuid
+        defaultBranch:
+          type: string
+        mountPath:
+          type: string
+        readOnly:
+          type: boolean
+          default: false
+    VariableReference:
+      type: object
+      required: [name, secretId]
+      properties:
+        name:
+          type: string
+          pattern: '^[A-Za-z_][A-Za-z0-9_]*$'
+        secretId:
+          type: string
+          format: uuid
+    EnvironmentHook:
+      type: object
+      required: [phase, command]
+      properties:
+        phase:
+          type: string
+          enum: [setup, start, stop]
+        command:
+          type: string
+          maxLength: 10000
+        timeoutSeconds:
+          type: integer
+          minimum: 1
+          maximum: 3600
+    NetworkPolicy:
+      type: object
+      required: [mode, allowedHosts]
+      properties:
+        mode:
+          type: string
+          enum: [restricted, allowlist, unrestricted]
+        allowedHosts:
+          type: array
+          uniqueItems: true
+          maxItems: 256
+          items:
+            type: string
+
+    SessionStatus:
+      type: string
+      enum: [draft, queued, active, waiting, paused, completed, failed, canceled]
+    SessionVisibility:
+      type: string
+      enum: [private, space]
+    Session:
+      allOf:
+        - $ref: '#/components/schemas/ResourceBase'
+        - type: object
+          required:
+            - spaceId
+            - title
+            - expertId
+            - expertRevisionId
+            - status
+            - visibility
+            - source
+            - lastActivityAt
+          properties:
+            spaceId:
+              type: string
+              format: uuid
+            title:
+              type: string
+            summary:
+              type: string
+            expertId:
+              type: string
+              format: uuid
+            expertRevisionId:
+              type: string
+              format: uuid
+            environmentId:
+              type: [string, 'null']
+              format: uuid
+            environmentRevisionId:
+              type: [string, 'null']
+              format: uuid
+            executionSnapshotId:
+              type: [string, 'null']
+            status:
+              $ref: '#/components/schemas/SessionStatus'
+            waitingReason:
+              type: [string, 'null']
+            visibility:
+              $ref: '#/components/schemas/SessionVisibility'
+            pinnedAt:
+              type: [string, 'null']
+              format: date-time
+            pinFolderId:
+              type: [string, 'null']
+              format: uuid
+            source:
+              type: string
+              enum: [manual, automation, worker_import]
+            sourceEventId:
+              type: [string, 'null']
+              format: uuid
+            automationId:
+              type: [string, 'null']
+              format: uuid
+            activeTurnId:
+              type: [string, 'null']
+              format: uuid
+            startedAt:
+              type: [string, 'null']
+              format: date-time
+            lastActivityAt:
+              $ref: '#/components/schemas/Timestamp'
+            completedAt:
+              type: [string, 'null']
+              format: date-time
+            archivedAt:
+              type: [string, 'null']
+              format: date-time
+            retentionUntil:
+              type: [string, 'null']
+              format: date-time
+            legalHold:
+              type: boolean
+            artifactSummary:
+              type: array
+              items:
+                $ref: '#/components/schemas/Artifact'
+    SessionCreate:
+      type: object
+      required: [expertId, start]
+      properties:
+        expertId:
+          type: string
+          format: uuid
+        title:
+          type: string
+          minLength: 1
+          maxLength: 240
+        visibility:
+          $ref: '#/components/schemas/SessionVisibility'
+        start:
+          type: boolean
+          default: true
+        message:
+          $ref: '#/components/schemas/MessageCreate'
+        advancedOverrides:
+          type: object
+          description: Relay extension; accepted only when the Expert policy allows overrides.
+          properties:
+            repositoryId:
+              type: string
+              format: uuid
+            baseBranch:
+              type: string
+            acceptanceCriteria:
+              type: array
+              items:
+                type: string
+          additionalProperties: false
+      allOf:
+        - if:
+            properties:
+              start:
+                const: true
+            required: [start]
+          then:
+            properties:
+              message:
+                $ref: '#/components/schemas/MessageCreate'
+            required: [message]
+      additionalProperties: false
+    SessionPatch:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 240
+        pinned:
+          type: boolean
+        pinFolderId:
+          type: [string, 'null']
+          format: uuid
+      additionalProperties: false
+    SessionCreateResult:
+      type: object
+      required: [session]
+      properties:
+        session:
+          $ref: '#/components/schemas/Session'
+        message:
+          $ref: '#/components/schemas/Message'
+        turn:
+          $ref: '#/components/schemas/Turn'
+        command:
+          $ref: '#/components/schemas/Command'
+    AttachmentReference:
+      type: object
+      required: [id, kind, name, size]
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [upload, file, artifact, external_link]
+        name:
+          type: string
+        size:
+          type: integer
+          minimum: 0
+        mimeType:
+          type: string
+        url:
+          type: string
+          format: uri
+    MessageCreate:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+          minLength: 1
+          maxLength: 100000
+        attachments:
+          type: array
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/AttachmentReference'
+        enhance:
+          type: boolean
+          default: false
+      additionalProperties: false
+    Message:
+      type: object
+      required: [id, sessionId, sequence, role, content, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          format: uuid
+        turnId:
+          type: [string, 'null']
+          format: uuid
+        sequence:
+          type: integer
+          format: int64
+          minimum: 1
+        role:
+          type: string
+          enum: [user, agent, tool, system, event]
+        actorId:
+          type: [string, 'null']
+          format: uuid
+        content:
+          type: string
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/AttachmentReference'
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+    ShareGrantCreate:
+      type: object
+      required: [principalType, principalId, role]
+      properties:
+        principalType:
+          type: string
+          enum: [user, group]
+        principalId:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [viewer, collaborator]
+        expiresAt:
+          type: [string, 'null']
+          format: date-time
+      additionalProperties: false
+    ShareGrant:
+      type: object
+      required: [id, sessionId, principalType, principalId, role, createdAt, createdBy]
+      properties:
+        id:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          format: uuid
+        principalType:
+          type: string
+          enum: [user, group]
+        principalId:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [viewer, collaborator]
+        expiresAt:
+          type: [string, 'null']
+          format: date-time
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        createdBy:
+          type: string
+          format: uuid
+
+    TurnStatus:
+      type: string
+      enum: [queued, running, waiting_tool, waiting_approval, completed, failed, canceled]
+    Turn:
+      type: object
+      required: [id, sessionId, ordinal, initiatorType, inputMessageId, status, queuedAt, version]
+      properties:
+        id:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          format: uuid
+        ordinal:
+          type: integer
+          minimum: 1
+        initiatorType:
+          type: string
+          enum: [user, event, system]
+        initiatorId:
+          type: [string, 'null']
+        inputMessageId:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/TurnStatus'
+        queuedAt:
+          $ref: '#/components/schemas/Timestamp'
+        startedAt:
+          type: [string, 'null']
+          format: date-time
+        completedAt:
+          type: [string, 'null']
+          format: date-time
+        currentAttempt:
+          oneOf:
+            - $ref: '#/components/schemas/Attempt'
+            - type: 'null'
+        version:
+          type: integer
+          minimum: 1
+    AttemptStatus:
+      type: string
+      enum: [queued, starting, running, waiting, paused, succeeded, failed, canceled]
+    Attempt:
+      type: object
+      required: [id, turnId, number, status, model, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        turnId:
+          type: string
+          format: uuid
+        number:
+          type: integer
+          minimum: 1
+        status:
+          $ref: '#/components/schemas/AttemptStatus'
+        model:
+          type: string
+        runtimeId:
+          type: [string, 'null']
+        failureCode:
+          type: [string, 'null']
+        failureDetail:
+          type: [string, 'null']
+          description: Redacted failure detail.
+        usage:
+          $ref: '#/components/schemas/JsonObject'
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        startedAt:
+          type: [string, 'null']
+          format: date-time
+        finishedAt:
+          type: [string, 'null']
+          format: date-time
+    TurnCommandResult:
+      type: object
+      required: [message, turn, command]
+      properties:
+        message:
+          $ref: '#/components/schemas/Message'
+        turn:
+          $ref: '#/components/schemas/Turn'
+        command:
+          $ref: '#/components/schemas/Command'
+
+    WorkerStatus:
+      type: string
+      enum: [queued, running, waiting, completed, failed, canceled]
+    Worker:
+      type: object
+      required: [id, sessionId, parentTurnId, name, instructions, status, depth, ordinal, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          format: uuid
+        parentTurnId:
+          type: string
+          format: uuid
+        parentWorkerId:
+          type: [string, 'null']
+          format: uuid
+        expertRevisionId:
+          type: [string, 'null']
+          format: uuid
+        name:
+          type: string
+        instructions:
+          type: string
+        status:
+          $ref: '#/components/schemas/WorkerStatus'
+        depth:
+          type: integer
+          minimum: 1
+        ordinal:
+          type: integer
+          minimum: 1
+        resultSummary:
+          type: [string, 'null']
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        completedAt:
+          type: [string, 'null']
+          format: date-time
+
+    ToolCallStatus:
+      type: string
+      enum: [queued, approval_required, running, succeeded, failed, canceled]
+    ToolCall:
+      type: object
+      required: [id, sessionId, turnId, attemptId, toolName, operation, riskLevel, status, inputSummary, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          format: uuid
+        turnId:
+          type: string
+          format: uuid
+        attemptId:
+          type: string
+          format: uuid
+        workerId:
+          type: [string, 'null']
+          format: uuid
+        toolName:
+          type: string
+        operation:
+          type: string
+        riskLevel:
+          type: string
+          enum: [low, medium, high, critical]
+        status:
+          $ref: '#/components/schemas/ToolCallStatus'
+        inputSummary:
+          type: string
+        outputSummary:
+          type: [string, 'null']
+        approvalId:
+          type: [string, 'null']
+          format: uuid
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        startedAt:
+          type: [string, 'null']
+          format: date-time
+        completedAt:
+          type: [string, 'null']
+          format: date-time
+
+    FileScope:
+      type: string
+      enum: [workspace, user, organization]
+    File:
+      allOf:
+        - $ref: '#/components/schemas/ResourceBase'
+        - type: object
+          required: [scope, path, mimeType, size, latestVersionId]
+          properties:
+            spaceId:
+              type: [string, 'null']
+              format: uuid
+            scope:
+              $ref: '#/components/schemas/FileScope'
+            ownerUserId:
+              type: [string, 'null']
+              format: uuid
+            sessionId:
+              type: [string, 'null']
+              format: uuid
+            path:
+              type: string
+            mimeType:
+              type: string
+            size:
+              type: integer
+              format: int64
+              minimum: 0
+            latestVersionId:
+              type: string
+              format: uuid
+            lastWrittenByToolCallId:
+              type: string
+              format: uuid
+            lastWrittenByExpertId:
+              type: string
+              format: uuid
+            archivedAt:
+              type: [string, 'null']
+              format: date-time
+    FileVersion:
+      type: object
+      required: [id, fileId, version, contentHash, size, createdByToolCallId, sourceSessionId, sourceTurnId, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        fileId:
+          type: string
+          format: uuid
+        version:
+          type: integer
+          minimum: 1
+        contentHash:
+          type: string
+        size:
+          type: integer
+          format: int64
+          minimum: 0
+        createdByToolCallId:
+          type: string
+          format: uuid
+        sourceSessionId:
+          type: string
+          format: uuid
+        sourceTurnId:
+          type: string
+          format: uuid
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+
+    ArtifactType:
+      type: string
+      enum: [pull_request, branch, commit, issue, link, test_report, deployment, document]
+    Artifact:
+      allOf:
+        - $ref: '#/components/schemas/ResourceBase'
+        - type: object
+          required: [spaceId, sessionId, type, label, url, status]
+          properties:
+            spaceId:
+              type: string
+              format: uuid
+            sessionId:
+              type: string
+              format: uuid
+            turnId:
+              type: [string, 'null']
+              format: uuid
+            type:
+              $ref: '#/components/schemas/ArtifactType'
+            provider:
+              type: [string, 'null']
+            externalId:
+              type: [string, 'null']
+            label:
+              type: string
+            url:
+              type: string
+              format: uri
+            status:
+              type: string
+            attributes:
+              $ref: '#/components/schemas/JsonObject'
+            createdByToolCallId:
+              type: [string, 'null']
+              format: uuid
+            removedAt:
+              type: [string, 'null']
+              format: date-time
+    ArtifactCreate:
+      type: object
+      required: [type, label, url]
+      properties:
+        turnId:
+          type: string
+          format: uuid
+        type:
+          $ref: '#/components/schemas/ArtifactType'
+        provider:
+          type: string
+        externalId:
+          type: string
+        label:
+          type: string
+          minLength: 1
+          maxLength: 500
+        url:
+          type: string
+          format: uri
+        status:
+          type: string
+        attributes:
+          $ref: '#/components/schemas/JsonObject'
+      additionalProperties: false
+    ArtifactPatch:
+      type: object
+      properties:
+        label:
+          type: string
+          minLength: 1
+          maxLength: 500
+        url:
+          type: string
+          format: uri
+        status:
+          type: string
+        attributes:
+          $ref: '#/components/schemas/JsonObject'
+      additionalProperties: false
+
+    EventSource:
+      type: string
+      enum: [manual, github, slack, jira, pagerduty, linear, schedule, webhook]
+    AutomationStatus:
+      type: string
+      enum: [draft, paused, active, error]
+    Automation:
+      allOf:
+        - $ref: '#/components/schemas/ResourceBase'
+        - type: object
+          required: [spaceId, expertId, expertRevisionId, triggerId, source, eventType, filter, status, autoArchive, matchCount]
+          properties:
+            spaceId:
+              type: string
+              format: uuid
+            expertId:
+              type: string
+              format: uuid
+            expertRevisionId:
+              type: string
+              format: uuid
+            triggerId:
+              type: string
+            source:
+              $ref: '#/components/schemas/EventSource'
+            eventType:
+              type: string
+            filter:
+              $ref: '#/components/schemas/JsonObject'
+            status:
+              $ref: '#/components/schemas/AutomationStatus'
+            autoArchive:
+              type: boolean
+            serviceAccountId:
+              type: string
+              format: uuid
+            lastMatchedAt:
+              type: [string, 'null']
+              format: date-time
+            matchCount:
+              type: integer
+              minimum: 0
+            lastTestedAt:
+              type: [string, 'null']
+              format: date-time
+    AutomationCreate:
+      type: object
+      required: [expertId, source, eventType]
+      properties:
+        expertId:
+          type: string
+          format: uuid
+        source:
+          $ref: '#/components/schemas/EventSource'
+        eventType:
+          type: string
+          minLength: 1
+        filter:
+          $ref: '#/components/schemas/JsonObject'
+        autoArchive:
+          type: boolean
+          default: false
+      additionalProperties: false
+    AutomationPatch:
+      type: object
+      properties:
+        eventType:
+          type: string
+          minLength: 1
+        filter:
+          $ref: '#/components/schemas/JsonObject'
+        autoArchive:
+          type: boolean
+      additionalProperties: false
+
+    EventStatus:
+      type: string
+      enum: [received, matched, ignored, dispatching, dispatched, failed]
+    Event:
+      allOf:
+        - $ref: '#/components/schemas/ResourceBase'
+        - type: object
+          required: [spaceId, source, eventType, externalId, payloadHash, status, receivedAt]
+          properties:
+            spaceId:
+              type: string
+              format: uuid
+            source:
+              $ref: '#/components/schemas/EventSource'
+            eventType:
+              type: string
+            externalId:
+              type: string
+            payloadHash:
+              type: string
+            payloadPreview:
+              $ref: '#/components/schemas/JsonObject'
+            headersPreview:
+              $ref: '#/components/schemas/JsonObject'
+            status:
+              $ref: '#/components/schemas/EventStatus'
+            automationId:
+              type: [string, 'null']
+              format: uuid
+            sessionId:
+              type: [string, 'null']
+              format: uuid
+            receivedAt:
+              $ref: '#/components/schemas/Timestamp'
+            processedAt:
+              type: [string, 'null']
+              format: date-time
+    EventCreate:
+      type: object
+      required: [source, eventType, externalId, payload]
+      properties:
+        source:
+          $ref: '#/components/schemas/EventSource'
+        eventType:
+          type: string
+          minLength: 1
+        externalId:
+          type: string
+          minLength: 1
+          maxLength: 500
+        headers:
+          $ref: '#/components/schemas/JsonObject'
+        payload:
+          $ref: '#/components/schemas/JsonObject'
+      additionalProperties: false
+
+    SubscriptionStatus:
+      type: string
+      enum: [active, paused, expired, canceled]
+    Subscription:
+      allOf:
+        - $ref: '#/components/schemas/ResourceBase'
+        - type: object
+          required: [spaceId, sessionId, createdByToolCallId, source, eventType, filter, status, deliveryCount]
+          properties:
+            spaceId:
+              type: string
+              format: uuid
+            sessionId:
+              type: string
+              format: uuid
+            createdByToolCallId:
+              type: string
+              format: uuid
+            source:
+              $ref: '#/components/schemas/EventSource'
+            eventType:
+              type: string
+            filter:
+              $ref: '#/components/schemas/JsonObject'
+            status:
+              $ref: '#/components/schemas/SubscriptionStatus'
+            expiresAt:
+              type: [string, 'null']
+              format: date-time
+            lastDeliveredAt:
+              type: [string, 'null']
+              format: date-time
+            deliveryCount:
+              type: integer
+              minimum: 0
+    SubscriptionCreate:
+      type: object
+      required: [createdByToolCallId, source, eventType]
+      properties:
+        createdByToolCallId:
+          type: string
+          format: uuid
+        source:
+          $ref: '#/components/schemas/EventSource'
+        eventType:
+          type: string
+        filter:
+          $ref: '#/components/schemas/JsonObject'
+        expiresAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+    SubscriptionPatch:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [active, paused]
+        expiresAt:
+          type: [string, 'null']
+          format: date-time
+      additionalProperties: false
+
+    ApprovalStatus:
+      type: string
+      enum: [pending, approved, changes_requested, rejected, expired, canceled]
+    Approval:
+      allOf:
+        - $ref: '#/components/schemas/ResourceBase'
+        - type: object
+          required:
+            - spaceId
+            - sessionId
+            - turnId
+            - toolCallId
+            - action
+            - riskLevel
+            - reasons
+            - status
+            - requestedBy
+            - expiresAt
+          properties:
+            spaceId:
+              type: string
+              format: uuid
+            sessionId:
+              type: string
+              format: uuid
+            turnId:
+              type: string
+              format: uuid
+            toolCallId:
+              type: string
+              format: uuid
+            action:
+              type: string
+            riskLevel:
+              type: string
+              enum: [low, medium, high, critical]
+            reasons:
+              type: array
+              items:
+                type: string
+            evidence:
+              type: array
+              items:
+                $ref: '#/components/schemas/ApprovalEvidence'
+            status:
+              $ref: '#/components/schemas/ApprovalStatus'
+            requestedBy:
+              type: string
+              format: uuid
+            assignedTo:
+              type: array
+              items:
+                type: string
+                format: uuid
+            expiresAt:
+              $ref: '#/components/schemas/Timestamp'
+            decidedBy:
+              type: [string, 'null']
+              format: uuid
+            decisionNote:
+              type: [string, 'null']
+            decidedAt:
+              type: [string, 'null']
+              format: date-time
+    ApprovalEvidence:
+      type: object
+      required: [type, label, value]
+      properties:
+        type:
+          type: string
+        label:
+          type: string
+        value:
+          type: string
+          description: Redacted evidence or authorized reference.
+    ApprovalDecision:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approved, changes_requested, rejected]
+        note:
+          type: string
+          maxLength: 5000
+      additionalProperties: false
