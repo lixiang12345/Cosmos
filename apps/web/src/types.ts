@@ -116,6 +116,7 @@ export type NewTaskInput = {
   title: string
   description: string
   repo: string
+  repositoryId?: string
   expert: string
   expertId?: string
   expertVersion?: number

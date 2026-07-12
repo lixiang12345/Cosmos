@@ -115,6 +115,7 @@ function AuthProbe() {
       <output data-testid="auth-status">{auth.status}</output>
       <output data-testid="auth-error">{auth.error ?? ''}</output>
       <output data-testid="access-token">{auth.accessToken ?? ''}</output>
+      <output data-testid="credential-version">{auth.credentialVersion}</output>
       <button type="button" onClick={() => { void auth.handleUnauthorized(auth.accessToken) }}>Clear identity</button>
       <button type="button" onClick={() => {
         void getMe({ accessToken: auth.accessToken, onUnauthorized: auth.handleUnauthorized }).catch(() => undefined)
@@ -263,6 +264,7 @@ describe('AuthProvider', () => {
     const user = userEvent.setup()
     renderProvider()
     await waitFor(() => expect(screen.getByTestId('access-token')).toHaveTextContent('token-a'))
+    expect(screen.getByTestId('credential-version')).toHaveTextContent('1')
 
     await user.click(screen.getByRole('button', { name: 'Load profile' }))
     expect(fetchMock).toHaveBeenCalledOnce()
@@ -272,6 +274,7 @@ describe('AuthProvider', () => {
     expect(onLoaded).toBeTypeOf('function')
     act(() => { onLoaded?.(createUser('/sessions', 'token-b') as User) })
     expect(screen.getByTestId('access-token')).toHaveTextContent('token-b')
+    expect(screen.getByTestId('credential-version')).toHaveTextContent('2')
 
     await act(async () => {
       response.resolve(new Response(JSON.stringify({

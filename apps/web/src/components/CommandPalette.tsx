@@ -86,7 +86,7 @@ export function CommandPalette({ open, runs, onClose, onNewTask }: CommandPalett
     detail: `${run.repo} · ${run.expert}`,
     icon: Bot,
     keywords: `${run.title} ${run.repo} ${run.branch} ${run.trigger} ${run.expert}`,
-    action: () => go(`/runs/${run.id}`),
+    action: () => go(`/sessions/${run.id}`),
   })), [go, runs])
 
   const normalizedQuery = query.trim().toLocaleLowerCase()

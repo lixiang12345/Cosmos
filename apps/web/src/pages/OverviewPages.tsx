@@ -93,7 +93,7 @@ export function RunsOverview({ runs, onOpenNavigation, onNewTask }: PageProps) {
               <span>{t('sessions.task')}</span><span>{t('sessions.status')}</span><span>{t('sessions.expert')}</span><span>{t('sessions.progress')}</span><span>{t('sessions.updated')}</span><span />
             </div>
             {runs.map((run) => (
-              <Link to={`/runs/${run.id}`} className="data-table__row runs-table__row" role="row" key={run.id}>
+              <Link to={`/sessions/${run.id}`} className="data-table__row runs-table__row" role="row" key={run.id}>
                 <span className="table-primary"><strong>{run.title}</strong><small>{run.repo}</small></span>
                 <span className="runs-status-cell" data-label={t('sessions.status')}><StatusBadge status={run.status} /></span>
                 <span className="runs-expert-cell" data-label={t('sessions.expert')}>{run.expert}</span>
@@ -233,7 +233,7 @@ export function GovernancePage({ runs, onOpenNavigation }: PageProps) {
         <section className="data-section">
           <SectionTitle eyebrow={t('governance.eyebrow')} title={t('governance.pending')} />
           {pending ? (
-            <Link className="decision-row" to={`/runs/${pending.id}`}>
+            <Link className="decision-row" to={`/sessions/${pending.id}`}>
               <span className="decision-row__risk"><AlertTriangle aria-hidden="true" /></span>
               <div><h3>{pending.approval?.title}</h3><p>{pending.title} · {pending.repo}</p></div>
               <span><small>{t('governance.matchedPolicy')}</small><strong>{t('governance.externalBudget')}</strong></span>

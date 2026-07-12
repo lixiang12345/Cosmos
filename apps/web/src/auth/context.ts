@@ -9,6 +9,7 @@ export type AuthContextValue = {
   displayName?: string
   demoMode: boolean
   accessToken?: string
+  credentialVersion: number
   error?: string
   handleUnauthorized: (failedAccessToken: string | undefined) => Promise<void>
   signIn: () => Promise<void>

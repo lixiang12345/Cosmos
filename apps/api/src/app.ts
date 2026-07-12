@@ -22,8 +22,12 @@ import {
 } from './auth.js'
 import {
   AuthorizationChangedError,
+  EnvironmentNotReadyError,
+  ExpertNotPublishedError,
   IdempotencyConflictError,
   InMemorySessionRepository,
+  SessionConfigurationNotFoundError,
+  SessionConfigurationValidationError,
   canWriteSpace,
   type SessionRepository,
 } from './session-repository.js'
@@ -34,6 +38,10 @@ const SPACE_ID_PATTERN = /^.{1,128}$/u
 type SpaceParams = {
   organizationId: string
   spaceId: string
+}
+
+type SessionParams = SpaceParams & {
+  sessionId: string
 }
 
 type ValidationIssue = {
@@ -75,6 +83,14 @@ function sendApiError(
   return reply.code(statusCode).send(payload)
 }
 
+function sendResourceNotFound(reply: FastifyReply, request: FastifyRequest) {
+  return sendApiError(reply, 404, request, {
+    code: 'RESOURCE_NOT_FOUND',
+    message: 'The requested API resource was not found.',
+    retryable: false,
+  })
+}
+
 function parseSpaceId(spaceId: string) {
   const normalized = spaceId.trim()
   return SPACE_ID_PATTERN.test(normalized) ? normalized : null
@@ -89,6 +105,10 @@ function readIdempotencyKey(request: FastifyRequest) {
 function errorStatusCode(error: unknown) {
   if (typeof error !== 'object' || error === null || !('statusCode' in error)) return undefined
   return typeof error.statusCode === 'number' ? error.statusCode : undefined
+}
+
+function sessionEtag(session: { version: number }) {
+  return `"${session.version}"`
 }
 
 export function createApp(options: CreateAppOptions = {}): FastifyInstance {
@@ -140,6 +160,35 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         code: 'PERMISSION_DENIED',
         message: error.message,
         retryable: false,
+      })
+    }
+
+    if (error instanceof SessionConfigurationNotFoundError) {
+      return sendResourceNotFound(reply, request)
+    }
+
+    if (error instanceof ExpertNotPublishedError) {
+      return sendApiError(reply, 422, request, {
+        code: 'EXPERT_NOT_PUBLISHED',
+        message: error.message,
+        retryable: false,
+      })
+    }
+
+    if (error instanceof EnvironmentNotReadyError) {
+      return sendApiError(reply, 422, request, {
+        code: 'ENVIRONMENT_NOT_READY',
+        message: error.message,
+        retryable: false,
+      })
+    }
+
+    if (error instanceof SessionConfigurationValidationError) {
+      return sendApiError(reply, 422, request, {
+        code: 'VALIDATION_FAILED',
+        message: error.message,
+        retryable: false,
+        fieldErrors: error.fieldErrors,
       })
     }
 
@@ -211,11 +260,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     }
     const access = await sessionRepository.getSpaceAccess(organizationId, spaceId, actor.id)
     if (!access) {
-      sendApiError(reply, 404, request, {
-        code: 'RESOURCE_NOT_FOUND',
-        message: 'The requested API resource was not found.',
-        retryable: false,
-      })
+      sendResourceNotFound(reply, request)
       return null
     }
     return { access, actor, organizationId, spaceId }
@@ -238,6 +283,27 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         projectionUpdatedAt: items[0]?.updatedAt ?? null,
       },
     })
+  })
+
+  app.get<{ Params: SessionParams }>('/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId', async (request, reply) => {
+    const authorization = await authorizeSpace(request, reply, request.params)
+    if (!authorization) return
+    const sessionId = parseSpaceId(request.params.sessionId)
+    if (!sessionId) return sendResourceNotFound(reply, request)
+
+    const candidate = await sessionRepository.getById(
+      authorization.organizationId,
+      authorization.spaceId,
+      sessionId,
+      authorization.actor.id,
+    )
+    if (!candidate) return sendResourceNotFound(reply, request)
+
+    const session = SessionDtoSchema.parse(candidate)
+    reply.header('ETag', sessionEtag(session))
+    reply.header('Cache-Control', 'private, no-store')
+    reply.header('Vary', 'Authorization')
+    return session
   })
 
   app.post<{ Params: SpaceParams }>('/api/v1/organizations/:organizationId/spaces/:spaceId/sessions', async (request, reply) => {
@@ -285,6 +351,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
 
     reply.header('Idempotency-Replayed', String(result.replayed))
     reply.header('Location', `/api/v1/organizations/${authorization.organizationId}/spaces/${authorization.spaceId}/sessions/${session.id}`)
+    reply.header('ETag', sessionEtag(session))
     return reply.code(201).send(CreateSessionResponseSchema.parse({
       session,
       message: result.message,

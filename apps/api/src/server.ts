@@ -28,7 +28,10 @@ const app = createApp({
   corsOrigin: config.corsOrigin,
   sessionRepository: pool
     ? new PostgresSessionRepository(pool)
-    : new InMemorySessionRepository({ actorOrganizations: developmentOrganizations }),
+    : new InMemorySessionRepository({
+      actorOrganizations: developmentOrganizations,
+      allowLegacyDevelopmentConfigurationFallback: config.authentication.mode === 'development',
+    }),
   readinessCheck: pool ? async () => { await pool.query('SELECT 1') } : undefined,
   authenticate,
 })

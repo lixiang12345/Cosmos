@@ -3,6 +3,7 @@ import {
   CreateSessionRequestSchema,
   CreateSessionResponseSchema,
   MeResponseSchema,
+  SessionDtoSchema,
   SessionListResponseSchema,
   type CreateSessionRequestInput,
 } from '@relay/contracts'
@@ -12,6 +13,8 @@ import { createDevelopmentAuthenticator } from './auth.js'
 import {
   AuthorizationChangedError,
   InMemorySessionRepository,
+  SessionConfigurationNotFoundError,
+  type InMemoryExpertCatalogEntry,
   type InMemorySessionRepositoryOptions,
 } from './session-repository.js'
 
@@ -43,10 +46,56 @@ const testActorOrganizations = {
   ],
 }
 
+function catalogEntry(
+  organizationId: string,
+  spaceId: string,
+  overrides: Partial<InMemoryExpertCatalogEntry> = {},
+): InMemoryExpertCatalogEntry {
+  return {
+    organizationId,
+    spaceId,
+    id: 'expert-pr-author',
+    name: 'Authoritative PR Author',
+    status: 'published',
+    publishedRevision: {
+      id: `expert-revision-${spaceId}`,
+      version: 7,
+      status: 'published',
+      environment: {
+        id: `environment-${spaceId}`,
+        status: 'ready',
+        activeRevisionId: `environment-revision-${spaceId}`,
+        revision: {
+          id: `environment-revision-${spaceId}`,
+          status: 'ready',
+          repositories: [{
+            id: `repository-${spaceId}`,
+            repository: spaceId === 'commerce' ? 'commerce/checkout' : 'platform/checkout',
+            baseBranch: 'main',
+            isDefault: true,
+          }, {
+            id: `repository-${spaceId}-secondary`,
+            repository: spaceId === 'commerce' ? 'commerce/secondary' : 'platform/secondary',
+            baseBranch: 'main',
+          }],
+        },
+      },
+    },
+    ...overrides,
+  }
+}
+
+const testAuthoritativeCatalog = [
+  catalogEntry('relay', 'commerce'),
+  catalogEntry('relay', 'platform'),
+  catalogEntry('other', 'platform'),
+]
+
 function testRepository(options: InMemorySessionRepositoryOptions = {}) {
   return new InMemorySessionRepository({
     ...options,
     actorOrganizations: options.actorOrganizations ?? testActorOrganizations,
+    authoritativeCatalog: options.authoritativeCatalog ?? testAuthoritativeCatalog,
   })
 }
 
@@ -183,12 +232,17 @@ describe('Relay API', () => {
       method: 'POST',
       url: '/api/v1/organizations/relay/spaces/platform/sessions',
       headers: { 'idempotency-key': 'create-session-1' },
-      payload: sessionRequest,
+      payload: {
+        title: sessionRequest.title,
+        expertId: sessionRequest.expertId,
+        message: sessionRequest.message,
+      },
     })
     const body = CreateSessionResponseSchema.parse(response.json())
 
     expect(response.statusCode).toBe(201)
     expect(response.headers['idempotency-replayed']).toBe('false')
+    expect(response.headers.etag).toBe('"1"')
     expect(body.session).toMatchObject({
       id: 'session-1',
       organizationId: 'relay',
@@ -196,11 +250,222 @@ describe('Relay API', () => {
       status: 'queued',
       visibility: 'private',
       attachments: [],
+      expertName: 'Authoritative PR Author',
+      repository: 'platform/checkout',
+      baseBranch: 'main',
+      configurationResolutionVersion: 1,
+      expertRevisionId: 'expert-revision-platform',
+      environmentRevisionId: 'environment-revision-platform',
+      repositoryId: 'repository-platform',
     })
     expect(body.message).toMatchObject({ sessionId: 'session-1', sequence: 1, role: 'user' })
     expect(body.turn).toMatchObject({ sessionId: 'session-1', ordinal: 1, status: 'queued' })
     expect(body.command).toMatchObject({ type: 'session.start', status: 'accepted' })
     expect(response.headers.location).toBe('/api/v1/organizations/relay/spaces/platform/sessions/session-1')
+  })
+
+  it('fails closed without an authoritative catalog and ignores forged compatibility metadata', async () => {
+    const failClosed = new InMemorySessionRepository({ actorOrganizations: testActorOrganizations })
+    await expect(failClosed.create({
+      organizationId: 'relay',
+      spaceId: 'platform',
+      actorId: 'user-local-admin',
+      idempotencyKey: 'fail-closed',
+      request: CreateSessionRequestSchema.parse(sessionRequest),
+    })).rejects.toBeInstanceOf(SessionConfigurationNotFoundError)
+
+    const repository = testRepository({ createId: () => crypto.randomUUID() })
+    const response = await testApp(repository).inject({
+      method: 'POST',
+      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      headers: { 'idempotency-key': 'authoritative-resolution' },
+      payload: {
+        ...sessionRequest,
+        expertName: 'Forged Expert',
+        expertVersion: 999,
+        environmentId: 'forged-environment',
+        repository: 'platform/secondary',
+        advancedOverrides: { repositoryId: 'repository-platform' },
+      },
+    })
+    const session = CreateSessionResponseSchema.parse(response.json()).session
+
+    expect(response.statusCode).toBe(201)
+    expect(session).toMatchObject({
+      expertName: 'Authoritative PR Author',
+      expertVersion: 7,
+      environmentId: 'environment-platform',
+      repository: 'platform/checkout',
+      baseBranch: 'main',
+      configurationResolutionVersion: 1,
+      expertRevisionId: 'expert-revision-platform',
+      environmentRevisionId: 'environment-revision-platform',
+      repositoryId: 'repository-platform',
+    })
+  })
+
+  it('marks the explicitly enabled legacy development fallback as non-authoritative', async () => {
+    const repository = new InMemorySessionRepository({
+      actorOrganizations: testActorOrganizations,
+      allowLegacyDevelopmentConfigurationFallback: true,
+      createId: () => crypto.randomUUID(),
+    })
+    const response = await testApp(repository).inject({
+      method: 'POST',
+      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      headers: { 'idempotency-key': 'legacy-development-fallback' },
+      payload: sessionRequest,
+    })
+    const session = CreateSessionResponseSchema.parse(response.json()).session
+
+    expect(response.statusCode).toBe(201)
+    expect(session.configurationResolutionVersion).toBe(0)
+    expect(session).not.toHaveProperty('expertRevisionId')
+    expect(session).not.toHaveProperty('environmentRevisionId')
+    expect(session).not.toHaveProperty('repositoryId')
+  })
+
+  it('maps unavailable authoritative configuration states without creating a Session', async () => {
+    const disabledExpertRepository = testRepository({
+      authoritativeCatalog: [catalogEntry('relay', 'platform', { status: 'disabled' })],
+    })
+    const notReadyEntry = catalogEntry('relay', 'platform')
+    if (!notReadyEntry.publishedRevision) throw new Error('Expected a published test revision.')
+    notReadyEntry.publishedRevision.environment.status = 'disabled'
+    const notReadyRepository = testRepository({ authoritativeCatalog: [notReadyEntry] })
+    const unknownRepository = testRepository()
+
+    const disabledExpert = await testApp(disabledExpertRepository).inject({
+      method: 'POST',
+      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      headers: { 'idempotency-key': 'disabled-expert' },
+      payload: sessionRequest,
+    })
+    const notReadyEnvironment = await testApp(notReadyRepository).inject({
+      method: 'POST',
+      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      headers: { 'idempotency-key': 'not-ready-environment' },
+      payload: sessionRequest,
+    })
+    const unknownExpert = await testApp(unknownRepository).inject({
+      method: 'POST',
+      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      headers: { 'idempotency-key': 'unknown-expert' },
+      payload: { ...sessionRequest, expertId: 'unknown-expert' },
+    })
+
+    expect(disabledExpert.statusCode).toBe(422)
+    expect(ApiErrorSchema.parse(disabledExpert.json()).code).toBe('EXPERT_NOT_PUBLISHED')
+    expect(notReadyEnvironment.statusCode).toBe(422)
+    expect(ApiErrorSchema.parse(notReadyEnvironment.json()).code).toBe('ENVIRONMENT_NOT_READY')
+    expect(unknownExpert.statusCode).toBe(404)
+    expect(ApiErrorSchema.parse(unknownExpert.json()).code).toBe('RESOURCE_NOT_FOUND')
+    await expect(disabledExpertRepository.listBySpace('relay', 'platform', 'user-local-admin')).resolves.toEqual([])
+    await expect(notReadyRepository.listBySpace('relay', 'platform', 'user-local-admin')).resolves.toEqual([])
+  })
+
+  it('conceals a private Expert from another Space member as not found', async () => {
+    const privateExpert = catalogEntry('relay', 'platform', {
+      visibility: 'private',
+      createdBy: 'user-expert-owner',
+    })
+    const app = testApp(testRepository({ authoritativeCatalog: [privateExpert] }))
+    const privateResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      headers: { 'idempotency-key': 'private-expert' },
+      payload: sessionRequest,
+    })
+    const missingResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      headers: { 'idempotency-key': 'missing-expert' },
+      payload: { ...sessionRequest, expertId: 'missing-expert' },
+    })
+
+    expect(privateResponse.statusCode).toBe(404)
+    expect(missingResponse.statusCode).toBe(404)
+    expect(privateResponse.json()).toMatchObject({
+      code: 'RESOURCE_NOT_FOUND', message: missingResponse.json().message,
+    })
+  })
+
+  it('rejects conflicting or forbidden advanced overrides as domain validation errors', async () => {
+    const conflictingBranches = await testApp().inject({
+      method: 'POST',
+      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      headers: { 'idempotency-key': 'conflicting-branches' },
+      payload: {
+        ...sessionRequest,
+        advancedOverrides: { repositoryId: 'repository-platform', baseBranch: 'release' },
+      },
+    })
+    const lockedEntry = catalogEntry('relay', 'platform')
+    if (!lockedEntry.publishedRevision) throw new Error('Expected a published test revision.')
+    lockedEntry.publishedRevision.allowRepositoryOverride = false
+    const forbiddenRepository = await testApp(testRepository({
+      authoritativeCatalog: [lockedEntry],
+    })).inject({
+      method: 'POST',
+      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      headers: { 'idempotency-key': 'forbidden-repository' },
+      payload: {
+        ...sessionRequest,
+        advancedOverrides: { repositoryId: 'repository-platform-secondary' },
+      },
+    })
+    const conflictError = ApiErrorSchema.parse(conflictingBranches.json())
+    const policyError = ApiErrorSchema.parse(forbiddenRepository.json())
+
+    expect(conflictingBranches.statusCode).toBe(422)
+    expect(conflictError.code).toBe('VALIDATION_FAILED')
+    expect(conflictError.fieldErrors?.['advancedOverrides.baseBranch']).toBeDefined()
+    expect(forbiddenRepository.statusCode).toBe(422)
+    expect(policyError.code).toBe('VALIDATION_FAILED')
+    expect(policyError.fieldErrors?.['advancedOverrides.repositoryId']).toBeDefined()
+  })
+
+  it('returns canonical Session detail headers and conceals private Sessions from other members', async () => {
+    const actorOrganizations = {
+      ...testActorOrganizations,
+      'user-space-member': [{
+        id: 'relay', name: 'Relay', role: 'member' as const,
+        spaces: [{ id: 'platform', name: 'Platform', role: 'member' as const }],
+      }],
+    }
+    const repository = testRepository({ actorOrganizations })
+    const created = await repository.create({
+      organizationId: 'relay',
+      spaceId: 'platform',
+      actorId: 'user-local-admin',
+      idempotencyKey: 'private-detail',
+      request: CreateSessionRequestSchema.parse(sessionRequest),
+    })
+    const creatorApp = testApp(repository)
+    const memberApp = createApp({
+      sessionRepository: repository,
+      authenticate: createDevelopmentAuthenticator('user-space-member'),
+    })
+    openApps.push(memberApp)
+    const detailUrl = `/api/v1/organizations/relay/spaces/platform/sessions/${created.session.id}`
+    const detail = await creatorApp.inject({ method: 'GET', url: detailUrl })
+    const hidden = await memberApp.inject({ method: 'GET', url: detailUrl })
+    const missing = await creatorApp.inject({
+      method: 'GET',
+      url: '/api/v1/organizations/relay/spaces/platform/sessions/missing-session',
+    })
+
+    expect(detail.statusCode).toBe(200)
+    expect(SessionDtoSchema.parse(detail.json())).toEqual(created.session)
+    expect(detail.headers.etag).toBe('"1"')
+    expect(detail.headers['cache-control']).toBe('private, no-store')
+    expect(detail.headers.vary).toBe('Authorization')
+    expect(hidden.statusCode).toBe(404)
+    expect(missing.statusCode).toBe(404)
+    expect(hidden.json()).toMatchObject({
+      code: 'RESOURCE_NOT_FOUND',
+      message: missing.json().message,
+    })
   })
 
   it('caps Space write access at the Organization role', async () => {
@@ -286,6 +551,8 @@ describe('Relay API', () => {
     expect(first.statusCode).toBe(201)
     expect(replay.statusCode).toBe(201)
     expect(replay.headers['idempotency-replayed']).toBe('true')
+    expect(first.headers.etag).toBe('"1"')
+    expect(replay.headers.etag).toBe('"1"')
     expect(replay.json()).toEqual(first.json())
     expect(sessions).toHaveLength(1)
 
@@ -305,6 +572,7 @@ describe('Relay API', () => {
     const otherSpace = await app.inject({
       ...request,
       url: '/api/v1/organizations/relay/spaces/commerce/sessions',
+      payload: { ...sessionRequest, repository: 'commerce/checkout' },
     })
 
     expect(otherSpace.statusCode).toBe(201)

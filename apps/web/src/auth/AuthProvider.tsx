@@ -86,13 +86,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [manager, setManager] = useState<UserManager>()
   const [user, setUser] = useState<User | undefined>(undefined)
   const currentAccessToken = useRef<string | undefined>(undefined)
+  const [credentialVersion, setCredentialVersion] = useState(0)
   const [initializationError, setInitializationError] = useState<string>()
   const [status, setStatus] = useState<AuthStatus>(() => (
     config instanceof Error ? 'configuration_error' : config.mode === 'development' ? 'authenticated' : 'loading'
   ))
 
   const updateUser = useCallback((nextUser: User | undefined) => {
-    currentAccessToken.current = nextUser?.access_token
+    const nextAccessToken = nextUser?.access_token
+    if (currentAccessToken.current !== nextAccessToken) {
+      currentAccessToken.current = nextAccessToken
+      setCredentialVersion((version) => version + 1)
+    }
     setUser(nextUser)
   }, [])
 
@@ -225,11 +230,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     displayName,
     demoMode: config instanceof Error ? false : config.demoMode,
     accessToken: user?.access_token,
+    credentialVersion,
     error: config instanceof Error ? config.message : initializationError,
     handleUnauthorized,
     signIn,
     signOut,
-  }), [actorId, config, displayName, handleUnauthorized, initializationError, signIn, signOut, status, user?.access_token])
+  }), [actorId, config, credentialVersion, displayName, handleUnauthorized, initializationError, signIn, signOut, status, user?.access_token])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

@@ -31,7 +31,7 @@ const me: MeResponse = {
 function auth(overrides: Partial<AuthContextValue> = {}): AuthContextValue {
   return {
     status: 'authenticated', mode: 'oidc', actorId: 'user-a', displayName: 'User A',
-    demoMode: false, accessToken: 'access-token',
+    demoMode: false, accessToken: 'access-token', credentialVersion: 1,
     handleUnauthorized: async () => undefined,
     signIn: async () => undefined,
     signOut: async () => undefined,

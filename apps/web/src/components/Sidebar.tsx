@@ -176,16 +176,16 @@ export function Sidebar({ runs, open, collapsed, onClose, onNewTask, onToggleCol
           {pinnedRuns.length ? <div className="sidebar__group sidebar__favorites">
             <div className="sidebar__group-heading"><p className="sidebar__group-label">{copy.pinned}</p><Pin aria-hidden="true" /></div>
             {pinnedRuns.map((run) => {
-              const active = location.pathname === `/runs/${run.id}`
-              return <NavLink key={run.id} to={`/runs/${run.id}`} className={`recent-run${active ? ' recent-run--active' : ''}`} onClick={onClose}><span className="recent-run__title">{run.title}</span><StatusBadge status={run.status} /></NavLink>
+              const active = location.pathname === `/sessions/${run.id}`
+              return <NavLink key={run.id} to={`/sessions/${run.id}`} className={`recent-run${active ? ' recent-run--active' : ''}`} onClick={onClose}><span className="recent-run__title">{run.title}</span><StatusBadge status={run.status} /></NavLink>
             })}
           </div> : null}
 
           <div className="sidebar__group sidebar__recent">
             <div className="sidebar__group-heading"><p className="sidebar__group-label">{copy.recent}</p><History aria-hidden="true" /></div>
             {recentRuns.map((run) => {
-              const active = location.pathname === `/runs/${run.id}`
-              return <NavLink key={run.id} to={`/runs/${run.id}`} className={`recent-run${active ? ' recent-run--active' : ''}`} onClick={onClose}><span className="recent-run__title">{run.title}</span><StatusBadge status={run.status} /></NavLink>
+              const active = location.pathname === `/sessions/${run.id}`
+              return <NavLink key={run.id} to={`/sessions/${run.id}`} className={`recent-run${active ? ' recent-run--active' : ''}`} onClick={onClose}><span className="recent-run__title">{run.title}</span><StatusBadge status={run.status} /></NavLink>
             })}
           </div>
 

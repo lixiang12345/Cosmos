@@ -133,6 +133,7 @@ export function NewTaskDialog({
       title: deriveSessionTitle(value),
       description: value,
       repo: selectedRepository.fullName,
+      repositoryId: selectedRepository.id,
       expert: selectedExpert.name,
       expertId: selectedExpert.id,
       expertVersion: selectedExpert.version,

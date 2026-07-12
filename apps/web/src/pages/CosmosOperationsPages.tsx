@@ -222,7 +222,7 @@ export function CosmosHomePage({
 
   const openSession = (runId: string) => {
     if (onOpenSession) onOpenSession(runId)
-    else window.location.assign(`/runs/${runId}`)
+    else window.location.assign(`/sessions/${runId}`)
   }
 
   return (

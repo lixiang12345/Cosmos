@@ -3,7 +3,15 @@ import { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { runMigrations } from './migrations.js'
 import { PostgresSessionRepository } from './postgres-session-repository.js'
-import { AuthorizationChangedError, IdempotencyConflictError } from './session-repository.js'
+import { seedSessionConfiguration, type SeededSessionConfiguration } from './session-configuration-test-fixture.js'
+import {
+  AuthorizationChangedError,
+  EnvironmentNotReadyError,
+  ExpertNotPublishedError,
+  IdempotencyConflictError,
+  SessionConfigurationNotFoundError,
+  SessionConfigurationValidationError,
+} from './session-repository.js'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 const describeWithDatabase = databaseUrl ? describe : describe.skip
@@ -37,6 +45,7 @@ const request: CreateSessionRequest = {
 
 describeWithDatabase('PostgresSessionRepository', () => {
   const pool = new Pool({ connectionString: databaseUrl })
+  const configurations = new Map<string, SeededSessionConfiguration>()
 
   beforeAll(async () => {
     await runMigrations(pool)
@@ -49,6 +58,9 @@ describeWithDatabase('PostgresSessionRepository', () => {
       ['relay', 'space-conflict'], ['relay', 'space-canonical'], ['relay', 'space-expiry'],
       ['relay', 'space-draft'],
       ['relay', 'space-rollback'],
+      ['relay', 'space-policy'],
+      ['relay', 'space-private-expert'],
+      ['relay', 'space-revision-pin'],
       ['relay', 'space-role-cap'],
       ['relay', 'space-role-recheck'],
       ['other', 'space-commerce'],
@@ -67,12 +79,27 @@ describeWithDatabase('PostgresSessionRepository', () => {
     }
     await pool.query(`
       INSERT INTO relay_organization_memberships (organization_id, actor_id, role)
-      VALUES ('relay', 'user-capped', 'viewer'), ('relay', 'user-recheck', 'member');
+      VALUES
+        ('relay', 'user-capped', 'viewer'),
+        ('relay', 'user-recheck', 'member'),
+        ('relay', 'user-expert-owner', 'member');
       INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
       VALUES
         ('relay', 'space-role-cap', 'user-capped', 'space_manager'),
-        ('relay', 'space-role-recheck', 'user-recheck', 'member');
+        ('relay', 'space-role-recheck', 'user-recheck', 'member'),
+        ('relay', 'space-private-expert', 'user-expert-owner', 'member');
     `)
+    for (const [organizationId, spaceId] of spaces) {
+      const configurationOptions = spaceId === 'space-policy'
+        ? { allowRepositoryOverride: false, allowBaseBranchOverride: false }
+        : spaceId === 'space-private-expert'
+          ? { expertVisibility: 'private' as const, expertCreatedBy: 'user-expert-owner' }
+          : {}
+      configurations.set(
+        `${organizationId}/${spaceId}`,
+        await seedSessionConfiguration(pool, organizationId, spaceId, configurationOptions),
+      )
+    }
   })
 
   afterAll(async () => {
@@ -119,6 +146,231 @@ describeWithDatabase('PostgresSessionRepository', () => {
 
     const reconnectedRepository = new PostgresSessionRepository(pool)
     await expect(reconnectedRepository.listBySpace('relay', 'space-commerce', 'user-local-admin')).resolves.toEqual([created.session])
+    expect(created.session).toMatchObject({
+      expertName: 'Authoritative PR Author',
+      expertVersion: 1,
+      configurationResolutionVersion: 1,
+      expertRevisionId: 'expert-revision-1',
+      environmentId: 'environment-default',
+      environmentRevisionId: 'environment-revision-1',
+      repositoryId: 'repository-default',
+      repository: 'commerce/checkout',
+      baseBranch: 'main',
+    })
+  })
+
+  it('persists only locked server configuration and includes its revision pins in execution payloads', async () => {
+    const repository = new PostgresSessionRepository(pool)
+    const result = await repository.create({
+      organizationId: 'relay',
+      spaceId: 'space-commerce',
+      actorId: 'user-local-admin',
+      idempotencyKey: 'forged-compatibility-fields',
+      request: {
+        ...request,
+        title: 'Authoritative configuration proof',
+        expertName: 'Forged Expert',
+        expertVersion: 999,
+        environmentId: 'forged-environment',
+        repository: 'forged/repository',
+        advancedOverrides: { repositoryId: 'repository-default' },
+      },
+    })
+    expect(result.session).toMatchObject({
+      expertName: 'Authoritative PR Author',
+      expertVersion: 1,
+      environmentId: 'environment-default',
+      repository: 'commerce/checkout',
+      configurationResolutionVersion: 1,
+      expertRevisionId: 'expert-revision-1',
+      environmentRevisionId: 'environment-revision-1',
+      repositoryId: 'repository-default',
+    })
+
+    const payloads = await pool.query<{ command_payload: unknown; outbox_payload: unknown }>(`
+      SELECT command.payload AS command_payload, outbox.payload AS outbox_payload
+      FROM relay_commands command
+      JOIN relay_outbox_events outbox ON outbox.session_id = command.session_id
+      WHERE command.session_id = $1
+    `, [result.session.id])
+    expect(payloads.rows[0].command_payload).toMatchObject({
+      configurationResolutionVersion: 1,
+      expertRevisionId: 'expert-revision-1',
+      environmentRevisionId: 'environment-revision-1',
+      repositoryId: 'repository-default',
+    })
+    expect(payloads.rows[0].outbox_payload).toMatchObject({
+      configurationResolutionVersion: 1,
+      expertRevisionId: 'expert-revision-1',
+      environmentRevisionId: 'environment-revision-1',
+      repositoryId: 'repository-default',
+    })
+  })
+
+  it('conceals unknown repository selectors and rejects forbidden branch overrides', async () => {
+    const repository = new PostgresSessionRepository(pool)
+    const record = {
+      organizationId: 'relay',
+      spaceId: 'space-commerce',
+      actorId: 'user-local-admin',
+      request,
+    }
+
+    await expect(repository.create({
+      ...record,
+      idempotencyKey: 'unknown-repository-selector',
+      request: { ...request, advancedOverrides: { repositoryId: 'repository-unknown' } },
+    })).rejects.toBeInstanceOf(SessionConfigurationNotFoundError)
+    await expect(repository.create({
+      ...record,
+      spaceId: 'space-policy',
+      idempotencyKey: 'forbidden-base-branch',
+      request: { ...request, baseBranch: undefined, advancedOverrides: { baseBranch: 'release' } },
+    })).rejects.toBeInstanceOf(SessionConfigurationValidationError)
+  })
+
+  it('conceals a private Expert from a noncreator before creating idempotency state', async () => {
+    const repository = new PostgresSessionRepository(pool)
+    await expect(repository.create({
+      organizationId: 'relay',
+      spaceId: 'space-private-expert',
+      actorId: 'user-local-admin',
+      idempotencyKey: 'private-expert-concealment',
+      request,
+    })).rejects.toBeInstanceOf(SessionConfigurationNotFoundError)
+
+    const counts = await pool.query<{ sessions: string; idempotency_records: string }>(`
+      SELECT
+        (SELECT count(*) FROM relay_sessions
+          WHERE organization_id = 'relay' AND space_id = 'space-private-expert') AS sessions,
+        (SELECT count(*) FROM relay_idempotency_records
+          WHERE organization_id = 'relay' AND space_id = 'space-private-expert') AS idempotency_records
+    `)
+    expect(counts.rows[0]).toEqual({ sessions: '0', idempotency_records: '0' })
+  })
+
+  it('rolls back when the published Expert or its pinned Environment becomes unavailable', async () => {
+    const repository = new PostgresSessionRepository(pool)
+    await pool.query(`
+      UPDATE relay_experts SET status = 'disabled'
+      WHERE organization_id = 'relay' AND space_id = 'space-role-cap' AND id = 'expert-pr-author'
+    `)
+    try {
+      await expect(repository.create({
+        organizationId: 'relay', spaceId: 'space-role-cap', actorId: 'user-local-admin',
+        idempotencyKey: 'disabled-expert-rollback', request,
+      })).rejects.toBeInstanceOf(ExpertNotPublishedError)
+    } finally {
+      await pool.query(`
+        UPDATE relay_experts SET status = 'published'
+        WHERE organization_id = 'relay' AND space_id = 'space-role-cap' AND id = 'expert-pr-author'
+      `)
+    }
+
+    await pool.query(`
+      UPDATE relay_environments SET status = 'disabled'
+      WHERE organization_id = 'relay' AND space_id = 'space-role-recheck' AND id = 'environment-default'
+    `)
+    try {
+      await expect(repository.create({
+        organizationId: 'relay', spaceId: 'space-role-recheck', actorId: 'user-local-admin',
+        idempotencyKey: 'disabled-environment-rollback', request,
+      })).rejects.toBeInstanceOf(EnvironmentNotReadyError)
+    } finally {
+      await pool.query(`
+        UPDATE relay_environments SET status = 'ready'
+        WHERE organization_id = 'relay' AND space_id = 'space-role-recheck' AND id = 'environment-default'
+      `)
+    }
+
+    const counts = await pool.query<{
+      sessions: string
+      idempotency_records: string
+      idempotency_responses: string
+    }>(`
+      SELECT
+        (SELECT count(*) FROM relay_sessions
+          WHERE organization_id = 'relay' AND space_id IN ('space-role-cap', 'space-role-recheck')) AS sessions,
+        (SELECT count(*) FROM relay_idempotency_records
+          WHERE organization_id = 'relay' AND space_id IN ('space-role-cap', 'space-role-recheck')) AS idempotency_records,
+        (SELECT count(*) FROM relay_idempotency_responses
+          WHERE organization_id = 'relay'
+            AND canonical_path IN (
+              '/v1/organizations/relay/spaces/space-role-cap/sessions',
+              '/v1/organizations/relay/spaces/space-role-recheck/sessions'
+            )) AS idempotency_responses
+    `)
+    expect(counts.rows[0]).toEqual({
+      sessions: '0', idempotency_records: '0', idempotency_responses: '0',
+    })
+  })
+
+  it('replays the original pinned revisions after the Expert publishes a newer configuration', async () => {
+    const organizationId = 'relay'
+    const spaceId = 'space-revision-pin'
+    const configuration = configurations.get(`${organizationId}/${spaceId}`)
+    if (!configuration) throw new Error('Expected an authoritative test configuration.')
+    const repository = new PostgresSessionRepository(pool)
+    const record = {
+      organizationId,
+      spaceId,
+      actorId: 'user-local-admin',
+      idempotencyKey: 'revision-pinning',
+      request,
+    }
+    const first = await repository.create(record)
+
+    await pool.query(`
+      INSERT INTO relay_environment_revisions (
+        organization_id, space_id, environment_id, id, revision, status, created_by
+      ) VALUES ($1, $2, $3, 'environment-revision-2', 2, 'draft', 'system:test-fixture')
+    `, [organizationId, spaceId, configuration.environmentId])
+    await pool.query(`
+      INSERT INTO relay_environment_revision_repositories (
+        organization_id, space_id, environment_id, environment_revision_id,
+        repository_id, repository, base_branch, is_default
+      ) VALUES ($1, $2, $3, 'environment-revision-2', 'repository-v2', $4, 'main', true)
+    `, [organizationId, spaceId, configuration.environmentId, configuration.repository])
+    await pool.query(`
+      UPDATE relay_environment_revisions SET status = 'ready'
+      WHERE organization_id = $1 AND space_id = $2
+        AND environment_id = $3 AND id = 'environment-revision-2'
+    `, [organizationId, spaceId, configuration.environmentId])
+    await pool.query(`
+      UPDATE relay_environments SET active_revision_id = 'environment-revision-2'
+      WHERE organization_id = $1 AND space_id = $2 AND id = $3
+    `, [organizationId, spaceId, configuration.environmentId])
+    await pool.query(`
+      INSERT INTO relay_expert_revisions (
+        organization_id, space_id, expert_id, id, revision, status,
+        environment_id, environment_revision_id, created_by
+      ) VALUES ($1, $2, $3, 'expert-revision-2', 2, 'draft', $4, 'environment-revision-2', 'system:test-fixture')
+    `, [organizationId, spaceId, configuration.expertId, configuration.environmentId])
+    await pool.query(`
+      UPDATE relay_expert_revisions SET status = 'published'
+      WHERE organization_id = $1 AND space_id = $2
+        AND expert_id = $3 AND id = 'expert-revision-2'
+    `, [organizationId, spaceId, configuration.expertId])
+    await pool.query(`
+      UPDATE relay_experts SET published_revision_id = 'expert-revision-2'
+      WHERE organization_id = $1 AND space_id = $2 AND id = $3
+    `, [organizationId, spaceId, configuration.expertId])
+
+    const replay = await repository.create(record)
+    const next = await repository.create({ ...record, idempotencyKey: 'revision-pinning-next' })
+
+    expect(replay).toEqual({ ...first, replayed: true })
+    expect(replay.session).toMatchObject({
+      expertRevisionId: 'expert-revision-1',
+      environmentRevisionId: 'environment-revision-1',
+      repositoryId: 'repository-default',
+    })
+    expect(next.session).toMatchObject({
+      expertVersion: 2,
+      expertRevisionId: 'expert-revision-2',
+      environmentRevisionId: 'environment-revision-2',
+      repositoryId: 'repository-v2',
+    })
   })
 
   it('rechecks membership inside the list query after access is revoked', async () => {

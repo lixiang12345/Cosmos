@@ -6,6 +6,7 @@ import {
   type CreateSessionResponse,
   type MeOrganization,
   type OrganizationRole,
+  type SessionConfigurationResolutionVersion,
   type SessionCommand,
   type SessionDto,
   type SessionMessage,
@@ -31,6 +32,53 @@ export type CreateSessionResult = {
   replayed: boolean
 }
 
+export type ResolvedSessionConfiguration = {
+  configurationResolutionVersion: SessionConfigurationResolutionVersion
+  expertId: string
+  expertName: string
+  expertVersion?: number
+  expertRevisionId?: string
+  environmentId?: string
+  environmentRevisionId?: string
+  repositoryId?: string
+  repository: string
+  baseBranch: string
+}
+
+export type InMemoryRepositoryBinding = {
+  id: string
+  repository: string
+  baseBranch: string
+  isDefault?: boolean
+}
+
+export type InMemoryExpertCatalogEntry = {
+  organizationId: string
+  spaceId: string
+  id: string
+  name: string
+  status: 'draft' | 'published' | 'disabled' | 'archived'
+  visibility?: 'private' | 'space'
+  createdBy?: string
+  publishedRevision?: {
+    id: string
+    version: number
+    status: 'draft' | 'published'
+    allowRepositoryOverride?: boolean
+    allowBaseBranchOverride?: boolean
+    environment: {
+      id: string
+      status: 'draft' | 'provisioning' | 'ready' | 'updating' | 'failed' | 'disabled'
+      activeRevisionId: string
+      revision: {
+        id: string
+        status: 'draft' | 'ready'
+        repositories: readonly InMemoryRepositoryBinding[]
+      }
+    }
+  }
+}
+
 export type SpaceAccess = {
   organizationRole: OrganizationRole
   spaceRole: SpaceRole
@@ -54,37 +102,81 @@ export class AuthorizationChangedError extends Error {
   }
 }
 
+export class SessionConfigurationNotFoundError extends Error {
+  constructor() {
+    super('The selected Session configuration was not found.')
+    this.name = 'SessionConfigurationNotFoundError'
+  }
+}
+
+export class ExpertNotPublishedError extends Error {
+  constructor() {
+    super('The selected Expert does not have an available published revision.')
+    this.name = 'ExpertNotPublishedError'
+  }
+}
+
+export class EnvironmentNotReadyError extends Error {
+  constructor() {
+    super('The selected Expert environment is not ready.')
+    this.name = 'EnvironmentNotReadyError'
+  }
+}
+
+export class SessionConfigurationValidationError extends Error {
+  constructor(
+    message: string,
+    readonly fieldErrors: Record<string, string[]>,
+  ) {
+    super(message)
+    this.name = 'SessionConfigurationValidationError'
+  }
+}
+
 export interface SessionRepository {
   listActorOrganizations(actorId: string): Promise<MeOrganization[]>
   getSpaceAccess(organizationId: string, spaceId: string, actorId: string): Promise<SpaceAccess | null>
   listBySpace(organizationId: string, spaceId: string, actorId: string): Promise<SessionDto[]>
+  getById(organizationId: string, spaceId: string, sessionId: string, actorId: string): Promise<SessionDto | null>
   create(record: CreateSessionRecord): Promise<CreateSessionResult>
 }
 
 export type InMemorySessionRepositoryOptions = {
   seed?: SessionDto[]
   actorOrganizations?: Readonly<Record<string, readonly MeOrganization[]>>
+  authoritativeCatalog?: readonly InMemoryExpertCatalogEntry[]
+  allowLegacyDevelopmentConfigurationFallback?: boolean
+  seedCreatedBy?: Readonly<Record<string, string>>
   createId?: () => string
   now?: () => Date
 }
 
 export function createSessionDto(
   record: CreateSessionRecord,
-  options: { id?: string; timestamp?: string } = {},
+  options: {
+    configuration: ResolvedSessionConfiguration
+    id?: string
+    timestamp?: string
+  },
 ): SessionDto {
   const timestamp = options.timestamp ?? new Date().toISOString()
+  const configuration = options.configuration
   return SessionDtoSchema.parse({
     id: options.id ?? randomUUID(),
     organizationId: record.organizationId,
     spaceId: record.spaceId,
     title: record.request.title,
     summary: record.request.message.content,
-    expertId: record.request.expertId,
-    expertName: record.request.expertName,
-    expertVersion: record.request.expertVersion,
-    environmentId: record.request.environmentId,
-    repository: record.request.repository,
-    baseBranch: record.request.baseBranch,
+    expertId: configuration.expertId,
+    expertName: configuration.expertName,
+    expertVersion: configuration.expertVersion,
+    environmentId: configuration.environmentId,
+    configurationResolutionVersion: configuration.configurationResolutionVersion,
+    expertRevisionId: configuration.expertRevisionId,
+    environmentRevisionId: configuration.environmentRevisionId,
+    repositoryId: configuration.repositoryId,
+    repository: configuration.repository,
+    baseBranch: configuration.baseBranch,
     visibility: record.request.visibility,
     status: record.request.start ? 'queued' : 'draft',
     attachments: record.request.message.attachments,
@@ -141,6 +233,113 @@ function cloneSession(session: SessionDto): SessionDto {
   return { ...session, attachments: [...session.attachments] }
 }
 
+function configurationValidation(field: string, message: string): never {
+  throw new SessionConfigurationValidationError('The Session configuration overrides are invalid.', {
+    [field]: [message],
+  })
+}
+
+export function resolveRepositoryBinding(
+  request: CreateSessionRequest,
+  repositories: readonly InMemoryRepositoryBinding[],
+  policy: { allowRepositoryOverride: boolean; allowBaseBranchOverride: boolean },
+): InMemoryRepositoryBinding {
+  const advancedRepositoryId = request.advancedOverrides?.repositoryId
+  const legacyRepository = request.repository
+  let selected: InMemoryRepositoryBinding | undefined
+
+  if (advancedRepositoryId) {
+    selected = repositories.find((repository) => repository.id === advancedRepositoryId)
+    if (!selected) throw new SessionConfigurationNotFoundError()
+  } else if (legacyRepository) {
+    selected = repositories.find((repository) => repository.repository === legacyRepository)
+  } else {
+    selected = repositories.find((repository) => repository.isDefault)
+  }
+
+  if (!selected) throw new SessionConfigurationNotFoundError()
+  if (!policy.allowRepositoryOverride && !selected.isDefault) {
+    configurationValidation(
+      advancedRepositoryId ? 'advancedOverrides.repositoryId' : 'repository',
+      'This Expert revision only allows its default repository binding.',
+    )
+  }
+
+  const advancedBaseBranch = request.advancedOverrides?.baseBranch
+  if (advancedBaseBranch && request.baseBranch && advancedBaseBranch !== request.baseBranch) {
+    configurationValidation('advancedOverrides.baseBranch', 'The advanced and legacy base branch selections conflict.')
+  }
+  const selectedBaseBranch = advancedBaseBranch ?? request.baseBranch
+  if (!policy.allowBaseBranchOverride && selectedBaseBranch && selectedBaseBranch !== selected.baseBranch) {
+    configurationValidation(
+      advancedBaseBranch ? 'advancedOverrides.baseBranch' : 'baseBranch',
+      'This Expert revision does not allow a base branch override.',
+    )
+  }
+
+  return { ...selected, baseBranch: selectedBaseBranch ?? selected.baseBranch }
+}
+
+export function resolveInMemorySessionConfiguration(
+  record: CreateSessionRecord,
+  catalog: readonly InMemoryExpertCatalogEntry[],
+): ResolvedSessionConfiguration {
+  const expert = catalog.find((candidate) =>
+    candidate.organizationId === record.organizationId
+    && candidate.spaceId === record.spaceId
+    && candidate.id === record.request.expertId)
+  if (!expert) throw new SessionConfigurationNotFoundError()
+  if ((expert.visibility ?? 'space') === 'private' && expert.createdBy !== record.actorId) {
+    throw new SessionConfigurationNotFoundError()
+  }
+
+  const revision = expert.publishedRevision
+  if (expert.status !== 'published' || !revision || revision.status !== 'published') {
+    throw new ExpertNotPublishedError()
+  }
+
+  const environment = revision.environment
+  if (
+    environment.status !== 'ready'
+    || environment.activeRevisionId !== environment.revision.id
+    || environment.revision.status !== 'ready'
+  ) {
+    throw new EnvironmentNotReadyError()
+  }
+
+  const repository = resolveRepositoryBinding(record.request, environment.revision.repositories, {
+    allowRepositoryOverride: revision.allowRepositoryOverride ?? true,
+    allowBaseBranchOverride: revision.allowBaseBranchOverride ?? true,
+  })
+  return {
+    configurationResolutionVersion: 1,
+    expertId: expert.id,
+    expertName: expert.name,
+    expertVersion: revision.version,
+    expertRevisionId: revision.id,
+    environmentId: environment.id,
+    environmentRevisionId: environment.revision.id,
+    repositoryId: repository.id,
+    repository: repository.repository,
+    baseBranch: repository.baseBranch,
+  }
+}
+
+function resolveLegacyDevelopmentConfiguration(record: CreateSessionRecord): ResolvedSessionConfiguration {
+  if (!record.request.repository || !record.request.baseBranch) {
+    configurationValidation('repository', 'Legacy development Sessions require repository and baseBranch hints.')
+  }
+  return {
+    configurationResolutionVersion: 0,
+    expertId: record.request.expertId,
+    expertName: record.request.expertName ?? record.request.expertId,
+    expertVersion: record.request.expertVersion,
+    environmentId: record.request.environmentId,
+    repository: record.request.repository,
+    baseBranch: record.request.baseBranch,
+  }
+}
+
 function compareText(left: string, right: string) {
   return left < right ? -1 : left > right ? 1 : 0
 }
@@ -166,6 +365,7 @@ function spaceKey(organizationId: string, spaceId: string) {
 
 export class InMemorySessionRepository implements SessionRepository {
   private readonly sessionsBySpace = new Map<string, SessionDto[]>()
+  private readonly sessionCreators = new Map<string, string>()
   private readonly organizationsByActor = new Map<string, MeOrganization[]>()
   private readonly sessionsByIdempotencyKey = new Map<string, {
     requestFingerprint: string
@@ -173,10 +373,14 @@ export class InMemorySessionRepository implements SessionRepository {
   }>()
   private readonly createId: () => string
   private readonly now: () => Date
+  private readonly authoritativeCatalog: readonly InMemoryExpertCatalogEntry[]
+  private readonly allowLegacyDevelopmentConfigurationFallback: boolean
 
   constructor(options: InMemorySessionRepositoryOptions = {}) {
     this.createId = options.createId ?? randomUUID
     this.now = options.now ?? (() => new Date())
+    this.authoritativeCatalog = options.authoritativeCatalog ?? []
+    this.allowLegacyDevelopmentConfigurationFallback = options.allowLegacyDevelopmentConfigurationFallback ?? false
 
     for (const [actorId, organizations] of Object.entries(options.actorOrganizations ?? {})) {
       this.organizationsByActor.set(actorId, orderActorOrganizations(
@@ -190,6 +394,8 @@ export class InMemorySessionRepository implements SessionRepository {
       const sessions = this.sessionsBySpace.get(key) ?? []
       sessions.push(cloneSession(session))
       this.sessionsBySpace.set(key, sessions)
+      const createdBy = options.seedCreatedBy?.[session.id]
+      if (createdBy) this.sessionCreators.set(session.id, createdBy)
     }
   }
 
@@ -207,7 +413,22 @@ export class InMemorySessionRepository implements SessionRepository {
 
   async listBySpace(organizationId: string, spaceId: string, actorId: string): Promise<SessionDto[]> {
     if (!await this.getSpaceAccess(organizationId, spaceId, actorId)) return []
-    return (this.sessionsBySpace.get(spaceKey(organizationId, spaceId)) ?? []).map(cloneSession)
+    return (this.sessionsBySpace.get(spaceKey(organizationId, spaceId)) ?? [])
+      .filter((session) => session.visibility === 'space' || this.sessionCreators.get(session.id) === actorId)
+      .map(cloneSession)
+  }
+
+  async getById(
+    organizationId: string,
+    spaceId: string,
+    sessionId: string,
+    actorId: string,
+  ): Promise<SessionDto | null> {
+    if (!await this.getSpaceAccess(organizationId, spaceId, actorId)) return null
+    const session = (this.sessionsBySpace.get(spaceKey(organizationId, spaceId)) ?? [])
+      .find((candidate) => candidate.id === sessionId)
+    if (!session || (session.visibility === 'private' && this.sessionCreators.get(session.id) !== actorId)) return null
+    return cloneSession(session)
   }
 
   async create(record: CreateSessionRecord): Promise<CreateSessionResult> {
@@ -228,7 +449,16 @@ export class InMemorySessionRepository implements SessionRepository {
       }
     }
 
+    let configuration: ResolvedSessionConfiguration
+    if (this.authoritativeCatalog.length > 0) {
+      configuration = resolveInMemorySessionConfiguration(record, this.authoritativeCatalog)
+    } else if (this.allowLegacyDevelopmentConfigurationFallback) {
+      configuration = resolveLegacyDevelopmentConfiguration(record)
+    } else {
+      throw new SessionConfigurationNotFoundError()
+    }
     const session = createSessionDto(record, {
+      configuration,
       id: this.createId(),
       timestamp: this.now().toISOString(),
     })
@@ -238,6 +468,7 @@ export class InMemorySessionRepository implements SessionRepository {
     const sessions = this.sessionsBySpace.get(key) ?? []
     sessions.unshift(session)
     this.sessionsBySpace.set(key, sessions)
+    this.sessionCreators.set(session.id, record.actorId)
     const result = { session: cloneSession(session), ...startRecords, replayed: false }
     this.sessionsByIdempotencyKey.set(idempotencyScope, { requestFingerprint, result })
 

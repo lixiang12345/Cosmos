@@ -2,11 +2,13 @@ import {
   ApiErrorSchema,
   CreateSessionResponseSchema,
   MeResponseSchema,
+  SessionDtoSchema,
   SessionListResponseSchema,
   type ApiError,
   type CreateSessionRequestInput,
   type CreateSessionResponse,
   type MeResponse,
+  type SessionDto,
   type SessionListResponse,
 } from '@relay/contracts'
 
@@ -220,6 +222,23 @@ function sessionsPath(organizationId: string, spaceId: string) {
   return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/sessions`
 }
 
+function assertSessionScope(
+  session: SessionDto,
+  organizationId: string,
+  spaceId: string,
+  sessionId?: string,
+) {
+  if (
+    session.organizationId !== organizationId
+    || session.spaceId !== spaceId
+    || (sessionId !== undefined && session.id !== sessionId)
+  ) {
+    throw new RelayApiError('Relay API returned a Session outside the requested scope.', {
+      code: 'INVALID_RESPONSE', status: 200,
+    })
+  }
+}
+
 export function createSession(
   organizationId: string,
   spaceId: string,
@@ -246,12 +265,30 @@ export function listSessions(
   const pending = request(path, {
     method: 'GET',
     headers: { Accept: 'application/json' },
-  }, SessionListResponseSchema, auth)
+  }, SessionListResponseSchema, auth).then((response) => {
+    for (const session of response.items) assertSessionScope(session, organizationId, spaceId)
+    return response
+  })
   sessionListRequests.set(requestKey, pending)
   void pending.finally(() => {
     if (sessionListRequests.get(requestKey) === pending) sessionListRequests.delete(requestKey)
   }).catch(() => undefined)
   return pending
+}
+
+export function getSession(
+  organizationId: string,
+  spaceId: string,
+  sessionId: string,
+  auth?: RelayApiAuthContext,
+): Promise<SessionDto> {
+  return request(`${sessionsPath(organizationId, spaceId)}/${encodeURIComponent(sessionId)}`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  }, SessionDtoSchema, auth).then((session) => {
+    assertSessionScope(session, organizationId, spaceId, sessionId)
+    return session
+  })
 }
 
 export function getMe(auth?: RelayApiAuthContext): Promise<MeResponse> {

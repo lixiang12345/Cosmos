@@ -1,5 +1,5 @@
 import type { SessionDto } from '@relay/contracts'
-import { CheckCircle2, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, LoaderCircle, RefreshCw, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from './auth/context'
@@ -49,7 +49,7 @@ import { ExpertEditorPage, ExpertsPage } from './pages/ExpertsPage'
 import { RunsOverview } from './pages/OverviewPages'
 import { SessionsPage } from './pages/SessionsPage'
 import { usePreferences } from './preferences'
-import { createSession, listSessions } from './services/relayApi'
+import { RelayApiError, createSession, getSession, listSessions } from './services/relayApi'
 import type { NewTaskInput, Run, RunAttempt, TaskCreateMode } from './types'
 import { useActiveWorkspace } from './workspace'
 
@@ -163,8 +163,15 @@ function inferExpertSpace(expert: ExpertStore['experts'][number]) {
     : 'space-commerce'
 }
 
-function RunRoute({
+function SessionRoute({
   runs,
+  organizationId,
+  spaceId,
+  accessToken,
+  credentialVersion,
+  handleUnauthorized,
+  demoMode,
+  locale,
   onOpenNavigation,
   onDecision,
   onRetry,
@@ -172,26 +179,102 @@ function RunRoute({
   onStop,
 }: {
   runs: Run[]
+  organizationId: string
+  spaceId: string
+  accessToken?: string
+  credentialVersion: number
+  handleUnauthorized: (failedAccessToken: string | undefined) => Promise<void>
+  demoMode: boolean
+  locale: 'zh' | 'en'
   onOpenNavigation: () => void
   onDecision: (runId: string, decision: 'approved' | 'changes') => void
   onRetry: (runId: string) => void
   onPause: (runId: string) => void
   onStop: (runId: string) => void
 }) {
-  const { runId } = useParams()
-  const run = runs.find((item) => item.id === runId)
-  if (!run) return <Navigate to="/sessions" replace />
+  const { sessionId } = useParams()
+  const [retryVersion, setRetryVersion] = useState(0)
+  const [request, setRequest] = useState<{
+    key: string
+    status: 'loading' | 'ready' | 'error'
+    run?: Run
+    error?: string
+    notFound?: boolean
+  }>()
+  const run = runs.find((item) => item.id === sessionId)
+  const requestKey = `${organizationId}\u0000${spaceId}\u0000${sessionId ?? ''}\u0000${credentialVersion}\u0000${locale}\u0000${retryVersion}`
+
+  useEffect(() => {
+    if (!sessionId || demoMode) return
+    let cancelled = false
+    void getSession(organizationId, spaceId, sessionId, { accessToken, onUnauthorized: handleUnauthorized })
+      .then((session) => {
+        if (cancelled) return
+        setRequest({ key: requestKey, status: 'ready', run: sessionDtoToRun(session, locale) })
+      }, (cause: unknown) => {
+        if (cancelled) return
+        setRequest({
+          key: requestKey,
+          status: 'error',
+          error: cause instanceof Error ? cause.message : (locale === 'zh' ? '无法加载会话。' : 'Unable to load the Session.'),
+          notFound: cause instanceof RelayApiError && cause.status === 404,
+        })
+      })
+    return () => { cancelled = true }
+  }, [accessToken, demoMode, handleUnauthorized, locale, organizationId, requestKey, sessionId, spaceId])
+
+  if (!sessionId) return <Navigate to="/sessions" replace />
+  const resolvedRun = demoMode
+    ? run
+    : request?.key === requestKey && request.status === 'ready' ? request.run : undefined
+  if (resolvedRun) {
+    return (
+      <RunWorkbench
+        key={resolvedRun.id}
+        run={resolvedRun}
+        onOpenNavigation={onOpenNavigation}
+        onDecision={onDecision}
+        onRetry={onRetry}
+        onPause={onPause}
+        onStop={onStop}
+      />
+    )
+  }
+  if (demoMode) return <Navigate to="/sessions" replace />
+
+  const currentRequest = request?.key === requestKey ? request : undefined
+  if (currentRequest?.status === 'error') {
+    return (
+      <main className="module-page session-detail-state">
+        <section role="alert">
+          <AlertTriangle aria-hidden="true" />
+          <h1>{currentRequest.notFound
+            ? (locale === 'zh' ? '会话不存在或无权访问' : 'Session not found or unavailable')
+            : (locale === 'zh' ? '无法加载会话' : 'Unable to load Session')}</h1>
+          <p>{currentRequest.error}</p>
+          {!currentRequest.notFound ? (
+            <button type="button" className="button button--primary" onClick={() => setRetryVersion((value) => value + 1)}>
+              <RefreshCw aria-hidden="true" />{locale === 'zh' ? '重试' : 'Retry'}
+            </button>
+          ) : null}
+        </section>
+      </main>
+    )
+  }
+
   return (
-    <RunWorkbench
-      key={run.id}
-      run={run}
-      onOpenNavigation={onOpenNavigation}
-      onDecision={onDecision}
-      onRetry={onRetry}
-      onPause={onPause}
-      onStop={onStop}
-    />
+    <main className="module-page session-detail-state">
+      <section role="status" aria-live="polite">
+        <LoaderCircle className="cosmos-spin" aria-hidden="true" />
+        <p>{locale === 'zh' ? '正在加载会话...' : 'Loading Session...'}</p>
+      </section>
+    </main>
   )
+}
+
+function LegacySessionRedirect() {
+  const { sessionId } = useParams()
+  return <Navigate to={sessionId ? `/sessions/${sessionId}` : '/sessions'} replace />
 }
 
 function ExpertEditorRoute({
@@ -227,7 +310,7 @@ function ExpertEditorRoute({
 }
 
 function RelayApp() {
-  const { accessToken, demoMode, handleUnauthorized } = useAuth()
+  const { accessToken, credentialVersion, demoMode, handleUnauthorized } = useAuth()
   const { organization } = useActiveWorkspace()
   const organizationId = organization.id
   const [runs, setRuns] = useState<Run[]>(() => demoMode ? getDemoRuns() : [])
@@ -375,6 +458,10 @@ function RelayApp() {
       },
       repository: input.repo,
       baseBranch: input.baseBranch,
+      advancedOverrides: {
+        repositoryId: input.repositoryId,
+        baseBranch: input.baseBranch,
+      },
     }, idempotencyKey, { accessToken, onUnauthorized: handleUnauthorized })
     sessionIdempotencyKeys.current.delete(requestFingerprint)
     const id = session.id
@@ -437,7 +524,7 @@ function RelayApp() {
     setToast(isDraft
       ? (locale === 'zh' ? '会话草稿已保存' : 'Session draft saved')
       : (locale === 'zh' ? '会话已创建，等待 Worker 接收命令' : 'Session created and waiting for a Worker.'))
-    navigate(isDraft ? '/sessions' : `/runs/${id}`)
+    navigate(isDraft ? '/sessions' : `/sessions/${id}`)
   }
 
   const decide = (runId: string, decision: 'approved' | 'changes') => {
@@ -659,6 +746,7 @@ function RelayApp() {
       title: deriveSessionTitle(prompt),
       description: prompt,
       repo: repository.fullName,
+      repositoryId: repository.id,
       expert: expert.name,
       expertId: expert.id,
       expertVersion: expert.version,
@@ -679,17 +767,17 @@ function RelayApp() {
   const toggleArchive = (runId: string) => {
     const target = runs.find((run) => run.id === runId)
     setRuns((items) => items.map((run) => run.id === runId ? { ...run, archived: !run.archived } : run))
-    if (!target?.archived && location.pathname === `/runs/${runId}`) navigate('/sessions')
+    if (!target?.archived && location.pathname === `/sessions/${runId}`) navigate('/sessions')
     setToast(target?.archived ? (locale === 'zh' ? '会话已恢复' : 'Session restored') : (locale === 'zh' ? '会话已归档' : 'Session archived'))
   }
   const deleteSession = (runId: string) => {
     setRuns((items) => items.filter((run) => run.id !== runId))
-    if (location.pathname === `/runs/${runId}`) navigate('/sessions')
+    if (location.pathname === `/sessions/${runId}`) navigate('/sessions')
     setToast(locale === 'zh' ? '会话已删除' : 'Session deleted')
   }
 
   const openNavigation = () => setNavigationOpen(true)
-  const openSession = (runId: string) => navigate(`/runs/${runId}`)
+  const openSession = (runId: string) => navigate(`/sessions/${runId}`)
   const pageProps = { runs: scopedRuns, onOpenNavigation: openNavigation, onNewTask: openNewTask }
 
   const materializeAutomationSession = (result: InjectEventResult) => {
@@ -770,7 +858,24 @@ function RelayApp() {
           />
         } />
         <Route path="/runs" element={<RunsOverview {...pageProps} />} />
-        <Route path="/runs/:runId" element={<RunRoute runs={scopedRuns} onOpenNavigation={openNavigation} onDecision={decide} onRetry={retry} onPause={pauseRun} onStop={stopRun} />} />
+        <Route path="/sessions/:sessionId" element={
+          <SessionRoute
+            runs={scopedRuns}
+            organizationId={organizationId}
+            spaceId={activeSpace.id}
+            accessToken={accessToken}
+            credentialVersion={credentialVersion}
+            handleUnauthorized={handleUnauthorized}
+            demoMode={demoMode}
+            locale={locale}
+            onOpenNavigation={openNavigation}
+            onDecision={decide}
+            onRetry={retry}
+            onPause={pauseRun}
+            onStop={stopRun}
+          />
+        } />
+        <Route path="/runs/:sessionId" element={<LegacySessionRedirect />} />
         <Route path="/files" element={<Navigate to="/files/user" replace />} />
         <Route path="/files/user" element={<CosmosFilesPage key="user" initialScope="user" onOpenNavigation={openNavigation} />} />
         <Route path="/files/organization" element={<CosmosFilesPage key="organization" initialScope="organization" onOpenNavigation={openNavigation} />} />

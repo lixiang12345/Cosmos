@@ -1,12 +1,17 @@
 openapi: 3.1.0
 info:
   title: Relay Agent OS API
-  version: 0.1.0
+  version: 0.2.0
   summary: Multi-tenant control-plane and Session API for Relay.
   description: |
     Contract for the Relay prototype backend. A Session is a persistent conversation;
     a Turn is one queued unit of Agent work; an Attempt is one execution of a Turn.
     Expert and Environment revisions are immutable once used by a Session.
+
+    This file contains the target API surface. Operations not marked with
+    `x-relay-implementation-status` are design contracts and must not be exposed
+    as implemented. The current Session slice marks its implementation status
+    explicitly and is runtime-validated by `@relay/contracts`.
 
     All timestamps are UTC RFC 3339. All list endpoints use opaque cursor pagination.
     POST operations that create a resource, enqueue a command, or cause an external
@@ -582,6 +587,7 @@ paths:
     get:
       tags: [Sessions]
       operationId: listSessions
+      x-relay-implementation-status: partial
       summary: List current or archived Sessions visible to the caller
       parameters:
         - $ref: '#/components/parameters/Cursor'
@@ -639,6 +645,7 @@ paths:
     post:
       tags: [Sessions]
       operationId: createSession
+      x-relay-implementation-status: implemented
       summary: Create a draft or queued Session from a published Expert
       description: |
         `start=true` atomically creates the Session, first user Message and first Turn.
@@ -659,6 +666,8 @@ paths:
               $ref: '#/components/headers/Location'
             ETag:
               $ref: '#/components/headers/ETag'
+            Idempotency-Replayed:
+              $ref: '#/components/headers/IdempotencyReplayed'
           content:
             application/json:
               schema:
@@ -678,6 +687,7 @@ paths:
     get:
       tags: [Sessions]
       operationId: getSession
+      x-relay-implementation-status: implemented
       summary: Get a Session
       responses:
         '200':
@@ -685,6 +695,16 @@ paths:
           headers:
             ETag:
               $ref: '#/components/headers/ETag'
+            Cache-Control:
+              description: Private responses are never stored by shared or browser caches.
+              schema:
+                type: string
+                const: private, no-store
+            Vary:
+              description: Prevents credentials from sharing a cached representation.
+              schema:
+                type: string
+                const: Authorization
           content:
             application/json:
               schema:
@@ -2777,7 +2797,7 @@ components:
             - spaceId
             - title
             - expertId
-            - expertRevisionId
+            - configurationResolutionVersion
             - status
             - visibility
             - source
@@ -2793,6 +2813,16 @@ components:
             expertId:
               type: string
               format: uuid
+            expertName:
+              type: string
+              description: Display snapshot resolved by the server; never authoritative create input.
+            expertVersion:
+              type: integer
+              minimum: 1
+            configurationResolutionVersion:
+              type: integer
+              enum: [0, 1]
+              description: Version 0 is migration-only legacy data; every new Session is version 1.
             expertRevisionId:
               type: string
               format: uuid
@@ -2802,6 +2832,17 @@ components:
             environmentRevisionId:
               type: [string, 'null']
               format: uuid
+            repositoryId:
+              type: string
+              format: uuid
+            repository:
+              type: string
+              maxLength: 512
+              description: Server-resolved display snapshot of the bound repository.
+            baseBranch:
+              type: string
+              maxLength: 255
+              description: Server-resolved branch after applying allowed policy overrides.
             executionSnapshotId:
               type: [string, 'null']
             status:
@@ -2848,9 +2889,26 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/Artifact'
+        - if:
+            properties:
+              configurationResolutionVersion:
+                const: 1
+            required: [configurationResolutionVersion]
+          then:
+            properties:
+              expertRevisionId:
+                type: string
+                format: uuid
+              environmentRevisionId:
+                type: string
+                format: uuid
+              repositoryId:
+                type: string
+                format: uuid
+            required: [expertRevisionId, environmentRevisionId, repositoryId]
     SessionCreate:
       type: object
-      required: [expertId, start]
+      required: [expertId, title, message]
       properties:
         expertId:
           type: string
@@ -2875,22 +2933,9 @@ components:
               format: uuid
             baseBranch:
               type: string
-            acceptanceCriteria:
-              type: array
-              items:
-                type: string
+              minLength: 1
+              maxLength: 255
           additionalProperties: false
-      allOf:
-        - if:
-            properties:
-              start:
-                const: true
-            required: [start]
-          then:
-            properties:
-              message:
-                $ref: '#/components/schemas/MessageCreate'
-            required: [message]
       additionalProperties: false
     SessionPatch:
       type: object

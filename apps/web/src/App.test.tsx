@@ -1,5 +1,5 @@
 import type { CreateSessionRequestInput, MeResponse, SessionDto } from '@relay/contracts'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import App from './App'
@@ -7,11 +7,13 @@ import { AuthProvider } from './auth/AuthProvider'
 import { AuthContext, type AuthContextValue } from './auth/context'
 import { initialRuns } from './data/mockData'
 import { PREFERENCE_STORAGE_KEYS, PreferencesProvider } from './preferences'
-import { createSession, listSessions } from './services/relayApi'
+import { createSession, getSession, listSessions } from './services/relayApi'
 import { WorkspaceContext, type WorkspaceContextValue } from './workspace'
 
-vi.mock('./services/relayApi', () => ({
+vi.mock('./services/relayApi', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./services/relayApi')>(),
   createSession: vi.fn(),
+  getSession: vi.fn(),
   listSessions: vi.fn(),
 }))
 
@@ -30,11 +32,15 @@ function makeApiSession(
     title: input.title,
     summary: input.message.content,
     expertId: input.expertId,
-    expertName: input.expertName,
+    expertName: input.expertName ?? 'Authoritative Expert',
     expertVersion: input.expertVersion,
-    environmentId: input.environmentId,
-    repository: input.repository,
-    baseBranch: input.baseBranch,
+    environmentId: input.environmentId ?? 'environment-authoritative',
+    configurationResolutionVersion: 1,
+    expertRevisionId: 'expert-revision-authoritative',
+    environmentRevisionId: 'environment-revision-authoritative',
+    repositoryId: input.advancedOverrides?.repositoryId ?? 'repository-authoritative',
+    repository: input.repository ?? 'authoritative/repository',
+    baseBranch: input.advancedOverrides?.baseBranch ?? input.baseBranch ?? 'main',
     visibility: input.visibility ?? 'private',
     status: input.start === false ? 'draft' : 'queued',
     attachments: input.message.attachments ?? [],
@@ -74,26 +80,11 @@ function renderApp(route = '/runs/run-482') {
           </MemoryRouter>
         </WorkspaceContext.Provider>
       </AuthProvider>
-    </PreferencesProvider>,
+    </PreferencesProvider>
   )
 }
 
-function renderAuthenticatedApp(
-  route: string,
-  overrides: Partial<AuthContextValue> = {},
-) {
-  const auth: AuthContextValue = {
-    status: 'authenticated',
-    mode: 'oidc',
-    actorId: 'user-production',
-    displayName: 'Production User',
-    demoMode: false,
-    accessToken: 'production-access-token',
-    handleUnauthorized: async () => undefined,
-    signIn: async () => undefined,
-    signOut: async () => undefined,
-    ...overrides,
-  }
+function authenticatedAppTree(route: string, auth: AuthContextValue) {
   const me: MeResponse = {
     actor: { id: auth.actorId ?? 'user-production', kind: 'user' },
     organizations: [{
@@ -108,7 +99,7 @@ function renderAuthenticatedApp(
     selectSpace: () => undefined,
     refresh: () => undefined,
   }
-  return render(
+  return (
     <PreferencesProvider>
       <AuthContext.Provider value={auth}>
         <WorkspaceContext.Provider value={workspace}>
@@ -117,8 +108,45 @@ function renderAuthenticatedApp(
           </MemoryRouter>
         </WorkspaceContext.Provider>
       </AuthContext.Provider>
-    </PreferencesProvider>,
+    </PreferencesProvider>
   )
+}
+
+function renderAuthenticatedApp(
+  route: string,
+  overrides: Partial<AuthContextValue> = {},
+) {
+  let auth: AuthContextValue = {
+    status: 'authenticated',
+    mode: 'oidc',
+    actorId: 'user-production',
+    displayName: 'Production User',
+    demoMode: false,
+    accessToken: 'production-access-token',
+    credentialVersion: 1,
+    handleUnauthorized: async () => undefined,
+    signIn: async () => undefined,
+    signOut: async () => undefined,
+    ...overrides,
+  }
+  const result = render(authenticatedAppTree(route, auth))
+  return {
+    ...result,
+    rerenderAuth(next: Partial<AuthContextValue>) {
+      auth = { ...auth, ...next }
+      result.rerender(authenticatedAppTree(route, auth))
+    },
+  }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, reject, resolve }
 }
 
 async function openTemplateLibrary(user: ReturnType<typeof userEvent.setup>) {
@@ -143,6 +171,7 @@ describe('Relay prototype', () => {
     window.localStorage.removeItem('relay.experts')
     window.localStorage.removeItem('relay.controlPlane.v1')
     vi.mocked(createSession).mockReset()
+    vi.mocked(getSession).mockReset()
     vi.mocked(listSessions).mockReset()
     vi.mocked(listSessions).mockResolvedValue({
       items: [], page: { nextCursor: null, hasMore: false, projectionUpdatedAt: null },
@@ -272,6 +301,81 @@ describe('Relay prototype', () => {
       const stored = JSON.parse(window.localStorage.getItem('relay.demo.sessions') ?? '[]') as Array<{ id: string }>
       expect(stored.filter((run) => run.id === 'session-persisted')).toHaveLength(1)
     })
+  })
+
+  it('loads a canonical Session detail directly without waiting for the list projection', async () => {
+    const detail = makeApiSession('organization-production', 'space-production', {
+      title: '直接恢复的生产会话',
+      expertId: 'expert-authoritative',
+      message: { content: '从详情 API 恢复。' },
+    }, { id: 'session-direct' })
+    vi.mocked(getSession).mockResolvedValue(detail)
+
+    renderAuthenticatedApp('/sessions/session-direct')
+
+    expect(await screen.findByRole('heading', { level: 1, name: '直接恢复的生产会话' })).toBeInTheDocument()
+    expect(getSession).toHaveBeenCalledWith(
+      'organization-production',
+      'space-production',
+      'session-direct',
+      expect.objectContaining({
+        accessToken: 'production-access-token',
+        onUnauthorized: expect.any(Function),
+      }),
+    )
+  })
+
+  it('does not render or retain a stale list projection as canonical Session detail', async () => {
+    const stale = makeApiSession('organization-production', 'space-production', {
+      title: '列表中的旧标题', expertId: 'expert-authoritative', message: { content: '旧投影。' },
+    }, { id: 'session-authoritative', version: 1 })
+    const current = { ...stale, title: '详情接口的新标题', summary: '权威详情。', version: 2 }
+    const detailResponse = deferred<SessionDto>()
+    vi.mocked(listSessions).mockResolvedValueOnce({
+      items: [stale], page: { nextCursor: null, hasMore: false, projectionUpdatedAt: stale.updatedAt },
+    })
+    vi.mocked(getSession).mockReturnValueOnce(detailResponse.promise)
+
+    const firstView = renderAuthenticatedApp('/sessions/session-authoritative')
+
+    await waitFor(() => expect(listSessions).toHaveBeenCalled())
+    expect(screen.queryByRole('heading', { level: 1, name: '列表中的旧标题' })).not.toBeInTheDocument()
+    await act(async () => { detailResponse.resolve(current) })
+    expect(await screen.findByRole('heading', { level: 1, name: '详情接口的新标题' })).toBeInTheDocument()
+    firstView.unmount()
+
+    const delayedList = deferred<Awaited<ReturnType<typeof listSessions>>>()
+    vi.mocked(listSessions).mockReturnValueOnce(delayedList.promise)
+    vi.mocked(getSession).mockResolvedValueOnce(current)
+    const secondView = renderAuthenticatedApp('/sessions/session-authoritative')
+    expect(await screen.findAllByRole('heading', { level: 1, name: '详情接口的新标题' })).toHaveLength(1)
+    await act(async () => {
+      delayedList.resolve({
+        items: [stale], page: { nextCursor: null, hasMore: false, projectionUpdatedAt: stale.updatedAt },
+      })
+    })
+    expect(screen.getAllByRole('heading', { level: 1, name: '详情接口的新标题' })).toHaveLength(1)
+    expect(screen.queryByRole('heading', { level: 1, name: '列表中的旧标题' })).not.toBeInTheDocument()
+    secondView.unmount()
+  })
+
+  it('hides a verified Session when credentials rotate until the new credential is authorized', async () => {
+    const detail = makeApiSession('organization-production', 'space-production', {
+      title: 'Token A 可见的会话', expertId: 'expert-authoritative', message: { content: '受限内容。' },
+    }, { id: 'session-rotation' })
+    vi.mocked(getSession)
+      .mockResolvedValueOnce(detail)
+      .mockRejectedValueOnce(new Error('Token B is not authorized.'))
+
+    const view = renderAuthenticatedApp('/sessions/session-rotation', {
+      accessToken: 'token-a', credentialVersion: 1,
+    })
+    expect(await screen.findByRole('heading', { level: 1, name: 'Token A 可见的会话' })).toBeInTheDocument()
+
+    view.rerenderAuth({ accessToken: 'token-b', credentialVersion: 2 })
+
+    expect(screen.queryByRole('heading', { level: 1, name: 'Token A 可见的会话' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Token B is not authorized.')
   })
 
   it('ignores demo Session storage for an authenticated production identity', async () => {

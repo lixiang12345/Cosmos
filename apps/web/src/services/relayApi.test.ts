@@ -4,13 +4,14 @@ import {
   RelayApiError,
   createSession,
   getMe,
+  getSession,
   getRelayApiBaseUrl,
   listSessions,
   resolveRelayApiBaseUrl,
   resolveRelayApiRequestUrl,
 } from './relayApi'
 
-const createInput: CreateSessionRequestInput = {
+const createInput = {
   title: 'Fix checkout race condition',
   expertId: 'expert-pr-author',
   expertName: 'PR Author',
@@ -19,12 +20,14 @@ const createInput: CreateSessionRequestInput = {
   repository: 'platform/checkout',
   baseBranch: 'main',
   message: { content: 'Trace the duplicate reservation path and add a regression test.' },
-}
+} satisfies CreateSessionRequestInput
 
 const session: SessionDto = {
   id: 'session-1', organizationId: 'relay', spaceId: 'space-platform', title: createInput.title,
   summary: createInput.message.content, expertId: createInput.expertId, expertName: createInput.expertName,
   expertVersion: createInput.expertVersion, environmentId: createInput.environmentId, repository: createInput.repository,
+  configurationResolutionVersion: 1, expertRevisionId: 'expert-revision-3',
+  environmentRevisionId: 'environment-revision-1', repositoryId: 'repository-checkout',
   baseBranch: createInput.baseBranch, visibility: 'private', status: 'active', attachments: [], source: 'manual',
   createdAt: '2026-07-12T08:00:00.000Z', updatedAt: '2026-07-12T08:00:00.000Z',
   lastActivityAt: '2026-07-12T08:00:00.000Z', version: 1,
@@ -141,6 +144,43 @@ describe('Relay API client', () => {
       '/api/v1/organizations/relay/spaces/space-platform/sessions',
       expect.objectContaining({ method: 'GET' }),
     )
+  })
+
+  it('rejects a list response containing a Session outside the requested tenant scope', async () => {
+    const response = {
+      items: [{ ...session, organizationId: 'other-organization' }],
+      page: { nextCursor: null, hasMore: false, projectionUpdatedAt: session.updatedAt },
+    }
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(response)))
+
+    await expect(listSessions('relay', 'space-platform')).rejects.toMatchObject({
+      code: 'INVALID_RESPONSE', status: 200,
+    })
+  })
+
+  it('gets one Session from its tenant-scoped canonical path', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(session, 200, {
+      ETag: '"1"',
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(getSession('relay', 'space-platform', 'session-1', {
+      accessToken: 'access-token',
+    })).resolves.toEqual(session)
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/organizations/relay/spaces/space-platform/sessions/session-1',
+      expect.objectContaining({ method: 'GET' }),
+    )
+  })
+
+  it('rejects a detail response outside the requested tenant scope', async () => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+      ...session, organizationId: 'other-organization',
+    })))
+
+    await expect(getSession('relay', 'space-platform', 'session-1')).rejects.toMatchObject({
+      code: 'INVALID_RESPONSE', status: 200,
+    })
   })
 
   it('shares an in-flight Session list request for the same token and scope', async () => {

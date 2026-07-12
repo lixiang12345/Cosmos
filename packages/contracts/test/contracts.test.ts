@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   ApiErrorSchema,
+  CreateSessionAdvancedOverridesSchema,
   CreateSessionRequestSchema,
   CreateSessionResponseSchema,
   MeResponseSchema,
@@ -69,6 +70,34 @@ describe('session contracts', () => {
     })
   })
 
+  it('accepts the minimal authoritative create request', () => {
+    expect(CreateSessionRequestSchema.parse({
+      expertId: createSessionInput.expertId,
+      title: createSessionInput.title,
+      message: { content: createSessionInput.message.content },
+    })).toEqual({
+      expertId: createSessionInput.expertId,
+      title: createSessionInput.title,
+      visibility: 'private',
+      start: true,
+      message: { content: createSessionInput.message.content, attachments: [] },
+    })
+  })
+
+  it('accepts strict advanced overrides and transitional top-level hints', () => {
+    expect(CreateSessionRequestSchema.parse({
+      ...createSessionInput,
+      advancedOverrides: { repositoryId: 'repository-checkout', baseBranch: 'release' },
+    }).advancedOverrides).toEqual({
+      repositoryId: 'repository-checkout',
+      baseBranch: 'release',
+    })
+    expect(CreateSessionAdvancedOverridesSchema.safeParse({
+      repositoryId: 'repository-checkout',
+      unknown: true,
+    }).success).toBe(false)
+  })
+
   it('rejects an empty message and excessive attachments', () => {
     expect(CreateSessionRequestSchema.safeParse({
       ...createSessionInput,
@@ -106,6 +135,37 @@ describe('session contracts', () => {
       items: [session],
       page: { nextCursor: null, hasMore: false, projectionUpdatedAt: session.updatedAt },
     }).items).toEqual([session])
+  })
+
+  it('requires every authoritative configuration id for resolved sessions', () => {
+    const authoritativeSession = {
+      ...sessionInput,
+      configurationResolutionVersion: 1,
+      expertRevisionId: 'expert-revision-3',
+      environmentRevisionId: 'environment-revision-5',
+      repositoryId: 'repository-checkout',
+    } as const
+
+    expect(SessionDtoSchema.parse(authoritativeSession)).toMatchObject({
+      configurationResolutionVersion: 1,
+      expertRevisionId: 'expert-revision-3',
+      environmentRevisionId: 'environment-revision-5',
+      repositoryId: 'repository-checkout',
+    })
+    expect(SessionDtoSchema.safeParse({
+      ...authoritativeSession,
+      repositoryId: undefined,
+    }).success).toBe(false)
+  })
+
+  it('defaults legacy sessions to unresolved configuration without authoritative ids', () => {
+    expect(SessionDtoSchema.parse(sessionInput)).toMatchObject({
+      configurationResolutionVersion: 0,
+    })
+    expect(SessionDtoSchema.safeParse({
+      ...sessionInput,
+      expertRevisionId: 'expert-revision-3',
+    }).success).toBe(false)
   })
 })
 

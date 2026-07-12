@@ -1,10 +1,11 @@
-import { ApiErrorSchema, MeResponseSchema, SessionListResponseSchema } from '@relay/contracts'
+import { ApiErrorSchema, MeResponseSchema, SessionDtoSchema, SessionListResponseSchema } from '@relay/contracts'
 import { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createApp } from './app.js'
 import type { AuthenticatedActor } from './auth.js'
 import { runMigrations } from './migrations.js'
 import { PostgresSessionRepository } from './postgres-session-repository.js'
+import { seedSessionConfiguration } from './session-configuration-test-fixture.js'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 const describeWithDatabase = databaseUrl ? describe : describe.skip
@@ -46,6 +47,9 @@ describeWithDatabase('HTTP authentication and tenant isolation', () => {
         ('org-a', 'space-a', 'user-a', 'member'), ('org-a', 'space-a', 'user-b', 'member'),
         ('org-a', 'space-a', 'user-viewer', 'viewer'), ('org-a', 'space-b', 'user-a', 'member');
     `)
+    await seedSessionConfiguration(pool, 'org-a', 'space-a')
+    await seedSessionConfiguration(pool, 'org-a', 'space-b')
+    await seedSessionConfiguration(pool, 'org-b', 'space-a')
     await app.ready()
   })
 
@@ -135,6 +139,61 @@ describeWithDatabase('HTTP authentication and tenant isolation', () => {
       'Tenant isolation proof', 'Shared with the Space',
     ]))
     expect(memberList.items.map((session) => session.title)).toEqual(['Shared with the Space'])
+
+    const privateSession = SessionDtoSchema.parse(privateCreate.json().session)
+    const spaceSession = SessionDtoSchema.parse(spaceCreate.json().session)
+    const privateDetailUrl = `${url}/${privateSession.id}`
+    const creatorDetail = await app.inject({ method: 'GET', url: privateDetailUrl, headers: auth('token-a') })
+    const hiddenDetail = await app.inject({ method: 'GET', url: privateDetailUrl, headers: auth('token-b') })
+    const missingDetail = await app.inject({ method: 'GET', url: `${url}/missing-session`, headers: auth('token-b') })
+    const sharedDetail = await app.inject({ method: 'GET', url: `${url}/${spaceSession.id}`, headers: auth('token-b') })
+    const crossSpaceDetail = await app.inject({
+      method: 'GET',
+      url: `/api/v1/organizations/org-a/spaces/space-b/sessions/${spaceSession.id}`,
+      headers: auth('token-a'),
+    })
+
+    expect(SessionDtoSchema.parse(creatorDetail.json())).toEqual(privateSession)
+    expect(creatorDetail.headers.etag).toBe('"1"')
+    expect(creatorDetail.headers['cache-control']).toBe('private, no-store')
+    expect(creatorDetail.headers.vary).toBe('Authorization')
+    expect(SessionDtoSchema.parse(sharedDetail.json())).toEqual(spaceSession)
+    expect(hiddenDetail.statusCode).toBe(404)
+    expect(crossSpaceDetail.statusCode).toBe(404)
+    expect(hiddenDetail.json()).toMatchObject({
+      code: 'RESOURCE_NOT_FOUND', message: missingDetail.json().message,
+    })
+
+    await pool.query(`
+      DELETE FROM relay_space_memberships
+      WHERE organization_id = 'org-a' AND space_id = 'space-a' AND actor_id = 'user-a'
+    `)
+    const revokedDetail = await app.inject({ method: 'GET', url: privateDetailUrl, headers: auth('token-a') })
+    expect(revokedDetail.statusCode).toBe(404)
+    expect(revokedDetail.json()).toMatchObject({
+      code: 'RESOURCE_NOT_FOUND', message: missingDetail.json().message,
+    })
+    await pool.query(`
+      INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
+      VALUES ('org-a', 'space-a', 'user-a', 'member')
+    `)
+  })
+
+  it('conceals an unknown repository override with the same not-found response', async () => {
+    const unknownRepository = await app.inject({
+      method: 'POST',
+      url,
+      headers: { ...auth('token-a'), 'idempotency-key': 'unknown-repository-http' },
+      payload: { ...sessionRequest, advancedOverrides: { repositoryId: 'repository-unknown' } },
+    })
+    const missing = await app.inject({
+      method: 'GET', url: `${url}/missing-session`, headers: auth('token-a'),
+    })
+
+    expect(unknownRepository.statusCode).toBe(404)
+    expect(unknownRepository.json()).toMatchObject({
+      code: 'RESOURCE_NOT_FOUND', message: missing.json().message,
+    })
   })
 
   it('scopes the same idempotency key independently by actor and Space', async () => {

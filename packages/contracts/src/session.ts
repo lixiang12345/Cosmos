@@ -28,23 +28,38 @@ export const MessageCreateSchema = z.object({
 export type MessageCreate = z.infer<typeof MessageCreateSchema>
 export type MessageCreateInput = z.input<typeof MessageCreateSchema>
 
+export const CreateSessionAdvancedOverridesSchema = z.object({
+  repositoryId: IdentifierSchema.optional(),
+  baseBranch: z.string().trim().min(1).max(255).optional(),
+}).strict()
+
+export type CreateSessionAdvancedOverrides = z.infer<typeof CreateSessionAdvancedOverridesSchema>
+
 export const CreateSessionRequestSchema = z.object({
   expertId: IdentifierSchema,
-  expertName: z.string().trim().min(1).max(160),
+  expertName: z.string().trim().min(1).max(160).optional(),
   expertVersion: z.number().int().positive().optional(),
   environmentId: IdentifierSchema.optional(),
   title: z.string().trim().min(1).max(240),
   visibility: SessionVisibilitySchema.default('private'),
   start: z.boolean().default(true),
   message: MessageCreateSchema,
-  repository: z.string().trim().min(1).max(512),
-  baseBranch: z.string().trim().min(1).max(255),
+  repository: z.string().trim().min(1).max(512).optional(),
+  baseBranch: z.string().trim().min(1).max(255).optional(),
+  advancedOverrides: CreateSessionAdvancedOverridesSchema.optional(),
 }).strict()
 
 export type CreateSessionRequest = z.infer<typeof CreateSessionRequestSchema>
 export type CreateSessionRequestInput = z.input<typeof CreateSessionRequestSchema>
 
-export const SessionDtoSchema = z.object({
+export const SessionConfigurationResolutionVersionSchema = z.union([
+  z.literal(0),
+  z.literal(1),
+])
+
+export type SessionConfigurationResolutionVersion = z.infer<typeof SessionConfigurationResolutionVersionSchema>
+
+const SessionDtoBaseSchema = z.object({
   id: IdentifierSchema,
   organizationId: IdentifierSchema,
   spaceId: IdentifierSchema,
@@ -54,6 +69,10 @@ export const SessionDtoSchema = z.object({
   expertName: z.string().trim().min(1).max(160),
   expertVersion: z.number().int().positive().optional(),
   environmentId: IdentifierSchema.optional(),
+  configurationResolutionVersion: SessionConfigurationResolutionVersionSchema.default(0),
+  expertRevisionId: IdentifierSchema.optional(),
+  environmentRevisionId: IdentifierSchema.optional(),
+  repositoryId: IdentifierSchema.optional(),
   repository: z.string().trim().min(1).max(512),
   baseBranch: z.string().trim().min(1).max(255),
   visibility: SessionVisibilitySchema,
@@ -66,7 +85,34 @@ export const SessionDtoSchema = z.object({
   version: z.number().int().positive(),
 }).strict()
 
+const authoritativeConfigurationFields = [
+  'expertRevisionId',
+  'environmentRevisionId',
+  'repositoryId',
+] as const
+
+export const SessionDtoSchema = SessionDtoBaseSchema.superRefine((session, context) => {
+  for (const field of authoritativeConfigurationFields) {
+    if (session.configurationResolutionVersion === 1 && session[field] === undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: [field],
+        message: `${field} is required when configurationResolutionVersion is 1`,
+      })
+    }
+
+    if (session.configurationResolutionVersion === 0 && session[field] !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: [field],
+        message: `${field} is not allowed when configurationResolutionVersion is 0`,
+      })
+    }
+  }
+})
+
 export type SessionDto = z.infer<typeof SessionDtoSchema>
+export type SessionDtoInput = z.input<typeof SessionDtoSchema>
 
 export const SessionMessageSchema = z.object({
   id: IdentifierSchema,

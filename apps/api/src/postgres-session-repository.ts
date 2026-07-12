@@ -10,14 +10,20 @@ import {
 import type { Pool, PoolClient } from 'pg'
 import {
   AuthorizationChangedError,
+  EnvironmentNotReadyError,
+  ExpertNotPublishedError,
   IdempotencyConflictError,
+  SessionConfigurationNotFoundError,
   canWriteSpace,
   createSessionStartRecords,
   createSessionDto,
   orderActorOrganizations,
+  resolveRepositoryBinding,
   type CreateSessionRecord,
   type CreateSessionResult,
+  type InMemoryRepositoryBinding,
   type OrganizationRole,
+  type ResolvedSessionConfiguration,
   type SessionRepository,
   type SpaceAccess,
   type SpaceRole,
@@ -32,7 +38,11 @@ type SessionRow = {
   expert_id: string
   expert_name: string
   expert_version: number | null
+  expert_revision_id: string | null
   environment_id: string | null
+  environment_revision_id: string | null
+  repository_id: string | null
+  configuration_resolution_version: 0 | 1
   repository: string
   base_branch: string
   visibility: SessionDto['visibility']
@@ -75,7 +85,11 @@ function mapSession(row: SessionRow): SessionDto {
     expertId: row.expert_id,
     expertName: row.expert_name,
     expertVersion: row.expert_version ?? undefined,
+    expertRevisionId: row.expert_revision_id ?? undefined,
     environmentId: row.environment_id ?? undefined,
+    environmentRevisionId: row.environment_revision_id ?? undefined,
+    repositoryId: row.repository_id ?? undefined,
+    configurationResolutionVersion: row.configuration_resolution_version,
     repository: row.repository,
     baseBranch: row.base_branch,
     visibility: row.visibility,
@@ -101,8 +115,10 @@ function responseToResult(response: CreateSessionResponse, replayed: boolean): C
 
 const sessionColumns = `
   id, organization_id, space_id, title, summary, expert_id, expert_name,
-  expert_version, environment_id, repository, base_branch, visibility, status,
-  attachments, source, created_at, updated_at, last_activity_at, version
+  expert_version, expert_revision_id, environment_id, environment_revision_id,
+  repository_id, configuration_resolution_version, repository, base_branch,
+  visibility, status, attachments, source, created_at, updated_at,
+  last_activity_at, version
 `
 
 export type PostgresSessionRepositoryOptions = {
@@ -208,6 +224,30 @@ export class PostgresSessionRepository implements SessionRepository {
     return result.rows.map(mapSession)
   }
 
+  async getById(
+    organizationId: string,
+    spaceId: string,
+    sessionId: string,
+    actorId: string,
+  ): Promise<SessionDto | null> {
+    const result = await this.pool.query<SessionRow>(`
+      SELECT ${sessionColumns.split(',').map((column) => `session.${column.trim()}`).join(', ')}
+      FROM relay_sessions session
+      JOIN relay_organization_memberships organization_membership
+        ON organization_membership.organization_id = session.organization_id
+        AND organization_membership.actor_id = $4
+      JOIN relay_space_memberships space_membership
+        ON space_membership.organization_id = session.organization_id
+        AND space_membership.space_id = session.space_id
+        AND space_membership.actor_id = $4
+      WHERE session.organization_id = $1
+        AND session.space_id = $2
+        AND session.id = $3
+        AND (session.visibility = 'space' OR session.created_by = $4)
+    `, [organizationId, spaceId, sessionId, actorId])
+    return result.rows[0] ? mapSession(result.rows[0]) : null
+  }
+
   async create(record: CreateSessionRecord): Promise<CreateSessionResult> {
     const client = await this.pool.connect()
     try {
@@ -284,21 +324,28 @@ export class PostgresSessionRepository implements SessionRepository {
         AND canonical_path = $3 AND idempotency_key_hash = $4
         AND expires_at <= $5
     `, [record.organizationId, record.actorId, canonicalPath, keyHash, now.toISOString()])
-    const session = createSessionDto(record, { id: this.createId(), timestamp: now.toISOString() })
+    const configuration = await this.resolveConfiguration(client, record)
+    const session = createSessionDto(record, {
+      configuration,
+      id: this.createId(),
+      timestamp: now.toISOString(),
+    })
     const startRecords = createSessionStartRecords(record, session, { createId: this.createId })
     await client.query(`
       INSERT INTO relay_sessions (
         ${sessionColumns}, created_by
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-        $14::jsonb, $15, $16, $17, $18, $19, $20
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+        $15, $16, $17, $18::jsonb, $19, $20, $21, $22, $23, $24
       )
     `, [
       session.id, session.organizationId, session.spaceId, session.title, session.summary,
       session.expertId, session.expertName, session.expertVersion ?? null,
-      session.environmentId ?? null, session.repository, session.baseBranch, session.visibility,
-      session.status, JSON.stringify(session.attachments), session.source, session.createdAt,
-      session.updatedAt, session.lastActivityAt, session.version, record.actorId,
+      session.expertRevisionId ?? null, session.environmentId ?? null,
+      session.environmentRevisionId ?? null, session.repositoryId ?? null,
+      session.configurationResolutionVersion, session.repository, session.baseBranch,
+      session.visibility, session.status, JSON.stringify(session.attachments), session.source,
+      session.createdAt, session.updatedAt, session.lastActivityAt, session.version, record.actorId,
     ])
     if (startRecords.message && startRecords.turn && startRecords.command) {
       await client.query(`
@@ -331,7 +378,13 @@ export class PostgresSessionRepository implements SessionRepository {
       `, [
         startRecords.command.id, session.organizationId, session.spaceId, session.id,
         startRecords.command.type, startRecords.command.status, startRecords.command.resourceType,
-        startRecords.command.resourceId, JSON.stringify({ turnId: startRecords.turn.id }),
+        startRecords.command.resourceId, JSON.stringify({
+          turnId: startRecords.turn.id,
+          configurationResolutionVersion: session.configurationResolutionVersion,
+          expertRevisionId: session.expertRevisionId,
+          environmentRevisionId: session.environmentRevisionId,
+          repositoryId: session.repositoryId,
+        }),
         startRecords.command.acceptedAt,
       ])
       await client.query(`
@@ -346,6 +399,10 @@ export class PostgresSessionRepository implements SessionRepository {
           messageId: startRecords.message.id,
           turnId: startRecords.turn.id,
           commandId: startRecords.command.id,
+          configurationResolutionVersion: session.configurationResolutionVersion,
+          expertRevisionId: session.expertRevisionId,
+          environmentRevisionId: session.environmentRevisionId,
+          repositoryId: session.repositoryId,
         }),
         session.createdAt,
       ])
@@ -371,6 +428,127 @@ export class PostgresSessionRepository implements SessionRepository {
       JSON.stringify(response), JSON.stringify({ location: `${canonicalPath}/${session.id}` }), expiresAt,
     ])
     return responseToResult(response, false)
+  }
+
+  private async resolveConfiguration(
+    client: PoolClient,
+    record: CreateSessionRecord,
+  ): Promise<ResolvedSessionConfiguration> {
+    const expert = await client.query<{
+      name: string
+      status: 'draft' | 'published' | 'disabled' | 'archived'
+      visibility: 'private' | 'space'
+      created_by: string
+      published_revision_id: string | null
+    }>(`
+      SELECT name, status, visibility, created_by, published_revision_id
+      FROM relay_experts
+      WHERE organization_id = $1 AND space_id = $2 AND id = $3
+      FOR UPDATE
+    `, [record.organizationId, record.spaceId, record.request.expertId])
+    if (!expert.rowCount) throw new SessionConfigurationNotFoundError()
+    const expertRow = expert.rows[0]
+    if (expertRow.visibility === 'private' && expertRow.created_by !== record.actorId) {
+      throw new SessionConfigurationNotFoundError()
+    }
+    if (expertRow.status !== 'published' || !expertRow.published_revision_id) {
+      throw new ExpertNotPublishedError()
+    }
+
+    const expertRevision = await client.query<{
+      id: string
+      revision: number
+      status: 'draft' | 'published'
+      environment_id: string
+      environment_revision_id: string
+      allow_repository_override: boolean
+      allow_base_branch_override: boolean
+    }>(`
+      SELECT id, revision, status, environment_id, environment_revision_id,
+        allow_repository_override, allow_base_branch_override
+      FROM relay_expert_revisions
+      WHERE organization_id = $1 AND space_id = $2 AND expert_id = $3 AND id = $4
+      FOR UPDATE
+    `, [
+      record.organizationId,
+      record.spaceId,
+      record.request.expertId,
+      expertRow.published_revision_id,
+    ])
+    const expertRevisionRow = expertRevision.rows[0]
+    if (!expertRevisionRow || expertRevisionRow.status !== 'published') throw new ExpertNotPublishedError()
+
+    const environment = await client.query<{
+      status: 'draft' | 'provisioning' | 'ready' | 'updating' | 'failed' | 'disabled'
+      active_revision_id: string | null
+    }>(`
+      SELECT status, active_revision_id
+      FROM relay_environments
+      WHERE organization_id = $1 AND space_id = $2 AND id = $3
+      FOR UPDATE
+    `, [record.organizationId, record.spaceId, expertRevisionRow.environment_id])
+    const environmentRow = environment.rows[0]
+    if (
+      !environmentRow
+      || environmentRow.status !== 'ready'
+      || environmentRow.active_revision_id !== expertRevisionRow.environment_revision_id
+    ) {
+      throw new EnvironmentNotReadyError()
+    }
+
+    const environmentRevision = await client.query<{ status: 'draft' | 'ready' }>(`
+      SELECT status
+      FROM relay_environment_revisions
+      WHERE organization_id = $1 AND space_id = $2 AND environment_id = $3 AND id = $4
+      FOR UPDATE
+    `, [
+      record.organizationId,
+      record.spaceId,
+      expertRevisionRow.environment_id,
+      expertRevisionRow.environment_revision_id,
+    ])
+    if (environmentRevision.rows[0]?.status !== 'ready') throw new EnvironmentNotReadyError()
+
+    const repositoryRows = await client.query<{
+      repository_id: string
+      repository: string
+      base_branch: string
+      is_default: boolean
+    }>(`
+      SELECT repository_id, repository, base_branch, is_default
+      FROM relay_environment_revision_repositories
+      WHERE organization_id = $1 AND space_id = $2
+        AND environment_id = $3 AND environment_revision_id = $4
+      FOR UPDATE
+    `, [
+      record.organizationId,
+      record.spaceId,
+      expertRevisionRow.environment_id,
+      expertRevisionRow.environment_revision_id,
+    ])
+    const repositories: InMemoryRepositoryBinding[] = repositoryRows.rows.map((repository) => ({
+      id: repository.repository_id,
+      repository: repository.repository,
+      baseBranch: repository.base_branch,
+      isDefault: repository.is_default,
+    }))
+    const selectedRepository = resolveRepositoryBinding(record.request, repositories, {
+      allowRepositoryOverride: expertRevisionRow.allow_repository_override,
+      allowBaseBranchOverride: expertRevisionRow.allow_base_branch_override,
+    })
+
+    return {
+      configurationResolutionVersion: 1,
+      expertId: record.request.expertId,
+      expertName: expertRow.name,
+      expertVersion: expertRevisionRow.revision,
+      expertRevisionId: expertRevisionRow.id,
+      environmentId: expertRevisionRow.environment_id,
+      environmentRevisionId: expertRevisionRow.environment_revision_id,
+      repositoryId: selectedRepository.id,
+      repository: selectedRepository.repository,
+      baseBranch: selectedRepository.baseBranch,
+    }
   }
 
   private async getSession(client: PoolClient, sessionId: string) {

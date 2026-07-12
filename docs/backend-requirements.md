@@ -1,7 +1,7 @@
 # Relay 后端需求与领域模型
 
 > 状态：MVP 实施基线  
-> 版本：1.1（2026-07-12）
+> 版本：1.2（2026-07-13）
 > 依据：`docs/cosmos-evidence-matrix.md`（2026-07-12）  
 > API 契约：`docs/api-contract.yaml`  
 > 目标：为 Relay 的 Home、Sessions、Experts、Environments、Files、Artifacts、Workers 与 Automations 原型提供可演进、可审计的多租户后端边界。
@@ -25,10 +25,10 @@
 | --- | --- | --- |
 | 进程与配置 | Fastify API；`/api/health` 公开存活检查；受鉴权的 `/api/ready` 可检查 PostgreSQL；生产模式强制 OIDC、`DATABASE_URL` 和 `CORS_ORIGIN` | 无限流、信任代理、安全 header、优雅排空验收和多区部署 |
 | 身份发现与授权 | `GET /api/v1/me` 返回 authenticated actor 及其真实 Organization/Space membership；Session 读写在 repository 查询中重检 membership；写权限取 Organization/Space 角色交集 | 无 operation policy、Private share、合规访问、RLS 或实时撤权通知 |
-| Session API | `GET/POST /api/v1/organizations/:organizationId/spaces/:spaceId/sessions`；共享 Zod 请求/响应/错误验证 | 无 get/patch/archive/message/turn/command/SSE；列表无真实 cursor 和 filter |
-| 持久化 | `DATABASE_URL` 存在时使用 PostgreSQL，否则开发模式使用内存 repository；有版本化 SQL migration；已有 Organization/Space/Membership、Session、首条 Message/Turn、Command/Outbox 与完整幂等响应 | 无 Expert/Environment revision、后续 Message/Attempt、Audit 或 RLS |
+| Session API | tenant-scoped list/create/get；单资源与 create 返回版本 `ETag`；共享 Zod 请求/响应/错误验证；Private 资源按 creator conceal | 无 patch/archive/message/lifecycle command/SSE；列表无真实 cursor 和 filter |
+| 权威配置与持久化 | PostgreSQL migration 已建立 Expert/Environment identity、immutable revision、Repository binding 和复合 tenant FK；create 在事务中解析 Published/Ready/current revision 后固定三个 authoritative ID；Session/首条 Message/Turn/Command/Outbox/完整幂等响应原子写入 | 无 Expert/Environment CRUD/publish API、ExecutionSnapshot、后续 Message/Attempt、Audit 或 RLS；大表 migration 仍需分阶段上线方案 |
 | 创建幂等 | Organization + authenticated actor + method + canonical path + key 作用域；同 key/同 body 重放，不同 body 返回 409；PostgreSQL 使用事务级 advisory lock 处理并发 | 未运行过期记录清理作业；尚未统一所有写 endpoint 的幂等中间件 |
-| 测试 | API/repository/config/JWT 单元测试；配置 `TEST_DATABASE_URL` 时运行 PostgreSQL 并发幂等、HTTP 跨 tenant/Private 隔离和 `001 -> 002` 升级测试 | 数据库测试会在无环境变量时 skip；无 RLS、迁移回滚、备份恢复或负载测试 |
+| 测试 | API/repository/config/JWT 单元测试；配置 `TEST_DATABASE_URL` 时运行 PostgreSQL 并发幂等、权威配置、跨 tenant/Private 隔离和 `001 -> 004` 新库/升级测试 | 数据库测试会在无环境变量时 skip；无 RLS、在线大表迁移、备份恢复或负载测试 |
 
 这是“PostgreSQL 持久化纵向切片”，不是本文 Phase 1 已完成，也不具备处理客户私密数据的最小安全边界。
 
@@ -39,9 +39,9 @@
 | 漂移 | 当前实现 | 目标决策 |
 | --- | --- | --- |
 | Base path | 代码为 `/api/v1`，OpenAPI server 为 `/v1` | 生产边缘对外使用 `/v1`；同源 Web 可经 `/api/v1` 代理。在合同测试中明确两者的 rewrite，不保留两套业务路由 |
-| Create body | 客户端提交 `expertName/expertVersion/environmentId/repository/baseBranch`、title 必填 | 迁移到 OpenAPI `SessionCreate`；客户端只提交 `expertId/message/visibility/advancedOverrides`，服务端解析并固定 Expert/Environment revision |
-| Create transaction | `start=true` 同事务写 Session + first Message + Turn + Command + Outbox + 完整幂等响应，Session 返回 `queued`；有并发与故障回滚测试 | 尚未服务端解析 Expert/Environment revision，也无 Command consumer/lease/heartbeat |
-| Response | 迁移期 `SessionDto`，没有 revision/message/turn/command、`ETag` 和 `Location` | 按 `SessionCreateResult` 返回服务端快照和并发控制 header |
+| Create body | `expertId/title/message` 是最小输入；`visibility/start` 有默认值；`advancedOverrides.repositoryId/baseBranch` 严格校验。旧名称/版本/环境/仓库字段仅是迁移提示，不作为事实持久化 | 移除迁移提示前先完成所有 Web/Automation caller 升级；附件仍需迁移为预上传引用 |
+| Create transaction | `start=true` 同事务解析并锁定 Published ExpertRevision、Ready EnvironmentRevision 与 Repository binding，再写 Session + first Message + Turn + Command + Outbox + 完整幂等响应 | 无 Command consumer、lease/heartbeat、ExecutionSnapshot 或 SessionEvent |
+| Response | `SessionDto` 返回 `configurationResolutionVersion` 和三个 authoritative ID；create 返回 message/turn/command、`ETag`、`Location` 与 replay header；get 返回 `ETag` 和 no-store | 仍需与目标 `Session` resource 的完整字段、统一 problem details 和生成契约收敛 |
 | Error | 运行时为 `{code,message,retryable,fieldErrors,correlationId}` | 统一到 `application/problem+json`；迁移期前端适配必须有合同测试，不允许第三套错误格式 |
 | Identifier | 当前接受 1-128 字符串并生成 UUIDv4 | 持久实体改为服务端 UUIDv7；不在 URL 中使用可猜业务标识 |
 | Attachment | 最多 10 个 URL/字符串 | 使用预上传后的 `AttachmentReference`；统一大小、数量、MIME 和扫描约束 |
