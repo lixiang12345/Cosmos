@@ -37,6 +37,7 @@ export type ControlPlaneProviderProps = {
   initialState?: ControlPlaneState
   storage?: ControlPlaneStorage | null
   provisioningIntervalMs?: number
+  onActiveSpaceChange?: (spaceId: string) => void
 }
 
 export function ControlPlaneProvider({
@@ -44,6 +45,7 @@ export function ControlPlaneProvider({
   initialState,
   storage,
   provisioningIntervalMs = 700,
+  onActiveSpaceChange,
 }: ControlPlaneProviderProps) {
   const [state, setState] = useState<ControlPlaneState>(() => (
     initialState ?? loadControlPlaneState(storage)
@@ -84,7 +86,11 @@ export function ControlPlaneProvider({
     )
 
     return {
-      switchSpace: (spaceId) => run(switchSpaceState(stateRef.current, spaceId)),
+      switchSpace: (spaceId) => {
+        const space = run(switchSpaceState(stateRef.current, spaceId))
+        onActiveSpaceChange?.(space.id)
+        return space
+      },
       createEnvironment: (input) => run(createEnvironmentState(stateRef.current, input)),
       updateEnvironment: (environmentId, input) => run(updateEnvironmentState(stateRef.current, environmentId, input)),
       advanceEnvironmentProvisioning: (environmentId) => run(advanceEnvironmentProvisioningState(stateRef.current, environmentId)),
@@ -101,7 +107,7 @@ export function ControlPlaneProvider({
       createMcp: createMcpServer,
       createWebhook: (input) => run(createWebhookState(stateRef.current, input)),
     }
-  }, [commit])
+  }, [commit, onActiveSpaceChange])
 
   const scope = useMemo(() => selectControlPlaneScope(state), [state])
   const value = useMemo<ControlPlaneContextValue>(() => ({

@@ -1,10 +1,12 @@
 import {
   ApiErrorSchema,
   CreateSessionResponseSchema,
+  MeResponseSchema,
   SessionListResponseSchema,
   type ApiError,
   type CreateSessionRequestInput,
   type CreateSessionResponse,
+  type MeResponse,
   type SessionListResponse,
 } from '@relay/contracts'
 
@@ -12,8 +14,10 @@ const DEFAULT_RELAY_API_BASE_URL = '/api'
 
 export type RelayApiAuthContext = {
   accessToken?: string
-  onUnauthorized?: () => void | Promise<void>
+  onUnauthorized?: (failedAccessToken: string | undefined) => void | Promise<void>
 }
+
+const sessionListRequests = new Map<string, Promise<SessionListResponse>>()
 
 type RelayApiLocation = {
   applicationOrigin: string
@@ -185,7 +189,7 @@ async function request<T>(
   const correlationId = getCorrelationId(response, body)
   if (!response.ok) {
     if (response.status === 401 && auth.onUnauthorized) {
-      await Promise.resolve(auth.onUnauthorized()).catch(() => undefined)
+      await Promise.resolve(auth.onUnauthorized(auth.accessToken)).catch(() => undefined)
     }
     const parsedError = ApiErrorSchema.safeParse(body)
     if (parsedError.success) {
@@ -235,8 +239,24 @@ export function listSessions(
   spaceId: string,
   auth?: RelayApiAuthContext,
 ): Promise<SessionListResponse> {
-  return request(sessionsPath(organizationId, spaceId), {
+  const path = sessionsPath(organizationId, spaceId)
+  const requestKey = JSON.stringify([path, auth?.accessToken])
+  const existing = sessionListRequests.get(requestKey)
+  if (existing) return existing
+  const pending = request(path, {
     method: 'GET',
     headers: { Accept: 'application/json' },
   }, SessionListResponseSchema, auth)
+  sessionListRequests.set(requestKey, pending)
+  void pending.finally(() => {
+    if (sessionListRequests.get(requestKey) === pending) sessionListRequests.delete(requestKey)
+  }).catch(() => undefined)
+  return pending
+}
+
+export function getMe(auth?: RelayApiAuthContext): Promise<MeResponse> {
+  return request('/v1/me', {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  }, MeResponseSchema, auth)
 }

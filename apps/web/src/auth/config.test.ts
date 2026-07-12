@@ -6,28 +6,20 @@ describe('web authentication configuration', () => {
     expect(loadWebAuthConfig({
       VITE_AUTH_MODE: 'development', VITE_DEMO_MODE: 'true',
     }, 'http://127.0.0.1:5173')).toEqual({
-      mode: 'development', actorId: 'user-local-admin', organizationId: 'relay',
-      spaceId: 'space-commerce', demoMode: true,
+      mode: 'development', actorId: 'user-local-admin', demoMode: true,
     })
     expect(() => loadWebAuthConfig({
       VITE_AUTH_MODE: 'development', PROD: true,
     }, 'https://relay.example')).toThrow('disabled in production')
   })
 
-  it('requires complete OIDC and tenant configuration', () => {
-    expect(() => loadWebAuthConfig({ VITE_AUTH_MODE: 'oidc' }, 'https://relay.example')).toThrow('VITE_RELAY_ORGANIZATION_ID')
-    expect(() => loadWebAuthConfig({
-      VITE_AUTH_MODE: 'oidc', VITE_RELAY_ORGANIZATION_ID: 'org-a',
-    }, 'https://relay.example')).toThrow('VITE_RELAY_SPACE_ID')
-
+  it('requires complete OIDC client configuration without deployment-scoped tenant ids', () => {
     expect(loadWebAuthConfig({
-      VITE_AUTH_MODE: 'oidc', VITE_RELAY_ORGANIZATION_ID: 'org-a',
-      VITE_RELAY_SPACE_ID: 'space-a',
+      VITE_AUTH_MODE: 'oidc',
       VITE_OIDC_AUTHORITY: 'https://identity.example.com', VITE_OIDC_CLIENT_ID: 'relay-web',
       VITE_OIDC_AUDIENCE: 'relay-api',
     }, 'https://relay.example')).toMatchObject({
-      mode: 'oidc', organizationId: 'org-a', authority: 'https://identity.example.com/',
-      spaceId: 'space-a',
+      mode: 'oidc', authority: 'https://identity.example.com/',
       clientId: 'relay-web', redirectUri: 'https://relay.example/auth/callback',
       audience: 'relay-api', demoMode: false,
     })
@@ -40,7 +32,6 @@ describe('web authentication configuration', () => {
   it('requires secure OIDC endpoints and same-origin callbacks in production', () => {
     const base = {
       VITE_AUTH_MODE: 'oidc', PROD: true,
-      VITE_RELAY_ORGANIZATION_ID: 'org-a', VITE_RELAY_SPACE_ID: 'space-a',
       VITE_OIDC_CLIENT_ID: 'relay-web',
     }
     expect(() => loadWebAuthConfig({
@@ -58,7 +49,6 @@ describe('web authentication configuration', () => {
   it('allows loopback HTTP only outside production', () => {
     expect(loadWebAuthConfig({
       VITE_AUTH_MODE: 'oidc',
-      VITE_RELAY_ORGANIZATION_ID: 'org-local', VITE_RELAY_SPACE_ID: 'space-local',
       VITE_OIDC_AUTHORITY: 'http://127.0.0.1:9000', VITE_OIDC_CLIENT_ID: 'relay-local',
     }, 'http://127.0.0.1:5173')).toMatchObject({
       authority: 'http://127.0.0.1:9000/', redirectUri: 'http://127.0.0.1:5173/auth/callback',

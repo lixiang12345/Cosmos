@@ -12,10 +12,23 @@ if (pool) await runMigrations(pool)
 const authenticate = config.authentication.mode === 'oidc'
   ? createJwtAuthenticator(config.authentication)
   : createDevelopmentAuthenticator(config.authentication.actorId)
+const developmentOrganizations = config.authentication.mode === 'development' ? {
+  [config.authentication.actorId]: [{
+    id: 'relay',
+    name: 'Relay',
+    role: 'organization_owner' as const,
+    spaces: [
+      { id: 'space-commerce', name: 'Commerce Engineering', role: 'space_manager' as const },
+      { id: 'space-platform', name: 'Platform Engineering', role: 'space_manager' as const },
+    ],
+  }],
+} : undefined
 const app = createApp({
   logger: true,
   corsOrigin: config.corsOrigin,
-  sessionRepository: pool ? new PostgresSessionRepository(pool) : new InMemorySessionRepository(),
+  sessionRepository: pool
+    ? new PostgresSessionRepository(pool)
+    : new InMemorySessionRepository({ actorOrganizations: developmentOrganizations }),
   readinessCheck: pool ? async () => { await pool.query('SELECT 1') } : undefined,
   authenticate,
 })

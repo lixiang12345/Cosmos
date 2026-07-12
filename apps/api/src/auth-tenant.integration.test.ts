@@ -1,4 +1,4 @@
-import { ApiErrorSchema, SessionListResponseSchema } from '@relay/contracts'
+import { ApiErrorSchema, MeResponseSchema, SessionListResponseSchema } from '@relay/contracts'
 import { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createApp } from './app.js'
@@ -21,6 +21,7 @@ describeWithDatabase('HTTP authentication and tenant isolation', () => {
     ['token-b', { id: 'user-b', kind: 'user' }],
     ['token-viewer', { id: 'user-viewer', kind: 'user' }],
     ['token-outsider', { id: 'user-outsider', kind: 'user' }],
+    ['token-service', { id: 'service-ci', kind: 'service_account' }],
   ])
   const authenticate = async (authorization: string | undefined) => {
     const actor = authorization ? actors.get(authorization.replace(/^Bearer /, '')) : undefined
@@ -39,7 +40,8 @@ describeWithDatabase('HTTP authentication and tenant isolation', () => {
       INSERT INTO relay_spaces (organization_id, id, name)
         VALUES ('org-a', 'space-a', 'Space A'), ('org-a', 'space-b', 'Space B'), ('org-b', 'space-a', 'Space A');
       INSERT INTO relay_organization_memberships (organization_id, actor_id, role) VALUES
-        ('org-a', 'user-a', 'member'), ('org-a', 'user-b', 'member'), ('org-a', 'user-viewer', 'viewer');
+        ('org-a', 'user-a', 'member'), ('org-a', 'user-b', 'member'), ('org-a', 'user-viewer', 'viewer'),
+        ('org-b', 'user-a', 'viewer'), ('org-b', 'service-ci', 'organization_admin');
       INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role) VALUES
         ('org-a', 'space-a', 'user-a', 'member'), ('org-a', 'space-a', 'user-b', 'member'),
         ('org-a', 'space-a', 'user-viewer', 'viewer'), ('org-a', 'space-b', 'user-a', 'member');
@@ -54,6 +56,40 @@ describeWithDatabase('HTTP authentication and tenant isolation', () => {
 
   const url = '/api/v1/organizations/org-a/spaces/space-a/sessions'
   const auth = (token: string) => ({ authorization: `Bearer ${token}` })
+
+  it('discovers only the authenticated actor memberships in deterministic order', async () => {
+    const response = await app.inject({ method: 'GET', url: '/api/v1/me', headers: auth('token-a') })
+
+    expect(response.statusCode).toBe(200)
+    expect(MeResponseSchema.parse(response.json())).toEqual({
+      actor: { id: 'user-a', kind: 'user' },
+      organizations: [
+        {
+          id: 'org-a', name: 'Organization A', role: 'member',
+          spaces: [
+            { id: 'space-a', name: 'Space A', role: 'member' },
+            { id: 'space-b', name: 'Space B', role: 'member' },
+          ],
+        },
+        { id: 'org-b', name: 'Organization B', role: 'viewer', spaces: [] },
+      ],
+    })
+  })
+
+  it('returns service-account identity and an empty organization list for an outsider', async () => {
+    const service = await app.inject({ method: 'GET', url: '/api/v1/me', headers: auth('token-service') })
+    const outsider = await app.inject({ method: 'GET', url: '/api/v1/me', headers: auth('token-outsider') })
+
+    expect(MeResponseSchema.parse(service.json())).toEqual({
+      actor: { id: 'service-ci', kind: 'service_account' },
+      organizations: [{
+        id: 'org-b', name: 'Organization B', role: 'organization_admin', spaces: [],
+      }],
+    })
+    expect(MeResponseSchema.parse(outsider.json())).toEqual({
+      actor: { id: 'user-outsider', kind: 'user' }, organizations: [],
+    })
+  })
 
   it('hides non-member and cross-tenant resources with the same 404 shape', async () => {
     const outsider = await app.inject({ method: 'GET', url, headers: auth('token-outsider') })

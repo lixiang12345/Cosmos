@@ -5,6 +5,7 @@ import App from './App'
 import { AuthGate } from './auth/AuthGate'
 import { AuthProvider } from './auth/AuthProvider'
 import { PreferencesProvider } from './preferences'
+import { WorkspaceGate, WorkspaceProvider } from './workspace'
 import './styles.css'
 
 createRoot(document.getElementById('root')!).render(
@@ -12,9 +13,13 @@ createRoot(document.getElementById('root')!).render(
     <PreferencesProvider>
       <AuthProvider>
         <AuthGate>
-          <BrowserRouter>
-            <App />
-          </BrowserRouter>
+          <WorkspaceProvider>
+            <WorkspaceGate>
+              <BrowserRouter>
+                <App />
+              </BrowserRouter>
+            </WorkspaceGate>
+          </WorkspaceProvider>
         </AuthGate>
       </AuthProvider>
     </PreferencesProvider>

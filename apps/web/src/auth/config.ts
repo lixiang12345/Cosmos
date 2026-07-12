@@ -1,8 +1,6 @@
 export type DevelopmentAuthConfig = {
   mode: 'development'
   actorId: string
-  organizationId: string
-  spaceId: string
   demoMode: boolean
 }
 
@@ -15,8 +13,6 @@ export type OidcAuthConfig = {
   silentRedirectUri?: string
   scope: string
   audience?: string
-  organizationId: string
-  spaceId: string
   demoMode: false
 }
 
@@ -69,22 +65,11 @@ export function loadWebAuthConfig(
   if (mode !== 'development' && mode !== 'oidc') {
     throw new Error('VITE_AUTH_MODE must be explicitly set to development or oidc.')
   }
-  const organizationId = required(
-    env.VITE_RELAY_ORGANIZATION_ID ?? (mode === 'development' ? 'relay' : undefined),
-    'VITE_RELAY_ORGANIZATION_ID',
-  )
-  const spaceId = required(
-    env.VITE_RELAY_SPACE_ID ?? (mode === 'development' ? 'space-commerce' : undefined),
-    'VITE_RELAY_SPACE_ID',
-  )
-
   if (mode === 'development') {
     if (production) throw new Error('Development authentication is disabled in production builds.')
     return {
       mode,
       actorId: required(env.VITE_DEVELOPMENT_ACTOR_ID ?? 'user-local-admin', 'VITE_DEVELOPMENT_ACTOR_ID'),
-      organizationId,
-      spaceId,
       demoMode: env.VITE_DEMO_MODE === 'true' || isTest,
     }
   }
@@ -130,8 +115,6 @@ export function loadWebAuthConfig(
     audience: typeof env.VITE_OIDC_AUDIENCE === 'string' && env.VITE_OIDC_AUDIENCE.trim()
       ? env.VITE_OIDC_AUDIENCE.trim()
       : undefined,
-    organizationId,
-    spaceId,
     demoMode: false,
   }
 }

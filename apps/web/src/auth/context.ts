@@ -7,12 +7,10 @@ export type AuthContextValue = {
   mode?: 'development' | 'oidc'
   actorId?: string
   displayName?: string
-  organizationId?: string
-  spaceId?: string
   demoMode: boolean
   accessToken?: string
   error?: string
-  handleUnauthorized: () => Promise<void>
+  handleUnauthorized: (failedAccessToken: string | undefined) => Promise<void>
   signIn: () => Promise<void>
   signOut: () => Promise<void>
 }

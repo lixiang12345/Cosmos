@@ -31,6 +31,7 @@ import { useAuth } from '../auth/context'
 import { useControlPlane } from '../features/control-plane'
 import { usePreferences } from '../preferences'
 import type { Run } from '../types'
+import { useActiveWorkspace } from '../workspace'
 import { GlobalControls } from './GlobalControls'
 import { IconButton, StatusBadge } from './ui'
 
@@ -96,6 +97,7 @@ export function Sidebar({ runs, open, collapsed, onClose, onNewTask, onToggleCol
   const auth = useAuth()
   const { locale, t } = usePreferences()
   const { activeSpace, actions, state } = useControlPlane()
+  const workspace = useActiveWorkspace()
   const location = useLocation()
   const [spaceSwitcherOpen, setSpaceSwitcherOpen] = useState(false)
   const [filesOpen, setFilesOpen] = useState(true)
@@ -129,13 +131,34 @@ export function Sidebar({ runs, open, collapsed, onClose, onNewTask, onToggleCol
           </button>
           {spaceSwitcherOpen ? (
             <ul className="space-switcher-menu">
-              {state.spaces.map((space) => (
-                <li key={space.id}>
-                  <button type="button" aria-current={activeSpace.id === space.id} onClick={() => { actions.switchSpace(space.id); setSpaceSwitcherOpen(false) }}>
-                    {space.name}
-                  </button>
-                </li>
-              ))}
+              {workspace.me.organizations.flatMap((organization) => organization.spaces.length ? [
+                <li key={organization.id} className="space-switcher-menu__organization">
+                  <p>{organization.name}</p>
+                  <ul>
+                    {organization.spaces.map((space) => {
+                      const current = workspace.organization.id === organization.id && activeSpace.id === space.id
+                      return (
+                        <li key={`${organization.id}:${space.id}`}>
+                          <button
+                            type="button"
+                            aria-current={current}
+                            onClick={() => {
+                              if (workspace.organization.id === organization.id && state.spaces.some((item) => item.id === space.id)) {
+                                actions.switchSpace(space.id)
+                              } else {
+                                workspace.selectSpace(organization.id, space.id)
+                              }
+                              setSpaceSwitcherOpen(false)
+                            }}
+                          >
+                            {space.name}
+                          </button>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </li>,
+              ] : [])}
             </ul>
           ) : null}
         </div>

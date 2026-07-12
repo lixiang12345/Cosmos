@@ -1,13 +1,19 @@
 import { randomUUID } from 'node:crypto'
 import {
+  MeOrganizationSchema,
   SessionDtoSchema,
   type CreateSessionRequest,
   type CreateSessionResponse,
+  type MeOrganization,
+  type OrganizationRole,
   type SessionCommand,
   type SessionDto,
   type SessionMessage,
   type SessionTurn,
+  type SpaceRole,
 } from '@relay/contracts'
+
+export type { OrganizationRole, SpaceRole } from '@relay/contracts'
 
 export type CreateSessionRecord = {
   organizationId: string
@@ -25,11 +31,13 @@ export type CreateSessionResult = {
   replayed: boolean
 }
 
-export type OrganizationRole = 'organization_owner' | 'organization_admin' | 'member' | 'viewer'
-export type SpaceRole = 'space_manager' | 'member' | 'viewer'
 export type SpaceAccess = {
   organizationRole: OrganizationRole
   spaceRole: SpaceRole
+}
+
+export function canWriteSpace(access: SpaceAccess): boolean {
+  return access.organizationRole !== 'viewer' && access.spaceRole !== 'viewer'
 }
 
 export class IdempotencyConflictError extends Error {
@@ -47,6 +55,7 @@ export class AuthorizationChangedError extends Error {
 }
 
 export interface SessionRepository {
+  listActorOrganizations(actorId: string): Promise<MeOrganization[]>
   getSpaceAccess(organizationId: string, spaceId: string, actorId: string): Promise<SpaceAccess | null>
   listBySpace(organizationId: string, spaceId: string, actorId: string): Promise<SessionDto[]>
   create(record: CreateSessionRecord): Promise<CreateSessionResult>
@@ -54,6 +63,7 @@ export interface SessionRepository {
 
 export type InMemorySessionRepositoryOptions = {
   seed?: SessionDto[]
+  actorOrganizations?: Readonly<Record<string, readonly MeOrganization[]>>
   createId?: () => string
   now?: () => Date
 }
@@ -131,12 +141,32 @@ function cloneSession(session: SessionDto): SessionDto {
   return { ...session, attachments: [...session.attachments] }
 }
 
+function compareText(left: string, right: string) {
+  return left < right ? -1 : left > right ? 1 : 0
+}
+
+function compareNames(left: { id: string; name: string }, right: { id: string; name: string }) {
+  return compareText(left.name, right.name) || compareText(left.id, right.id)
+}
+
+function cloneOrganization(organization: MeOrganization): MeOrganization {
+  return {
+    ...organization,
+    spaces: organization.spaces.map((space) => ({ ...space })).sort(compareNames),
+  }
+}
+
+export function orderActorOrganizations(organizations: readonly MeOrganization[]): MeOrganization[] {
+  return organizations.map(cloneOrganization).sort(compareNames)
+}
+
 function spaceKey(organizationId: string, spaceId: string) {
   return `${organizationId}\u0000${spaceId}`
 }
 
 export class InMemorySessionRepository implements SessionRepository {
   private readonly sessionsBySpace = new Map<string, SessionDto[]>()
+  private readonly organizationsByActor = new Map<string, MeOrganization[]>()
   private readonly sessionsByIdempotencyKey = new Map<string, {
     requestFingerprint: string
     result: CreateSessionResult
@@ -148,6 +178,12 @@ export class InMemorySessionRepository implements SessionRepository {
     this.createId = options.createId ?? randomUUID
     this.now = options.now ?? (() => new Date())
 
+    for (const [actorId, organizations] of Object.entries(options.actorOrganizations ?? {})) {
+      this.organizationsByActor.set(actorId, orderActorOrganizations(
+        organizations.map((organization) => MeOrganizationSchema.parse(organization)),
+      ))
+    }
+
     for (const candidate of options.seed ?? []) {
       const session = SessionDtoSchema.parse(candidate)
       const key = spaceKey(session.organizationId, session.spaceId)
@@ -157,15 +193,26 @@ export class InMemorySessionRepository implements SessionRepository {
     }
   }
 
-  async getSpaceAccess(): Promise<SpaceAccess> {
-    return { organizationRole: 'organization_owner', spaceRole: 'space_manager' }
+  async listActorOrganizations(actorId: string): Promise<MeOrganization[]> {
+    return orderActorOrganizations(this.organizationsByActor.get(actorId) ?? [])
   }
 
-  async listBySpace(organizationId: string, spaceId: string): Promise<SessionDto[]> {
+  async getSpaceAccess(organizationId: string, spaceId: string, actorId: string): Promise<SpaceAccess | null> {
+    const organization = this.organizationsByActor.get(actorId)?.find((item) => item.id === organizationId)
+    const space = organization?.spaces.find((item) => item.id === spaceId)
+    return organization && space
+      ? { organizationRole: organization.role, spaceRole: space.role }
+      : null
+  }
+
+  async listBySpace(organizationId: string, spaceId: string, actorId: string): Promise<SessionDto[]> {
+    if (!await this.getSpaceAccess(organizationId, spaceId, actorId)) return []
     return (this.sessionsBySpace.get(spaceKey(organizationId, spaceId)) ?? []).map(cloneSession)
   }
 
   async create(record: CreateSessionRecord): Promise<CreateSessionResult> {
+    const access = await this.getSpaceAccess(record.organizationId, record.spaceId, record.actorId)
+    if (!access || !canWriteSpace(access)) throw new AuthorizationChangedError()
     const idempotencyScope = `${spaceKey(record.organizationId, record.spaceId)}\u0000${record.actorId}\u0000${record.idempotencyKey}`
     const requestFingerprint = JSON.stringify(record.request)
     const existing = this.sessionsByIdempotencyKey.get(idempotencyScope)

@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
@@ -84,13 +85,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   })
   const [manager, setManager] = useState<UserManager>()
   const [user, setUser] = useState<User | undefined>(undefined)
+  const currentAccessToken = useRef<string | undefined>(undefined)
   const [initializationError, setInitializationError] = useState<string>()
   const [status, setStatus] = useState<AuthStatus>(() => (
     config instanceof Error ? 'configuration_error' : config.mode === 'development' ? 'authenticated' : 'loading'
   ))
 
+  const updateUser = useCallback((nextUser: User | undefined) => {
+    currentAccessToken.current = nextUser?.access_token
+    setUser(nextUser)
+  }, [])
+
   const clearIdentity = useCallback(async () => {
-    setUser(undefined)
+    updateUser(undefined)
     setStatus('unauthenticated')
     if (!(config instanceof Error) && config.mode === 'oidc') {
       try {
@@ -99,7 +106,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Local identity is already cleared; remote storage cleanup is best effort.
       }
     }
-  }, [config, manager])
+  }, [config, manager, updateUser])
+
+  const handleUnauthorized = useCallback(async (failedAccessToken: string | undefined) => {
+    if (failedAccessToken !== currentAccessToken.current) return
+    await clearIdentity()
+  }, [clearIdentity])
 
   useEffect(() => {
     if (config instanceof Error || config.mode === 'development') return
@@ -143,7 +155,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         if (cancelled) return
         if (currentUser && !currentUser.expired) {
-          setUser(currentUser)
+          updateUser(currentUser)
           setStatus('authenticated')
         } else {
           setStatus('unauthenticated')
@@ -157,11 +169,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const onLoaded = (loadedUser: User) => {
-      setUser(loadedUser)
+      updateUser(loadedUser)
       setStatus('authenticated')
     }
     const onUnloaded = () => {
-      setUser(undefined)
+      updateUser(undefined)
       setStatus('unauthenticated')
     }
     const onExpired = () => { void clearIdentity() }
@@ -175,7 +187,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       manager.events.removeUserUnloaded(onUnloaded)
       manager.events.removeAccessTokenExpired(onExpired)
     }
-  }, [clearIdentity, config, manager])
+  }, [clearIdentity, config, manager, updateUser])
 
   const signIn = useCallback(async () => {
     if (config instanceof Error || config.mode !== 'oidc') return
@@ -186,14 +198,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     if (config instanceof Error || config.mode !== 'oidc') return
-    setUser(undefined)
+    updateUser(undefined)
     setStatus('unauthenticated')
     try {
       await manager?.signoutRedirect()
     } catch {
       await clearIdentity()
     }
-  }, [clearIdentity, config, manager])
+  }, [clearIdentity, config, manager, updateUser])
 
   const actorId = config instanceof Error
     ? undefined
@@ -211,15 +223,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     mode: config instanceof Error ? undefined : config.mode,
     actorId,
     displayName,
-    organizationId: config instanceof Error ? undefined : config.organizationId,
-    spaceId: config instanceof Error ? undefined : config.spaceId,
     demoMode: config instanceof Error ? false : config.demoMode,
     accessToken: user?.access_token,
     error: config instanceof Error ? config.message : initializationError,
-    handleUnauthorized: clearIdentity,
+    handleUnauthorized,
     signIn,
     signOut,
-  }), [actorId, clearIdentity, config, displayName, initializationError, signIn, signOut, status, user?.access_token])
+  }), [actorId, config, displayName, handleUnauthorized, initializationError, signIn, signOut, status, user?.access_token])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

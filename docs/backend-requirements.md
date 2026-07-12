@@ -24,9 +24,10 @@
 | 范围 | 当前实现 | 未实现/不得声称 |
 | --- | --- | --- |
 | 进程与配置 | Fastify API；`/api/health` 公开存活检查；受鉴权的 `/api/ready` 可检查 PostgreSQL；生产模式强制 OIDC、`DATABASE_URL` 和 `CORS_ORIGIN` | 无限流、信任代理、安全 header、优雅排空验收和多区部署 |
+| 身份发现与授权 | `GET /api/v1/me` 返回 authenticated actor 及其真实 Organization/Space membership；Session 读写在 repository 查询中重检 membership；写权限取 Organization/Space 角色交集 | 无 operation policy、Private share、合规访问、RLS 或实时撤权通知 |
 | Session API | `GET/POST /api/v1/organizations/:organizationId/spaces/:spaceId/sessions`；共享 Zod 请求/响应/错误验证 | 无 get/patch/archive/message/turn/command/SSE；列表无真实 cursor 和 filter |
 | 持久化 | `DATABASE_URL` 存在时使用 PostgreSQL，否则开发模式使用内存 repository；有版本化 SQL migration；已有 Organization/Space/Membership、Session、首条 Message/Turn、Command/Outbox 与完整幂等响应 | 无 Expert/Environment revision、后续 Message/Attempt、Audit 或 RLS |
-| 创建幂等 | Organization + Space + key 作用域；同 key/同 body 重放，不同 body 返回 409；PostgreSQL 使用事务级 advisory lock 处理并发 | 未包含 authenticated actor/method/canonical path；未保存完整 status/body/headers；未校验过期时间或运行清理作业 |
+| 创建幂等 | Organization + authenticated actor + method + canonical path + key 作用域；同 key/同 body 重放，不同 body 返回 409；PostgreSQL 使用事务级 advisory lock 处理并发 | 未运行过期记录清理作业；尚未统一所有写 endpoint 的幂等中间件 |
 | 测试 | API/repository/config/JWT 单元测试；配置 `TEST_DATABASE_URL` 时运行 PostgreSQL 并发幂等、HTTP 跨 tenant/Private 隔离和 `001 -> 002` 升级测试 | 数据库测试会在无环境变量时 skip；无 RLS、迁移回滚、备份恢复或负载测试 |
 
 这是“PostgreSQL 持久化纵向切片”，不是本文 Phase 1 已完成，也不具备处理客户私密数据的最小安全边界。
@@ -407,7 +408,7 @@ Approval: pending -> approved|changes_requested|rejected|expired|canceled
 - 相同 key/body 重放返回原结果并设置 `Idempotency-Replayed: true`；相同 key/不同 body 返回 `409 IDEMPOTENCY_KEY_REUSED`。
 - Event ingestion 另以 `(organization, source, externalId)` 长期去重；保留期不得短于原始 Event 保留期。
 - 客户端超时后必须使用相同 key 重试，不得生成新 key。
-- 当前 Session repository 仅实现 `organization + space + key`、request hash 和 Session reference；它是迁移期子集，在接入身份前不满足上述生产约束。
+- 当前 Session create 已实现 `organization + authenticated actor + method + canonical path + key`、request hash、完整响应和 24 小时有效期；仍需抽成所有写 endpoint 共用的幂等中间件并运行过期记录清理作业。
 
 ### 7.3 错误格式
 

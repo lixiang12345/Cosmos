@@ -11,6 +11,7 @@ import { initialRuns } from './data/mockData'
 import {
   ControlPlaneProvider,
   createEmptyControlPlaneState,
+  loadControlPlaneState,
   useControlPlane,
   type InjectEventResult,
 } from './features/control-plane'
@@ -50,6 +51,7 @@ import { SessionsPage } from './pages/SessionsPage'
 import { usePreferences } from './preferences'
 import { createSession, listSessions } from './services/relayApi'
 import type { NewTaskInput, Run, RunAttempt, TaskCreateMode } from './types'
+import { useActiveWorkspace } from './workspace'
 
 function mapSessionStatus(status: SessionDto['status']): Run['status'] {
   return status === 'draft' ? 'queued' : status === 'active' ? 'running' : status
@@ -225,7 +227,9 @@ function ExpertEditorRoute({
 }
 
 function RelayApp() {
-  const { accessToken, demoMode, handleUnauthorized, organizationId = '' } = useAuth()
+  const { accessToken, demoMode, handleUnauthorized } = useAuth()
+  const { organization } = useActiveWorkspace()
+  const organizationId = organization.id
   const [runs, setRuns] = useState<Run[]>(() => demoMode ? getDemoRuns() : [])
   const [sessionsRequest, setSessionsRequest] = useState<{
     key: string
@@ -830,13 +834,28 @@ function RelayApp() {
 }
 
 export default function App() {
-  const { demoMode, spaceId = 'unconfigured-space' } = useAuth()
-  const initialState = useMemo(
-    () => demoMode ? undefined : createEmptyControlPlaneState(spaceId),
-    [demoMode, spaceId],
+  const { demoMode } = useAuth()
+  const { organization, space, selectSpace } = useActiveWorkspace()
+  const initialState = useMemo(() => {
+    if (!demoMode) return createEmptyControlPlaneState(space.id, organization.spaces)
+    const demoState = loadControlPlaneState()
+    return demoState.spaces.some((item) => item.id === space.id)
+      ? { ...demoState, activeSpaceId: space.id }
+      : demoState
+  },
+    [demoMode, organization.spaces, space.id],
+  )
+  const syncSpace = useMemo(
+    () => (spaceId: string) => selectSpace(organization.id, spaceId),
+    [organization.id, selectSpace],
   )
   return (
-    <ControlPlaneProvider initialState={initialState} storage={demoMode ? undefined : null}>
+    <ControlPlaneProvider
+      key={demoMode ? 'demo' : organization.id}
+      initialState={initialState}
+      storage={demoMode ? undefined : null}
+      onActiveSpaceChange={syncSpace}
+    >
       <RelayApp />
     </ControlPlaneProvider>
   )

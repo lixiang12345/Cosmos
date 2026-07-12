@@ -3,10 +3,24 @@ import { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { runMigrations } from './migrations.js'
 import { PostgresSessionRepository } from './postgres-session-repository.js'
-import { IdempotencyConflictError } from './session-repository.js'
+import { AuthorizationChangedError, IdempotencyConflictError } from './session-repository.js'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 const describeWithDatabase = databaseUrl ? describe : describe.skip
+
+async function waitForBlockedApplication(pool: Pool, applicationName: string, blockerPid: number) {
+  const deadline = Date.now() + 2_000
+  while (Date.now() < deadline) {
+    const result = await pool.query(`
+      SELECT 1
+      FROM pg_stat_activity
+      WHERE application_name = $1 AND $2 = ANY(pg_blocking_pids(pid))
+    `, [applicationName, blockerPid])
+    if (result.rowCount) return
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  throw new Error(`Timed out waiting for ${applicationName} to block on the membership lock.`)
+}
 
 const request: CreateSessionRequest = {
   title: 'Persist the checkout Session',
@@ -35,6 +49,8 @@ describeWithDatabase('PostgresSessionRepository', () => {
       ['relay', 'space-conflict'], ['relay', 'space-canonical'], ['relay', 'space-expiry'],
       ['relay', 'space-draft'],
       ['relay', 'space-rollback'],
+      ['relay', 'space-role-cap'],
+      ['relay', 'space-role-recheck'],
       ['other', 'space-commerce'],
     ]
     for (const [organizationId, spaceId] of spaces) {
@@ -49,10 +65,47 @@ describeWithDatabase('PostgresSessionRepository', () => {
         VALUES ($1, $2, 'user-local-admin', 'space_manager') ON CONFLICT DO NOTHING
       `, [organizationId, spaceId])
     }
+    await pool.query(`
+      INSERT INTO relay_organization_memberships (organization_id, actor_id, role)
+      VALUES ('relay', 'user-capped', 'viewer'), ('relay', 'user-recheck', 'member');
+      INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
+      VALUES
+        ('relay', 'space-role-cap', 'user-capped', 'space_manager'),
+        ('relay', 'space-role-recheck', 'user-recheck', 'member');
+    `)
   })
 
   afterAll(async () => {
     await pool.end()
+  })
+
+  it('discovers actual memberships with stable Organization and Space ordering', async () => {
+    await pool.query(`
+      INSERT INTO relay_organizations (id, name) VALUES
+        ('discovery-a', 'Discovery Z'), ('discovery-z', 'Discovery A');
+      INSERT INTO relay_spaces (organization_id, id, name) VALUES
+        ('discovery-z', 'space-a', 'Space Z'), ('discovery-z', 'space-z', 'Space A'),
+        ('discovery-z', 'space-hidden', 'Hidden Space');
+      INSERT INTO relay_organization_memberships (organization_id, actor_id, role) VALUES
+        ('discovery-a', 'discovery-user', 'viewer'),
+        ('discovery-z', 'discovery-user', 'organization_admin');
+      INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role) VALUES
+        ('discovery-z', 'space-a', 'discovery-user', 'viewer'),
+        ('discovery-z', 'space-z', 'discovery-user', 'space_manager');
+    `)
+    const repository = new PostgresSessionRepository(pool)
+
+    await expect(repository.listActorOrganizations('discovery-user')).resolves.toEqual([
+      {
+        id: 'discovery-z', name: 'Discovery A', role: 'organization_admin',
+        spaces: [
+          { id: 'space-z', name: 'Space A', role: 'space_manager' },
+          { id: 'space-a', name: 'Space Z', role: 'viewer' },
+        ],
+      },
+      { id: 'discovery-a', name: 'Discovery Z', role: 'viewer', spaces: [] },
+    ])
+    await expect(repository.listActorOrganizations('missing-user')).resolves.toEqual([])
   })
 
   it('persists Sessions and isolates list results by organization and Space', async () => {
@@ -66,6 +119,26 @@ describeWithDatabase('PostgresSessionRepository', () => {
 
     const reconnectedRepository = new PostgresSessionRepository(pool)
     await expect(reconnectedRepository.listBySpace('relay', 'space-commerce', 'user-local-admin')).resolves.toEqual([created.session])
+  })
+
+  it('rechecks membership inside the list query after access is revoked', async () => {
+    const repository = new PostgresSessionRepository(pool)
+    const created = await repository.create({
+      organizationId: 'relay', spaceId: 'space-commerce', actorId: 'user-local-admin',
+      idempotencyKey: 'revocation-list-1', request: { ...request, title: 'Revocation proof' },
+    })
+    expect((await repository.listBySpace('relay', 'space-commerce', 'user-local-admin'))
+      .some((session) => session.id === created.session.id)).toBe(true)
+
+    await pool.query(`
+      DELETE FROM relay_space_memberships
+      WHERE organization_id = 'relay' AND space_id = 'space-commerce' AND actor_id = 'user-local-admin'
+    `)
+    await expect(repository.listBySpace('relay', 'space-commerce', 'user-local-admin')).resolves.toEqual([])
+    await pool.query(`
+      INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
+      VALUES ('relay', 'space-commerce', 'user-local-admin', 'space_manager')
+    `)
   })
 
   it('creates one Session when the same command arrives concurrently', async () => {
@@ -113,6 +186,100 @@ describeWithDatabase('PostgresSessionRepository', () => {
     expect(persistedKeys.rows).toHaveLength(1)
     expect(persistedKeys.rows[0].idempotency_key_hash).toMatch(/^[a-f0-9]{64}$/)
     expect(persistedKeys.rows[0].idempotency_key_hash).not.toBe(record.idempotencyKey)
+  })
+
+  it('intersects Organization and Space roles when creating a Session', async () => {
+    const repository = new PostgresSessionRepository(pool)
+
+    await expect(repository.create({
+      organizationId: 'relay', spaceId: 'space-role-cap', actorId: 'user-capped',
+      idempotencyKey: 'organization-viewer-create', request,
+    })).rejects.toBeInstanceOf(AuthorizationChangedError)
+    await expect(repository.listBySpace('relay', 'space-role-cap', 'user-capped')).resolves.toEqual([])
+  })
+
+  it('rechecks both membership roles inside the create transaction', async () => {
+    const repository = new PostgresSessionRepository(pool)
+    await expect(repository.getSpaceAccess('relay', 'space-role-recheck', 'user-recheck')).resolves.toEqual({
+      organizationRole: 'member', spaceRole: 'member',
+    })
+
+    await pool.query(`
+      UPDATE relay_organization_memberships SET role = 'viewer'
+      WHERE organization_id = 'relay' AND actor_id = 'user-recheck'
+    `)
+
+    await expect(repository.create({
+      organizationId: 'relay', spaceId: 'space-role-recheck', actorId: 'user-recheck',
+      idempotencyKey: 'role-downgraded-before-create', request,
+    })).rejects.toBeInstanceOf(AuthorizationChangedError)
+  })
+
+  it('rejects creation when an Organization downgrade commits while authorization waits', async () => {
+    const organizationId = 'role-race-organization'
+    const spaceId = 'role-race-space'
+    const actorId = 'role-race-user'
+    const applicationName = 'relay-role-downgrade-race-test'
+    await pool.query(
+      "INSERT INTO relay_organizations (id, name) VALUES ($1, 'Role race Organization')",
+      [organizationId],
+    )
+    await pool.query(
+      "INSERT INTO relay_spaces (organization_id, id, name) VALUES ($1, $2, 'Role race Space')",
+      [organizationId, spaceId],
+    )
+    await pool.query(`
+      INSERT INTO relay_organization_memberships (organization_id, actor_id, role)
+      VALUES ($1, $2, 'member')
+    `, [organizationId, actorId])
+    await pool.query(`
+      INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
+      VALUES ($1, $2, $3, 'space_manager')
+    `, [organizationId, spaceId, actorId])
+
+    const downgradeClient = await pool.connect()
+    const createPool = new Pool({ connectionString: databaseUrl, max: 1, application_name: applicationName })
+    const repository = new PostgresSessionRepository(createPool)
+    let downgradeTransactionOpen = false
+    let creation: ReturnType<PostgresSessionRepository['create']> | undefined
+    try {
+      await downgradeClient.query('BEGIN')
+      downgradeTransactionOpen = true
+      const blockerPid = (await downgradeClient.query<{ pid: number }>(
+        'SELECT pg_backend_pid() AS pid',
+      )).rows[0].pid
+      await downgradeClient.query(`
+        UPDATE relay_organization_memberships SET role = 'viewer'
+        WHERE organization_id = $1 AND actor_id = $2
+      `, [organizationId, actorId])
+
+      creation = repository.create({
+        organizationId,
+        spaceId,
+        actorId,
+        idempotencyKey: 'concurrent-role-downgrade',
+        request,
+      })
+      void creation.catch(() => undefined)
+      await waitForBlockedApplication(pool, applicationName, blockerPid)
+      await downgradeClient.query('COMMIT')
+      downgradeTransactionOpen = false
+
+      await expect(creation).rejects.toBeInstanceOf(AuthorizationChangedError)
+      const counts = await pool.query(`
+        SELECT
+          (SELECT count(*) FROM relay_sessions
+            WHERE organization_id = $1 AND space_id = $2 AND created_by = $3) AS sessions,
+          (SELECT count(*) FROM relay_idempotency_records
+            WHERE organization_id = $1 AND space_id = $2 AND actor_id = $3) AS idempotency_records
+      `, [organizationId, spaceId, actorId])
+      expect(counts.rows[0]).toEqual({ sessions: '0', idempotency_records: '0' })
+    } finally {
+      if (downgradeTransactionOpen) await downgradeClient.query('ROLLBACK')
+      downgradeClient.release()
+      await creation?.catch(() => undefined)
+      await createPool.end()
+    }
   })
 
   it('orders Sessions by most recent activity', async () => {

@@ -41,7 +41,7 @@ DATABASE_URL=postgres://relay:relay-local-only@127.0.0.1:55432/relay pnpm dev:ap
 TEST_DATABASE_URL=postgres://relay:relay-local-only@127.0.0.1:55432/relay pnpm test:integration
 ```
 
-API 使用版本化 SQL migration 自动升级数据库；也可显式运行 `DATABASE_URL=... pnpm db:migrate`。`/api/health` 是唯一公开的进程存活探针；`/api/ready` 受鉴权保护并真实检查数据库依赖。生产 API 必须显式设置 `AUTH_MODE=oidc`、`DATABASE_URL`、`CORS_ORIGIN`、`OIDC_ISSUER`、`OIDC_AUDIENCE` 和 `OIDC_JWKS_URI`；生产 Web 必须设置 `VITE_AUTH_MODE=oidc`、Organization、Space 与 OIDC public-client 配置，缺失时显示配置错误而非进入 demo。
+API 使用版本化 SQL migration 自动升级数据库；也可显式运行 `DATABASE_URL=... pnpm db:migrate`。`/api/health` 是唯一公开的进程存活探针；`/api/ready` 受鉴权保护并真实检查数据库依赖。生产 API 必须显式设置 `AUTH_MODE=oidc`、`DATABASE_URL`、`CORS_ORIGIN`、`OIDC_ISSUER`、`OIDC_AUDIENCE` 和 `OIDC_JWKS_URI`；生产 Web 必须设置 `VITE_AUTH_MODE=oidc` 与 OIDC public-client 配置，Organization/Space 由受鉴权的 `/api/v1/me` membership discovery 返回，缺失身份配置时显示错误而非进入 demo。
 
 质量检查：
 
@@ -55,13 +55,14 @@ pnpm check
 
 - `GET /api/health`
 - `GET /api/ready`（需鉴权）
+- `GET /api/v1/me`（当前 actor 及可访问的 Organization/Space membership）
 - `GET /api/v1/organizations/:organizationId/spaces/:spaceId/sessions`
 - `POST /api/v1/organizations/:organizationId/spaces/:spaceId/sessions`
 - 创建 Session 使用 `Idempotency-Key`；相同请求可安全重放，不同请求复用同一 key 返回 `409`。
 - `start=true` 在同一 PostgreSQL 事务中写入 Session、首条 Message、Turn、Command、Outbox 和完整幂等响应；返回状态为 `queued`，不冒充 Agent 已执行。
 - API 成功响应与结构化错误均由 `@relay/contracts` 校验。
 
-配置 `DATABASE_URL` 后，Session 与幂等记录写入 PostgreSQL；未配置时仅开发环境使用进程内存 repository。API 已实现 OIDC access token 校验、Organization/Space membership、viewer 写限制、Private Session creator 隔离和 actor/Space 级幂等；Private 分享、RLS/统一 tenant guard、审计、任务队列和真实 Agent runtime 尚未实现，因此当前版本仍不能直接暴露到公网。这些能力按 [软件交付计划](./docs/software-delivery-plan.md) 继续演进。
+配置 `DATABASE_URL` 后，Session 与幂等记录写入 PostgreSQL；未配置时仅开发环境使用进程内存 repository。API 已实现 OIDC access token 校验、actor membership discovery、Organization/Space 角色交集写限制、Private Session creator 隔离和 actor/路径级幂等；Private 分享、RLS/统一 tenant guard、审计、任务队列和真实 Agent runtime 尚未实现，因此当前版本仍不能直接暴露到公网。这些能力按 [软件交付计划](./docs/software-delivery-plan.md) 继续演进。
 
 ## 原型范围
 

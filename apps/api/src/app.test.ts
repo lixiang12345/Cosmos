@@ -1,13 +1,19 @@
 import {
   ApiErrorSchema,
+  CreateSessionRequestSchema,
   CreateSessionResponseSchema,
+  MeResponseSchema,
   SessionListResponseSchema,
   type CreateSessionRequestInput,
 } from '@relay/contracts'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createApp } from './app.js'
 import { createDevelopmentAuthenticator } from './auth.js'
-import { InMemorySessionRepository } from './session-repository.js'
+import {
+  AuthorizationChangedError,
+  InMemorySessionRepository,
+  type InMemorySessionRepositoryOptions,
+} from './session-repository.js'
 
 const openApps: ReturnType<typeof createApp>[] = []
 const sessionRequest: CreateSessionRequestInput = {
@@ -21,7 +27,30 @@ const sessionRequest: CreateSessionRequestInput = {
   message: { content: 'Trace the duplicate reservation path and implement a regression test.' },
 }
 
-function testApp(repository = new InMemorySessionRepository()) {
+const testActorOrganizations = {
+  'user-local-admin': [
+    {
+      id: 'relay', name: 'Relay', role: 'organization_owner' as const,
+      spaces: [
+        { id: 'commerce', name: 'Commerce', role: 'space_manager' as const },
+        { id: 'platform', name: 'Platform', role: 'space_manager' as const },
+      ],
+    },
+    {
+      id: 'other', name: 'Other', role: 'organization_owner' as const,
+      spaces: [{ id: 'platform', name: 'Platform', role: 'space_manager' as const }],
+    },
+  ],
+}
+
+function testRepository(options: InMemorySessionRepositoryOptions = {}) {
+  return new InMemorySessionRepository({
+    ...options,
+    actorOrganizations: options.actorOrganizations ?? testActorOrganizations,
+  })
+}
+
+function testApp(repository = testRepository()) {
   const app = createApp({
     sessionRepository: repository,
     authenticate: createDevelopmentAuthenticator('user-local-admin'),
@@ -68,6 +97,7 @@ describe('Relay API', () => {
     const sessions = await app.inject({
       method: 'GET', url: '/api/v1/organizations/relay/spaces/platform/sessions',
     })
+    const me = await app.inject({ method: 'GET', url: '/api/v1/me' })
     const readiness = await app.inject({ method: 'GET', url: '/api/ready' })
     const unsupportedHealthMethod = await app.inject({ method: 'POST', url: '/api/health' })
 
@@ -78,6 +108,7 @@ describe('Relay API', () => {
       code: 'AUTHENTICATION_REQUIRED', retryable: false,
     })
     expect(readiness.statusCode).toBe(401)
+    expect(me.statusCode).toBe(401)
     expect(unsupportedHealthMethod.statusCode).toBe(401)
 
     const malformedBody = await app.inject({
@@ -89,8 +120,62 @@ describe('Relay API', () => {
     expect(malformedBody.statusCode).toBe(401)
   })
 
+  it('discovers the authenticated actor and only their explicitly seeded memberships', async () => {
+    const repository = testRepository({
+      actorOrganizations: {
+        'user-local-admin': [
+          {
+            id: 'organization-a', name: 'Zeta', role: 'viewer',
+            spaces: [{ id: 'space-a', name: 'Zeta Space', role: 'viewer' }],
+          },
+          {
+            id: 'organization-z', name: 'Alpha', role: 'organization_admin',
+            spaces: [
+              { id: 'space-a', name: 'Zeta Space', role: 'member' },
+              { id: 'space-z', name: 'Alpha Space', role: 'space_manager' },
+            ],
+          },
+        ],
+        'another-user': [{
+          id: 'organization-hidden', name: 'Hidden', role: 'member', spaces: [],
+        }],
+      },
+    })
+    const response = await testApp(repository).inject({ method: 'GET', url: '/api/v1/me' })
+    const body = MeResponseSchema.parse(response.json())
+
+    expect(response.statusCode).toBe(200)
+    expect(response.headers['cache-control']).toBe('no-store')
+    expect(body).toEqual({
+      actor: { id: 'user-local-admin', kind: 'user' },
+      organizations: [
+        {
+          id: 'organization-z', name: 'Alpha', role: 'organization_admin',
+          spaces: [
+            { id: 'space-z', name: 'Alpha Space', role: 'space_manager' },
+            { id: 'space-a', name: 'Zeta Space', role: 'member' },
+          ],
+        },
+        {
+          id: 'organization-a', name: 'Zeta', role: 'viewer',
+          spaces: [{ id: 'space-a', name: 'Zeta Space', role: 'viewer' }],
+        },
+      ],
+    })
+  })
+
+  it('returns an authenticated actor with no synthetic memberships', async () => {
+    const response = await testApp(new InMemorySessionRepository()).inject({ method: 'GET', url: '/api/v1/me' })
+
+    expect(response.statusCode).toBe(200)
+    expect(MeResponseSchema.parse(response.json())).toEqual({
+      actor: { id: 'user-local-admin', kind: 'user' },
+      organizations: [],
+    })
+  })
+
   it('creates a Session with defaults from the shared contract', async () => {
-    const repository = new InMemorySessionRepository({
+    const repository = testRepository({
       createId: () => 'session-1',
       now: () => new Date('2026-07-12T08:00:00.000Z'),
     })
@@ -118,8 +203,37 @@ describe('Relay API', () => {
     expect(response.headers.location).toBe('/api/v1/organizations/relay/spaces/platform/sessions/session-1')
   })
 
+  it('caps Space write access at the Organization role', async () => {
+    const repository = testRepository({
+      actorOrganizations: {
+        'user-local-admin': [{
+          id: 'relay', name: 'Relay', role: 'viewer',
+          spaces: [{ id: 'platform', name: 'Platform', role: 'space_manager' }],
+        }],
+      },
+    })
+    const response = await testApp(repository).inject({
+      method: 'POST',
+      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      headers: { 'idempotency-key': 'organization-viewer-create' },
+      payload: sessionRequest,
+    })
+
+    expect(response.statusCode).toBe(403)
+    expect(ApiErrorSchema.parse(response.json())).toMatchObject({
+      code: 'PERMISSION_DENIED', retryable: false,
+    })
+    await expect(repository.create({
+      organizationId: 'relay',
+      spaceId: 'platform',
+      actorId: 'user-local-admin',
+      idempotencyKey: 'repository-organization-viewer-create',
+      request: CreateSessionRequestSchema.parse(sessionRequest),
+    })).rejects.toBeInstanceOf(AuthorizationChangedError)
+  })
+
   it('lists Sessions only from the requested organization and Space', async () => {
-    const repository = new InMemorySessionRepository({ createId: () => crypto.randomUUID() })
+    const repository = testRepository({ createId: () => crypto.randomUUID() })
     const normalizedRequest = {
       ...sessionRequest,
       start: true,
@@ -156,7 +270,7 @@ describe('Relay API', () => {
   })
 
   it('requires Idempotency-Key and replays the same Session per organization and Space', async () => {
-    const repository = new InMemorySessionRepository()
+    const repository = testRepository()
     const app = testApp(repository)
     const url = '/api/v1/organizations/relay/spaces/platform/sessions'
     const withoutKey = await app.inject({ method: 'POST', url, payload: sessionRequest })
@@ -167,7 +281,7 @@ describe('Relay API', () => {
     const request = { method: 'POST' as const, url, headers: { 'idempotency-key': 'same-command' }, payload: sessionRequest }
     const first = await app.inject(request)
     const replay = await app.inject(request)
-    const sessions = await repository.listBySpace('relay', 'platform')
+    const sessions = await repository.listBySpace('relay', 'platform', 'user-local-admin')
 
     expect(first.statusCode).toBe(201)
     expect(replay.statusCode).toBe(201)
@@ -186,7 +300,7 @@ describe('Relay API', () => {
       code: 'IDEMPOTENCY_KEY_REUSED',
       retryable: false,
     })
-    expect(await repository.listBySpace('relay', 'platform')).toHaveLength(1)
+    expect(await repository.listBySpace('relay', 'platform', 'user-local-admin')).toHaveLength(1)
 
     const otherSpace = await app.inject({
       ...request,
@@ -195,6 +309,6 @@ describe('Relay API', () => {
 
     expect(otherSpace.statusCode).toBe(201)
     expect(otherSpace.headers['idempotency-replayed']).toBe('false')
-    expect(await repository.listBySpace('relay', 'commerce')).toHaveLength(1)
+    expect(await repository.listBySpace('relay', 'commerce', 'user-local-admin')).toHaveLength(1)
   })
 })

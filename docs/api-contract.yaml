@@ -25,6 +25,8 @@ servers:
 security:
   - bearerAuth: []
 tags:
+  - name: Identity
+    description: Authenticated actor discovery and accessible Organization and Space memberships.
   - name: Organizations
     description: Tenant identity, lifecycle, region, and retention policy.
   - name: Spaces
@@ -55,6 +57,33 @@ tags:
     description: Human decisions that gate an exact high-risk ToolCall input.
 
 paths:
+  /me:
+    get:
+      tags: [Identity]
+      operationId: getCurrentActor
+      summary: Discover the authenticated actor and accessible workspaces
+      description: |
+        Returns the authenticated actor and only the Organization and Space memberships
+        currently visible to that actor. Organization and Space IDs are unique within
+        their respective arrays.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Authenticated actor and accessible memberships
+          headers:
+            Cache-Control:
+              description: Prevents identity and authorization data from being cached.
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
   /organizations/{organizationId}:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -2130,6 +2159,76 @@ components:
           minimum: 0
         acceptedAt:
           $ref: '#/components/schemas/Timestamp'
+
+    OrganizationRole:
+      type: string
+      enum: [organization_owner, organization_admin, member, viewer]
+    SpaceRole:
+      type: string
+      enum: [space_manager, member, viewer]
+    MeActor:
+      type: object
+      required: [id, kind]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 256
+        kind:
+          type: string
+          enum: [user, service_account]
+      additionalProperties: false
+    MeSpace:
+      type: object
+      required: [id, name, role]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        name:
+          type: string
+          minLength: 1
+          maxLength: 160
+        role:
+          $ref: '#/components/schemas/SpaceRole'
+      additionalProperties: false
+    MeOrganization:
+      type: object
+      required: [id, name, role, spaces]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        name:
+          type: string
+          minLength: 1
+          maxLength: 160
+        role:
+          $ref: '#/components/schemas/OrganizationRole'
+        spaces:
+          type: array
+          description: Space IDs are unique within this Organization.
+          maxItems: 10000
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/MeSpace'
+      additionalProperties: false
+    MeResponse:
+      type: object
+      required: [actor, organizations]
+      properties:
+        actor:
+          $ref: '#/components/schemas/MeActor'
+        organizations:
+          type: array
+          description: Organization IDs are unique.
+          maxItems: 1000
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/MeOrganization'
+      additionalProperties: false
 
     Organization:
       allOf:

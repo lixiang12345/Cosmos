@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   RelayApiError,
   createSession,
+  getMe,
   getRelayApiBaseUrl,
   listSessions,
   resolveRelayApiBaseUrl,
@@ -142,6 +143,37 @@ describe('Relay API client', () => {
     )
   })
 
+  it('shares an in-flight Session list request for the same token and scope', async () => {
+    const response = { items: [session], page: { nextCursor: null, hasMore: false, projectionUpdatedAt: session.updatedAt } }
+    let resolveResponse!: (response: Response) => void
+    const pending = new Promise<Response>((resolve) => { resolveResponse = resolve })
+    const fetchMock = vi.fn<typeof fetch>().mockReturnValue(pending)
+    vi.stubGlobal('fetch', fetchMock)
+
+    const first = listSessions('relay', 'space-platform', { accessToken: 'same-token' })
+    const second = listSessions('relay', 'space-platform', { accessToken: 'same-token' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    resolveResponse(jsonResponse(response))
+    await expect(Promise.all([first, second])).resolves.toEqual([response, response])
+  })
+
+  it('discovers the authenticated actor and authorized tenant hierarchy', async () => {
+    const me = {
+      actor: { id: 'user-production', kind: 'user' as const },
+      organizations: [{
+        id: 'organization-production', name: 'Production', role: 'member' as const,
+        spaces: [{ id: 'space-production', name: 'Production Space', role: 'member' as const }],
+      }],
+    }
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(me))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(getMe({ accessToken: 'access-token' })).resolves.toEqual(me)
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/me', expect.objectContaining({ method: 'GET' }))
+    const headers = new Headers(fetchMock.mock.calls[0][1]?.headers)
+    expect(headers.get('Authorization')).toBe('Bearer access-token')
+  })
+
   it('preserves a contract-shaped HTTP error', async () => {
     vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
       code: 'IDEMPOTENCY_KEY_REUSED', message: 'The idempotency key was already used.', retryable: false,
@@ -162,7 +194,8 @@ describe('Relay API client', () => {
     await expect(listSessions('relay', 'space-platform', {
       accessToken: 'expired-token', onUnauthorized,
     })).rejects.toMatchObject({ status: 401 })
-    expect(onUnauthorized).toHaveBeenCalledTimes(1)
+    expect(onUnauthorized).toHaveBeenCalledOnce()
+    expect(onUnauthorized).toHaveBeenCalledWith('expired-token')
   })
 
   it('preserves the structured 401 when identity cleanup fails', async () => {

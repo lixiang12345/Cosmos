@@ -513,18 +513,24 @@ export function createSeededControlPlaneState(): ControlPlaneState {
   }
 }
 
-export function createEmptyControlPlaneState(spaceId: string): ControlPlaneState {
+export function createEmptyControlPlaneState(
+  spaceId: string,
+  spaces: ReadonlyArray<{ id: string; name: string }> = [{ id: spaceId, name: 'Authorized Space' }],
+): ControlPlaneState {
+  const authorizedSpaces = spaces.some((space) => space.id === spaceId)
+    ? spaces
+    : [{ id: spaceId, name: 'Authorized Space' }, ...spaces]
   return {
     schemaVersion: CONTROL_PLANE_SCHEMA_VERSION,
     activeSpaceId: spaceId,
-    spaces: [{
-      id: spaceId,
-      name: 'Authorized Space',
-      slug: spaceId,
+    spaces: authorizedSpaces.map((space) => ({
+      id: space.id,
+      name: space.name,
+      slug: space.id,
       description: '',
       region: '',
       createdAt: new Date(0).toISOString(),
-    }],
+    })),
     environments: [],
     daemons: [],
     repositories: [],

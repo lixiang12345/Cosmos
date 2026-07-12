@@ -24,3 +24,20 @@ export {
 } from './session.js'
 
 export { ApiErrorSchema, type ApiError } from './api-error.js'
+
+export {
+  ActorKindSchema,
+  MeActorSchema,
+  MeOrganizationSchema,
+  MeResponseSchema,
+  MeSpaceSchema,
+  OrganizationRoleSchema,
+  SpaceRoleSchema,
+  type ActorKind,
+  type MeActor,
+  type MeOrganization,
+  type MeResponse,
+  type MeSpace,
+  type OrganizationRole,
+  type SpaceRole,
+} from './me.js'

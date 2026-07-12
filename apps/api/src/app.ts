@@ -3,6 +3,7 @@ import {
   ApiErrorSchema,
   CreateSessionRequestSchema,
   CreateSessionResponseSchema,
+  MeResponseSchema,
   SessionDtoSchema,
   SessionListResponseSchema,
   type ApiError,
@@ -23,6 +24,7 @@ import {
   AuthorizationChangedError,
   IdempotencyConflictError,
   InMemorySessionRepository,
+  canWriteSpace,
   type SessionRepository,
 } from './session-repository.js'
 
@@ -183,6 +185,16 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     }
   })
 
+  app.get('/api/v1/me', async (request, reply) => {
+    const actor = actorsByRequest.get(request)
+    if (!actor) throw new AuthenticationError()
+    reply.header('Cache-Control', 'no-store')
+    return MeResponseSchema.parse({
+      actor,
+      organizations: await sessionRepository.listActorOrganizations(actor.id),
+    })
+  })
+
   async function authorizeSpace(request: FastifyRequest, reply: FastifyReply, params: SpaceParams) {
     const actor = actorsByRequest.get(request)
     if (!actor) throw new AuthenticationError()
@@ -232,7 +244,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     const authorization = await authorizeSpace(request, reply, request.params)
     if (!authorization) return
 
-    if (authorization.access.spaceRole === 'viewer') {
+    if (!canWriteSpace(authorization.access)) {
       return sendApiError(reply, 403, request, {
         code: 'PERMISSION_DENIED',
         message: 'You do not have permission to create Sessions in this Space.',

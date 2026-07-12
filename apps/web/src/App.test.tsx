@@ -1,4 +1,4 @@
-import type { CreateSessionRequestInput, SessionDto } from '@relay/contracts'
+import type { CreateSessionRequestInput, MeResponse, SessionDto } from '@relay/contracts'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
@@ -8,6 +8,7 @@ import { AuthContext, type AuthContextValue } from './auth/context'
 import { initialRuns } from './data/mockData'
 import { PREFERENCE_STORAGE_KEYS, PreferencesProvider } from './preferences'
 import { createSession, listSessions } from './services/relayApi'
+import { WorkspaceContext, type WorkspaceContextValue } from './workspace'
 
 vi.mock('./services/relayApi', () => ({
   createSession: vi.fn(),
@@ -47,12 +48,31 @@ function makeApiSession(
 }
 
 function renderApp(route = '/runs/run-482') {
+  const me: MeResponse = {
+    actor: { id: 'user-local-admin', kind: 'user' },
+    organizations: [{
+      id: 'relay', name: 'Relay', role: 'organization_owner',
+      spaces: [
+        { id: 'space-commerce', name: 'Commerce Engineering', role: 'space_manager' },
+        { id: 'space-platform', name: 'Platform Engineering', role: 'space_manager' },
+      ],
+    }],
+  }
+  const workspace: WorkspaceContextValue = {
+    status: 'ready', me,
+    activeOrganization: me.organizations[0],
+    activeSpace: me.organizations[0].spaces[0],
+    selectSpace: () => undefined,
+    refresh: () => undefined,
+  }
   return render(
     <PreferencesProvider>
       <AuthProvider>
-        <MemoryRouter initialEntries={[route]}>
-          <App />
-        </MemoryRouter>
+        <WorkspaceContext.Provider value={workspace}>
+          <MemoryRouter initialEntries={[route]}>
+            <App />
+          </MemoryRouter>
+        </WorkspaceContext.Provider>
       </AuthProvider>
     </PreferencesProvider>,
   )
@@ -67,8 +87,6 @@ function renderAuthenticatedApp(
     mode: 'oidc',
     actorId: 'user-production',
     displayName: 'Production User',
-    organizationId: 'organization-production',
-    spaceId: 'space-production',
     demoMode: false,
     accessToken: 'production-access-token',
     handleUnauthorized: async () => undefined,
@@ -76,12 +94,28 @@ function renderAuthenticatedApp(
     signOut: async () => undefined,
     ...overrides,
   }
+  const me: MeResponse = {
+    actor: { id: auth.actorId ?? 'user-production', kind: 'user' },
+    organizations: [{
+      id: 'organization-production', name: 'Production', role: 'member',
+      spaces: [{ id: 'space-production', name: 'Production Space', role: 'member' }],
+    }],
+  }
+  const workspace: WorkspaceContextValue = {
+    status: 'ready', me,
+    activeOrganization: me.organizations[0],
+    activeSpace: me.organizations[0].spaces[0],
+    selectSpace: () => undefined,
+    refresh: () => undefined,
+  }
   return render(
     <PreferencesProvider>
       <AuthContext.Provider value={auth}>
-        <MemoryRouter initialEntries={[route]}>
-          <App />
-        </MemoryRouter>
+        <WorkspaceContext.Provider value={workspace}>
+          <MemoryRouter initialEntries={[route]}>
+            <App />
+          </MemoryRouter>
+        </WorkspaceContext.Provider>
       </AuthContext.Provider>
     </PreferencesProvider>,
   )

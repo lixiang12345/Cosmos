@@ -5,6 +5,7 @@ import type { User } from 'oidc-client-ts'
 import { AuthProvider } from './AuthProvider'
 import type { OidcAuthConfig } from './config'
 import { useAuth } from './context'
+import { getMe } from '../services/relayApi'
 
 const authTestState = vi.hoisted(() => ({
   config: undefined as unknown,
@@ -46,9 +47,12 @@ vi.mock('oidc-client-ts', () => {
 
 type UserStub = Pick<User, 'access_token' | 'expired' | 'profile' | 'state'>
 
-function createUser(state: unknown = '/sessions'): UserStub {
+function createUser(
+  state: unknown = '/sessions',
+  accessToken = 'access-token-must-stay-in-memory',
+): UserStub {
   return {
-    access_token: 'access-token-must-stay-in-memory',
+    access_token: accessToken,
     expired: false,
     profile: { sub: 'user-production', name: 'Production User' } as User['profile'],
     state,
@@ -97,8 +101,6 @@ function configure(path: string) {
     redirectUri: `${origin}/auth/callback`,
     postLogoutRedirectUri: `${origin}/`,
     scope: 'openid profile email',
-    organizationId: 'organization-production',
-    spaceId: 'space-production',
     demoMode: false,
   }
   authTestState.config = config
@@ -113,7 +115,10 @@ function AuthProbe() {
       <output data-testid="auth-status">{auth.status}</output>
       <output data-testid="auth-error">{auth.error ?? ''}</output>
       <output data-testid="access-token">{auth.accessToken ?? ''}</output>
-      <button type="button" onClick={() => { void auth.handleUnauthorized() }}>Clear identity</button>
+      <button type="button" onClick={() => { void auth.handleUnauthorized(auth.accessToken) }}>Clear identity</button>
+      <button type="button" onClick={() => {
+        void getMe({ accessToken: auth.accessToken, onUnauthorized: auth.handleUnauthorized }).catch(() => undefined)
+      }}>Load profile</button>
       <button type="button" onClick={() => { void auth.signOut() }}>Sign out</button>
     </div>
   )
@@ -133,6 +138,7 @@ describe('AuthProvider', () => {
     authTestState.manager = undefined
     authTestState.settings = []
     window.sessionStorage.clear()
+    vi.unstubAllGlobals()
   })
 
   it('uses in-memory user storage while keeping only protocol state in session storage', async () => {
@@ -228,20 +234,55 @@ describe('AuthProvider', () => {
     expect(authTestState.settings).toHaveLength(2)
   })
 
-  it('clears identity synchronously when local OIDC cleanup rejects', async () => {
+  it('clears the current identity synchronously when its 401 cleanup rejects', async () => {
     configure('/sessions')
     const manager = createManager(createUser())
     manager.removeUser.mockRejectedValue(new Error('Storage cleanup failed.'))
     authTestState.manager = manager
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      code: 'AUTHENTICATION_REQUIRED', message: 'Sign in again.', retryable: false,
+    }), { status: 401, headers: { 'Content-Type': 'application/json' } })))
     const user = userEvent.setup()
     renderProvider()
     await waitFor(() => expect(screen.getByTestId('auth-status')).toHaveTextContent('authenticated'))
 
-    await user.click(screen.getByRole('button', { name: 'Clear identity' }))
+    await user.click(screen.getByRole('button', { name: 'Load profile' }))
 
-    expect(screen.getByTestId('auth-status')).toHaveTextContent('unauthenticated')
+    await waitFor(() => expect(screen.getByTestId('auth-status')).toHaveTextContent('unauthenticated'))
     expect(screen.getByTestId('access-token')).toBeEmptyDOMElement()
     await waitFor(() => expect(manager.removeUser).toHaveBeenCalledTimes(1))
+  })
+
+  it('ignores token A\'s delayed 401 after token B becomes current', async () => {
+    configure('/sessions')
+    const manager = createManager(createUser('/sessions', 'token-a'))
+    authTestState.manager = manager
+    const response = deferred<Response>()
+    const fetchMock = vi.fn<typeof fetch>().mockReturnValue(response.promise)
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+    renderProvider()
+    await waitFor(() => expect(screen.getByTestId('access-token')).toHaveTextContent('token-a'))
+
+    await user.click(screen.getByRole('button', { name: 'Load profile' }))
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('Authorization')).toBe('Bearer token-a')
+
+    const onLoaded = manager.events.addUserLoaded.mock.lastCall?.[0] as ((user: User) => void) | undefined
+    expect(onLoaded).toBeTypeOf('function')
+    act(() => { onLoaded?.(createUser('/sessions', 'token-b') as User) })
+    expect(screen.getByTestId('access-token')).toHaveTextContent('token-b')
+
+    await act(async () => {
+      response.resolve(new Response(JSON.stringify({
+        code: 'AUTHENTICATION_REQUIRED', message: 'Sign in again.', retryable: false,
+      }), { status: 401, headers: { 'Content-Type': 'application/json' } }))
+      await response.promise
+    })
+
+    await waitFor(() => expect(screen.getByTestId('auth-status')).toHaveTextContent('authenticated'))
+    expect(screen.getByTestId('access-token')).toHaveTextContent('token-b')
+    expect(manager.removeUser).not.toHaveBeenCalled()
   })
 
   it('leaves a local signed-out state when the provider logout redirect fails', async () => {

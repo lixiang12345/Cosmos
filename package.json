@@ -8,8 +8,8 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "dev": "AUTH_MODE=development VITE_AUTH_MODE=development VITE_DEMO_MODE=true VITE_RELAY_ORGANIZATION_ID=relay VITE_RELAY_SPACE_ID=space-commerce pnpm --parallel --filter @relay/api --filter @relay/web dev",
-    "dev:web": "VITE_AUTH_MODE=development VITE_DEMO_MODE=true VITE_RELAY_ORGANIZATION_ID=relay VITE_RELAY_SPACE_ID=space-commerce pnpm --filter @relay/web dev",
+    "dev": "AUTH_MODE=development VITE_AUTH_MODE=development VITE_DEMO_MODE=true pnpm --parallel --filter @relay/api --filter @relay/web dev",
+    "dev:web": "VITE_AUTH_MODE=development VITE_DEMO_MODE=true pnpm --filter @relay/web dev",
     "dev:api": "AUTH_MODE=development pnpm --filter @relay/api dev",
     "db:up": "docker compose up -d --wait postgres",
     "db:down": "docker compose down",

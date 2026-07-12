@@ -1,16 +1,20 @@
 import { createHash, randomUUID } from 'node:crypto'
 import {
   CreateSessionResponseSchema,
+  MeOrganizationSchema,
   SessionDtoSchema,
   type CreateSessionResponse,
+  type MeOrganization,
   type SessionDto,
 } from '@relay/contracts'
 import type { Pool, PoolClient } from 'pg'
 import {
   AuthorizationChangedError,
   IdempotencyConflictError,
+  canWriteSpace,
   createSessionStartRecords,
   createSessionDto,
+  orderActorOrganizations,
   type CreateSessionRecord,
   type CreateSessionResult,
   type OrganizationRole,
@@ -118,6 +122,56 @@ export class PostgresSessionRepository implements SessionRepository {
     this.idempotencyTtlMs = options.idempotencyTtlMs ?? 24 * 60 * 60 * 1_000
   }
 
+  async listActorOrganizations(actorId: string): Promise<MeOrganization[]> {
+    const result = await this.pool.query<{
+      organization_id: string
+      organization_name: string
+      organization_role: OrganizationRole
+      space_id: string | null
+      space_name: string | null
+      space_role: SpaceRole | null
+    }>(`
+      SELECT organization.id AS organization_id, organization.name AS organization_name,
+        organization_membership.role AS organization_role,
+        space.id AS space_id, space.name AS space_name, space_membership.role AS space_role
+      FROM relay_organization_memberships organization_membership
+      JOIN relay_organizations organization
+        ON organization.id = organization_membership.organization_id
+      LEFT JOIN relay_space_memberships space_membership
+        ON space_membership.organization_id = organization_membership.organization_id
+        AND space_membership.actor_id = organization_membership.actor_id
+      LEFT JOIN relay_spaces space
+        ON space.organization_id = space_membership.organization_id
+        AND space.id = space_membership.space_id
+      WHERE organization_membership.actor_id = $1
+    `, [actorId])
+    const organizations = new Map<string, MeOrganization>()
+
+    for (const row of result.rows) {
+      let organization = organizations.get(row.organization_id)
+      if (!organization) {
+        organization = MeOrganizationSchema.parse({
+          id: row.organization_id,
+          name: row.organization_name,
+          role: row.organization_role,
+          spaces: [],
+        })
+        organizations.set(row.organization_id, organization)
+      }
+      if (row.space_id !== null && row.space_name !== null && row.space_role !== null) {
+        organization.spaces.push({
+          id: row.space_id,
+          name: row.space_name,
+          role: row.space_role,
+        })
+      }
+    }
+
+    return orderActorOrganizations(
+      [...organizations.values()].map((organization) => MeOrganizationSchema.parse(organization)),
+    )
+  }
+
   async getSpaceAccess(organizationId: string, spaceId: string, actorId: string): Promise<SpaceAccess | null> {
     const result = await this.pool.query<{
       organization_role: OrganizationRole
@@ -138,11 +192,18 @@ export class PostgresSessionRepository implements SessionRepository {
 
   async listBySpace(organizationId: string, spaceId: string, actorId: string): Promise<SessionDto[]> {
     const result = await this.pool.query<SessionRow>(`
-      SELECT ${sessionColumns}
-      FROM relay_sessions
-      WHERE organization_id = $1 AND space_id = $2
-        AND (visibility = 'space' OR created_by = $3)
-      ORDER BY last_activity_at DESC, id DESC
+      SELECT ${sessionColumns.split(',').map((column) => `session.${column.trim()}`).join(', ')}
+      FROM relay_sessions session
+      JOIN relay_organization_memberships organization_membership
+        ON organization_membership.organization_id = session.organization_id
+        AND organization_membership.actor_id = $3
+      JOIN relay_space_memberships space_membership
+        ON space_membership.organization_id = session.organization_id
+        AND space_membership.space_id = session.space_id
+        AND space_membership.actor_id = $3
+      WHERE session.organization_id = $1 AND session.space_id = $2
+        AND (session.visibility = 'space' OR session.created_by = $3)
+      ORDER BY session.last_activity_at DESC, session.id DESC
     `, [organizationId, spaceId, actorId])
     return result.rows.map(mapSession)
   }
@@ -163,8 +224,8 @@ export class PostgresSessionRepository implements SessionRepository {
   }
 
   private async createInTransaction(client: PoolClient, record: CreateSessionRecord): Promise<CreateSessionResult> {
-    const access = await client.query<{ role: SpaceRole }>(`
-      SELECT space_membership.role
+    const access = await client.query<SpaceAccess>(`
+      SELECT organization_membership.role AS "organizationRole", space_membership.role AS "spaceRole"
       FROM relay_organization_memberships organization_membership
       JOIN relay_space_memberships space_membership
         ON space_membership.organization_id = organization_membership.organization_id
@@ -174,7 +235,7 @@ export class PostgresSessionRepository implements SessionRepository {
         AND organization_membership.actor_id = $3
       FOR UPDATE OF organization_membership, space_membership
     `, [record.organizationId, record.spaceId, record.actorId])
-    if (!access.rowCount || access.rows[0].role === 'viewer') throw new AuthorizationChangedError()
+    if (!access.rowCount || !canWriteSpace(access.rows[0])) throw new AuthorizationChangedError()
 
     const keyHash = hash(record.idempotencyKey)
     const requestHash = hash(canonicalJson(record.request))

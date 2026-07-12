@@ -3,6 +3,7 @@ import {
   ApiErrorSchema,
   CreateSessionRequestSchema,
   CreateSessionResponseSchema,
+  MeResponseSchema,
   SessionDtoSchema,
   SessionListResponseSchema,
   SessionStatusSchema,
@@ -127,5 +128,44 @@ describe('API error contract', () => {
   it('rejects unknown fields and missing retryability', () => {
     expect(ApiErrorSchema.safeParse({ code: 'FAILED', message: 'Failed' }).success).toBe(false)
     expect(ApiErrorSchema.safeParse({ code: 'FAILED', message: 'Failed', retryable: true, unexpected: true }).success).toBe(false)
+  })
+})
+
+describe('identity discovery contract', () => {
+  const response = {
+    actor: { id: 'user-123', kind: 'user' },
+    organizations: [{
+      id: 'organization-relay',
+      name: 'Relay Engineering',
+      role: 'organization_admin',
+      spaces: [{ id: 'space-platform', name: 'Platform', role: 'space_manager' }],
+    }],
+  } as const
+
+  it('accepts an authenticated actor and strongly typed membership hierarchy', () => {
+    expect(MeResponseSchema.parse(response)).toEqual(response)
+    expect(MeResponseSchema.parse({
+      actor: { id: 'automation-123', kind: 'service_account' },
+      organizations: [],
+    }).organizations).toEqual([])
+  })
+
+  it('rejects invalid roles, duplicate ids, and unknown fields', () => {
+    expect(MeResponseSchema.safeParse({
+      ...response,
+      organizations: [{ ...response.organizations[0], role: 'owner' }],
+    }).success).toBe(false)
+    expect(MeResponseSchema.safeParse({
+      ...response,
+      organizations: [{
+        ...response.organizations[0],
+        spaces: [response.organizations[0].spaces[0], response.organizations[0].spaces[0]],
+      }],
+    }).success).toBe(false)
+    expect(MeResponseSchema.safeParse({
+      ...response,
+      organizations: [response.organizations[0], response.organizations[0]],
+    }).success).toBe(false)
+    expect(MeResponseSchema.safeParse({ ...response, unexpected: true }).success).toBe(false)
   })
 })
