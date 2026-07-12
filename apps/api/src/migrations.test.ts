@@ -10,6 +10,14 @@ const migrationVersions = [
   '005_control_plane_resource_versions.sql',
   '006_expert_catalog_index.sql',
   '007_environment_catalog_index.sql',
+  '008_tenant_reference_integrity.sql',
+  '009_session_tenant_identity.sql',
+  '010_turn_tenant_identity.sql',
+  '011_command_tenant_identity.sql',
+  '012_tenant_reference_constraints.sql',
+  '013_validate_tenant_references.sql',
+  '014_session_audit_ledgers.sql',
+  '015_validate_session_audit_ledgers.sql',
 ]
 
 function poolWithVersions(versions: string[]) {

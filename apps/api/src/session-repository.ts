@@ -20,6 +20,8 @@ export type CreateSessionRecord = {
   organizationId: string
   spaceId: string
   actorId: string
+  actorKind: 'user' | 'service_account'
+  requestId: string
   idempotencyKey: string
   request: CreateSessionRequest
 }

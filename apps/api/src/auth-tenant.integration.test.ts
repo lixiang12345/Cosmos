@@ -35,8 +35,21 @@ describeWithDatabase('HTTP authentication and tenant isolation', () => {
   beforeAll(async () => {
     await runMigrations(pool)
     await pool.query(`
-      TRUNCATE relay_idempotency_responses, relay_idempotency_records, relay_sessions, relay_space_memberships,
-        relay_organization_memberships, relay_spaces, relay_organizations CASCADE;
+      ALTER TABLE relay_session_events DISABLE TRIGGER relay_session_events_reject_truncate;
+      ALTER TABLE relay_audit_events DISABLE TRIGGER relay_audit_events_reject_truncate;
+    `)
+    try {
+      await pool.query(`
+        TRUNCATE relay_idempotency_responses, relay_idempotency_records, relay_sessions,
+          relay_space_memberships, relay_organization_memberships, relay_spaces, relay_organizations CASCADE
+      `)
+    } finally {
+      await pool.query(`
+        ALTER TABLE relay_session_events ENABLE TRIGGER relay_session_events_reject_truncate;
+        ALTER TABLE relay_audit_events ENABLE TRIGGER relay_audit_events_reject_truncate;
+      `)
+    }
+    await pool.query(`
       INSERT INTO relay_organizations (id, name) VALUES ('org-a', 'Organization A'), ('org-b', 'Organization B');
       INSERT INTO relay_spaces (organization_id, id, name)
         VALUES ('org-a', 'space-a', 'Space A'), ('org-a', 'space-b', 'Space B'), ('org-b', 'space-a', 'Space A');

@@ -43,6 +43,11 @@ const request: CreateSessionRequest = {
   message: { content: 'Verify persistence and concurrent idempotency.', attachments: [] },
 }
 
+const auditContext = {
+  actorKind: 'user' as const,
+  requestId: 'postgres-session-repository-integration',
+}
+
 describeWithDatabase('PostgresSessionRepository', () => {
   const pool = new Pool({ connectionString: databaseUrl })
   const configurations = new Map<string, SeededSessionConfiguration>()
@@ -50,9 +55,20 @@ describeWithDatabase('PostgresSessionRepository', () => {
   beforeAll(async () => {
     await runMigrations(pool)
     await pool.query(`
-      TRUNCATE relay_idempotency_responses, relay_idempotency_records, relay_sessions, relay_space_memberships,
-        relay_organization_memberships, relay_spaces, relay_organizations CASCADE
+      ALTER TABLE relay_session_events DISABLE TRIGGER relay_session_events_reject_truncate;
+      ALTER TABLE relay_audit_events DISABLE TRIGGER relay_audit_events_reject_truncate;
     `)
+    try {
+      await pool.query(`
+        TRUNCATE relay_idempotency_responses, relay_idempotency_records, relay_sessions,
+          relay_space_memberships, relay_organization_memberships, relay_spaces, relay_organizations CASCADE
+      `)
+    } finally {
+      await pool.query(`
+        ALTER TABLE relay_session_events ENABLE TRIGGER relay_session_events_reject_truncate;
+        ALTER TABLE relay_audit_events ENABLE TRIGGER relay_audit_events_reject_truncate;
+      `)
+    }
     const spaces = [
       ['relay', 'space-commerce'], ['relay', 'space-platform'], ['relay', 'space-ordering'],
       ['relay', 'space-conflict'], ['relay', 'space-canonical'], ['relay', 'space-expiry'],
@@ -138,9 +154,11 @@ describeWithDatabase('PostgresSessionRepository', () => {
   it('persists Sessions and isolates list results by organization and Space', async () => {
     const repository = new PostgresSessionRepository(pool)
     const created = await repository.create({
+      ...auditContext,
       organizationId: 'relay', spaceId: 'space-commerce', actorId: 'user-local-admin', idempotencyKey: 'persist-1', request,
     })
     await repository.create({
+      ...auditContext,
       organizationId: 'other', spaceId: 'space-commerce', actorId: 'user-local-admin', idempotencyKey: 'persist-1', request,
     })
 
@@ -162,6 +180,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
   it('persists only locked server configuration and includes its revision pins in execution payloads', async () => {
     const repository = new PostgresSessionRepository(pool)
     const result = await repository.create({
+      ...auditContext,
       organizationId: 'relay',
       spaceId: 'space-commerce',
       actorId: 'user-local-admin',
@@ -210,6 +229,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
   it('conceals unknown repository selectors and rejects forbidden branch overrides', async () => {
     const repository = new PostgresSessionRepository(pool)
     const record = {
+      ...auditContext,
       organizationId: 'relay',
       spaceId: 'space-commerce',
       actorId: 'user-local-admin',
@@ -232,6 +252,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
   it('conceals a private Expert from a noncreator before creating idempotency state', async () => {
     const repository = new PostgresSessionRepository(pool)
     await expect(repository.create({
+      ...auditContext,
       organizationId: 'relay',
       spaceId: 'space-private-expert',
       actorId: 'user-local-admin',
@@ -257,6 +278,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
     `)
     try {
       await expect(repository.create({
+        ...auditContext,
         organizationId: 'relay', spaceId: 'space-role-cap', actorId: 'user-local-admin',
         idempotencyKey: 'disabled-expert-rollback', request,
       })).rejects.toBeInstanceOf(ExpertNotPublishedError)
@@ -273,6 +295,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
     `)
     try {
       await expect(repository.create({
+        ...auditContext,
         organizationId: 'relay', spaceId: 'space-role-recheck', actorId: 'user-local-admin',
         idempotencyKey: 'disabled-environment-rollback', request,
       })).rejects.toBeInstanceOf(EnvironmentNotReadyError)
@@ -312,6 +335,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
     if (!configuration) throw new Error('Expected an authoritative test configuration.')
     const repository = new PostgresSessionRepository(pool)
     const record = {
+      ...auditContext,
       organizationId,
       spaceId,
       actorId: 'user-local-admin',
@@ -376,6 +400,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
   it('rechecks membership inside the list query after access is revoked', async () => {
     const repository = new PostgresSessionRepository(pool)
     const created = await repository.create({
+      ...auditContext,
       organizationId: 'relay', spaceId: 'space-commerce', actorId: 'user-local-admin',
       idempotencyKey: 'revocation-list-1', request: { ...request, title: 'Revocation proof' },
     })
@@ -396,6 +421,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
   it('creates one Session when the same command arrives concurrently', async () => {
     const repository = new PostgresSessionRepository(pool)
     const record = {
+      ...auditContext,
       organizationId: 'relay', spaceId: 'space-platform', actorId: 'user-local-admin', idempotencyKey: 'concurrent-command', request,
     }
 
@@ -413,6 +439,8 @@ describeWithDatabase('PostgresSessionRepository', () => {
       turns: string
       commands: string
       outbox_events: string
+      session_events: string
+      audit_events: string
       responses: string
     }>(`
       SELECT
@@ -420,12 +448,15 @@ describeWithDatabase('PostgresSessionRepository', () => {
         (SELECT count(*) FROM relay_turns WHERE session_id = $1) AS turns,
         (SELECT count(*) FROM relay_commands WHERE session_id = $1) AS commands,
         (SELECT count(*) FROM relay_outbox_events WHERE session_id = $1) AS outbox_events,
+        (SELECT count(*) FROM relay_session_events WHERE session_id = $1) AS session_events,
+        (SELECT count(*) FROM relay_audit_events WHERE session_id = $1) AS audit_events,
         (SELECT count(*) FROM relay_idempotency_responses
           WHERE organization_id = $2 AND actor_id = $3
             AND canonical_path = '/v1/organizations/relay/spaces/space-platform/sessions') AS responses
     `, [results[0].session.id, record.organizationId, record.actorId])
     expect(executionRows.rows[0]).toEqual({
-      messages: '1', turns: '1', commands: '1', outbox_events: '1', responses: '1',
+      messages: '1', turns: '1', commands: '1', outbox_events: '1',
+      session_events: '3', audit_events: '1', responses: '1',
     })
 
     const persistedKeys = await pool.query<{
@@ -444,6 +475,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
     const repository = new PostgresSessionRepository(pool)
 
     await expect(repository.create({
+      ...auditContext,
       organizationId: 'relay', spaceId: 'space-role-cap', actorId: 'user-capped',
       idempotencyKey: 'organization-viewer-create', request,
     })).rejects.toBeInstanceOf(AuthorizationChangedError)
@@ -462,6 +494,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
     `)
 
     await expect(repository.create({
+      ...auditContext,
       organizationId: 'relay', spaceId: 'space-role-recheck', actorId: 'user-recheck',
       idempotencyKey: 'role-downgraded-before-create', request,
     })).rejects.toBeInstanceOf(AuthorizationChangedError)
@@ -506,6 +539,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
       `, [organizationId, actorId])
 
       creation = repository.create({
+        ...auditContext,
         organizationId,
         spaceId,
         actorId,
@@ -538,11 +572,13 @@ describeWithDatabase('PostgresSessionRepository', () => {
     let now = new Date('2026-07-12T12:00:00.000Z')
     const repository = new PostgresSessionRepository(pool, { now: () => now })
     const first = await repository.create({
+      ...auditContext,
       organizationId: 'relay', spaceId: 'space-ordering', actorId: 'user-local-admin', idempotencyKey: 'ordering-1', request,
     })
 
     now = new Date('2026-07-12T12:01:00.000Z')
     const second = await repository.create({
+      ...auditContext,
       organizationId: 'relay', spaceId: 'space-ordering', actorId: 'user-local-admin', idempotencyKey: 'ordering-2', request,
     })
 
@@ -555,6 +591,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
   it('rejects a different request that reuses the same idempotency key', async () => {
     const repository = new PostgresSessionRepository(pool)
     const record = {
+      ...auditContext,
       organizationId: 'relay', spaceId: 'space-conflict', actorId: 'user-local-admin', idempotencyKey: 'conflicting-command', request,
     }
     await repository.create(record)
@@ -566,6 +603,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
   it('replays semantically identical requests regardless of object key order', async () => {
     const repository = new PostgresSessionRepository(pool)
     const record = {
+      ...auditContext,
       organizationId: 'relay', spaceId: 'space-canonical', actorId: 'user-local-admin', idempotencyKey: 'canonical-command', request,
     }
     const first = await repository.create(record)
@@ -597,6 +635,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
       idempotencyTtlMs: 1_000,
     })
     const record = {
+      ...auditContext,
       organizationId: 'relay', spaceId: 'space-expiry', actorId: 'user-local-admin', idempotencyKey: 'expiring-command', request,
     }
     const first = await repository.create(record)
@@ -614,6 +653,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
   it('persists the draft message while keeping drafts out of the execution queue', async () => {
     const repository = new PostgresSessionRepository(pool)
     const result = await repository.create({
+      ...auditContext,
       organizationId: 'relay', spaceId: 'space-draft', actorId: 'user-local-admin',
       idempotencyKey: 'draft-only', request: { ...request, start: false },
     })
@@ -656,6 +696,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
     `)
     const repository = new PostgresSessionRepository(pool)
     const record = {
+      ...auditContext,
       organizationId: 'relay', spaceId: 'space-rollback', actorId: 'user-local-admin',
       idempotencyKey: 'rollback-command', request: { ...request, title: 'Rollback proof' },
     }

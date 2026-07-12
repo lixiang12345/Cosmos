@@ -13,7 +13,7 @@ import {
   type EnvironmentDetailDto,
   type ExpertDetailDto,
 } from '@relay/contracts'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.js'
 import { createDevelopmentAuthenticator } from './auth.js'
 import type {
@@ -505,11 +505,57 @@ describe('Relay API', () => {
     expect(reads).toBe(0)
   })
 
+  it('denies service accounts all Session access before membership checks or repository operations', async () => {
+    const repository = testRepository({
+      actorOrganizations: {
+        'service-session-operator': [{
+          id: 'relay', name: 'Relay', role: 'organization_admin',
+          spaces: [{ id: 'platform', name: 'Platform', role: 'space_manager' }],
+        }],
+      },
+    })
+    const getSpaceAccess = vi.spyOn(repository, 'getSpaceAccess')
+    const listBySpace = vi.spyOn(repository, 'listBySpace')
+    const getById = vi.spyOn(repository, 'getById')
+    const create = vi.spyOn(repository, 'create')
+    const app = createApp({
+      sessionRepository: repository,
+      authenticate: async () => ({ id: 'service-session-operator', kind: 'service_account' }),
+    })
+    openApps.push(app)
+    const url = '/api/v1/organizations/relay/spaces/platform/sessions'
+
+    const [list, detail, createResponse] = await Promise.all([
+      app.inject({ method: 'GET', url }),
+      app.inject({ method: 'GET', url: `${url}/session-private` }),
+      app.inject({
+        method: 'POST',
+        url,
+        headers: { 'idempotency-key': 'service-account-create' },
+        payload: sessionRequest,
+      }),
+    ])
+    const errors = [list, detail, createResponse].map((response) => ApiErrorSchema.parse(response.json()))
+
+    expect([list.statusCode, detail.statusCode, createResponse.statusCode]).toEqual([403, 403, 403])
+    for (const error of errors) {
+      expect(error).toMatchObject({ code: 'PERMISSION_DENIED', retryable: false })
+    }
+    expect(new Set(errors.map((error) => error.message))).toEqual(new Set([
+      'Service accounts cannot access Sessions until operation scopes and bindings are enforced.',
+    ]))
+    expect(getSpaceAccess).not.toHaveBeenCalled()
+    expect(listBySpace).not.toHaveBeenCalled()
+    expect(getById).not.toHaveBeenCalled()
+    expect(create).not.toHaveBeenCalled()
+  })
+
   it('creates a Session with defaults from the shared contract', async () => {
     const repository = testRepository({
       createId: () => 'session-1',
       now: () => new Date('2026-07-12T08:00:00.000Z'),
     })
+    const create = vi.spyOn(repository, 'create')
     const response = await testApp(repository).inject({
       method: 'POST',
       url: '/api/v1/organizations/relay/spaces/platform/sessions',
@@ -544,6 +590,11 @@ describe('Relay API', () => {
     expect(body.turn).toMatchObject({ sessionId: 'session-1', ordinal: 1, status: 'queued' })
     expect(body.command).toMatchObject({ type: 'session.start', status: 'accepted' })
     expect(response.headers.location).toBe('/api/v1/organizations/relay/spaces/platform/sessions/session-1')
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      actorId: 'user-local-admin',
+      actorKind: 'user',
+      requestId: expect.any(String),
+    }))
   })
 
   it('persists the first message in a draft without creating execution records', async () => {
@@ -579,6 +630,8 @@ describe('Relay API', () => {
       organizationId: 'relay',
       spaceId: 'platform',
       actorId: 'user-local-admin',
+      actorKind: 'user',
+      requestId: 'request-fail-closed',
       idempotencyKey: 'fail-closed',
       request: CreateSessionRequestSchema.parse(sessionRequest),
     })).rejects.toBeInstanceOf(SessionConfigurationNotFoundError)
@@ -747,6 +800,8 @@ describe('Relay API', () => {
       organizationId: 'relay',
       spaceId: 'platform',
       actorId: 'user-local-admin',
+      actorKind: 'user',
+      requestId: 'request-private-detail',
       idempotencyKey: 'private-detail',
       request: CreateSessionRequestSchema.parse(sessionRequest),
     })
@@ -801,6 +856,8 @@ describe('Relay API', () => {
       organizationId: 'relay',
       spaceId: 'platform',
       actorId: 'user-local-admin',
+      actorKind: 'user',
+      requestId: 'request-organization-viewer',
       idempotencyKey: 'repository-organization-viewer-create',
       request: CreateSessionRequestSchema.parse(sessionRequest),
     })).rejects.toBeInstanceOf(AuthorizationChangedError)
@@ -814,8 +871,8 @@ describe('Relay API', () => {
       visibility: 'private' as const,
       message: { ...sessionRequest.message, attachments: [] },
     }
-    await repository.create({ organizationId: 'relay', spaceId: 'platform', actorId: 'user-local-admin', idempotencyKey: 'platform-1', request: normalizedRequest })
-    await repository.create({ organizationId: 'other', spaceId: 'platform', actorId: 'user-local-admin', idempotencyKey: 'other-1', request: normalizedRequest })
+    await repository.create({ organizationId: 'relay', spaceId: 'platform', actorId: 'user-local-admin', actorKind: 'user', requestId: 'request-platform-1', idempotencyKey: 'platform-1', request: normalizedRequest })
+    await repository.create({ organizationId: 'other', spaceId: 'platform', actorId: 'user-local-admin', actorKind: 'user', requestId: 'request-other-1', idempotencyKey: 'other-1', request: normalizedRequest })
 
     const response = await testApp(repository).inject({
       method: 'GET',

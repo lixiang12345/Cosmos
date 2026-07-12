@@ -331,6 +331,24 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     return authorizeSpace(request, reply, params)
   }
 
+  async function authorizeSessionSpace(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    params: SpaceParams,
+  ) {
+    const actor = actorsByRequest.get(request)
+    if (!actor) throw new AuthenticationError()
+    if (actor.kind === 'service_account') {
+      sendApiError(reply, 403, request, {
+        code: 'PERMISSION_DENIED',
+        message: 'Service accounts cannot access Sessions until operation scopes and bindings are enforced.',
+        retryable: false,
+      })
+      return null
+    }
+    return authorizeSpace(request, reply, params)
+  }
+
   function catalogListResponse<T extends { updatedAt: string }>(
     page: { items: T[]; hasMore: boolean; nextCursor: { updatedAt: string; id: string } | null },
     resource: CatalogResource,
@@ -444,7 +462,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   )
 
   app.get<{ Params: SpaceParams }>('/api/v1/organizations/:organizationId/spaces/:spaceId/sessions', async (request, reply) => {
-    const authorization = await authorizeSpace(request, reply, request.params)
+    const authorization = await authorizeSessionSpace(request, reply, request.params)
     if (!authorization) return
 
     const items = await sessionRepository.listBySpace(
@@ -463,7 +481,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   })
 
   app.get<{ Params: SessionParams }>('/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId', async (request, reply) => {
-    const authorization = await authorizeSpace(request, reply, request.params)
+    const authorization = await authorizeSessionSpace(request, reply, request.params)
     if (!authorization) return
     const sessionId = parseSpaceId(request.params.sessionId)
     if (!sessionId) return sendResourceNotFound(reply, request)
@@ -484,7 +502,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   })
 
   app.post<{ Params: SpaceParams }>('/api/v1/organizations/:organizationId/spaces/:spaceId/sessions', async (request, reply) => {
-    const authorization = await authorizeSpace(request, reply, request.params)
+    const authorization = await authorizeSessionSpace(request, reply, request.params)
     if (!authorization) return
 
     if (!canWriteSpace(authorization.access)) {
@@ -521,6 +539,8 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       organizationId: authorization.organizationId,
       spaceId: authorization.spaceId,
       actorId: authorization.actor.id,
+      actorKind: authorization.actor.kind,
+      requestId: request.id,
       idempotencyKey,
       request: parsed.data,
     })

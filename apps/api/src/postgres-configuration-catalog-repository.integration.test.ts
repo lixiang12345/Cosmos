@@ -12,7 +12,18 @@ describeWithDatabase('PostgresConfigurationCatalogRepository integration', () =>
 
   beforeAll(async () => {
     await runMigrations(pool)
-    await pool.query('TRUNCATE relay_organizations CASCADE')
+    await pool.query(`
+      ALTER TABLE relay_session_events DISABLE TRIGGER relay_session_events_reject_truncate;
+      ALTER TABLE relay_audit_events DISABLE TRIGGER relay_audit_events_reject_truncate;
+    `)
+    try {
+      await pool.query('TRUNCATE relay_organizations CASCADE')
+    } finally {
+      await pool.query(`
+        ALTER TABLE relay_session_events ENABLE TRIGGER relay_session_events_reject_truncate;
+        ALTER TABLE relay_audit_events ENABLE TRIGGER relay_audit_events_reject_truncate;
+      `)
+    }
     await pool.query(`
       INSERT INTO relay_organizations (id, name) VALUES
         ('catalog-org-a', 'Catalog Organization A'),

@@ -55,6 +55,13 @@ type SessionRow = {
   version: number
 }
 
+type SessionEventDraft = {
+  eventType: 'session.created' | 'message.created' | 'turn.queued'
+  resourceType: 'session' | 'message' | 'turn'
+  resourceId: string
+  payload: Record<string, unknown>
+}
+
 function hash(value: string) {
   return createHash('sha256').update(value).digest('hex')
 }
@@ -308,7 +315,14 @@ export class PostgresSessionRepository implements SessionRepository {
       if (existing.rows[0].request_hash !== requestHash) throw new IdempotencyConflictError()
       const response = existing.rows[0].response_body
         ? CreateSessionResponseSchema.parse(existing.rows[0].response_body)
-        : { session: await this.getSession(client, existing.rows[0].session_id) }
+        : {
+            session: await this.getSession(
+              client,
+              record.organizationId,
+              record.spaceId,
+              existing.rows[0].session_id,
+            ),
+          }
       return responseToResult(response, true)
     }
 
@@ -409,6 +423,7 @@ export class PostgresSessionRepository implements SessionRepository {
         session.createdAt,
       ])
     }
+    await this.appendCreationLedger(client, record, session, startRecords, keyHash)
     const response = CreateSessionResponseSchema.parse({ session, ...startRecords })
     const expiresAt = new Date(now.getTime() + this.idempotencyTtlMs).toISOString()
     await client.query(`
@@ -430,6 +445,119 @@ export class PostgresSessionRepository implements SessionRepository {
       JSON.stringify(response), JSON.stringify({ location: `${canonicalPath}/${session.id}` }), expiresAt,
     ])
     return responseToResult(response, false)
+  }
+
+  private async appendCreationLedger(
+    client: PoolClient,
+    record: CreateSessionRecord,
+    session: SessionDto,
+    records: Pick<CreateSessionResponse, 'message' | 'turn' | 'command'>,
+    idempotencyKeyHash: string,
+  ) {
+    if (!records.message) throw new Error('A new Session must have an initial Message.')
+    const drafts: SessionEventDraft[] = [
+      {
+        eventType: 'session.created',
+        resourceType: 'session',
+        resourceId: session.id,
+        payload: {
+          status: session.status,
+          visibility: session.visibility,
+          version: session.version,
+          configurationResolutionVersion: session.configurationResolutionVersion,
+        },
+      },
+      {
+        eventType: 'message.created',
+        resourceType: 'message',
+        resourceId: records.message.id,
+        payload: {
+          sequence: records.message.sequence,
+          role: records.message.role,
+        },
+      },
+    ]
+    if (records.turn) {
+      drafts.push({
+        eventType: 'turn.queued',
+        resourceType: 'turn',
+        resourceId: records.turn.id,
+        payload: {
+          ordinal: records.turn.ordinal,
+          status: records.turn.status,
+          version: records.turn.version,
+          inputMessageId: records.turn.inputMessageId,
+        },
+      })
+    }
+
+    const reservation = await client.query<{ first_sequence: string }>(`
+      UPDATE relay_sessions
+      SET last_event_sequence = last_event_sequence + $4
+      WHERE organization_id = $1 AND space_id = $2 AND id = $3
+      RETURNING last_event_sequence - $4 + 1 AS first_sequence
+    `, [session.organizationId, session.spaceId, session.id, drafts.length])
+    if (!reservation.rowCount) throw new Error('The Session event sequence could not be reserved.')
+    const firstSequence = Number(reservation.rows[0].first_sequence)
+
+    for (const [index, draft] of drafts.entries()) {
+      await client.query(`
+        INSERT INTO relay_session_events (
+          organization_id, space_id, session_id, event_id, sequence,
+          event_type, resource_type, resource_id, payload, actor_id,
+          actor_kind, message_id, turn_id, command_id, request_id, occurred_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11,
+          $12, $13, $14, $15, $16
+        )
+      `, [
+        session.organizationId,
+        session.spaceId,
+        session.id,
+        this.createId(),
+        firstSequence + index,
+        draft.eventType,
+        draft.resourceType,
+        draft.resourceId,
+        JSON.stringify(draft.payload),
+        record.actorId,
+        record.actorKind,
+        draft.resourceType === 'message' ? draft.resourceId : null,
+        draft.resourceType === 'turn' ? draft.resourceId : null,
+        records.command?.id ?? null,
+        record.requestId,
+        session.createdAt,
+      ])
+    }
+
+    await client.query(`
+      INSERT INTO relay_audit_events (
+        organization_id, audit_event_id, space_id, session_id, actor_id,
+        actor_kind, action, target_type, target_id, result, request_id,
+        idempotency_key_hash, policy_decision, policy_reason, before_state,
+        after_state, occurred_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, 'session.create', 'session', $4,
+        'success', $7, $8, 'allow', 'organization_and_space_write', NULL,
+        $9::jsonb, $10
+      )
+    `, [
+      session.organizationId,
+      this.createId(),
+      session.spaceId,
+      session.id,
+      record.actorId,
+      record.actorKind,
+      record.requestId,
+      idempotencyKeyHash,
+      JSON.stringify({
+        status: session.status,
+        visibility: session.visibility,
+        version: session.version,
+        executionQueued: Boolean(records.command),
+      }),
+      session.createdAt,
+    ])
   }
 
   private async resolveConfiguration(
@@ -553,10 +681,17 @@ export class PostgresSessionRepository implements SessionRepository {
     }
   }
 
-  private async getSession(client: PoolClient, sessionId: string) {
+  private async getSession(
+    client: PoolClient,
+    organizationId: string,
+    spaceId: string,
+    sessionId: string,
+  ) {
     const result = await client.query<SessionRow>(`
-      SELECT ${sessionColumns} FROM relay_sessions WHERE id = $1
-    `, [sessionId])
+      SELECT ${sessionColumns}
+      FROM relay_sessions
+      WHERE organization_id = $1 AND space_id = $2 AND id = $3
+    `, [organizationId, spaceId, sessionId])
     if (!result.rowCount) throw new Error('The idempotent Session no longer exists.')
     return mapSession(result.rows[0])
   }
