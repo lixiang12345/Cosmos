@@ -658,11 +658,37 @@ paths:
     get:
       tags: [Sessions]
       operationId: listSessions
-      x-relay-implementation-status: partial
+      x-relay-implementation-status: implemented
       summary: List Sessions visible to the caller
       description: |
-        The current runtime slice returns one unfiltered, non-paginated page. The
-        `partial` marker remains until cursor pagination and filters are implemented.
+        Returns a stable keyset-paginated projection ordered by latest activity. Cursors
+        are tenant- and filter-scoped and cannot be reused with another query.
+      parameters:
+        - name: cursor
+          in: query
+          description: Opaque cursor returned by the previous page for this tenant and filter set.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 4096
+        - $ref: '#/components/parameters/Limit'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/SessionStatus'
+        - name: archived
+          in: query
+          description: Select active, archived, or all Sessions. Defaults to false.
+          schema:
+            type: string
+            enum: ['true', 'false', all]
+        - name: search
+          in: query
+          description: Case-insensitive literal search over title, summary, Expert, and repository.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
       responses:
         '200':
           description: Session page
@@ -3023,6 +3049,7 @@ components:
         - createdAt
         - updatedAt
         - lastActivityAt
+        - archivedAt
         - version
       properties:
         id:
@@ -3087,6 +3114,10 @@ components:
           $ref: '#/components/schemas/Timestamp'
         lastActivityAt:
           $ref: '#/components/schemas/Timestamp'
+        archivedAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
         version:
           type: integer
           minimum: 1
@@ -3250,10 +3281,12 @@ components:
           required: [nextCursor, hasMore, projectionUpdatedAt]
           properties:
             nextCursor:
-              type: 'null'
+              oneOf:
+                - type: string
+                  minLength: 1
+                - type: 'null'
             hasMore:
               type: boolean
-              const: false
             projectionUpdatedAt:
               oneOf:
                 - $ref: '#/components/schemas/Timestamp'

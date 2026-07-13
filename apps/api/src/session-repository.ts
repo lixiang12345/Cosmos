@@ -10,6 +10,7 @@ import {
   type SessionCommand,
   type SessionDto,
   type SessionMessage,
+  type SessionStatus,
   type SendSessionMessageResponse,
   type StartSessionResponse,
   type SessionTurn,
@@ -67,6 +68,26 @@ export type SendSessionMessageRecord = {
 
 export type SendSessionMessageResult = SendSessionMessageResponse & {
   replayed: boolean
+}
+
+export type SessionListCursor = {
+  lastActivityAt: string
+  id: string
+}
+
+export type SessionListOptions = {
+  limit?: number
+  cursor?: SessionListCursor
+  status?: SessionStatus
+  archived?: boolean | 'all'
+  search?: string
+}
+
+export type SessionListPage = {
+  items: SessionDto[]
+  hasMore: boolean
+  nextCursor: SessionListCursor | null
+  projectionUpdatedAt: string | null
 }
 
 export type ResolvedSessionConfiguration = {
@@ -207,7 +228,12 @@ export class SessionConfigurationValidationError extends Error {
 export interface SessionRepository {
   listActorOrganizations(actorId: string): Promise<MeOrganization[]>
   getSpaceAccess(organizationId: string, spaceId: string, actorId: string): Promise<SpaceAccess | null>
-  listBySpace(organizationId: string, spaceId: string, actorId: string): Promise<SessionDto[]>
+  listBySpace(
+    organizationId: string,
+    spaceId: string,
+    actorId: string,
+    options?: SessionListOptions,
+  ): Promise<SessionListPage>
   getById(organizationId: string, spaceId: string, sessionId: string, actorId: string): Promise<SessionDto | null>
   create(record: CreateSessionRecord): Promise<CreateSessionResult>
   start(record: StartSessionRecord): Promise<StartSessionResult | null>
@@ -257,6 +283,7 @@ export function createSessionDto(
     createdAt: timestamp,
     updatedAt: timestamp,
     lastActivityAt: timestamp,
+    archivedAt: null,
     version: 1,
   })
 }
@@ -571,11 +598,43 @@ export class InMemorySessionRepository implements SessionRepository {
       : null
   }
 
-  async listBySpace(organizationId: string, spaceId: string, actorId: string): Promise<SessionDto[]> {
-    if (!await this.getSpaceAccess(organizationId, spaceId, actorId)) return []
-    return (this.sessionsBySpace.get(spaceKey(organizationId, spaceId)) ?? [])
+  async listBySpace(
+    organizationId: string,
+    spaceId: string,
+    actorId: string,
+    options: SessionListOptions = {},
+  ): Promise<SessionListPage> {
+    const limit = options.limit ?? 25
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      throw new RangeError('Session page limit must be an integer between 1 and 100.')
+    }
+    if (!await this.getSpaceAccess(organizationId, spaceId, actorId)) {
+      return { items: [], hasMore: false, nextCursor: null, projectionUpdatedAt: null }
+    }
+    const search = options.search?.toLocaleLowerCase()
+    const visible = (this.sessionsBySpace.get(spaceKey(organizationId, spaceId)) ?? [])
       .filter((session) => session.visibility === 'space' || this.sessionCreators.get(session.id) === actorId)
-      .map(cloneSession)
+      .filter((session) => options.archived === 'all'
+        || (options.archived === true ? session.archivedAt !== null : session.archivedAt === null))
+      .filter((session) => !options.status || session.status === options.status)
+      .filter((session) => !search || [session.title, session.summary, session.expertName, session.repository]
+        .some((value) => value.toLocaleLowerCase().includes(search)))
+      .filter((session) => {
+        if (!options.cursor) return true
+        const activityTime = new Date(session.lastActivityAt).getTime()
+        const cursorTime = new Date(options.cursor.lastActivityAt).getTime()
+        return activityTime < cursorTime || (activityTime === cursorTime && session.id < options.cursor.id)
+      })
+      .sort((left, right) => right.lastActivityAt.localeCompare(left.lastActivityAt) || right.id.localeCompare(left.id))
+    const hasMore = visible.length > limit
+    const items = visible.slice(0, limit).map(cloneSession)
+    const last = items.at(-1)
+    return {
+      items,
+      hasMore,
+      nextCursor: hasMore && last ? { lastActivityAt: last.lastActivityAt, id: last.id } : null,
+      projectionUpdatedAt: items[0]?.updatedAt ?? null,
+    }
   }
 
   async getById(

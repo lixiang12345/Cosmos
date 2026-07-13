@@ -28,6 +28,7 @@ const session: SessionDto = {
   createdAt: '2026-07-13T08:00:00.000Z',
   updatedAt: '2026-07-13T08:04:00.000Z',
   lastActivityAt: '2026-07-13T08:04:00.000Z',
+  archivedAt: null,
   version: 2,
 }
 

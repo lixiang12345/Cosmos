@@ -83,6 +83,7 @@ const SessionDtoBaseSchema = z.object({
   createdAt: TimestampSchema,
   updatedAt: TimestampSchema,
   lastActivityAt: TimestampSchema,
+  archivedAt: TimestampSchema.nullable(),
   version: z.number().int().positive(),
 }).strict()
 
@@ -506,6 +507,14 @@ export const SessionListResponseSchema = z.object({
     hasMore: z.boolean(),
     projectionUpdatedAt: TimestampSchema.nullable(),
   }).strict(),
-}).strict()
+}).strict().superRefine((response, context) => {
+  if (response.page.hasMore !== (response.page.nextCursor !== null)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['page', 'nextCursor'],
+      message: 'nextCursor must be present exactly when hasMore is true',
+    })
+  }
+})
 
 export type SessionListResponse = z.infer<typeof SessionListResponseSchema>

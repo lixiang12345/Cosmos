@@ -1064,8 +1064,10 @@ describe('Relay API', () => {
     expect(ApiErrorSchema.parse(notReadyEnvironment.json()).code).toBe('ENVIRONMENT_NOT_READY')
     expect(unknownExpert.statusCode).toBe(404)
     expect(ApiErrorSchema.parse(unknownExpert.json()).code).toBe('RESOURCE_NOT_FOUND')
-    await expect(disabledExpertRepository.listBySpace('relay', 'platform', 'user-local-admin')).resolves.toEqual([])
-    await expect(notReadyRepository.listBySpace('relay', 'platform', 'user-local-admin')).resolves.toEqual([])
+    await expect(disabledExpertRepository.listBySpace('relay', 'platform', 'user-local-admin'))
+      .resolves.toMatchObject({ items: [], hasMore: false })
+    await expect(notReadyRepository.listBySpace('relay', 'platform', 'user-local-admin'))
+      .resolves.toMatchObject({ items: [], hasMore: false })
   })
 
   it('conceals a private Expert from another Space member as not found', async () => {
@@ -1228,6 +1230,80 @@ describe('Relay API', () => {
     expect(body.page.hasMore).toBe(false)
   })
 
+  it('paginates filtered Session lists with scope-bound cursors', async () => {
+    let sequence = 0
+    const repository = testRepository({
+      createId: () => `runtime-${String(++sequence).padStart(4, '0')}`,
+      now: () => new Date('2026-07-13T08:00:00.123Z'),
+    })
+    for (const [idempotencyKey, title] of [
+      ['page-1', 'Checkout alpha'],
+      ['page-2', 'Checkout beta'],
+      ['page-3', 'Unrelated work'],
+    ] as const) {
+      await repository.create({
+        organizationId: 'relay', spaceId: 'platform', actorId: 'user-local-admin',
+        actorKind: 'user', requestId: idempotencyKey, idempotencyKey,
+        request: {
+          ...sessionRequest,
+          title,
+          visibility: 'private',
+          start: true,
+          message: { ...sessionRequest.message, attachments: [] },
+        },
+      })
+    }
+    const app = testApp(repository)
+    const firstResponse = await app.inject({
+      method: 'GET',
+      url: '/api/v1/organizations/relay/spaces/platform/sessions?limit=1&search=Checkout',
+    })
+    const first = SessionListResponseSchema.parse(firstResponse.json())
+
+    expect(firstResponse.statusCode).toBe(200)
+    expect(first.items).toHaveLength(1)
+    expect(first.page).toMatchObject({ hasMore: true })
+    expect(first.page.nextCursor).toEqual(expect.any(String))
+
+    const secondResponse = await app.inject({
+      method: 'GET',
+      url: `/api/v1/organizations/relay/spaces/platform/sessions?limit=1&search=Checkout&cursor=${first.page.nextCursor}`,
+    })
+    const second = SessionListResponseSchema.parse(secondResponse.json())
+    expect(secondResponse.statusCode).toBe(200)
+    expect(second.items).toHaveLength(1)
+    expect(second.items[0].id).not.toBe(first.items[0].id)
+    expect(second.page).toMatchObject({ hasMore: true })
+
+    const thirdResponse = await app.inject({
+      method: 'GET',
+      url: `/api/v1/organizations/relay/spaces/platform/sessions?limit=1&search=Checkout&cursor=${second.page.nextCursor}`,
+    })
+    const third = SessionListResponseSchema.parse(thirdResponse.json())
+    expect(thirdResponse.statusCode).toBe(200)
+    expect(third.items).toHaveLength(1)
+    expect(new Set([first.items[0].id, second.items[0].id, third.items[0].id]).size).toBe(3)
+    expect(third.page).toMatchObject({ hasMore: false, nextCursor: null })
+
+    const crossFilter = await app.inject({
+      method: 'GET',
+      url: `/api/v1/organizations/relay/spaces/platform/sessions?limit=1&search=Checkout&status=queued&cursor=${first.page.nextCursor}`,
+    })
+    const crossTenant = await app.inject({
+      method: 'GET',
+      url: `/api/v1/organizations/other/spaces/platform/sessions?limit=1&search=Checkout&cursor=${first.page.nextCursor}`,
+    })
+    const invalidLimit = await app.inject({
+      method: 'GET',
+      url: '/api/v1/organizations/relay/spaces/platform/sessions?limit=0',
+    })
+
+    expect(crossFilter.statusCode).toBe(400)
+    expect(crossTenant.statusCode).toBe(400)
+    expect(invalidLimit.statusCode).toBe(400)
+    expect(ApiErrorSchema.parse(invalidLimit.json()).fieldErrors).toHaveProperty('query.limit')
+  })
+
   it('returns a contract-shaped error for invalid input', async () => {
     const response = await testApp().inject({
       method: 'POST',
@@ -1262,7 +1338,7 @@ describe('Relay API', () => {
     expect(first.headers.etag).toBe('"1"')
     expect(replay.headers.etag).toBe('"1"')
     expect(replay.json()).toEqual(first.json())
-    expect(sessions).toHaveLength(1)
+    expect(sessions.items).toHaveLength(1)
 
     const conflictingReplay = await app.inject({
       ...request,
@@ -1275,7 +1351,7 @@ describe('Relay API', () => {
       code: 'IDEMPOTENCY_KEY_REUSED',
       retryable: false,
     })
-    expect(await repository.listBySpace('relay', 'platform', 'user-local-admin')).toHaveLength(1)
+    expect((await repository.listBySpace('relay', 'platform', 'user-local-admin')).items).toHaveLength(1)
 
     const otherSpace = await app.inject({
       ...request,
@@ -1285,6 +1361,6 @@ describe('Relay API', () => {
 
     expect(otherSpace.statusCode).toBe(201)
     expect(otherSpace.headers['idempotency-replayed']).toBe('false')
-    expect(await repository.listBySpace('relay', 'commerce', 'user-local-admin')).toHaveLength(1)
+    expect((await repository.listBySpace('relay', 'commerce', 'user-local-admin')).items).toHaveLength(1)
   })
 })

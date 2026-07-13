@@ -78,6 +78,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
       ['relay', 'space-rollback'],
       ['relay', 'space-policy'],
       ['relay', 'space-private-expert'],
+      ['relay', 'space-list'],
       ['relay', 'space-revision-pin'],
       ['relay', 'space-role-cap'],
       ['relay', 'space-role-recheck'],
@@ -100,12 +101,14 @@ describeWithDatabase('PostgresSessionRepository', () => {
       VALUES
         ('relay', 'user-capped', 'viewer'),
         ('relay', 'user-recheck', 'member'),
-        ('relay', 'user-expert-owner', 'member');
+        ('relay', 'user-expert-owner', 'member'),
+        ('relay', 'user-list-reader', 'member');
       INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
       VALUES
         ('relay', 'space-role-cap', 'user-capped', 'space_manager'),
         ('relay', 'space-role-recheck', 'user-recheck', 'member'),
-        ('relay', 'space-private-expert', 'user-expert-owner', 'member');
+        ('relay', 'space-private-expert', 'user-expert-owner', 'member'),
+        ('relay', 'space-list', 'user-list-reader', 'viewer');
     `)
     for (const [organizationId, spaceId] of spaces) {
       const configurationOptions = spaceId === 'space-policy'
@@ -165,7 +168,8 @@ describeWithDatabase('PostgresSessionRepository', () => {
     })
 
     const reconnectedRepository = new PostgresSessionRepository(pool)
-    await expect(reconnectedRepository.listBySpace('relay', 'space-commerce', 'user-local-admin')).resolves.toEqual([created.session])
+    await expect(reconnectedRepository.listBySpace('relay', 'space-commerce', 'user-local-admin'))
+      .resolves.toMatchObject({ items: [created.session], hasMore: false })
     expect(created.session).toMatchObject({
       expertName: 'Authoritative PR Author',
       expertVersion: 1,
@@ -421,14 +425,15 @@ describeWithDatabase('PostgresSessionRepository', () => {
       organizationId: 'relay', spaceId: 'space-commerce', actorId: 'user-local-admin',
       idempotencyKey: 'revocation-list-1', request: { ...request, title: 'Revocation proof' },
     })
-    expect((await repository.listBySpace('relay', 'space-commerce', 'user-local-admin'))
+    expect((await repository.listBySpace('relay', 'space-commerce', 'user-local-admin')).items
       .some((session) => session.id === created.session.id)).toBe(true)
 
     await pool.query(`
       DELETE FROM relay_space_memberships
       WHERE organization_id = 'relay' AND space_id = 'space-commerce' AND actor_id = 'user-local-admin'
     `)
-    await expect(repository.listBySpace('relay', 'space-commerce', 'user-local-admin')).resolves.toEqual([])
+    await expect(repository.listBySpace('relay', 'space-commerce', 'user-local-admin'))
+      .resolves.toMatchObject({ items: [], hasMore: false })
     await pool.query(`
       INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
       VALUES ('relay', 'space-commerce', 'user-local-admin', 'space_manager')
@@ -449,7 +454,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
     expect(results.every((result) => result.message?.id === results[0].message?.id)).toBe(true)
     expect(results.every((result) => result.turn?.id === results[0].turn?.id)).toBe(true)
     expect(results.every((result) => result.command?.id === results[0].command?.id)).toBe(true)
-    await expect(repository.listBySpace('relay', 'space-platform', 'user-local-admin')).resolves.toHaveLength(1)
+    expect((await repository.listBySpace('relay', 'space-platform', 'user-local-admin')).items).toHaveLength(1)
 
     const executionRows = await pool.query<{
       messages: string
@@ -496,7 +501,8 @@ describeWithDatabase('PostgresSessionRepository', () => {
       organizationId: 'relay', spaceId: 'space-role-cap', actorId: 'user-capped',
       idempotencyKey: 'organization-viewer-create', request,
     })).rejects.toBeInstanceOf(AuthorizationChangedError)
-    await expect(repository.listBySpace('relay', 'space-role-cap', 'user-capped')).resolves.toEqual([])
+    await expect(repository.listBySpace('relay', 'space-role-cap', 'user-capped'))
+      .resolves.toMatchObject({ items: [], hasMore: false })
   })
 
   it('rechecks both membership roles inside the create transaction', async () => {
@@ -599,10 +605,59 @@ describeWithDatabase('PostgresSessionRepository', () => {
       organizationId: 'relay', spaceId: 'space-ordering', actorId: 'user-local-admin', idempotencyKey: 'ordering-2', request,
     })
 
-    await expect(repository.listBySpace('relay', 'space-ordering', 'user-local-admin')).resolves.toEqual([
-      second.session,
-      first.session,
-    ])
+    await expect(repository.listBySpace('relay', 'space-ordering', 'user-local-admin'))
+      .resolves.toMatchObject({ items: [second.session, first.session], hasMore: false })
+  })
+
+  it('keyset-paginates filtered Sessions without exposing private or archived rows', async () => {
+    const now = new Date('2026-07-12T12:30:00.123Z')
+    const repository = new PostgresSessionRepository(pool, { now: () => now })
+    const first = await repository.create({
+      ...auditContext,
+      organizationId: 'relay', spaceId: 'space-list', actorId: 'user-local-admin',
+      idempotencyKey: 'list-alpha', request: { ...request, title: 'Private needle alpha' },
+    })
+    const second = await repository.create({
+      ...auditContext,
+      organizationId: 'relay', spaceId: 'space-list', actorId: 'user-local-admin',
+      idempotencyKey: 'list-beta', request: { ...request, title: 'Private needle 100% beta' },
+    })
+    const shared = await repository.create({
+      ...auditContext,
+      organizationId: 'relay', spaceId: 'space-list', actorId: 'user-local-admin',
+      idempotencyKey: 'list-shared',
+      request: { ...request, title: 'Shared platform work', visibility: 'space' },
+    })
+
+    const firstPage = await repository.listBySpace('relay', 'space-list', 'user-local-admin', {
+      limit: 1, search: 'needle', archived: false,
+    })
+    expect(firstPage).toMatchObject({ hasMore: true })
+    expect(firstPage.items).toHaveLength(1)
+    expect(firstPage.nextCursor).not.toBeNull()
+
+    const secondPage = await repository.listBySpace('relay', 'space-list', 'user-local-admin', {
+      limit: 1, search: 'needle', archived: false, cursor: firstPage.nextCursor ?? undefined,
+    })
+    expect(secondPage).toMatchObject({ hasMore: false, nextCursor: null })
+    expect(secondPage.items).toHaveLength(1)
+    expect(new Set([firstPage.items[0].id, secondPage.items[0].id]))
+      .toEqual(new Set([first.session.id, second.session.id]))
+
+    await expect(repository.listBySpace('relay', 'space-list', 'user-list-reader', { search: 'needle' }))
+      .resolves.toMatchObject({ items: [], hasMore: false })
+    await expect(repository.listBySpace('relay', 'space-list', 'user-list-reader'))
+      .resolves.toMatchObject({ items: [shared.session], hasMore: false })
+    await expect(repository.listBySpace('relay', 'space-list', 'user-local-admin', { search: '100%' }))
+      .resolves.toMatchObject({ items: [second.session], hasMore: false })
+
+    await pool.query('UPDATE relay_sessions SET archived_at = $1 WHERE id = $2', [now, second.session.id])
+    const active = await repository.listBySpace('relay', 'space-list', 'user-local-admin', { search: 'needle' })
+    const archived = await repository.listBySpace('relay', 'space-list', 'user-local-admin', {
+      search: 'needle', archived: true,
+    })
+    expect(active.items.map((session) => session.id)).toEqual([first.session.id])
+    expect(archived.items).toMatchObject([{ id: second.session.id, archivedAt: now.toISOString() }])
   })
 
   it('rejects a different request that reuses the same idempotency key', async () => {
@@ -642,7 +697,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
     const replay = await repository.create({ ...record, request: reorderedRequest })
 
     expect(replay).toEqual({ ...first, replayed: true })
-    await expect(repository.listBySpace('relay', 'space-canonical', 'user-local-admin')).resolves.toHaveLength(1)
+    expect((await repository.listBySpace('relay', 'space-canonical', 'user-local-admin')).items).toHaveLength(1)
   })
 
   it('allows a key to create a new Session after its idempotency window expires', async () => {
@@ -664,7 +719,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
 
     expect(afterExpiry.replayed).toBe(false)
     expect(afterExpiry.session.id).not.toBe(first.session.id)
-    await expect(repository.listBySpace('relay', 'space-expiry', 'user-local-admin')).resolves.toHaveLength(2)
+    expect((await repository.listBySpace('relay', 'space-expiry', 'user-local-admin')).items).toHaveLength(2)
   })
 
   it('starts a draft from its persisted first Message without duplicating queue records', async () => {

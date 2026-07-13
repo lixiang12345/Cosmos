@@ -45,6 +45,7 @@ const sessionInput = {
   createdAt: '2026-07-12T10:00:00.000Z',
   updatedAt: '2026-07-12T10:01:00.000Z',
   lastActivityAt: '2026-07-12T10:01:00.000Z',
+  archivedAt: null,
   version: 1,
 } as const
 

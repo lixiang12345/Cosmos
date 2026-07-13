@@ -51,6 +51,7 @@ const session: SessionDto = {
   baseBranch: createInput.baseBranch, visibility: 'private', status: 'active', attachments: [], source: 'manual',
   createdAt: '2026-07-12T08:00:00.000Z', updatedAt: '2026-07-12T08:00:00.000Z',
   lastActivityAt: '2026-07-12T08:00:00.000Z', version: 1,
+  archivedAt: null,
 }
 
 const messagePage: SessionMessagePage = {
@@ -284,6 +285,27 @@ describe('Relay API client', () => {
     await expect(listSessions('relay', 'space-platform')).resolves.toEqual(response)
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/v1/organizations/relay/spaces/space-platform/sessions',
+      expect.objectContaining({ method: 'GET' }),
+    )
+  })
+
+  it('encodes Session list pagination and filters', async () => {
+    const response = {
+      items: [session],
+      page: { nextCursor: 'next-page', hasMore: true, projectionUpdatedAt: session.updatedAt },
+    }
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(response))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listSessions('relay', 'space-platform', undefined, {
+      cursor: 'current-page',
+      limit: 10,
+      status: 'paused',
+      archived: 'all',
+      search: 'checkout flow',
+    })).resolves.toEqual(response)
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/organizations/relay/spaces/space-platform/sessions?cursor=current-page&limit=10&status=paused&archived=all&search=checkout+flow',
       expect.objectContaining({ method: 'GET' }),
     )
   })

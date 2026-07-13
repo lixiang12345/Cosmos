@@ -48,6 +48,12 @@ export type RelayCatalogListOptions = {
   limit?: number
 }
 
+export type RelaySessionListOptions = RelayCatalogListOptions & {
+  status?: SessionDto['status']
+  archived?: boolean | 'all'
+  search?: string
+}
+
 export type RelaySessionMessageListOptions = {
   cursor?: string | SessionEventCursor
   limit?: number
@@ -309,6 +315,17 @@ function catalogListPath(path: string, options: RelayCatalogListOptions | undefi
   return value ? `${path}?${value}` : path
 }
 
+function sessionListPath(path: string, options: RelaySessionListOptions | undefined) {
+  const query = new URLSearchParams()
+  if (options?.cursor) query.set('cursor', options.cursor)
+  if (options?.limit !== undefined) query.set('limit', String(options.limit))
+  if (options?.status) query.set('status', options.status)
+  if (options?.archived !== undefined) query.set('archived', String(options.archived))
+  if (options?.search) query.set('search', options.search)
+  const value = query.toString()
+  return value ? `${path}?${value}` : path
+}
+
 function encodeBase64UrlJson(value: unknown) {
   const bytes = new TextEncoder().encode(JSON.stringify(value))
   let binary = ''
@@ -418,8 +435,9 @@ export function listSessions(
   organizationId: string,
   spaceId: string,
   auth?: RelayApiAuthContext,
+  options?: RelaySessionListOptions,
 ): Promise<SessionListResponse> {
-  const path = sessionsPath(organizationId, spaceId)
+  const path = sessionListPath(sessionsPath(organizationId, spaceId), options)
   if (!auth?.requestIdentity) return loadSessions(path, organizationId, spaceId, auth)
   const requestKey = JSON.stringify([path, auth.requestIdentity])
   const existing = sessionListRequests.get(requestKey)

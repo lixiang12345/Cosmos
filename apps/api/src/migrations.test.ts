@@ -38,6 +38,9 @@ const migrationVersions = [
   '033_remove_legacy_session_event_shape.sql',
   '034_session_send_audit.sql',
   '035_validate_session_send_audit.sql',
+  '036_session_archival_and_list_indexes.sql',
+  '037_session_visible_activity_index.sql',
+  '038_session_archived_activity_index.sql',
 ]
 
 function poolWithVersions(versions: string[]) {

@@ -57,6 +57,12 @@ import {
   type SessionRepository,
 } from './session-repository.js'
 import {
+  InvalidSessionListPaginationError,
+  encodeSessionListCursor,
+  parseSessionListPagination,
+  type SessionListQuery,
+} from './session-list-pagination.js'
+import {
   InvalidSessionTimelinePaginationError,
   encodeSessionTimelineCursor,
   parseSessionTimelineCursor,
@@ -426,6 +432,17 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       })
     }
 
+    if (error instanceof InvalidSessionListPaginationError) {
+      return sendApiError(reply, 400, request, {
+        code: 'VALIDATION_FAILED',
+        message: 'The Session list parameters are invalid.',
+        retryable: false,
+        fieldErrors: {
+          [`query.${error.field}`]: ['Use a valid value and a cursor for this Workspace and filter set.'],
+        },
+      })
+    }
+
     if (error instanceof InvalidSessionTimelinePaginationError) {
       return sendApiError(reply, 400, request, {
         code: 'VALIDATION_FAILED',
@@ -668,24 +685,40 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     },
   )
 
-  app.get<{ Params: SpaceParams }>('/api/v1/organizations/:organizationId/spaces/:spaceId/sessions', async (request, reply) => {
-    const authorization = await authorizeSessionSpace(request, reply, request.params)
-    if (!authorization) return
+  app.get<{ Params: SpaceParams; Querystring: SessionListQuery }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions',
+    async (request, reply) => {
+      const authorization = await authorizeSessionSpace(request, reply, request.params)
+      if (!authorization) return
 
-    const items = await sessionRepository.listBySpace(
-      authorization.organizationId,
-      authorization.spaceId,
-      authorization.actor.id,
-    )
-    return SessionListResponseSchema.parse({
-      items,
-      page: {
-        nextCursor: null,
-        hasMore: false,
-        projectionUpdatedAt: items[0]?.updatedAt ?? null,
-      },
-    })
-  })
+      const options = parseSessionListPagination(
+        request.query,
+        authorization.organizationId,
+        authorization.spaceId,
+      )
+      const page = await sessionRepository.listBySpace(
+        authorization.organizationId,
+        authorization.spaceId,
+        authorization.actor.id,
+        options,
+      )
+      return SessionListResponseSchema.parse({
+        items: page.items,
+        page: {
+          nextCursor: page.nextCursor
+            ? encodeSessionListCursor(
+              page.nextCursor,
+              authorization.organizationId,
+              authorization.spaceId,
+              options,
+            )
+            : null,
+          hasMore: page.hasMore,
+          projectionUpdatedAt: page.projectionUpdatedAt,
+        },
+      })
+    },
+  )
 
   app.get<{ Params: SessionParams }>('/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId', async (request, reply) => {
     const authorization = await authorizeSessionSpace(request, reply, request.params)

@@ -33,6 +33,8 @@ import {
   type ResolvedSessionConfiguration,
   type SendSessionMessageRecord,
   type SendSessionMessageResult,
+  type SessionListOptions,
+  type SessionListPage,
   type SessionRepository,
   type SpaceAccess,
   type SpaceRole,
@@ -65,6 +67,7 @@ type SessionRow = {
   created_at: Date | string
   updated_at: Date | string
   last_activity_at: Date | string
+  archived_at: Date | string | null
   version: number
 }
 
@@ -119,6 +122,7 @@ function mapSession(row: SessionRow): SessionDto {
     createdAt: timestamp(row.created_at),
     updatedAt: timestamp(row.updated_at),
     lastActivityAt: timestamp(row.last_activity_at),
+    archivedAt: row.archived_at === null ? null : timestamp(row.archived_at),
     version: row.version,
   })
 }
@@ -149,7 +153,7 @@ const sessionColumns = `
   expert_version, expert_revision_id, environment_id, environment_revision_id,
   repository_id, configuration_resolution_version, repository, base_branch,
   visibility, status, attachments, source, created_at, updated_at,
-  last_activity_at, version
+  last_activity_at, archived_at, version
 `
 
 export type PostgresSessionRepositoryOptions = {
@@ -245,9 +249,53 @@ export class PostgresSessionRepository implements SessionRepository {
     return row ? { organizationRole: row.organization_role, spaceRole: row.space_role } : null
   }
 
-  async listBySpace(organizationId: string, spaceId: string, actorId: string): Promise<SessionDto[]> {
-    const result = await this.pool.query<SessionRow>(`
-      SELECT ${sessionColumns.split(',').map((column) => `session.${column.trim()}`).join(', ')}
+  async listBySpace(
+    organizationId: string,
+    spaceId: string,
+    actorId: string,
+    options: SessionListOptions = {},
+  ): Promise<SessionListPage> {
+    const limit = options.limit ?? 25
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      throw new RangeError('Session page limit must be an integer between 1 and 100.')
+    }
+    const parameters: unknown[] = [organizationId, spaceId, actorId]
+    const clauses = ['(session.visibility = \'space\' OR session.created_by = $3)']
+    if (options.archived !== 'all') {
+      clauses.push(options.archived === true
+        ? 'session.archived_at IS NOT NULL'
+        : 'session.archived_at IS NULL')
+    }
+    if (options.status) {
+      parameters.push(options.status)
+      clauses.push(`session.status = $${parameters.length}`)
+    }
+    if (options.search) {
+      const pattern = `%${options.search.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_')}%`
+      parameters.push(pattern)
+      clauses.push(`(
+        session.title ILIKE $${parameters.length} ESCAPE '\\'
+        OR session.summary ILIKE $${parameters.length} ESCAPE '\\'
+        OR session.expert_name ILIKE $${parameters.length} ESCAPE '\\'
+        OR session.repository ILIKE $${parameters.length} ESCAPE '\\'
+      )`)
+    }
+    if (options.cursor) {
+      if (!options.cursor.id.trim() || Number.isNaN(new Date(options.cursor.lastActivityAt).valueOf())) {
+        throw new RangeError('Session cursor must contain a valid timestamp and Session id.')
+      }
+      parameters.push(options.cursor.lastActivityAt, options.cursor.id)
+      clauses.push(`(session.last_activity_at, session.id) < (
+        $${parameters.length - 1}::timestamptz, $${parameters.length}
+      )`)
+    }
+    parameters.push(limit + 1)
+    const result = await this.pool.query<SessionRow & { cursor_last_activity_at: string }>(`
+      SELECT ${sessionColumns.split(',').map((column) => `session.${column.trim()}`).join(', ')},
+        to_char(
+          session.last_activity_at AT TIME ZONE 'UTC',
+          'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+        ) AS cursor_last_activity_at
       FROM relay_sessions session
       JOIN relay_organization_memberships organization_membership
         ON organization_membership.organization_id = session.organization_id
@@ -257,10 +305,22 @@ export class PostgresSessionRepository implements SessionRepository {
         AND space_membership.space_id = session.space_id
         AND space_membership.actor_id = $3
       WHERE session.organization_id = $1 AND session.space_id = $2
-        AND (session.visibility = 'space' OR session.created_by = $3)
+        AND ${clauses.join('\n        AND ')}
       ORDER BY session.last_activity_at DESC, session.id DESC
-    `, [organizationId, spaceId, actorId])
-    return result.rows.map(mapSession)
+      LIMIT $${parameters.length}
+    `, parameters)
+    const hasMore = result.rows.length > limit
+    const selectedRows = result.rows.slice(0, limit)
+    const items = selectedRows.map(mapSession)
+    const last = selectedRows.at(-1)
+    return {
+      items,
+      hasMore,
+      nextCursor: hasMore && last
+        ? { lastActivityAt: last.cursor_last_activity_at, id: last.id }
+        : null,
+      projectionUpdatedAt: items[0]?.updatedAt ?? null,
+    }
   }
 
   async getById(
@@ -788,7 +848,7 @@ export class PostgresSessionRepository implements SessionRepository {
         ${sessionColumns}, created_by
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-        $15, $16, $17, $18::jsonb, $19, $20, $21, $22, $23, $24
+        $15, $16, $17, $18::jsonb, $19, $20, $21, $22, NULL, $23, $24
       )
     `, [
       session.id, session.organizationId, session.spaceId, session.title, session.summary,

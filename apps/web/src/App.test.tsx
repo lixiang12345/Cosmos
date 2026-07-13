@@ -151,6 +151,7 @@ function makeApiSession(
     createdAt: API_TIMESTAMP,
     updatedAt: API_TIMESTAMP,
     lastActivityAt: API_TIMESTAMP,
+    archivedAt: null,
     version: 1,
     ...overrides,
   }
