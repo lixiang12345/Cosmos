@@ -59,6 +59,7 @@ const RemoteExpertsPage = lazy(() => import('./pages/RemoteCatalogPages').then((
 const RemoteExpertDetailPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteExpertDetailPage })))
 const RemoteEnvironmentsPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteEnvironmentsPage })))
 const RemoteFilesPage = lazy(() => import('./pages/RemoteFilesPage').then((module) => ({ default: module.RemoteFilesPage })))
+const RemoteWorkersPage = lazy(() => import('./pages/RemoteWorkersPage').then((module) => ({ default: module.RemoteWorkersPage })))
 const RemoteApprovalsPage = lazy(() => import('./pages/RemoteApprovalsPage').then((module) => ({ default: module.RemoteApprovalsPage })))
 const CosmosHomePage = lazy(() => import('./pages/CosmosOperationsPages').then((module) => ({ default: module.CosmosHomePage })))
 const CosmosFilesPage = lazy(() => import('./pages/CosmosOperationsPages').then((module) => ({ default: module.CosmosFilesPage })))
@@ -708,6 +709,7 @@ function SessionRoute({
         onRetry={retryTurnId ? () => { void runControl('retry') } : undefined}
         initialMessageDraft={initialMessageDraft}
         onOpenFiles={() => navigate(`/sessions/${resolvedSession.id}/files`)}
+        onOpenWorkers={() => navigate(`/sessions/${resolvedSession.id}/workers`)}
         onOpenNavigation={onOpenNavigation}
         onBack={() => navigate('/sessions')}
       />
@@ -780,6 +782,33 @@ function SessionWorkspaceFilesRoute({
           : `Please update ${path}:`,
       },
     })}
+  />
+}
+
+function SessionWorkersRoute({
+  organizationId,
+  spaceId,
+  auth,
+  credentialVersion,
+  onOpenNavigation,
+}: {
+  organizationId: string
+  spaceId: string
+  auth: RelayApiAuthContext
+  credentialVersion: number
+  onOpenNavigation: () => void
+}) {
+  const { sessionId } = useParams()
+  const navigate = useNavigate()
+  if (!sessionId) return <Navigate to="/sessions" replace />
+  return <RemoteWorkersPage
+    organizationId={organizationId}
+    spaceId={spaceId}
+    sessionId={sessionId}
+    auth={auth}
+    credentialVersion={credentialVersion}
+    onOpenNavigation={onOpenNavigation}
+    onBackToSession={() => navigate(`/sessions/${sessionId}`)}
   />
 }
 
@@ -1810,6 +1839,15 @@ function RelayApp() {
               credentialVersion={credentialVersion}
               requestModificationEnabled={productionExecutionEnabled}
               locale={locale}
+              onOpenNavigation={openNavigation}
+            />} />
+        <Route path="/sessions/:sessionId/workers" element={demoMode
+          ? <Navigate to="/sessions" replace />
+          : <SessionWorkersRoute
+              organizationId={organizationId}
+              spaceId={activeSpace.id}
+              auth={catalogAuth}
+              credentialVersion={credentialVersion}
               onOpenNavigation={openNavigation}
             />} />
         <Route path="/runs/:sessionId" element={<LegacySessionRedirect />} />

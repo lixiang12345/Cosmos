@@ -28,6 +28,7 @@ import {
   SessionEventPageSchema,
   SessionListResponseSchema,
   SessionShareListResponseSchema,
+  SessionWorkerListResponseSchema,
   ShareGrantDtoSchema,
   SessionMessagePageSchema,
   SendSessionMessageResponseSchema,
@@ -132,6 +133,16 @@ import {
   type SessionTimelineRepository,
 } from './session-timeline-repository.js'
 import {
+  EmptySessionWorkerRepository,
+  type SessionWorkerRepository,
+} from './session-worker-repository.js'
+import {
+  InvalidSessionWorkerPaginationError,
+  encodeSessionWorkerCursor,
+  parseSessionWorkerPagination,
+  type SessionWorkerListQuery,
+} from './session-worker-pagination.js'
+import {
   ApprovalAlreadyDecidedError,
   ApprovalDecisionConflictError,
   ApprovalPermissionDeniedError,
@@ -222,6 +233,7 @@ export type CreateAppOptions = {
   artifactRepository?: ArtifactRepository
   fileRepository?: FileRepository
   toolApprovalRepository?: ToolApprovalRepository
+  sessionWorkerRepository?: SessionWorkerRepository
   serviceAccountPolicyRepository?: ServiceAccountPolicyRepository
   configurationCatalogRepository?: ConfigurationCatalogRepository
   readinessCheck?: () => Promise<void>
@@ -464,6 +476,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   const artifactRepository = options.artifactRepository ?? new EmptyArtifactRepository()
   const fileRepository = options.fileRepository ?? new EmptyFileRepository()
   const toolApprovalRepository = options.toolApprovalRepository ?? new EmptyToolApprovalRepository()
+  const sessionWorkerRepository = options.sessionWorkerRepository ?? new EmptySessionWorkerRepository()
   const serviceAccountPolicyRepository = options.serviceAccountPolicyRepository
     ?? new DenyServiceAccountPolicyRepository()
   const configurationCatalogRepository = options.configurationCatalogRepository
@@ -763,6 +776,17 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         retryable: false,
         fieldErrors: {
           [`query.${error.field}`]: ['Use a valid value and a cursor bound to this filter set.'],
+        },
+      })
+    }
+
+    if (error instanceof InvalidSessionWorkerPaginationError) {
+      return sendApiError(reply, 400, request, {
+        code: 'VALIDATION_FAILED',
+        message: 'The Session Worker list parameters are invalid.',
+        retryable: false,
+        fieldErrors: {
+          [`query.${error.field}`]: ['Use a valid value and a cursor bound to this Session.'],
         },
       })
     }
@@ -1599,6 +1623,47 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       reply.header('Idempotency-Replayed', String(result.replayed))
       reply.header('ETag', resourceEtag(result.artifact))
       return reply.code(204).send()
+    },
+  )
+
+  app.get<{ Params: SessionParams; Querystring: SessionWorkerListQuery }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/workers',
+    async (request, reply) => {
+      const authorization = await authorizeSessionSpace(request, reply, request.params)
+      if (!authorization) return
+      const sessionId = parseSpaceId(request.params.sessionId)
+      if (!sessionId) return sendResourceNotFound(reply, request)
+      const pagination = parseSessionWorkerPagination(
+        request.query,
+        authorization.organizationId,
+        authorization.spaceId,
+        sessionId,
+      )
+      const page = await sessionWorkerRepository.list(
+        authorization.organizationId,
+        authorization.spaceId,
+        sessionId,
+        authorization.actor.id,
+        pagination,
+      )
+      if (!page) return sendResourceNotFound(reply, request)
+      return SessionWorkerListResponseSchema.parse({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        sessionId,
+        items: page.items,
+        page: {
+          nextCursor: page.nextCursor
+            ? encodeSessionWorkerCursor(
+              page.nextCursor,
+              authorization.organizationId,
+              authorization.spaceId,
+              sessionId,
+            )
+            : null,
+          hasMore: page.hasMore,
+        },
+      })
     },
   )
 

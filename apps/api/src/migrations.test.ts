@@ -57,6 +57,8 @@ const migrationVersions = [
   '052_tool_calls_and_approvals.sql',
   '053_validate_tool_calls_and_approvals.sql',
   '054_harden_tool_approval_runtime_policies.sql',
+  '055_session_workers.sql',
+  '056_validate_session_workers.sql',
 ]
 
 function poolWithVersions(versions: string[]) {

@@ -127,6 +127,23 @@ export {
 } from './postgres-session-repository.js'
 export { PostgresSessionTimelineRepository } from './postgres-session-timeline-repository.js'
 export {
+  PostgresSessionWorkerRepository,
+  PostgresSessionWorkerWriterRepository,
+  type PostgresSessionWorkerWriterRepositoryOptions,
+} from './postgres-session-worker-repository.js'
+export {
+  EmptySessionWorkerRepository,
+  SessionWorkerConflictError,
+  SessionWorkerVersionConflictError,
+  type CreateSessionWorkerRecord,
+  type SessionWorkerListCursor,
+  type SessionWorkerListOptions,
+  type SessionWorkerListPage,
+  type SessionWorkerRepository,
+  type SessionWorkerWriterRepository,
+  type TransitionSessionWorkerRecord,
+} from './session-worker-repository.js'
+export {
   DenyServiceAccountPolicyRepository,
   PostgresServiceAccountPolicyRepository,
   type ServiceAccountAuthorization,

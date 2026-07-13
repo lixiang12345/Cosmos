@@ -1461,12 +1461,13 @@ paths:
 
   /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/workers:
     parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
       - $ref: '#/components/parameters/SessionId'
     get:
       tags: [Workers]
       operationId: listSessionWorkers
+      x-relay-implementation-status: implemented
       summary: List the Session Worker tree
       parameters:
         - $ref: '#/components/parameters/Cursor'
@@ -1477,17 +1478,17 @@ paths:
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: '#/components/schemas/Page'
-                  - type: object
-                    required: [items]
-                    properties:
-                      items:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/Worker'
+                $ref: '#/components/schemas/RuntimeSessionWorkerListResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
 
   /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/tool-calls:
     parameters:
@@ -5325,42 +5326,102 @@ components:
       enum: [queued, running, waiting, completed, failed, canceled]
     Worker:
       type: object
-      required: [id, sessionId, parentTurnId, name, instructions, status, depth, ordinal, createdAt]
+      required:
+        - organizationId
+        - spaceId
+        - id
+        - sessionId
+        - parentTurnId
+        - parentWorkerId
+        - expertRevisionId
+        - name
+        - instructions
+        - status
+        - depth
+        - ordinal
+        - resultSummary
+        - createdAt
+        - updatedAt
+        - completedAt
+        - version
       properties:
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        spaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
         id:
-          type: string
-          format: uuid
+          $ref: '#/components/schemas/RuntimeIdentifier'
         sessionId:
-          type: string
-          format: uuid
+          $ref: '#/components/schemas/RuntimeIdentifier'
         parentTurnId:
-          type: string
-          format: uuid
+          $ref: '#/components/schemas/RuntimeIdentifier'
         parentWorkerId:
-          type: [string, 'null']
-          format: uuid
+          oneOf:
+            - $ref: '#/components/schemas/RuntimeIdentifier'
+            - type: 'null'
         expertRevisionId:
-          type: [string, 'null']
-          format: uuid
+          oneOf:
+            - $ref: '#/components/schemas/RuntimeIdentifier'
+            - type: 'null'
         name:
           type: string
+          minLength: 1
+          maxLength: 240
         instructions:
           type: string
+          minLength: 1
+          maxLength: 20000
         status:
           $ref: '#/components/schemas/WorkerStatus'
         depth:
           type: integer
           minimum: 1
+          maximum: 16
         ordinal:
           type: integer
           minimum: 1
+          maximum: 10000
         resultSummary:
           type: [string, 'null']
+          maxLength: 10000
         createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        updatedAt:
           $ref: '#/components/schemas/Timestamp'
         completedAt:
           type: [string, 'null']
           format: date-time
+        version:
+          type: integer
+          minimum: 1
+      additionalProperties: false
+
+    RuntimeSessionWorkerListResponse:
+      type: object
+      required: [organizationId, spaceId, sessionId, items, page]
+      properties:
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        spaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        sessionId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/Worker'
+        page:
+          type: object
+          required: [nextCursor, hasMore]
+          properties:
+            nextCursor:
+              type: [string, 'null']
+              maxLength: 4096
+            hasMore:
+              type: boolean
+          additionalProperties: false
+      additionalProperties: false
 
     ToolCallStatus:
       type: string

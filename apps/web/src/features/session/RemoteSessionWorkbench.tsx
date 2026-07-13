@@ -15,6 +15,7 @@ import {
   Clock3,
   FileText,
   GitBranch,
+  GitFork,
   Link2,
   LoaderCircle,
   Menu,
@@ -54,6 +55,7 @@ export type RemoteSessionWorkbenchProps = {
   onRetry?: () => void
   initialMessageDraft?: string
   onOpenFiles?: () => void
+  onOpenWorkers?: () => void
   onBack: () => void
   onOpenNavigation?: () => void
 }
@@ -293,6 +295,7 @@ export function RemoteSessionWorkbench({
   onRetry,
   initialMessageDraft = '',
   onOpenFiles,
+  onOpenWorkers,
   onBack,
   onOpenNavigation,
 }: RemoteSessionWorkbenchProps) {
@@ -392,9 +395,10 @@ export function RemoteSessionWorkbench({
       ) : null}
 
       <div className="remote-session-content">
-        {onOpenFiles ? <nav className="remote-session-tabs" role="tablist" aria-label={text(locale, '会话视图', 'Session views')}>
+        {onOpenFiles || onOpenWorkers ? <nav className="remote-session-tabs" role="tablist" aria-label={text(locale, '会话视图', 'Session views')}>
           <button type="button" role="tab" aria-selected className="remote-session-tabs__active"><MessageSquare aria-hidden="true" />{text(locale, '对话', 'Conversation')}</button>
-          <button type="button" role="tab" aria-selected={false} onClick={onOpenFiles}><FileText aria-hidden="true" />{text(locale, '文件', 'Files')}</button>
+          {onOpenFiles ? <button type="button" role="tab" aria-selected={false} onClick={onOpenFiles}><FileText aria-hidden="true" />{text(locale, '文件', 'Files')}</button> : null}
+          {onOpenWorkers ? <button type="button" role="tab" aria-selected={false} onClick={onOpenWorkers}><GitFork aria-hidden="true" />{text(locale, 'Workers', 'Workers')}</button> : null}
         </nav> : null}
         <section className={`remote-session-execution-state remote-session-execution-state--${execution.tone}`} aria-labelledby="remote-session-execution-title">
           <ExecutionIcon className={execution.tone === 'running' || execution.tone === 'retrying' ? 'cosmos-spin' : undefined} aria-hidden="true" />

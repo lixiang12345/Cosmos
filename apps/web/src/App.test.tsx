@@ -31,6 +31,7 @@ import {
   listFiles,
   listSessionEvents,
   listSessionMessages,
+  listSessionWorkers,
   listSessions,
   pauseSession,
   renameSession,
@@ -56,6 +57,7 @@ vi.mock('./services/relayApi', async (importOriginal) => ({
   listFiles: vi.fn(),
   listSessionEvents: vi.fn(),
   listSessionMessages: vi.fn(),
+  listSessionWorkers: vi.fn(),
   listSessions: vi.fn(),
   pauseSession: vi.fn(),
   renameSession: vi.fn(),
@@ -311,6 +313,7 @@ describe('Relay prototype', () => {
     vi.mocked(listFiles).mockReset()
     vi.mocked(listSessionEvents).mockReset()
     vi.mocked(listSessionMessages).mockReset()
+    vi.mocked(listSessionWorkers).mockReset()
     vi.mocked(listSessions).mockReset()
     vi.mocked(pauseSession).mockReset()
     vi.mocked(renameSession).mockReset()
@@ -336,6 +339,13 @@ describe('Relay prototype', () => {
       page: { nextCursor: null, hasMore: false },
     }))
     vi.mocked(listSessionEvents).mockImplementation(async (organizationId, spaceId, sessionId) => ({
+      organizationId,
+      spaceId,
+      sessionId,
+      items: [],
+      page: { nextCursor: null, hasMore: false },
+    }))
+    vi.mocked(listSessionWorkers).mockImplementation(async (organizationId, spaceId, sessionId) => ({
       organizationId,
       spaceId,
       sessionId,
@@ -501,8 +511,8 @@ describe('Relay prototype', () => {
     expect(screen.queryByText('gpt-5.6-sol')).not.toBeInTheDocument()
     expect(screen.queryByText('38.2k')).not.toBeInTheDocument()
     expect(screen.queryByText('￥4.82')).not.toBeInTheDocument()
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['对话', '文件'])
-    expect(screen.queryByRole('tab', { name: /产物|Workers|Changes|终端|审批/ })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['对话', '文件', 'Workers'])
+    expect(screen.queryByRole('tab', { name: /产物|Changes|终端|审批/ })).not.toBeInTheDocument()
     for (const action of ['停止', '重试', '批准']) {
       expect(screen.queryByRole('button', { name: action })).not.toBeInTheDocument()
     }
@@ -541,6 +551,32 @@ describe('Relay prototype', () => {
       { scope: 'workspace', sessionId: detail.id, search: undefined, limit: 100 },
       expect.objectContaining({ accessToken: 'production-access-token' }),
       expect.any(AbortSignal),
+    )
+
+    await user.click(screen.getByRole('button', { name: '返回会话' }))
+    expect(await screen.findByRole('heading', { name: detail.title })).toBeInTheDocument()
+  })
+
+  it('navigates from a production Session to its exact Worker tree and back', async () => {
+    const user = userEvent.setup()
+    const detail = makeApiSession('organization-production', 'space-production', {
+      title: 'Worker tree session', expertId: 'expert-production', start: true,
+      message: { content: 'Delegate independent review.' },
+    }, { id: 'session-worker-tree', status: 'active' })
+    vi.mocked(getSession).mockResolvedValue(detail)
+
+    renderAuthenticatedApp(`/sessions/${detail.id}`)
+
+    await screen.findByRole('heading', { name: detail.title })
+    await user.click(screen.getByRole('tab', { name: 'Workers' }))
+    expect(await screen.findByRole('heading', { name: 'Worker 树' })).toBeInTheDocument()
+    expect(listSessionWorkers).toHaveBeenCalledWith(
+      detail.organizationId,
+      detail.spaceId,
+      detail.id,
+      expect.objectContaining({ accessToken: 'production-access-token' }),
+      expect.any(AbortSignal),
+      { limit: 50 },
     )
 
     await user.click(screen.getByRole('button', { name: '返回会话' }))

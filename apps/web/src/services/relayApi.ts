@@ -19,6 +19,7 @@ import {
   SessionEventPageSchema,
   SessionListResponseSchema,
   SessionMessagePageSchema,
+  SessionWorkerListResponseSchema,
   SendSessionMessageResponseSchema,
   StartSessionResponseSchema,
   type ApiError,
@@ -47,6 +48,7 @@ import {
   type SessionEventPage,
   type SessionListResponse,
   type SessionMessagePage,
+  type SessionWorkerListResponse,
   type SendSessionMessageResponse,
   type StartSessionResponse,
 } from '@relay/contracts'
@@ -622,6 +624,32 @@ export function getSession(
   }, SessionDtoSchema, auth).then((session) => {
     assertSessionScope(session, organizationId, spaceId, sessionId)
     return session
+  })
+}
+
+export function listSessionWorkers(
+  organizationId: string,
+  spaceId: string,
+  sessionId: string,
+  auth?: RelayApiAuthContext,
+  signal?: AbortSignal,
+  options?: RelayCatalogListOptions,
+): Promise<SessionWorkerListResponse> {
+  return request(catalogListPath(`${sessionPath(organizationId, spaceId, sessionId)}/workers`, options), {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    signal,
+  }, SessionWorkerListResponseSchema, auth).then((response) => {
+    if (
+      response.organizationId !== organizationId
+      || response.spaceId !== spaceId
+      || response.sessionId !== sessionId
+    ) {
+      throw new RelayApiError('Relay API returned Session Workers outside the requested scope.', {
+        code: 'INVALID_RESPONSE', status: 200,
+      })
+    }
+    return response
   })
 }
 

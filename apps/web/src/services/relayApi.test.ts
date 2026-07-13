@@ -7,6 +7,7 @@ import type {
   ExpertSummaryDto,
   FileDto,
   FileVersionDto,
+  SessionWorkerDto,
   SessionEventPage,
   SessionDto,
   SessionMessagePage,
@@ -35,6 +36,7 @@ import {
   listFileVersions,
   listSessionEvents,
   listSessionMessages,
+  listSessionWorkers,
   listSessions,
   pauseSession,
   renameSession,
@@ -84,6 +86,26 @@ const fileVersion: FileVersionDto = {
   version: 2, contentHash: 'a'.repeat(64), size: file.size,
   createdByToolCallId: file.lastWrittenByToolCallId, sourceSessionId: session.id,
   sourceTurnId: 'turn-2', createdAt: session.updatedAt,
+}
+
+const sessionWorker: SessionWorkerDto = {
+  organizationId: session.organizationId,
+  spaceId: session.spaceId,
+  sessionId: session.id,
+  id: 'session-worker-1',
+  parentTurnId: 'turn-1',
+  parentWorkerId: null,
+  expertRevisionId: session.expertRevisionId ?? null,
+  name: 'Review implementation',
+  instructions: 'Review the implementation and report concrete issues.',
+  status: 'running',
+  depth: 1,
+  ordinal: 1,
+  resultSummary: null,
+  createdAt: session.createdAt,
+  updatedAt: session.updatedAt,
+  completedAt: null,
+  version: 2,
 }
 
 const approval: ApprovalDto = {
@@ -417,6 +439,36 @@ describe('Relay API client', () => {
       '/api/v1/organizations/relay/spaces/space-platform/sessions/session-1',
       expect.objectContaining({ method: 'GET' }),
     )
+  })
+
+  it('loads a cursor-paged Worker tree bound to the exact Session', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      organizationId: session.organizationId,
+      spaceId: session.spaceId,
+      sessionId: session.id,
+      items: [sessionWorker],
+      page: { nextCursor: 'worker-cursor', hasMore: true },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+
+    await expect(listSessionWorkers(
+      session.organizationId,
+      session.spaceId,
+      session.id,
+      { accessToken: 'token' },
+      undefined,
+      { cursor: 'previous', limit: 10 },
+    )).resolves.toMatchObject({ items: [{ id: sessionWorker.id }] })
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(`/sessions/${session.id}/workers?cursor=previous&limit=10`)
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      organizationId: session.organizationId,
+      spaceId: session.spaceId,
+      sessionId: 'session-other',
+      items: [],
+      page: { nextCursor: null, hasMore: false },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    await expect(listSessionWorkers(session.organizationId, session.spaceId, session.id))
+      .rejects.toMatchObject({ code: 'INVALID_RESPONSE' })
   })
 
   it('loads scoped File metadata, pages, and immutable versions', async () => {

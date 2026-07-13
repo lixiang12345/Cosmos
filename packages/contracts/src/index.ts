@@ -37,6 +37,15 @@ export {
 } from './artifact.js'
 
 export {
+  SessionWorkerDtoSchema,
+  SessionWorkerListResponseSchema,
+  SessionWorkerStatusSchema,
+  type SessionWorkerDto,
+  type SessionWorkerListResponse,
+  type SessionWorkerStatus,
+} from './worker.js'
+
+export {
   RuntimeCapabilitiesSchema,
   type RuntimeCapabilities,
 } from './capabilities.js'

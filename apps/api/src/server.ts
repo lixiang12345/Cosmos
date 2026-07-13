@@ -9,6 +9,7 @@ import { PostgresFileRepository } from './postgres-file-repository.js'
 import { assertRuntimeDatabaseRole, createRuntimePool } from './postgres-runtime-database.js'
 import { PostgresSessionRepository } from './postgres-session-repository.js'
 import { PostgresSessionTimelineRepository } from './postgres-session-timeline-repository.js'
+import { PostgresSessionWorkerRepository } from './postgres-session-worker-repository.js'
 import { PostgresToolApprovalRepository } from './postgres-tool-approval-repository.js'
 import { PostgresServiceAccountPolicyRepository } from './service-account-policy-repository.js'
 import { PostgresWorkerReadinessRepository } from './postgres-worker-readiness-repository.js'
@@ -58,6 +59,7 @@ const app = createApp({
       allowLegacyDevelopmentConfigurationFallback: config.authentication.mode === 'development',
     }),
   sessionTimelineRepository: pool ? new PostgresSessionTimelineRepository(pool) : undefined,
+  sessionWorkerRepository: pool ? new PostgresSessionWorkerRepository(pool) : undefined,
   artifactRepository: pool ? new PostgresArtifactRepository(pool) : undefined,
   fileRepository: pool ? new PostgresFileRepository(pool) : undefined,
   toolApprovalRepository: pool ? new PostgresToolApprovalRepository(pool) : undefined,
