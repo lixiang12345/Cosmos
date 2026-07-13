@@ -1177,15 +1177,22 @@ paths:
 
   /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/shares:
     parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
       - $ref: '#/components/parameters/SessionId'
     get:
       tags: [Sessions]
       operationId: listSessionShares
+      x-relay-implementation-status: implemented
       summary: List explicit Session share grants
       parameters:
-        - $ref: '#/components/parameters/Cursor'
+        - name: cursor
+          in: query
+          description: Scope-bound base64url cursor returned by the previous page for this Session.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 4096
         - $ref: '#/components/parameters/Limit'
       responses:
         '200':
@@ -1193,20 +1200,21 @@ paths:
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: '#/components/schemas/Page'
-                  - type: object
-                    required: [items]
-                    properties:
-                      items:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/ShareGrant'
+                $ref: '#/components/schemas/RuntimeSessionShareListResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
     post:
       tags: [Sessions]
       operationId: shareSession
+      x-relay-implementation-status: implemented
       summary: Grant a user or group access to a Session
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1215,41 +1223,80 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ShareGrantCreate'
+              $ref: '#/components/schemas/RuntimeShareGrantCreate'
       responses:
         '201':
           description: Share grant created
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Location:
+              $ref: '#/components/headers/Location'
+            Idempotency-Replayed:
+              $ref: '#/components/headers/IdempotencyReplayed'
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ShareGrant'
+                $ref: '#/components/schemas/RuntimeShareGrant'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/RuntimeConflict'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
 
   /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/shares/{shareId}:
     parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
       - $ref: '#/components/parameters/SessionId'
       - name: shareId
         in: path
         required: true
         schema:
-          type: string
-          format: uuid
+          $ref: '#/components/schemas/RuntimeIdentifier'
     delete:
       tags: [Sessions]
       operationId: revokeSessionShare
+      x-relay-implementation-status: implemented
       summary: Revoke a Session share grant
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
       responses:
-        '204':
+        '200':
           description: Share revoked
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Idempotency-Replayed:
+              $ref: '#/components/headers/IdempotencyReplayed'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeShareGrant'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/RuntimeNotFound'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
+        '412':
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '428':
+          $ref: '#/components/responses/RuntimePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
 
   /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/events:
     parameters:
@@ -3178,6 +3225,103 @@ components:
               maxLength: 255
           additionalProperties: false
       additionalProperties: false
+    RuntimeShareGrantCreate:
+      type: object
+      required: [principalType, principalId, role]
+      properties:
+        principalType:
+          type: string
+          enum: [user, group]
+        principalId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        role:
+          type: string
+          enum: [viewer, collaborator]
+        expiresAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+      additionalProperties: false
+    RuntimeShareGrant:
+      type: object
+      required:
+        - organizationId
+        - spaceId
+        - sessionId
+        - id
+        - principalType
+        - principalId
+        - role
+        - expiresAt
+        - createdAt
+        - createdBy
+        - revokedAt
+        - revokedBy
+        - version
+      properties:
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        spaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        sessionId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        id:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        principalType:
+          type: string
+          enum: [user, group]
+        principalId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        role:
+          type: string
+          enum: [viewer, collaborator]
+        expiresAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        createdBy:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        revokedAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        revokedBy:
+          oneOf:
+            - $ref: '#/components/schemas/RuntimeIdentifier'
+            - type: 'null'
+        version:
+          type: integer
+          minimum: 1
+      additionalProperties: false
+    RuntimeSessionShareListResponse:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/RuntimeShareGrant'
+        page:
+          type: object
+          required: [nextCursor, hasMore, projectionUpdatedAt]
+          properties:
+            nextCursor:
+              oneOf:
+                - type: string
+                  minLength: 1
+                  maxLength: 4096
+                - type: 'null'
+            hasMore:
+              type: boolean
+            projectionUpdatedAt:
+              oneOf:
+                - $ref: '#/components/schemas/Timestamp'
+                - type: 'null'
+          additionalProperties: false
+      additionalProperties: false
     RuntimeSession:
       type: object
       required:
@@ -4509,51 +4653,6 @@ components:
     SessionVisibility:
       type: string
       enum: [private, space]
-    ShareGrantCreate:
-      type: object
-      required: [principalType, principalId, role]
-      properties:
-        principalType:
-          type: string
-          enum: [user, group]
-        principalId:
-          type: string
-          format: uuid
-        role:
-          type: string
-          enum: [viewer, collaborator]
-        expiresAt:
-          type: [string, 'null']
-          format: date-time
-      additionalProperties: false
-    ShareGrant:
-      type: object
-      required: [id, sessionId, principalType, principalId, role, createdAt, createdBy]
-      properties:
-        id:
-          type: string
-          format: uuid
-        sessionId:
-          type: string
-          format: uuid
-        principalType:
-          type: string
-          enum: [user, group]
-        principalId:
-          type: string
-          format: uuid
-        role:
-          type: string
-          enum: [viewer, collaborator]
-        expiresAt:
-          type: [string, 'null']
-          format: date-time
-        createdAt:
-          $ref: '#/components/schemas/Timestamp'
-        createdBy:
-          type: string
-          format: uuid
-
     TurnStatus:
       type: string
       enum: [queued, running, waiting_tool, waiting_approval, completed, failed, canceled]

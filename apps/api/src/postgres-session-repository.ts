@@ -7,6 +7,7 @@ import {
   SessionCommandSchema,
   SessionControlResponseSchema,
   SessionDtoSchema,
+  ShareGrantDtoSchema,
   SendSessionMessageResponseSchema,
   StartSessionResponseSchema,
   type CreateSessionResponse,
@@ -14,6 +15,7 @@ import {
   type RetryTurnResponse,
   type SessionControlResponse,
   type SessionDto,
+  type ShareGrantDto,
   type SendSessionMessageResponse,
   type StartSessionResponse,
 } from '@relay/contracts'
@@ -33,6 +35,7 @@ import {
   orderActorOrganizations,
   resolveRepositoryBinding,
   type ControlSessionRecord,
+  type CreateShareGrantRecord,
   type CreateSessionRecord,
   type CreateSessionResult,
   type InMemoryRepositoryBinding,
@@ -48,11 +51,19 @@ import {
   type SessionLifecycleResult,
   type SessionControlResult,
   type SessionRepository,
+  type ShareGrantListOptions,
+  type ShareGrantListPage,
+  type ShareGrantMutationResult,
   type SpaceAccess,
   type SpaceRole,
   type SetSessionArchivedRecord,
   type StartSessionRecord,
   type StartSessionResult,
+  type RevokeShareGrantRecord,
+  ShareGrantConflictError,
+  ShareGrantValidationError,
+  ShareGrantVersionConflictError,
+  SharePrincipalNotFoundError,
   SessionStateConflictError,
   SessionVersionConflictError,
   TurnStateConflictError,
@@ -97,6 +108,22 @@ type SessionEventDraft = {
   resourceType: 'session' | 'message' | 'turn'
   resourceId: string
   payload: Record<string, unknown>
+}
+
+type ShareGrantRow = {
+  organization_id: string
+  space_id: string
+  session_id: string
+  id: string
+  principal_type: ShareGrantDto['principalType']
+  principal_id: string
+  role: ShareGrantDto['role']
+  expires_at: Date | string | null
+  created_at: Date | string
+  created_by: string
+  revoked_at: Date | string | null
+  revoked_by: string | null
+  version: number
 }
 
 function hash(value: string) {
@@ -148,6 +175,24 @@ function mapSession(row: SessionRow): SessionDto {
   })
 }
 
+function mapShareGrant(row: ShareGrantRow): ShareGrantDto {
+  return ShareGrantDtoSchema.parse({
+    organizationId: row.organization_id,
+    spaceId: row.space_id,
+    sessionId: row.session_id,
+    id: row.id,
+    principalType: row.principal_type,
+    principalId: row.principal_id,
+    role: row.role,
+    expiresAt: row.expires_at === null ? null : timestamp(row.expires_at),
+    createdAt: timestamp(row.created_at),
+    createdBy: row.created_by,
+    revokedAt: row.revoked_at === null ? null : timestamp(row.revoked_at),
+    revokedBy: row.revoked_by,
+    version: row.version,
+  })
+}
+
 function responseToResult(response: CreateSessionResponse, replayed: boolean): CreateSessionResult {
   return {
     session: response.session,
@@ -190,6 +235,11 @@ const sessionColumns = `
   repository_id, configuration_resolution_version, repository, base_branch,
   visibility, status, attachments, source, created_at, updated_at,
   last_activity_at, archived_at, version
+`
+
+const shareGrantColumns = `
+  organization_id, space_id, session_id, id, principal_type, principal_id,
+  role, expires_at, created_at, created_by, revoked_at, revoked_by, version
 `
 
 export type PostgresSessionRepositoryOptions = {
@@ -296,7 +346,31 @@ export class PostgresSessionRepository implements SessionRepository {
       throw new RangeError('Session page limit must be an integer between 1 and 100.')
     }
     const parameters: unknown[] = [organizationId, spaceId, actorId]
-    const clauses = ['(session.visibility = \'space\' OR session.created_by = $3)']
+    const clauses = [`(
+      session.visibility = 'space'
+      OR session.created_by = $3
+      OR EXISTS (
+        SELECT 1
+        FROM relay_session_share_grants share_grant
+        WHERE share_grant.organization_id = session.organization_id
+          AND share_grant.space_id = session.space_id
+          AND share_grant.session_id = session.id
+          AND share_grant.revoked_at IS NULL
+          AND (share_grant.expires_at IS NULL OR share_grant.expires_at > transaction_timestamp())
+          AND (
+            (share_grant.principal_type = 'user' AND share_grant.principal_id = $3)
+            OR (
+              share_grant.principal_type = 'group'
+              AND EXISTS (
+                SELECT 1 FROM relay_group_memberships group_membership
+                WHERE group_membership.organization_id = share_grant.organization_id
+                  AND group_membership.group_id = share_grant.principal_id
+                  AND group_membership.actor_id = $3
+              )
+            )
+          )
+      )
+    )`]
     if (options.archived !== 'all') {
       clauses.push(options.archived === true
         ? 'session.archived_at IS NOT NULL'
@@ -378,9 +452,113 @@ export class PostgresSessionRepository implements SessionRepository {
       WHERE session.organization_id = $1
         AND session.space_id = $2
         AND session.id = $3
-        AND (session.visibility = 'space' OR session.created_by = $4)
+        AND (
+          session.visibility = 'space'
+          OR session.created_by = $4
+          OR EXISTS (
+            SELECT 1
+            FROM relay_session_share_grants share_grant
+            WHERE share_grant.organization_id = session.organization_id
+              AND share_grant.space_id = session.space_id
+              AND share_grant.session_id = session.id
+              AND share_grant.revoked_at IS NULL
+              AND (share_grant.expires_at IS NULL OR share_grant.expires_at > transaction_timestamp())
+              AND (
+                (share_grant.principal_type = 'user' AND share_grant.principal_id = $4)
+                OR (
+                  share_grant.principal_type = 'group'
+                  AND EXISTS (
+                    SELECT 1 FROM relay_group_memberships group_membership
+                    WHERE group_membership.organization_id = share_grant.organization_id
+                      AND group_membership.group_id = share_grant.principal_id
+                      AND group_membership.actor_id = $4
+                  )
+                )
+              )
+          )
+        )
     `, [organizationId, spaceId, sessionId, actorId])
     return result.rows[0] ? mapSession(result.rows[0]) : null
+  }
+
+  async listShares(
+    organizationId: string,
+    spaceId: string,
+    sessionId: string,
+    actorId: string,
+    options: ShareGrantListOptions = {},
+  ): Promise<ShareGrantListPage | null> {
+    const limit = options.limit ?? 25
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      throw new RangeError('ShareGrant page limit must be an integer between 1 and 100.')
+    }
+    const management = await this.getShareManagementTarget(
+      this.pool,
+      organizationId,
+      spaceId,
+      sessionId,
+      actorId,
+      false,
+    )
+    if (!management) return null
+
+    const parameters: unknown[] = [organizationId, spaceId, sessionId]
+    let cursorClause = ''
+    if (options.cursor) {
+      if (!options.cursor.id.trim() || Number.isNaN(Date.parse(options.cursor.createdAt))) {
+        throw new RangeError('ShareGrant cursor must contain a valid timestamp and id.')
+      }
+      parameters.push(options.cursor.createdAt, options.cursor.id)
+      cursorClause = `AND (created_at, id) < ($4::timestamptz, $5)`
+    }
+    parameters.push(limit + 1)
+    const result = await this.pool.query<ShareGrantRow>(`
+      SELECT ${shareGrantColumns}
+      FROM relay_session_share_grants
+      WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
+        ${cursorClause}
+      ORDER BY created_at DESC, id DESC
+      LIMIT $${parameters.length}
+    `, parameters)
+    const hasMore = result.rows.length > limit
+    const items = result.rows.slice(0, limit).map(mapShareGrant)
+    const last = items.at(-1)
+    return {
+      items,
+      hasMore,
+      nextCursor: hasMore && last ? { createdAt: last.createdAt, id: last.id } : null,
+      projectionUpdatedAt: items[0]?.revokedAt ?? items[0]?.createdAt ?? null,
+    }
+  }
+
+  async createShare(record: CreateShareGrantRecord): Promise<ShareGrantMutationResult | null> {
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      const result = await this.createShareInTransaction(client, record)
+      await client.query('COMMIT')
+      return result
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+  }
+
+  async revokeShare(record: RevokeShareGrantRecord): Promise<ShareGrantMutationResult | null> {
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      const result = await this.revokeShareInTransaction(client, record)
+      await client.query('COMMIT')
+      return result
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
   }
 
   async rename(record: RenameSessionRecord): Promise<SessionDto | null> {
@@ -488,6 +666,366 @@ export class PostgresSessionRepository implements SessionRepository {
     }
   }
 
+  private async getShareManagementTarget(
+    client: Pick<Pool, 'query'> | Pick<PoolClient, 'query'>,
+    organizationId: string,
+    spaceId: string,
+    sessionId: string,
+    actorId: string,
+    lock: boolean,
+  ): Promise<{ session: SessionDto; policyReason: string } | null> {
+    const result = await client.query<SessionRow & {
+      created_by: string
+      space_role: SpaceRole
+      active_share_role: ShareGrantDto['role'] | null
+    }>(`
+      SELECT ${sessionColumns.split(',').map((column) => `session.${column.trim()}`).join(', ')},
+        session.created_by, space_membership.role AS space_role,
+        (
+          SELECT share_grant.role
+          FROM relay_session_share_grants share_grant
+          WHERE share_grant.organization_id = session.organization_id
+            AND share_grant.space_id = session.space_id
+            AND share_grant.session_id = session.id
+            AND share_grant.revoked_at IS NULL
+            AND (share_grant.expires_at IS NULL OR share_grant.expires_at > transaction_timestamp())
+            AND (
+              (share_grant.principal_type = 'user' AND share_grant.principal_id = $4)
+              OR (
+                share_grant.principal_type = 'group'
+                AND EXISTS (
+                  SELECT 1 FROM relay_group_memberships group_membership
+                  WHERE group_membership.organization_id = share_grant.organization_id
+                    AND group_membership.group_id = share_grant.principal_id
+                    AND group_membership.actor_id = $4
+                )
+              )
+            )
+          ORDER BY CASE share_grant.role WHEN 'collaborator' THEN 0 ELSE 1 END
+          LIMIT 1
+        ) AS active_share_role
+      FROM relay_sessions session
+      JOIN relay_organization_memberships organization_membership
+        ON organization_membership.organization_id = session.organization_id
+        AND organization_membership.actor_id = $4
+      JOIN relay_space_memberships space_membership
+        ON space_membership.organization_id = session.organization_id
+        AND space_membership.space_id = session.space_id
+        AND space_membership.actor_id = $4
+      WHERE session.organization_id = $1 AND session.space_id = $2 AND session.id = $3
+      ${lock ? 'FOR UPDATE OF session, organization_membership, space_membership' : ''}
+    `, [organizationId, spaceId, sessionId, actorId])
+    const row = result.rows[0]
+    if (!row) return null
+    const canRead = row.visibility === 'space' || row.created_by === actorId || row.active_share_role !== null
+    if (!canRead) return null
+    if (row.created_by === actorId) return { session: mapSession(row), policyReason: 'session_creator' }
+    if (row.visibility === 'space' && row.space_role === 'space_manager') {
+      return { session: mapSession(row), policyReason: 'space_manager' }
+    }
+    throw new AuthorizationChangedError()
+  }
+
+  private async validateSharePrincipal(client: PoolClient, record: CreateShareGrantRecord) {
+    const result = record.request.principalType === 'user'
+      ? await client.query(`
+          SELECT 1
+          FROM relay_organization_memberships organization_membership
+          JOIN relay_space_memberships space_membership
+            ON space_membership.organization_id = organization_membership.organization_id
+            AND space_membership.actor_id = organization_membership.actor_id
+          WHERE organization_membership.organization_id = $1
+            AND space_membership.space_id = $2
+            AND organization_membership.actor_id = $3
+        `, [record.organizationId, record.spaceId, record.request.principalId])
+      : await client.query(`
+          SELECT 1
+          FROM relay_groups relay_group
+          WHERE relay_group.organization_id = $1 AND relay_group.id = $3
+            AND EXISTS (
+              SELECT 1
+              FROM relay_group_memberships group_membership
+              JOIN relay_space_memberships space_membership
+                ON space_membership.organization_id = group_membership.organization_id
+                AND space_membership.actor_id = group_membership.actor_id
+              WHERE group_membership.organization_id = relay_group.organization_id
+                AND group_membership.group_id = relay_group.id
+                AND space_membership.space_id = $2
+            )
+        `, [record.organizationId, record.spaceId, record.request.principalId])
+    if (!result.rowCount) throw new SharePrincipalNotFoundError()
+  }
+
+  private async appendShareAudit(
+    client: PoolClient,
+    input: {
+      record: CreateShareGrantRecord | RevokeShareGrantRecord
+      grant: ShareGrantDto
+      action: 'session.share.create' | 'session.share.revoke'
+      policyReason: string
+      keyHash: string
+      before: ShareGrantDto | null
+      occurredAt: string
+    },
+  ) {
+    await client.query(`
+      INSERT INTO relay_audit_events (
+        organization_id, audit_event_id, space_id, session_id,
+        actor_id, actor_kind, delegation_chain, action,
+        target_type, target_id, result, request_id, idempotency_key_hash,
+        policy_decision, policy_reason, before_state, after_state, occurred_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, '[]'::jsonb, $7,
+        'share_grant', $8, 'success', $9, $10,
+        'allow', $11, $12::jsonb, $13::jsonb, $14
+      )
+    `, [
+      input.record.organizationId,
+      this.createId(),
+      input.record.spaceId,
+      input.record.sessionId,
+      input.record.actorId,
+      input.record.actorKind,
+      input.action,
+      input.grant.id,
+      input.record.requestId,
+      input.keyHash,
+      input.policyReason,
+      input.before === null ? null : JSON.stringify(input.before),
+      JSON.stringify(input.grant),
+      input.occurredAt,
+    ])
+  }
+
+  private async appendShareOutbox(
+    client: PoolClient,
+    grant: ShareGrantDto,
+    eventType: 'session.share_created' | 'session.share_revoked',
+    occurredAt: string,
+  ) {
+    await client.query(`
+      INSERT INTO relay_outbox_events (
+        id, organization_id, space_id, session_id, aggregate_type,
+        aggregate_id, event_type, payload, occurred_at
+      ) VALUES ($1, $2, $3, $4, 'share_grant', $5, $6, $7::jsonb, $8)
+    `, [
+      this.createId(),
+      grant.organizationId,
+      grant.spaceId,
+      grant.sessionId,
+      grant.id,
+      eventType,
+      JSON.stringify({
+        sessionId: grant.sessionId,
+        shareGrantId: grant.id,
+        principalType: grant.principalType,
+        principalId: grant.principalId,
+        role: grant.role,
+        expiresAt: grant.expiresAt,
+        revokedAt: grant.revokedAt,
+      }),
+      occurredAt,
+    ])
+  }
+
+  private async createShareInTransaction(
+    client: PoolClient,
+    record: CreateShareGrantRecord,
+  ): Promise<ShareGrantMutationResult | null> {
+    const target = await this.getShareManagementTarget(
+      client,
+      record.organizationId,
+      record.spaceId,
+      record.sessionId,
+      record.actorId,
+      true,
+    )
+    if (!target) return null
+    await this.validateSharePrincipal(client, record)
+
+    const canonicalPath = `/v1/organizations/${record.organizationId}/spaces/${record.spaceId}/sessions/${record.sessionId}/shares`
+    const idempotency = await this.prepareCommandIdempotency(client, {
+      ...record,
+      canonicalPath,
+      request: record.request,
+    })
+    if (idempotency.responseBody) {
+      return { grant: ShareGrantDtoSchema.parse(idempotency.responseBody), replayed: true }
+    }
+    if (record.request.expiresAt && Date.parse(record.request.expiresAt) <= idempotency.now.getTime()) {
+      throw new ShareGrantValidationError('ShareGrant expiresAt must be in the future.')
+    }
+    const occurredAt = idempotency.now.toISOString()
+
+    const expired = await client.query<ShareGrantRow>(`
+      SELECT ${shareGrantColumns}
+      FROM relay_session_share_grants
+      WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
+        AND principal_type = $4 AND principal_id = $5
+        AND revoked_at IS NULL AND expires_at IS NOT NULL AND expires_at <= $6
+      FOR UPDATE
+    `, [
+      record.organizationId,
+      record.spaceId,
+      record.sessionId,
+      record.request.principalType,
+      record.request.principalId,
+      occurredAt,
+    ])
+    if (expired.rows[0]) {
+      const before = mapShareGrant(expired.rows[0])
+      const normalized = await client.query<ShareGrantRow>(`
+        UPDATE relay_session_share_grants
+        SET revoked_at = $6, revoked_by = $7, version = version + 1
+        WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
+          AND principal_type = $4 AND principal_id = $5 AND revoked_at IS NULL
+        RETURNING ${shareGrantColumns}
+      `, [
+        record.organizationId,
+        record.spaceId,
+        record.sessionId,
+        record.request.principalType,
+        record.request.principalId,
+        occurredAt,
+        record.actorId,
+      ])
+      const grant = mapShareGrant(normalized.rows[0])
+      await this.appendShareAudit(client, {
+        record,
+        grant,
+        action: 'session.share.revoke',
+        policyReason: 'expired_grant_replaced',
+        keyHash: idempotency.keyHash,
+        before,
+        occurredAt,
+      })
+      await this.appendShareOutbox(client, grant, 'session.share_revoked', occurredAt)
+    }
+
+    const grantId = this.createId()
+    let inserted
+    try {
+      inserted = await client.query<ShareGrantRow>(`
+        INSERT INTO relay_session_share_grants (
+          organization_id, space_id, session_id, id, principal_type, principal_id,
+          role, expires_at, created_at, created_by, revoked_at, revoked_by, version
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, NULL, 1)
+        RETURNING ${shareGrantColumns}
+      `, [
+        record.organizationId,
+        record.spaceId,
+        record.sessionId,
+        grantId,
+        record.request.principalType,
+        record.request.principalId,
+        record.request.role,
+        record.request.expiresAt ?? null,
+        occurredAt,
+        record.actorId,
+      ])
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === '23505') {
+        throw new ShareGrantConflictError()
+      }
+      throw error
+    }
+    const grant = mapShareGrant(inserted.rows[0])
+    await this.appendShareAudit(client, {
+      record,
+      grant,
+      action: 'session.share.create',
+      policyReason: target.policyReason,
+      keyHash: idempotency.keyHash,
+      before: null,
+      occurredAt,
+    })
+    await this.appendShareOutbox(client, grant, 'session.share_created', occurredAt)
+    await this.saveCommandIdempotency(client, {
+      ...record,
+      canonicalPath,
+      keyHash: idempotency.keyHash,
+      requestHash: idempotency.requestHash,
+      expiresAt: idempotency.expiresAt,
+      response: grant,
+      etag: `"${grant.version}"`,
+      statusCode: 201,
+      responseHeaders: { location: `${canonicalPath}/${grant.id}` },
+    })
+    return { grant, replayed: false }
+  }
+
+  private async revokeShareInTransaction(
+    client: PoolClient,
+    record: RevokeShareGrantRecord,
+  ): Promise<ShareGrantMutationResult | null> {
+    const target = await this.getShareManagementTarget(
+      client,
+      record.organizationId,
+      record.spaceId,
+      record.sessionId,
+      record.actorId,
+      true,
+    )
+    if (!target) return null
+    const canonicalPath = `/v1/organizations/${record.organizationId}/spaces/${record.spaceId}/sessions/${record.sessionId}/shares/${record.shareId}`
+    const idempotency = await this.prepareCommandIdempotency(client, {
+      organizationId: record.organizationId,
+      spaceId: record.spaceId,
+      actorId: record.actorId,
+      sessionId: record.sessionId,
+      idempotencyKey: record.idempotencyKey,
+      canonicalPath,
+      method: 'DELETE',
+      request: { expectedVersion: record.expectedVersion },
+    })
+    if (idempotency.responseBody) {
+      return { grant: ShareGrantDtoSchema.parse(idempotency.responseBody), replayed: true }
+    }
+
+    const selected = await client.query<ShareGrantRow>(`
+      SELECT ${shareGrantColumns}
+      FROM relay_session_share_grants
+      WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
+      FOR UPDATE
+    `, [record.organizationId, record.spaceId, record.sessionId, record.shareId])
+    if (!selected.rows[0]) return null
+    const before = mapShareGrant(selected.rows[0])
+    if (before.version !== record.expectedVersion) {
+      throw new ShareGrantVersionConflictError(record.expectedVersion, before.version)
+    }
+    if (before.revokedAt !== null) throw new ShareGrantConflictError('The ShareGrant is already revoked.')
+    const occurredAt = idempotency.now.toISOString()
+    const updated = await client.query<ShareGrantRow>(`
+      UPDATE relay_session_share_grants
+      SET revoked_at = $5, revoked_by = $6, version = version + 1
+      WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
+      RETURNING ${shareGrantColumns}
+    `, [record.organizationId, record.spaceId, record.sessionId, record.shareId, occurredAt, record.actorId])
+    const grant = mapShareGrant(updated.rows[0])
+    await this.appendShareAudit(client, {
+      record,
+      grant,
+      action: 'session.share.revoke',
+      policyReason: target.policyReason,
+      keyHash: idempotency.keyHash,
+      before,
+      occurredAt,
+    })
+    await this.appendShareOutbox(client, grant, 'session.share_revoked', occurredAt)
+    await this.saveCommandIdempotency(client, {
+      ...record,
+      canonicalPath,
+      keyHash: idempotency.keyHash,
+      requestHash: idempotency.requestHash,
+      expiresAt: idempotency.expiresAt,
+      response: grant,
+      etag: `"${grant.version}"`,
+      method: 'DELETE',
+      statusCode: 200,
+    })
+    return { grant, replayed: false }
+  }
+
   private async lockMetadataTarget(
     client: PoolClient,
     record: RenameSessionRecord | SetSessionArchivedRecord | ControlSessionRecord | RetryTurnRecord,
@@ -505,16 +1043,49 @@ export class PostgresSessionRepository implements SessionRepository {
     `, [record.organizationId, record.spaceId, record.actorId])
     if (!access.rowCount || !canWriteSpace(access.rows[0])) throw new AuthorizationChangedError()
 
-    const candidate = await client.query<SessionRow & { created_by: string }>(`
-      SELECT ${sessionColumns}, created_by
-      FROM relay_sessions
-      WHERE organization_id = $1 AND space_id = $2 AND id = $3
-      FOR UPDATE
-    `, [record.organizationId, record.spaceId, record.sessionId])
+    const candidate = await client.query<SessionRow & {
+      created_by: string
+      active_share_role: ShareGrantDto['role'] | null
+    }>(`
+      SELECT ${sessionColumns.split(',').map((column) => `session.${column.trim()}`).join(', ')},
+        session.created_by,
+        (
+          SELECT share_grant.role
+          FROM relay_session_share_grants share_grant
+          WHERE share_grant.organization_id = session.organization_id
+            AND share_grant.space_id = session.space_id
+            AND share_grant.session_id = session.id
+            AND share_grant.revoked_at IS NULL
+            AND (share_grant.expires_at IS NULL OR share_grant.expires_at > transaction_timestamp())
+            AND (
+              (share_grant.principal_type = 'user' AND share_grant.principal_id = $4)
+              OR (
+                share_grant.principal_type = 'group'
+                AND EXISTS (
+                  SELECT 1 FROM relay_group_memberships group_membership
+                  WHERE group_membership.organization_id = share_grant.organization_id
+                    AND group_membership.group_id = share_grant.principal_id
+                    AND group_membership.actor_id = $4
+                )
+              )
+            )
+          ORDER BY CASE share_grant.role WHEN 'collaborator' THEN 0 ELSE 1 END
+          LIMIT 1
+        ) AS active_share_role
+      FROM relay_sessions session
+      WHERE session.organization_id = $1 AND session.space_id = $2 AND session.id = $3
+      FOR UPDATE OF session
+    `, [record.organizationId, record.spaceId, record.sessionId, record.actorId])
     const row = candidate.rows[0]
-    if (!row || (row.visibility === 'private' && row.created_by !== record.actorId)) return null
+    if (!row || (row.visibility === 'private' && row.created_by !== record.actorId && row.active_share_role === null)) {
+      return null
+    }
     if (row.created_by === record.actorId) {
       return { session: mapSession(row), policyReason: 'session_creator' }
+    }
+    const isRename = 'request' in record && 'title' in record.request
+    if (isRename && row.active_share_role === 'collaborator') {
+      return { session: mapSession(row), policyReason: 'active_collaborator_share' }
     }
     if (row.visibility === 'space' && access.rows[0].spaceRole === 'space_manager') {
       return { session: mapSession(row), policyReason: 'space_manager' }
@@ -682,12 +1253,14 @@ export class PostgresSessionRepository implements SessionRepository {
       idempotencyKey: string
       canonicalPath: string
       request: unknown
+      method?: 'POST' | 'DELETE'
     },
   ) {
+    const method = input.method ?? 'POST'
     const keyHash = hash(input.idempotencyKey)
     const requestHash = hash(canonicalJson(input.request))
     await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
-      JSON.stringify([input.organizationId, input.actorId, 'POST', input.canonicalPath, keyHash]),
+      JSON.stringify([input.organizationId, input.actorId, method, input.canonicalPath, keyHash]),
     ])
     const now = this.now()
     const existing = await client.query<{ request_hash: string; response_body: unknown | null }>(`
@@ -699,11 +1272,11 @@ export class PostgresSessionRepository implements SessionRepository {
         AND response.method = idempotency.method
         AND response.canonical_path = idempotency.canonical_path
         AND response.idempotency_key_hash = idempotency.idempotency_key_hash
-        AND response.expires_at > $5
+        AND response.expires_at > $6
       WHERE idempotency.organization_id = $1 AND idempotency.actor_id = $2
-        AND idempotency.method = 'POST' AND idempotency.canonical_path = $3
-        AND idempotency.idempotency_key_hash = $4 AND idempotency.expires_at > $5
-    `, [input.organizationId, input.actorId, input.canonicalPath, keyHash, now.toISOString()])
+        AND idempotency.method = $3 AND idempotency.canonical_path = $4
+        AND idempotency.idempotency_key_hash = $5 AND idempotency.expires_at > $6
+    `, [input.organizationId, input.actorId, method, input.canonicalPath, keyHash, now.toISOString()])
     if (existing.rowCount) {
       if (existing.rows[0].request_hash !== requestHash) throw new IdempotencyConflictError()
       if (!existing.rows[0].response_body) throw new Error('The idempotent command response is unavailable.')
@@ -718,16 +1291,16 @@ export class PostgresSessionRepository implements SessionRepository {
 
     await client.query(`
       DELETE FROM relay_idempotency_responses
-      WHERE organization_id = $1 AND actor_id = $2 AND method = 'POST'
-        AND canonical_path = $3 AND idempotency_key_hash = $4
-        AND expires_at <= $5
-    `, [input.organizationId, input.actorId, input.canonicalPath, keyHash, now.toISOString()])
+      WHERE organization_id = $1 AND actor_id = $2 AND method = $3
+        AND canonical_path = $4 AND idempotency_key_hash = $5
+        AND expires_at <= $6
+    `, [input.organizationId, input.actorId, method, input.canonicalPath, keyHash, now.toISOString()])
     await client.query(`
       DELETE FROM relay_idempotency_records
-      WHERE organization_id = $1 AND actor_id = $2 AND method = 'POST'
-        AND canonical_path = $3 AND idempotency_key_hash = $4
-        AND expires_at <= $5
-    `, [input.organizationId, input.actorId, input.canonicalPath, keyHash, now.toISOString()])
+      WHERE organization_id = $1 AND actor_id = $2 AND method = $3
+        AND canonical_path = $4 AND idempotency_key_hash = $5
+        AND expires_at <= $6
+    `, [input.organizationId, input.actorId, method, input.canonicalPath, keyHash, now.toISOString()])
     return {
       keyHash,
       requestHash,
@@ -750,17 +1323,23 @@ export class PostgresSessionRepository implements SessionRepository {
       expiresAt: string
       response: unknown
       etag: string
+      method?: 'POST' | 'DELETE'
+      statusCode?: number
+      responseHeaders?: Record<string, string>
     },
   ) {
+    const method = input.method ?? 'POST'
+    const statusCode = input.statusCode ?? 202
     await client.query(`
       INSERT INTO relay_idempotency_records (
         organization_id, space_id, actor_id, method, canonical_path,
         idempotency_key_hash, request_hash, session_id, expires_at
-      ) VALUES ($1, $2, $3, 'POST', $4, $5, $6, $7, $8)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     `, [
       input.organizationId,
       input.spaceId,
       input.actorId,
+      method,
       input.canonicalPath,
       input.keyHash,
       input.requestHash,
@@ -771,14 +1350,16 @@ export class PostgresSessionRepository implements SessionRepository {
       INSERT INTO relay_idempotency_responses (
         organization_id, actor_id, method, canonical_path, idempotency_key_hash,
         status_code, response_body, response_headers, expires_at
-      ) VALUES ($1, $2, 'POST', $3, $4, 202, $5::jsonb, $6::jsonb, $7)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9)
     `, [
       input.organizationId,
       input.actorId,
+      method,
       input.canonicalPath,
       input.keyHash,
+      statusCode,
       JSON.stringify(input.response),
-      JSON.stringify({ etag: input.etag }),
+      JSON.stringify({ etag: input.etag, ...input.responseHeaders }),
       input.expiresAt,
     ])
   }
@@ -1379,6 +1960,52 @@ export class PostgresSessionRepository implements SessionRepository {
     `, [record.organizationId, record.spaceId, record.actorId])
     if (!access.rowCount || !canWriteSpace(access.rows[0])) throw new AuthorizationChangedError()
 
+    const candidate = await client.query<SessionRow & {
+      created_by: string
+      active_share_role: ShareGrantDto['role'] | null
+    }>(`
+      SELECT ${sessionColumns.split(',').map((column) => `session.${column.trim()}`).join(', ')},
+        session.created_by,
+        (
+          SELECT share_grant.role
+          FROM relay_session_share_grants share_grant
+          WHERE share_grant.organization_id = session.organization_id
+            AND share_grant.space_id = session.space_id
+            AND share_grant.session_id = session.id
+            AND share_grant.revoked_at IS NULL
+            AND (share_grant.expires_at IS NULL OR share_grant.expires_at > transaction_timestamp())
+            AND (
+              (share_grant.principal_type = 'user' AND share_grant.principal_id = $4)
+              OR (
+                share_grant.principal_type = 'group'
+                AND EXISTS (
+                  SELECT 1 FROM relay_group_memberships group_membership
+                  WHERE group_membership.organization_id = share_grant.organization_id
+                    AND group_membership.group_id = share_grant.principal_id
+                    AND group_membership.actor_id = $4
+                )
+              )
+            )
+          ORDER BY CASE share_grant.role WHEN 'collaborator' THEN 0 ELSE 1 END
+          LIMIT 1
+        ) AS active_share_role
+      FROM relay_sessions session
+      WHERE session.organization_id = $1 AND session.space_id = $2 AND session.id = $3
+      FOR UPDATE OF session
+    `, [record.organizationId, record.spaceId, record.sessionId, record.actorId])
+    const row = candidate.rows[0]
+    if (!row || (row.visibility === 'private' && row.created_by !== record.actorId && row.active_share_role === null)) {
+      return null
+    }
+    if (row.visibility === 'private' && row.created_by !== record.actorId && row.active_share_role !== 'collaborator') {
+      throw new AuthorizationChangedError()
+    }
+    const policyReason = row.created_by === record.actorId
+      ? 'session_creator'
+      : row.active_share_role === 'collaborator'
+        ? 'active_collaborator_share'
+        : 'organization_and_space_write'
+
     const keyHash = hash(record.idempotencyKey)
     const requestHash = hash(canonicalJson(record.request))
     const canonicalPath = `/v1/organizations/${record.organizationId}/spaces/${record.spaceId}/sessions/${record.sessionId}/messages`
@@ -1422,14 +2049,6 @@ export class PostgresSessionRepository implements SessionRepository {
         AND expires_at <= $5
     `, [record.organizationId, record.actorId, canonicalPath, keyHash, now.toISOString()])
 
-    const candidate = await client.query<SessionRow & { created_by: string }>(`
-      SELECT ${sessionColumns}, created_by
-      FROM relay_sessions
-      WHERE organization_id = $1 AND space_id = $2 AND id = $3
-      FOR UPDATE
-    `, [record.organizationId, record.spaceId, record.sessionId])
-    const row = candidate.rows[0]
-    if (!row || (row.visibility === 'private' && row.created_by !== record.actorId)) return null
     const before = mapSession(row)
     if (before.status === 'draft' || before.status === 'canceled') {
       throw new SessionStateConflictError(before.status, 'send')
@@ -1530,7 +2149,7 @@ export class PostgresSessionRepository implements SessionRepository {
       }),
       session.updatedAt,
     ])
-    await this.appendSendLedger(client, record, before, session, records, keyHash)
+    await this.appendSendLedger(client, record, before, session, records, keyHash, policyReason)
 
     const response = SendSessionMessageResponseSchema.parse({ session, ...records })
     const expiresAt = new Date(now.getTime() + this.idempotencyTtlMs).toISOString()
@@ -1571,6 +2190,47 @@ export class PostgresSessionRepository implements SessionRepository {
       FOR UPDATE OF organization_membership, space_membership
     `, [record.organizationId, record.spaceId, record.actorId])
     if (!access.rowCount || !canWriteSpace(access.rows[0])) throw new AuthorizationChangedError()
+
+    const candidate = await client.query<SessionRow & {
+      created_by: string
+      active_share_role: ShareGrantDto['role'] | null
+    }>(`
+      SELECT ${sessionColumns.split(',').map((column) => `session.${column.trim()}`).join(', ')},
+        session.created_by,
+        (
+          SELECT share_grant.role
+          FROM relay_session_share_grants share_grant
+          WHERE share_grant.organization_id = session.organization_id
+            AND share_grant.space_id = session.space_id
+            AND share_grant.session_id = session.id
+            AND share_grant.revoked_at IS NULL
+            AND (share_grant.expires_at IS NULL OR share_grant.expires_at > transaction_timestamp())
+            AND (
+              (share_grant.principal_type = 'user' AND share_grant.principal_id = $4)
+              OR (
+                share_grant.principal_type = 'group'
+                AND EXISTS (
+                  SELECT 1 FROM relay_group_memberships group_membership
+                  WHERE group_membership.organization_id = share_grant.organization_id
+                    AND group_membership.group_id = share_grant.principal_id
+                    AND group_membership.actor_id = $4
+                )
+              )
+            )
+          ORDER BY CASE share_grant.role WHEN 'collaborator' THEN 0 ELSE 1 END
+          LIMIT 1
+        ) AS active_share_role
+      FROM relay_sessions session
+      WHERE session.organization_id = $1 AND session.space_id = $2 AND session.id = $3
+      FOR UPDATE OF session
+    `, [record.organizationId, record.spaceId, record.sessionId, record.actorId])
+    const row = candidate.rows[0]
+    if (!row || (row.visibility === 'private' && row.created_by !== record.actorId && row.active_share_role === null)) {
+      return null
+    }
+    if (row.visibility === 'private' && row.created_by !== record.actorId) {
+      throw new AuthorizationChangedError()
+    }
 
     const keyHash = hash(record.idempotencyKey)
     const requestHash = hash(canonicalJson({ expectedVersion: record.expectedVersion }))
@@ -1616,14 +2276,6 @@ export class PostgresSessionRepository implements SessionRepository {
         AND expires_at <= $5
     `, [record.organizationId, record.actorId, canonicalPath, keyHash, now.toISOString()])
 
-    const candidate = await client.query<SessionRow & { created_by: string }>(`
-      SELECT ${sessionColumns}, created_by
-      FROM relay_sessions
-      WHERE organization_id = $1 AND space_id = $2 AND id = $3
-      FOR UPDATE
-    `, [record.organizationId, record.spaceId, record.sessionId])
-    const row = candidate.rows[0]
-    if (!row || (row.visibility === 'private' && row.created_by !== record.actorId)) return null
     const before = mapSession(row)
     if (before.version !== record.expectedVersion) {
       throw new SessionVersionConflictError(record.expectedVersion, before.version)
@@ -2137,6 +2789,7 @@ export class PostgresSessionRepository implements SessionRepository {
     session: SessionDto,
     records: Pick<SendSessionMessageResponse, 'message' | 'turn' | 'command'>,
     idempotencyKeyHash: string,
+    policyReason: string,
   ) {
     const drafts: SessionEventDraft[] = [
       {
@@ -2210,8 +2863,8 @@ export class PostgresSessionRepository implements SessionRepository {
         after_state, occurred_at
       ) VALUES (
         $1, $2, $3, $4, $5, $6, 'session.send', 'session', $4,
-        'success', $7, $8, 'allow', 'organization_and_space_write',
-        $9::jsonb, $10::jsonb, $11
+        'success', $7, $8, 'allow', $9,
+        $10::jsonb, $11::jsonb, $12
       )
     `, [
       session.organizationId,
@@ -2222,6 +2875,7 @@ export class PostgresSessionRepository implements SessionRepository {
       record.actorKind,
       record.requestId,
       idempotencyKeyHash,
+      policyReason,
       JSON.stringify({ status: before.status, version: before.version }),
       JSON.stringify({
         status: session.status,

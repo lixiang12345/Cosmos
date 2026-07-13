@@ -2,6 +2,7 @@ import cors from '@fastify/cors'
 import {
   ApiErrorSchema,
   CancelSessionRequestSchema,
+  CreateShareGrantRequestSchema,
   CreateSessionRequestSchema,
   CreateSessionResponseSchema,
   EnvironmentDetailDtoSchema,
@@ -17,6 +18,8 @@ import {
   SessionControlResponseSchema,
   SessionEventPageSchema,
   SessionListResponseSchema,
+  SessionShareListResponseSchema,
+  ShareGrantDtoSchema,
   SessionMessagePageSchema,
   SendSessionMessageResponseSchema,
   StartSessionResponseSchema,
@@ -57,6 +60,10 @@ import {
   SessionConfigurationValidationError,
   SessionStateConflictError,
   SessionVersionConflictError,
+  ShareGrantConflictError,
+  ShareGrantValidationError,
+  ShareGrantVersionConflictError,
+  SharePrincipalNotFoundError,
   TurnStateConflictError,
   canWriteSpace,
   type SessionRepository,
@@ -67,6 +74,12 @@ import {
   parseSessionListPagination,
   type SessionListQuery,
 } from './session-list-pagination.js'
+import {
+  InvalidSessionSharePaginationError,
+  encodeSessionShareCursor,
+  parseSessionSharePagination,
+  type SessionShareListQuery,
+} from './session-share-pagination.js'
 import {
   InvalidSessionTimelinePaginationError,
   encodeSessionTimelineCursor,
@@ -93,6 +106,10 @@ type SessionParams = SpaceParams & {
 
 type TurnParams = SessionParams & {
   turnId: string
+}
+
+type ShareParams = SessionParams & {
+  shareId: string
 }
 
 type SessionEventStreamOptions = {
@@ -192,12 +209,16 @@ function readIfMatchVersion(request: FastifyRequest) {
   return Number.isSafeInteger(version) ? version : null
 }
 
-function requireIfMatchVersion(request: FastifyRequest, reply: FastifyReply) {
+function requireIfMatchVersion(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  resource = 'Session',
+) {
   const expectedVersion = readIfMatchVersion(request)
   if (expectedVersion === undefined) {
     sendApiError(reply, 428, request, {
       code: 'PRECONDITION_REQUIRED',
-      message: 'An If-Match header containing the current Session ETag is required.',
+      message: `An If-Match header containing the current ${resource} ETag is required.`,
       retryable: false,
       fieldErrors: { 'header.If-Match': ['Use the quoted ETag returned by the Session detail API.'] },
     })
@@ -407,6 +428,37 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       })
     }
 
+    if (error instanceof ShareGrantVersionConflictError) {
+      return sendApiError(reply, 412, request, {
+        code: 'PRECONDITION_FAILED',
+        message: error.message,
+        retryable: false,
+        details: {
+          expectedVersion: error.expectedVersion,
+          currentVersion: error.currentVersion,
+        },
+      })
+    }
+
+    if (error instanceof ShareGrantConflictError) {
+      return sendApiError(reply, 409, request, {
+        code: 'SHARE_GRANT_CONFLICT',
+        message: error.message,
+        retryable: false,
+      })
+    }
+
+    if (error instanceof ShareGrantValidationError) {
+      return sendApiError(reply, 400, request, {
+        code: 'VALIDATION_FAILED',
+        message: error.message,
+        retryable: false,
+        fieldErrors: { 'body.expiresAt': [error.message] },
+      })
+    }
+
+    if (error instanceof SharePrincipalNotFoundError) return sendResourceNotFound(reply, request)
+
     if (error instanceof SessionStateConflictError) {
       return sendApiError(reply, 409, request, {
         code: 'SESSION_STATE_CONFLICT',
@@ -480,6 +532,17 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         retryable: false,
         fieldErrors: {
           [`query.${error.field}`]: ['Use a valid value and a cursor for this Workspace and filter set.'],
+        },
+      })
+    }
+
+    if (error instanceof InvalidSessionSharePaginationError) {
+      return sendApiError(reply, 400, request, {
+        code: 'VALIDATION_FAILED',
+        message: 'The Session ShareGrant list parameters are invalid.',
+        retryable: false,
+        fieldErrors: {
+          [`query.${error.field}`]: ['Use a valid value and a cursor for this Session.'],
         },
       })
     }
@@ -781,6 +844,149 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     reply.header('Vary', 'Authorization')
     return session
   })
+
+  app.get<{ Params: SessionParams; Querystring: SessionShareListQuery }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/shares',
+    async (request, reply) => {
+      const authorization = await authorizeSessionSpace(request, reply, request.params)
+      if (!authorization) return
+      const sessionId = parseSpaceId(request.params.sessionId)
+      if (!sessionId) return sendResourceNotFound(reply, request)
+      const options = parseSessionSharePagination(
+        request.query,
+        authorization.organizationId,
+        authorization.spaceId,
+        sessionId,
+      )
+      const page = await sessionRepository.listShares(
+        authorization.organizationId,
+        authorization.spaceId,
+        sessionId,
+        authorization.actor.id,
+        options,
+      )
+      if (!page) return sendResourceNotFound(reply, request)
+      return SessionShareListResponseSchema.parse({
+        items: page.items,
+        page: {
+          nextCursor: page.nextCursor
+            ? encodeSessionShareCursor(
+              page.nextCursor,
+              authorization.organizationId,
+              authorization.spaceId,
+              sessionId,
+            )
+            : null,
+          hasMore: page.hasMore,
+          projectionUpdatedAt: page.projectionUpdatedAt,
+        },
+      })
+    },
+  )
+
+  app.post<{ Params: SessionParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/shares',
+    async (request, reply) => {
+      const authorization = await authorizeSessionSpace(request, reply, request.params)
+      if (!authorization) return
+      const sessionId = parseSpaceId(request.params.sessionId)
+      if (!sessionId) return sendResourceNotFound(reply, request)
+      if (!canWriteSpace(authorization.access)) {
+        return sendApiError(reply, 403, request, {
+          code: 'PERMISSION_DENIED',
+          message: 'You do not have permission to share Sessions in this Space.',
+          retryable: false,
+        })
+      }
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED',
+          message: 'A valid Idempotency-Key header is required.',
+          retryable: false,
+          fieldErrors: { 'Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      const parsed = CreateShareGrantRequestSchema.safeParse(request.body)
+      if (!parsed.success) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED',
+          message: 'The ShareGrant request is invalid.',
+          retryable: false,
+          fieldErrors: validationFieldErrors(parsed.error.issues),
+        })
+      }
+      const result = await sessionRepository.createShare({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        sessionId,
+        actorId: authorization.actor.id,
+        actorKind: authorization.actor.kind,
+        requestId: request.id,
+        idempotencyKey,
+        request: parsed.data,
+      })
+      if (!result) return sendResourceNotFound(reply, request)
+      const grant = ShareGrantDtoSchema.parse(result.grant)
+      reply.header('Idempotency-Replayed', String(result.replayed))
+      reply.header('Location', `/api/v1/organizations/${authorization.organizationId}/spaces/${authorization.spaceId}/sessions/${sessionId}/shares/${grant.id}`)
+      reply.header('ETag', resourceEtag(grant))
+      return reply.code(201).send(grant)
+    },
+  )
+
+  app.delete<{ Params: ShareParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/shares/:shareId',
+    async (request, reply) => {
+      const authorization = await authorizeSessionSpace(request, reply, request.params)
+      if (!authorization) return
+      const sessionId = parseSpaceId(request.params.sessionId)
+      const shareId = parseSpaceId(request.params.shareId)
+      if (!sessionId || !shareId) return sendResourceNotFound(reply, request)
+      if (!canWriteSpace(authorization.access)) {
+        return sendApiError(reply, 403, request, {
+          code: 'PERMISSION_DENIED',
+          message: 'You do not have permission to revoke Session shares in this Space.',
+          retryable: false,
+        })
+      }
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED',
+          message: 'A valid Idempotency-Key header is required.',
+          retryable: false,
+          fieldErrors: { 'Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      const expectedVersion = requireIfMatchVersion(request, reply, 'ShareGrant')
+      if (expectedVersion === null) return
+      if (request.body !== undefined) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED',
+          message: 'Revoking a ShareGrant does not accept a request body.',
+          retryable: false,
+          fieldErrors: { body: ['Send the request without a body.'] },
+        })
+      }
+      const result = await sessionRepository.revokeShare({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        sessionId,
+        shareId,
+        actorId: authorization.actor.id,
+        actorKind: authorization.actor.kind,
+        requestId: request.id,
+        idempotencyKey,
+        expectedVersion,
+      })
+      if (!result) return sendResourceNotFound(reply, request)
+      const grant = ShareGrantDtoSchema.parse(result.grant)
+      reply.header('Idempotency-Replayed', String(result.replayed))
+      reply.header('ETag', resourceEtag(grant))
+      return grant
+    },
+  )
 
   app.patch<{ Params: SessionParams }>(
     '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId',

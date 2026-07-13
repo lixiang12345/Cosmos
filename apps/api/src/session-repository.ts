@@ -6,6 +6,7 @@ import {
   type CancelSessionRequest,
   type CreateSessionRequest,
   type CreateSessionResponse,
+  type CreateShareGrantRequest,
   type MeOrganization,
   type OrganizationRole,
   type RenameSessionRequest,
@@ -15,6 +16,8 @@ import {
   type SessionDto,
   type SessionMessage,
   type SessionStatus,
+  type ShareGrantDto,
+  type ShareGrantRole,
   type SendSessionMessageResponse,
   type StartSessionResponse,
   type RetryTurnResponse,
@@ -120,6 +123,51 @@ export type RetryTurnResult = RetryTurnResponse & {
   replayed: boolean
 }
 
+export type ShareGrantListCursor = {
+  createdAt: string
+  id: string
+}
+
+export type ShareGrantListOptions = {
+  limit?: number
+  cursor?: ShareGrantListCursor
+}
+
+export type ShareGrantListPage = {
+  items: ShareGrantDto[]
+  hasMore: boolean
+  nextCursor: ShareGrantListCursor | null
+  projectionUpdatedAt: string | null
+}
+
+export type CreateShareGrantRecord = {
+  organizationId: string
+  spaceId: string
+  sessionId: string
+  actorId: string
+  actorKind: 'user' | 'service_account'
+  requestId: string
+  idempotencyKey: string
+  request: CreateShareGrantRequest
+}
+
+export type RevokeShareGrantRecord = {
+  organizationId: string
+  spaceId: string
+  sessionId: string
+  shareId: string
+  actorId: string
+  actorKind: 'user' | 'service_account'
+  requestId: string
+  idempotencyKey: string
+  expectedVersion: number
+}
+
+export type ShareGrantMutationResult = {
+  grant: ShareGrantDto
+  replayed: boolean
+}
+
 export type SessionListCursor = {
   lastActivityAt: string
   id: string
@@ -220,6 +268,37 @@ export class SessionVersionConflictError extends Error {
   }
 }
 
+export class ShareGrantVersionConflictError extends Error {
+  constructor(
+    readonly expectedVersion: number,
+    readonly currentVersion: number,
+  ) {
+    super('The ShareGrant changed after it was loaded. Refresh it and retry the operation.')
+    this.name = 'ShareGrantVersionConflictError'
+  }
+}
+
+export class ShareGrantConflictError extends Error {
+  constructor(message = 'An active ShareGrant already exists for this principal.') {
+    super(message)
+    this.name = 'ShareGrantConflictError'
+  }
+}
+
+export class SharePrincipalNotFoundError extends Error {
+  constructor() {
+    super('The requested share principal does not have current access to this Space.')
+    this.name = 'SharePrincipalNotFoundError'
+  }
+}
+
+export class ShareGrantValidationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ShareGrantValidationError'
+  }
+}
+
 export class SessionStateConflictError extends Error {
   constructor(
     readonly status: SessionDto['status'],
@@ -304,6 +383,15 @@ export interface SessionRepository {
   setArchived(record: SetSessionArchivedRecord): Promise<SessionLifecycleResult | null>
   control(record: ControlSessionRecord): Promise<SessionControlResult | null>
   retryTurn(record: RetryTurnRecord): Promise<RetryTurnResult | null>
+  listShares(
+    organizationId: string,
+    spaceId: string,
+    sessionId: string,
+    actorId: string,
+    options?: ShareGrantListOptions,
+  ): Promise<ShareGrantListPage | null>
+  createShare(record: CreateShareGrantRecord): Promise<ShareGrantMutationResult | null>
+  revokeShare(record: RevokeShareGrantRecord): Promise<ShareGrantMutationResult | null>
   create(record: CreateSessionRecord): Promise<CreateSessionResult>
   start(record: StartSessionRecord): Promise<StartSessionResult | null>
   send(record: SendSessionMessageRecord): Promise<SendSessionMessageResult | null>
@@ -315,6 +403,8 @@ export type InMemorySessionRepositoryOptions = {
   authoritativeCatalog?: readonly InMemoryExpertCatalogEntry[]
   allowLegacyDevelopmentConfigurationFallback?: boolean
   seedCreatedBy?: Readonly<Record<string, string>>
+  seedShareGrants?: readonly ShareGrantDto[]
+  groupMembers?: Readonly<Record<string, readonly string[]>>
   createId?: () => string
   now?: () => Date
 }
@@ -479,6 +569,10 @@ function cloneSession(session: SessionDto): SessionDto {
   return { ...session, attachments: [...session.attachments] }
 }
 
+function cloneShareGrant(grant: ShareGrantDto): ShareGrantDto {
+  return { ...grant }
+}
+
 function configurationValidation(field: string, message: string): never {
   throw new SessionConfigurationValidationError('The Session configuration overrides are invalid.', {
     [field]: [message],
@@ -637,6 +731,12 @@ export class InMemorySessionRepository implements SessionRepository {
     requestFingerprint: string
     result: RetryTurnResult
   }>()
+  private readonly sharesBySessionId = new Map<string, ShareGrantDto[]>()
+  private readonly shareMutationsByIdempotencyKey = new Map<string, {
+    requestFingerprint: string
+    result: ShareGrantMutationResult
+  }>()
+  private readonly groupMembers = new Map<string, Set<string>>()
   private readonly messagesBySessionId = new Map<string, SessionMessage[]>()
   private readonly turnsBySessionId = new Map<string, SessionTurn[]>()
   private readonly attemptsByTurnId = new Map<string, AttemptDto[]>()
@@ -656,6 +756,9 @@ export class InMemorySessionRepository implements SessionRepository {
         organizations.map((organization) => MeOrganizationSchema.parse(organization)),
       ))
     }
+    for (const [groupId, members] of Object.entries(options.groupMembers ?? {})) {
+      this.groupMembers.set(groupId, new Set(members))
+    }
 
     for (const candidate of options.seed ?? []) {
       const session = SessionDtoSchema.parse(candidate)
@@ -666,6 +769,34 @@ export class InMemorySessionRepository implements SessionRepository {
       const createdBy = options.seedCreatedBy?.[session.id]
       if (createdBy) this.sessionCreators.set(session.id, createdBy)
     }
+    for (const candidate of options.seedShareGrants ?? []) {
+      const grants = this.sharesBySessionId.get(candidate.sessionId) ?? []
+      grants.push({ ...candidate })
+      this.sharesBySessionId.set(candidate.sessionId, grants)
+    }
+  }
+
+  private activeShareRole(sessionId: string, actorId: string): ShareGrantRole | null {
+    const now = this.now().getTime()
+    const grants = this.sharesBySessionId.get(sessionId) ?? []
+    const roles = grants.filter((grant) => grant.revokedAt === null
+      && (grant.expiresAt === null || Date.parse(grant.expiresAt) > now)
+      && (grant.principalType === 'user'
+        ? grant.principalId === actorId
+        : this.groupMembers.get(grant.principalId)?.has(actorId)))
+      .map((grant) => grant.role)
+    return roles.includes('collaborator') ? 'collaborator' : roles.includes('viewer') ? 'viewer' : null
+  }
+
+  private canReadSession(session: SessionDto, actorId: string) {
+    return session.visibility === 'space'
+      || this.sessionCreators.get(session.id) === actorId
+      || this.activeShareRole(session.id, actorId) !== null
+  }
+
+  private canManageShares(session: SessionDto, actorId: string, access: SpaceAccess) {
+    return this.sessionCreators.get(session.id) === actorId
+      || (session.visibility === 'space' && access.spaceRole === 'space_manager')
   }
 
   async listActorOrganizations(actorId: string): Promise<MeOrganization[]> {
@@ -695,7 +826,7 @@ export class InMemorySessionRepository implements SessionRepository {
     }
     const search = options.search?.toLocaleLowerCase()
     const visible = (this.sessionsBySpace.get(spaceKey(organizationId, spaceId)) ?? [])
-      .filter((session) => session.visibility === 'space' || this.sessionCreators.get(session.id) === actorId)
+      .filter((session) => this.canReadSession(session, actorId))
       .filter((session) => options.archived === 'all'
         || (options.archived === true ? session.archivedAt !== null : session.archivedAt === null))
       .filter((session) => !options.status || session.status === options.status)
@@ -728,8 +859,136 @@ export class InMemorySessionRepository implements SessionRepository {
     if (!await this.getSpaceAccess(organizationId, spaceId, actorId)) return null
     const session = (this.sessionsBySpace.get(spaceKey(organizationId, spaceId)) ?? [])
       .find((candidate) => candidate.id === sessionId)
-    if (!session || (session.visibility === 'private' && this.sessionCreators.get(session.id) !== actorId)) return null
+    if (!session || !this.canReadSession(session, actorId)) return null
     return cloneSession(session)
+  }
+
+  async listShares(
+    organizationId: string,
+    spaceId: string,
+    sessionId: string,
+    actorId: string,
+    options: ShareGrantListOptions = {},
+  ): Promise<ShareGrantListPage | null> {
+    const limit = options.limit ?? 25
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      throw new RangeError('ShareGrant page limit must be an integer between 1 and 100.')
+    }
+    const access = await this.getSpaceAccess(organizationId, spaceId, actorId)
+    if (!access) return null
+    const session = (this.sessionsBySpace.get(spaceKey(organizationId, spaceId)) ?? [])
+      .find((candidate) => candidate.id === sessionId)
+    if (!session || !this.canReadSession(session, actorId)) return null
+    if (!this.canManageShares(session, actorId, access)) throw new AuthorizationChangedError()
+
+    const visible = (this.sharesBySessionId.get(sessionId) ?? [])
+      .filter((grant) => {
+        if (!options.cursor) return true
+        return grant.createdAt < options.cursor.createdAt
+          || (grant.createdAt === options.cursor.createdAt && grant.id < options.cursor.id)
+      })
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id))
+    const hasMore = visible.length > limit
+    const items = visible.slice(0, limit).map(cloneShareGrant)
+    const last = items.at(-1)
+    return {
+      items,
+      hasMore,
+      nextCursor: hasMore && last ? { createdAt: last.createdAt, id: last.id } : null,
+      projectionUpdatedAt: items[0]?.revokedAt ?? items[0]?.createdAt ?? null,
+    }
+  }
+
+  async createShare(record: CreateShareGrantRecord): Promise<ShareGrantMutationResult | null> {
+    const access = await this.getSpaceAccess(record.organizationId, record.spaceId, record.actorId)
+    if (!access || !canWriteSpace(access)) throw new AuthorizationChangedError()
+    const session = (this.sessionsBySpace.get(spaceKey(record.organizationId, record.spaceId)) ?? [])
+      .find((candidate) => candidate.id === record.sessionId)
+    if (!session || !this.canReadSession(session, record.actorId)) return null
+    if (!this.canManageShares(session, record.actorId, access)) throw new AuthorizationChangedError()
+
+    const idempotencyScope = `${spaceKey(record.organizationId, record.spaceId)}\u0000${record.actorId}\u0000${record.sessionId}\u0000share-create\u0000${record.idempotencyKey}`
+    const requestFingerprint = JSON.stringify(record.request)
+    const replay = this.shareMutationsByIdempotencyKey.get(idempotencyScope)
+    if (replay) {
+      if (replay.requestFingerprint !== requestFingerprint) throw new IdempotencyConflictError()
+      return { grant: cloneShareGrant(replay.result.grant), replayed: true }
+    }
+
+    const principalHasSpaceAccess = record.request.principalType === 'user'
+      ? await this.getSpaceAccess(record.organizationId, record.spaceId, record.request.principalId) !== null
+      : [...(this.groupMembers.get(record.request.principalId) ?? [])].some((member) =>
+        this.organizationsByActor.get(member)?.some((organization) =>
+          organization.id === record.organizationId
+          && organization.spaces.some((space) => space.id === record.spaceId)))
+    if (!principalHasSpaceAccess) throw new SharePrincipalNotFoundError()
+
+    const now = this.now()
+    if (record.request.expiresAt && Date.parse(record.request.expiresAt) <= now.getTime()) {
+      throw new ShareGrantValidationError('ShareGrant expiresAt must be in the future.')
+    }
+    const grants = this.sharesBySessionId.get(record.sessionId) ?? []
+    const existing = grants.find((grant) => grant.principalType === record.request.principalType
+      && grant.principalId === record.request.principalId
+      && grant.revokedAt === null)
+    if (existing && (existing.expiresAt === null || Date.parse(existing.expiresAt) > now.getTime())) {
+      throw new ShareGrantConflictError()
+    }
+    if (existing) {
+      existing.revokedAt = now.toISOString()
+      existing.revokedBy = record.actorId
+      existing.version += 1
+    }
+    const grant: ShareGrantDto = {
+      organizationId: record.organizationId,
+      spaceId: record.spaceId,
+      sessionId: record.sessionId,
+      id: this.createId(),
+      principalType: record.request.principalType,
+      principalId: record.request.principalId,
+      role: record.request.role,
+      expiresAt: record.request.expiresAt ?? null,
+      createdAt: now.toISOString(),
+      createdBy: record.actorId,
+      revokedAt: null,
+      revokedBy: null,
+      version: 1,
+    }
+    grants.push(grant)
+    this.sharesBySessionId.set(record.sessionId, grants)
+    const result = { grant: cloneShareGrant(grant), replayed: false }
+    this.shareMutationsByIdempotencyKey.set(idempotencyScope, { requestFingerprint, result })
+    return result
+  }
+
+  async revokeShare(record: RevokeShareGrantRecord): Promise<ShareGrantMutationResult | null> {
+    const access = await this.getSpaceAccess(record.organizationId, record.spaceId, record.actorId)
+    if (!access || !canWriteSpace(access)) throw new AuthorizationChangedError()
+    const session = (this.sessionsBySpace.get(spaceKey(record.organizationId, record.spaceId)) ?? [])
+      .find((candidate) => candidate.id === record.sessionId)
+    if (!session || !this.canReadSession(session, record.actorId)) return null
+    if (!this.canManageShares(session, record.actorId, access)) throw new AuthorizationChangedError()
+    const grant = (this.sharesBySessionId.get(record.sessionId) ?? [])
+      .find((candidate) => candidate.id === record.shareId)
+    if (!grant) return null
+
+    const idempotencyScope = `${spaceKey(record.organizationId, record.spaceId)}\u0000${record.actorId}\u0000${record.sessionId}\u0000${record.shareId}\u0000share-revoke\u0000${record.idempotencyKey}`
+    const requestFingerprint = JSON.stringify({ expectedVersion: record.expectedVersion })
+    const replay = this.shareMutationsByIdempotencyKey.get(idempotencyScope)
+    if (replay) {
+      if (replay.requestFingerprint !== requestFingerprint) throw new IdempotencyConflictError()
+      return { grant: cloneShareGrant(replay.result.grant), replayed: true }
+    }
+    if (grant.version !== record.expectedVersion) {
+      throw new ShareGrantVersionConflictError(record.expectedVersion, grant.version)
+    }
+    if (grant.revokedAt !== null) throw new ShareGrantConflictError('The ShareGrant is already revoked.')
+    grant.revokedAt = this.now().toISOString()
+    grant.revokedBy = record.actorId
+    grant.version += 1
+    const result = { grant: cloneShareGrant(grant), replayed: false }
+    this.shareMutationsByIdempotencyKey.set(idempotencyScope, { requestFingerprint, result })
+    return result
   }
 
   async rename(record: RenameSessionRecord): Promise<SessionDto | null> {
@@ -738,11 +997,12 @@ export class InMemorySessionRepository implements SessionRepository {
     const sessions = this.sessionsBySpace.get(spaceKey(record.organizationId, record.spaceId)) ?? []
     const sessionIndex = sessions.findIndex((candidate) => candidate.id === record.sessionId)
     const current = sessions[sessionIndex]
-    if (!current || (current.visibility === 'private' && this.sessionCreators.get(current.id) !== record.actorId)) {
+    if (!current || !this.canReadSession(current, record.actorId)) {
       return null
     }
     const isCreator = this.sessionCreators.get(current.id) === record.actorId
-    if (!isCreator && (current.visibility !== 'space' || access.spaceRole !== 'space_manager')) {
+    const isCollaborator = this.activeShareRole(current.id, record.actorId) === 'collaborator'
+    if (!isCreator && !isCollaborator && (current.visibility !== 'space' || access.spaceRole !== 'space_manager')) {
       throw new AuthorizationChangedError()
     }
     if (current.version !== record.expectedVersion) {
@@ -773,7 +1033,7 @@ export class InMemorySessionRepository implements SessionRepository {
     const sessions = this.sessionsBySpace.get(spaceKey(record.organizationId, record.spaceId)) ?? []
     const sessionIndex = sessions.findIndex((candidate) => candidate.id === record.sessionId)
     const current = sessions[sessionIndex]
-    if (!current || (current.visibility === 'private' && this.sessionCreators.get(current.id) !== record.actorId)) {
+    if (!current || !this.canReadSession(current, record.actorId)) {
       return null
     }
     const isCreator = this.sessionCreators.get(current.id) === record.actorId
@@ -810,7 +1070,7 @@ export class InMemorySessionRepository implements SessionRepository {
     const sessions = this.sessionsBySpace.get(key) ?? []
     const sessionIndex = sessions.findIndex((candidate) => candidate.id === record.sessionId)
     const current = sessions[sessionIndex]
-    if (!current || (current.visibility === 'private' && this.sessionCreators.get(current.id) !== record.actorId)) {
+    if (!current || !this.canReadSession(current, record.actorId)) {
       return null
     }
     const isCreator = this.sessionCreators.get(current.id) === record.actorId
@@ -887,7 +1147,7 @@ export class InMemorySessionRepository implements SessionRepository {
     const sessions = this.sessionsBySpace.get(key) ?? []
     const sessionIndex = sessions.findIndex((candidate) => candidate.id === record.sessionId)
     const current = sessions[sessionIndex]
-    if (!current || (current.visibility === 'private' && this.sessionCreators.get(current.id) !== record.actorId)) {
+    if (!current || !this.canReadSession(current, record.actorId)) {
       return null
     }
     const isCreator = this.sessionCreators.get(current.id) === record.actorId
@@ -1024,8 +1284,11 @@ export class InMemorySessionRepository implements SessionRepository {
     const sessions = this.sessionsBySpace.get(key) ?? []
     const sessionIndex = sessions.findIndex((candidate) => candidate.id === record.sessionId)
     const current = sessions[sessionIndex]
-    if (!current || (current.visibility === 'private' && this.sessionCreators.get(current.id) !== record.actorId)) {
+    if (!current || !this.canReadSession(current, record.actorId)) {
       return null
+    }
+    if (current.visibility === 'private' && this.sessionCreators.get(current.id) !== record.actorId) {
+      throw new AuthorizationChangedError()
     }
 
     const idempotencyScope = `${key}\u0000${record.actorId}\u0000${record.sessionId}\u0000${record.idempotencyKey}`
@@ -1082,8 +1345,13 @@ export class InMemorySessionRepository implements SessionRepository {
     const sessions = this.sessionsBySpace.get(key) ?? []
     const sessionIndex = sessions.findIndex((candidate) => candidate.id === record.sessionId)
     const current = sessions[sessionIndex]
-    if (!current || (current.visibility === 'private' && this.sessionCreators.get(current.id) !== record.actorId)) {
+    if (!current || !this.canReadSession(current, record.actorId)) {
       return null
+    }
+    const isCreator = this.sessionCreators.get(current.id) === record.actorId
+    const isCollaborator = this.activeShareRole(current.id, record.actorId) === 'collaborator'
+    if (!isCreator && !isCollaborator && (current.visibility !== 'space' || access.spaceRole !== 'space_manager')) {
+      throw new AuthorizationChangedError()
     }
 
     const idempotencyScope = `${key}\u0000${record.actorId}\u0000${record.sessionId}\u0000${record.idempotencyKey}`

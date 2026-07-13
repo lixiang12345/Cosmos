@@ -45,6 +45,8 @@ const migrationVersions = [
   '040_validate_session_metadata_lifecycle_ledgers.sql',
   '041_session_execution_controls.sql',
   '042_validate_session_execution_controls.sql',
+  '043_session_share_grants.sql',
+  '044_validate_session_share_grants.sql',
 ]
 
 function poolWithVersions(versions: string[]) {

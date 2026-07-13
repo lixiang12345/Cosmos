@@ -67,6 +67,74 @@ export const CancelSessionRequestSchema = z.object({
 export type CancelSessionRequest = z.infer<typeof CancelSessionRequestSchema>
 export type CancelSessionRequestInput = z.input<typeof CancelSessionRequestSchema>
 
+export const SharePrincipalTypeSchema = z.enum(['user', 'group'])
+export type SharePrincipalType = z.infer<typeof SharePrincipalTypeSchema>
+
+export const ShareGrantRoleSchema = z.enum(['viewer', 'collaborator'])
+export type ShareGrantRole = z.infer<typeof ShareGrantRoleSchema>
+
+export const CreateShareGrantRequestSchema = z.object({
+  principalType: SharePrincipalTypeSchema,
+  principalId: ActorIdentifierSchema,
+  role: ShareGrantRoleSchema,
+  expiresAt: TimestampSchema.nullable().optional(),
+}).strict()
+
+export type CreateShareGrantRequest = z.infer<typeof CreateShareGrantRequestSchema>
+export type CreateShareGrantRequestInput = z.input<typeof CreateShareGrantRequestSchema>
+
+export const ShareGrantDtoSchema = z.object({
+  organizationId: IdentifierSchema,
+  spaceId: IdentifierSchema,
+  sessionId: IdentifierSchema,
+  id: IdentifierSchema,
+  principalType: SharePrincipalTypeSchema,
+  principalId: ActorIdentifierSchema,
+  role: ShareGrantRoleSchema,
+  expiresAt: TimestampSchema.nullable(),
+  createdAt: TimestampSchema,
+  createdBy: ActorIdentifierSchema,
+  revokedAt: TimestampSchema.nullable(),
+  revokedBy: ActorIdentifierSchema.nullable(),
+  version: z.number().int().positive(),
+}).strict().superRefine((grant, context) => {
+  if ((grant.revokedAt === null) !== (grant.revokedBy === null)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['revokedBy'],
+      message: 'revokedAt and revokedBy must be present together',
+    })
+  }
+  if (grant.revokedAt !== null && Date.parse(grant.revokedAt) < Date.parse(grant.createdAt)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['revokedAt'],
+      message: 'revokedAt cannot precede createdAt',
+    })
+  }
+})
+
+export type ShareGrantDto = z.infer<typeof ShareGrantDtoSchema>
+
+export const SessionShareListResponseSchema = z.object({
+  items: z.array(ShareGrantDtoSchema),
+  page: z.object({
+    nextCursor: z.string().trim().min(1).nullable(),
+    hasMore: z.boolean(),
+    projectionUpdatedAt: TimestampSchema.nullable(),
+  }).strict(),
+}).strict().superRefine((response, context) => {
+  if (response.page.hasMore !== (response.page.nextCursor !== null)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['page', 'nextCursor'],
+      message: 'nextCursor must be present exactly when hasMore is true',
+    })
+  }
+})
+
+export type SessionShareListResponse = z.infer<typeof SessionShareListResponseSchema>
+
 export const SessionConfigurationResolutionVersionSchema = z.union([
   z.literal(0),
   z.literal(1),

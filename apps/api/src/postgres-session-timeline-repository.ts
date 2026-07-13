@@ -250,7 +250,31 @@ export class PostgresSessionTimelineRepository implements SessionTimelineReposit
         WHERE session.organization_id = $1
           AND session.space_id = $2
           AND session.id = $3
-          AND (session.visibility = 'space' OR session.created_by = $4)
+          AND (
+            session.visibility = 'space'
+            OR session.created_by = $4
+            OR EXISTS (
+              SELECT 1
+              FROM relay_session_share_grants share_grant
+              WHERE share_grant.organization_id = session.organization_id
+                AND share_grant.space_id = session.space_id
+                AND share_grant.session_id = session.id
+                AND share_grant.revoked_at IS NULL
+                AND (share_grant.expires_at IS NULL OR share_grant.expires_at > transaction_timestamp())
+                AND (
+                  (share_grant.principal_type = 'user' AND share_grant.principal_id = $4)
+                  OR (
+                    share_grant.principal_type = 'group'
+                    AND EXISTS (
+                      SELECT 1 FROM relay_group_memberships group_membership
+                      WHERE group_membership.organization_id = share_grant.organization_id
+                        AND group_membership.group_id = share_grant.principal_id
+                        AND group_membership.actor_id = $4
+                    )
+                  )
+                )
+            )
+          )
       )
       SELECT item.*
       FROM access
@@ -311,7 +335,31 @@ export class PostgresSessionTimelineRepository implements SessionTimelineReposit
         WHERE session.organization_id = $1
           AND session.space_id = $2
           AND session.id = $3
-          AND (session.visibility = 'space' OR session.created_by = $4)
+          AND (
+            session.visibility = 'space'
+            OR session.created_by = $4
+            OR EXISTS (
+              SELECT 1
+              FROM relay_session_share_grants share_grant
+              WHERE share_grant.organization_id = session.organization_id
+                AND share_grant.space_id = session.space_id
+                AND share_grant.session_id = session.id
+                AND share_grant.revoked_at IS NULL
+                AND (share_grant.expires_at IS NULL OR share_grant.expires_at > transaction_timestamp())
+                AND (
+                  (share_grant.principal_type = 'user' AND share_grant.principal_id = $4)
+                  OR (
+                    share_grant.principal_type = 'group'
+                    AND EXISTS (
+                      SELECT 1 FROM relay_group_memberships group_membership
+                      WHERE group_membership.organization_id = share_grant.organization_id
+                        AND group_membership.group_id = share_grant.principal_id
+                        AND group_membership.actor_id = $4
+                    )
+                  )
+                )
+            )
+          )
       )
       SELECT access.current_sequence, item.*
       FROM access

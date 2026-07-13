@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   ApiErrorSchema,
   CancelSessionRequestSchema,
+  CreateShareGrantRequestSchema,
   CreateSessionAdvancedOverridesSchema,
   CreateSessionRequestSchema,
   CreateSessionResponseSchema,
@@ -10,6 +11,8 @@ import {
   RetryTurnResponseSchema,
   SessionCommandSchema,
   SessionControlResponseSchema,
+  SessionShareListResponseSchema,
+  ShareGrantDtoSchema,
   SessionListResponseSchema,
   SendSessionMessageResponseSchema,
   SessionStatusSchema,
@@ -207,6 +210,39 @@ describe('session contracts', () => {
       attempt: { ...attempt, sessionId: 'session-other' },
       command: retryCommand,
     }).success).toBe(false)
+  })
+
+  it('validates versioned Session share grants and strict create requests', () => {
+    const grant = {
+      organizationId: sessionInput.organizationId,
+      spaceId: sessionInput.spaceId,
+      sessionId: sessionInput.id,
+      id: 'share-1',
+      principalType: 'user' as const,
+      principalId: 'user-collaborator',
+      role: 'collaborator' as const,
+      expiresAt: null,
+      createdAt: sessionInput.createdAt,
+      createdBy: 'user-creator',
+      revokedAt: null,
+      revokedBy: null,
+      version: 1,
+    }
+
+    expect(CreateShareGrantRequestSchema.parse({
+      principalType: 'user', principalId: ' user-collaborator ', role: 'viewer',
+    })).toEqual({ principalType: 'user', principalId: 'user-collaborator', role: 'viewer' })
+    expect(CreateShareGrantRequestSchema.safeParse({
+      principalType: 'organization', principalId: 'relay', role: 'owner',
+    }).success).toBe(false)
+    expect(ShareGrantDtoSchema.parse(grant)).toEqual(grant)
+    expect(ShareGrantDtoSchema.safeParse({
+      ...grant, revokedAt: sessionInput.updatedAt, revokedBy: null,
+    }).success).toBe(false)
+    expect(SessionShareListResponseSchema.parse({
+      items: [grant],
+      page: { nextCursor: null, hasMore: false, projectionUpdatedAt: grant.createdAt },
+    }).items).toEqual([grant])
   })
 
   it('requires every authoritative configuration id for resolved sessions', () => {
