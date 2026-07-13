@@ -50,6 +50,13 @@ const workerReadinessRepository = pool ? new PostgresWorkerReadinessRepository(p
 const app = createApp({
   logger: true,
   corsOrigin: config.corsOrigin,
+  bodyLimit: config.bodyLimit,
+  trustProxy: config.trustProxy,
+  connectionTimeoutMs: config.connectionTimeoutMs,
+  requestTimeoutMs: config.requestTimeoutMs,
+  keepAliveTimeoutMs: config.keepAliveTimeoutMs,
+  securityHeaders: config.securityHeaders,
+  rateLimit: config.rateLimit,
   sessionRepository: pool
     ? new PostgresSessionRepository(pool, {
       executionMaxAttempts: config.executionMaxAttempts,
@@ -79,14 +86,22 @@ const app = createApp({
   sessionEventStream: config.sessionEventStream,
 })
 
-const close = async () => {
-  await app.close()
-  await pool?.end()
-  process.exit(0)
+let closing = false
+const close = async (signal: NodeJS.Signals) => {
+  if (closing) return
+  closing = true
+  app.log.info({ signal }, 'API shutdown started')
+  try {
+    await app.close()
+    await pool?.end()
+  } catch (error) {
+    app.log.error(error, 'API shutdown failed')
+    process.exitCode = 1
+  }
 }
 
-process.once('SIGINT', () => void close())
-process.once('SIGTERM', () => void close())
+process.once('SIGINT', () => void close('SIGINT'))
+process.once('SIGTERM', () => void close('SIGTERM'))
 
 try {
   await app.listen({ host: config.host, port: config.port })

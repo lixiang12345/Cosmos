@@ -15,6 +15,8 @@
     "db:up": "docker compose up -d --wait postgres",
     "db:down": "docker compose down",
     "db:migrate": "pnpm --filter @relay/api migrate",
+    "db:backup": "sh ops/postgres/backup.sh",
+    "db:restore": "sh ops/postgres/restore.sh",
     "test:integration": "pnpm --filter @relay/api test:integration",
     "build": "pnpm --filter @relay/contracts build && pnpm --filter @relay/api build && pnpm --filter @relay/web build",
     "lint": "eslint .",

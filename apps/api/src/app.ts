@@ -1,4 +1,5 @@
 import cors from '@fastify/cors'
+import helmet from '@fastify/helmet'
 import {
   ApiErrorSchema,
   ApprovalDecisionRequestSchema,
@@ -240,6 +241,18 @@ export type CreateAppOptions = {
   logger?: FastifyServerOptions['logger']
   corsOrigin?: boolean | string
   bodyLimit?: number
+  trustProxy?: false | string[]
+  connectionTimeoutMs?: number
+  requestTimeoutMs?: number
+  keepAliveTimeoutMs?: number
+  securityHeaders?: {
+    hsts?: boolean
+  }
+  rateLimit?: false | {
+    max: number
+    timeWindowMs: number
+    cache: number
+  }
   authenticate?: AuthenticateRequest
   executionEnabled?: boolean
   executionReadinessCheck?: () => Promise<boolean>
@@ -416,6 +429,59 @@ function createSessionEventStreamLimiter(options: {
   }
 }
 
+function createRequestRateLimiter(options: { max: number; timeWindowMs: number; cache: number }) {
+  if (
+    !Number.isSafeInteger(options.max)
+    || options.max < 1
+    || options.max > 100_000
+    || !Number.isSafeInteger(options.timeWindowMs)
+    || options.timeWindowMs < 1_000
+    || options.timeWindowMs > 3_600_000
+    || !Number.isSafeInteger(options.cache)
+    || options.cache < 100
+    || options.cache > 1_000_000
+  ) {
+    throw new Error('API rate-limit options are outside the supported production bounds.')
+  }
+  type Bucket = { count: number; resetAt: number }
+  const buckets = new Map<string, Bucket>()
+  let overflow: Bucket | null = null
+
+  function activeBucket(bucket: Bucket | undefined | null, now: number) {
+    return bucket && bucket.resetAt > now ? bucket : null
+  }
+
+  return {
+    consume(key: string, now = Date.now()) {
+      let bucket = activeBucket(buckets.get(key), now)
+      if (!bucket) {
+        buckets.delete(key)
+        if (buckets.size >= options.cache) {
+          for (const [candidateKey, candidate] of buckets) {
+            if (candidate.resetAt <= now) buckets.delete(candidateKey)
+            if (buckets.size < options.cache) break
+          }
+        }
+        if (buckets.size < options.cache) {
+          bucket = { count: 0, resetAt: now + options.timeWindowMs }
+          buckets.set(key, bucket)
+        } else {
+          overflow = activeBucket(overflow, now)
+            ?? { count: 0, resetAt: now + options.timeWindowMs }
+          bucket = overflow
+        }
+      }
+      bucket.count += 1
+      const retryAfterSeconds = Math.max(1, Math.ceil((bucket.resetAt - now) / 1_000))
+      return {
+        allowed: bucket.count <= options.max,
+        remaining: Math.max(0, options.max - bucket.count),
+        retryAfterSeconds,
+      }
+    },
+  }
+}
+
 function writeSse(response: FastifyReply['raw'], value: string) {
   if (response.destroyed || response.writableEnded) return Promise.resolve(false)
   if (response.write(value)) return Promise.resolve(true)
@@ -459,6 +525,10 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   const app = Fastify({
     logger: options.logger ?? false,
     bodyLimit: options.bodyLimit ?? 1_048_576,
+    trustProxy: options.trustProxy ?? false,
+    connectionTimeout: options.connectionTimeoutMs ?? 10_000,
+    requestTimeout: options.requestTimeoutMs ?? 15_000,
+    keepAliveTimeout: options.keepAliveTimeoutMs ?? 5_000,
   })
   app.addContentTypeParser(
     'application/merge-patch+json',
@@ -503,18 +573,66 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     retryAfterSeconds: positiveInteger(options.sessionEventStream?.retryAfterSeconds, 5, 3_600),
   }
   const eventStreamLimiter = createSessionEventStreamLimiter(eventStream)
+  const requestRateLimitOptions = options.rateLimit === false
+    ? null
+    : (options.rateLimit ?? { max: 600, timeWindowMs: 60_000, cache: 10_000 })
+  const requestRateLimiter = requestRateLimitOptions
+    ? createRequestRateLimiter(requestRateLimitOptions)
+    : null
   const actorsByRequest = new WeakMap<FastifyRequest, AuthenticatedActor>()
+
+  void app.register(helmet, {
+    global: true,
+    contentSecurityPolicy: {
+      useDefaults: false,
+      directives: {
+        defaultSrc: ["'none'"],
+        baseUri: ["'none'"],
+        formAction: ["'none'"],
+        frameAncestors: ["'none'"],
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    frameguard: { action: 'deny' },
+    strictTransportSecurity: options.securityHeaders?.hsts
+      ? { maxAge: 31_536_000, includeSubDomains: true }
+      : false,
+  })
 
   void app.register(cors, {
     origin: options.corsOrigin ?? false,
+    exposedHeaders: [
+      'ETag',
+      'X-Request-ID',
+      'RateLimit-Limit',
+      'RateLimit-Remaining',
+      'RateLimit-Reset',
+      'Retry-After',
+    ],
   })
 
   app.addHook('onRequest', async (request, reply) => {
+    reply.header('X-Request-ID', request.id)
     const path = request.raw.url?.split('?', 1)[0]
     const isPublicHealthRequest = (request.method === 'GET' || request.method === 'HEAD') && path === '/api/health'
     if (request.method === 'OPTIONS' || isPublicHealthRequest) return
     reply.header('Cache-Control', 'private, no-store')
     reply.header('Vary', 'Authorization')
+    const rate = requestRateLimiter?.consume(request.ip)
+    if (rate) {
+      reply.header('RateLimit-Limit', requestRateLimitOptions?.max)
+      reply.header('RateLimit-Remaining', rate.remaining)
+      reply.header('RateLimit-Reset', rate.retryAfterSeconds)
+      if (!rate.allowed) {
+        reply.header('Retry-After', rate.retryAfterSeconds)
+        return sendApiError(reply, 429, request, {
+          code: 'RATE_LIMITED',
+          message: 'The API request rate limit was exceeded.',
+          retryable: true,
+        })
+      }
+    }
     actorsByRequest.set(request, await authenticate(request.headers.authorization))
   })
 

@@ -270,6 +270,74 @@ describe('Relay API', () => {
     expect(response.json()).toEqual({ status: 'ok' })
   })
 
+  it('sets API security and correlation headers without forcing HSTS in development', async () => {
+    const development = createApp()
+    const production = createApp({ securityHeaders: { hsts: true } })
+    openApps.push(development, production)
+
+    const developmentResponse = await development.inject({ method: 'GET', url: '/api/health' })
+    const productionResponse = await production.inject({ method: 'GET', url: '/api/health' })
+
+    expect(developmentResponse.headers).toMatchObject({
+      'content-security-policy': expect.stringContaining("default-src 'none'"),
+      'cross-origin-resource-policy': 'cross-origin',
+      'referrer-policy': 'no-referrer',
+      'x-content-type-options': 'nosniff',
+      'x-frame-options': 'DENY',
+    })
+    expect(developmentResponse.headers['x-request-id']).toBeTruthy()
+    expect(developmentResponse.headers['strict-transport-security']).toBeUndefined()
+    expect(productionResponse.headers['strict-transport-security']).toContain('max-age=31536000')
+  })
+
+  it('returns the shared error contract when the per-instance request limit is exceeded', async () => {
+    const app = createApp({
+      authenticate: createDevelopmentAuthenticator('user-local-admin'),
+      sessionRepository: testRepository(),
+      rateLimit: { max: 2, timeWindowMs: 60_000, cache: 100 },
+    })
+    openApps.push(app)
+
+    const first = await app.inject({ method: 'GET', url: '/api/v1/me' })
+    const second = await app.inject({ method: 'GET', url: '/api/v1/me' })
+    const limited = await app.inject({ method: 'GET', url: '/api/v1/me' })
+    const health = await Promise.all(Array.from({ length: 3 }, () => (
+      app.inject({ method: 'GET', url: '/api/health' })
+    )))
+
+    expect(first.statusCode).toBe(200)
+    expect(second.statusCode).toBe(200)
+    expect(limited.statusCode).toBe(429)
+    expect(ApiErrorSchema.parse(limited.json())).toMatchObject({
+      code: 'RATE_LIMITED', retryable: true,
+    })
+    expect(limited.headers['retry-after']).toBeTruthy()
+    expect(limited.headers['ratelimit-limit']).toBe('2')
+    expect(limited.headers['cache-control']).toBe('private, no-store')
+    expect(health.every(({ statusCode }) => statusCode === 200)).toBe(true)
+  })
+
+  it('ignores forwarded client addresses unless the immediate proxy is explicitly trusted', async () => {
+    const options = {
+      authenticate: createDevelopmentAuthenticator('user-local-admin'),
+      sessionRepository: testRepository(),
+      rateLimit: { max: 1, timeWindowMs: 60_000, cache: 100 },
+    }
+    const direct = createApp(options)
+    const proxied = createApp({ ...options, trustProxy: ['127.0.0.1'] })
+    openApps.push(direct, proxied)
+    const request = (app: ReturnType<typeof createApp>, address: string) => app.inject({
+      method: 'GET',
+      url: '/api/v1/me',
+      headers: { 'x-forwarded-for': address },
+    })
+
+    expect((await request(direct, '203.0.113.1')).statusCode).toBe(200)
+    expect((await request(direct, '203.0.113.2')).statusCode).toBe(429)
+    expect((await request(proxied, '203.0.113.1')).statusCode).toBe(200)
+    expect((await request(proxied, '203.0.113.2')).statusCode).toBe(200)
+  })
+
   it('reports dependency readiness without changing the liveness signal', async () => {
     const app = createApp({
       authenticate: createDevelopmentAuthenticator('user-local-admin'),

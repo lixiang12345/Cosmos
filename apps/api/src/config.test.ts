@@ -5,6 +5,13 @@ describe('API configuration', () => {
   it('supports an explicitly selected loopback-only development identity', () => {
     expect(loadConfig({ AUTH_MODE: 'development' })).toEqual({
       host: '127.0.0.1', port: 8787, corsOrigin: false, databaseUrl: undefined,
+      trustProxy: false,
+      bodyLimit: 1_048_576,
+      connectionTimeoutMs: 10_000,
+      requestTimeoutMs: 15_000,
+      keepAliveTimeoutMs: 5_000,
+      securityHeaders: { hsts: false },
+      rateLimit: { max: 600, timeWindowMs: 60_000, cache: 10_000 },
       databaseConnectionTimeoutMs: 5_000,
       databaseQueryTimeoutMs: 20_000,
       databaseStatementTimeoutMs: 15_000,
@@ -62,6 +69,33 @@ describe('API configuration', () => {
       OIDC_ISSUER: 'https://identity.test/',
       OIDC_JWKS_URI: 'http://identity.test/.well-known/jwks.json',
     })).toThrow('OIDC_JWKS_URI must be a valid HTTPS URL in production')
+  })
+
+  it('requires one exact HTTPS production CORS origin', () => {
+    const production = {
+      NODE_ENV: 'production',
+      AUTH_MODE: 'oidc',
+      DATABASE_URL: 'postgres://relay',
+      OIDC_ISSUER: 'https://identity.test/',
+      OIDC_AUDIENCE: 'relay-api',
+      OIDC_JWKS_URI: 'https://identity.test/.well-known/jwks.json',
+    }
+    for (const corsOrigin of ['*', 'http://relay.example', 'https://relay.example/path', 'https://relay.example/']) {
+      expect(() => loadConfig({ ...production, CORS_ORIGIN: corsOrigin })).toThrow('exact HTTPS origin')
+    }
+    expect(loadConfig({ ...production, CORS_ORIGIN: 'https://relay.example' })).toMatchObject({
+      corsOrigin: 'https://relay.example',
+      securityHeaders: { hsts: true },
+    })
+  })
+
+  it('accepts only explicit trusted proxy IPs and CIDR ranges', () => {
+    expect(loadConfig({
+      AUTH_MODE: 'development', TRUST_PROXY: '127.0.0.1, 172.18.0.0/16, ::1/128',
+    }).trustProxy).toEqual(['127.0.0.1', '172.18.0.0/16', '::1/128'])
+    for (const value of ['*', 'true', 'proxy.internal', '999.1.1.1', '127.0.0.1/33', '::1/129']) {
+      expect(() => loadConfig({ AUTH_MODE: 'development', TRUST_PROXY: value })).toThrow('TRUST_PROXY')
+    }
   })
 
   it('uses an explicit migration job outside development', () => {
@@ -136,6 +170,39 @@ describe('API configuration', () => {
   it('rejects invalid ports', () => {
     expect(() => loadConfig({ AUTH_MODE: 'development', PORT: '0' })).toThrow('PORT')
     expect(() => loadConfig({ AUTH_MODE: 'development', PORT: 'not-a-port' })).toThrow('PORT')
+    expect(() => loadConfig({ AUTH_MODE: 'development', PORT: '8787.5' })).toThrow('PORT')
+    expect(() => loadConfig({ AUTH_MODE: 'development', PORT: '8787anything' })).toThrow('PORT')
+  })
+
+  it('bounds API transport and rate-limit settings', () => {
+    expect(loadConfig({
+      AUTH_MODE: 'development',
+      API_BODY_LIMIT_BYTES: '2048',
+      API_CONNECTION_TIMEOUT_MS: '1200',
+      API_REQUEST_TIMEOUT_MS: '2500',
+      API_KEEP_ALIVE_TIMEOUT_MS: '1800',
+      API_RATE_LIMIT_MAX: '50',
+      API_RATE_LIMIT_WINDOW_MS: '10000',
+      API_RATE_LIMIT_CACHE: '200',
+    })).toMatchObject({
+      bodyLimit: 2_048,
+      connectionTimeoutMs: 1_200,
+      requestTimeoutMs: 2_500,
+      keepAliveTimeoutMs: 1_800,
+      rateLimit: { max: 50, timeWindowMs: 10_000, cache: 200 },
+    })
+    const invalidValues = [
+      ['API_BODY_LIMIT_BYTES', '100'],
+      ['API_CONNECTION_TIMEOUT_MS', '0'],
+      ['API_REQUEST_TIMEOUT_MS', 'forever'],
+      ['API_KEEP_ALIVE_TIMEOUT_MS', '300001'],
+      ['API_RATE_LIMIT_MAX', '0'],
+      ['API_RATE_LIMIT_WINDOW_MS', '999'],
+      ['API_RATE_LIMIT_CACHE', '99'],
+    ] as const
+    for (const [name, value] of invalidValues) {
+      expect(() => loadConfig({ AUTH_MODE: 'development', [name]: value })).toThrow(name)
+    }
   })
 
   it('bounds PostgreSQL connection, query, and server statement timeouts', () => {

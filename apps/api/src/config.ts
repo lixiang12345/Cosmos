@@ -2,6 +2,19 @@ export type ApiConfig = {
   host: string
   port: number
   corsOrigin: boolean | string
+  trustProxy: false | string[]
+  bodyLimit: number
+  connectionTimeoutMs: number
+  requestTimeoutMs: number
+  keepAliveTimeoutMs: number
+  securityHeaders: {
+    hsts: boolean
+  }
+  rateLimit: {
+    max: number
+    timeWindowMs: number
+    cache: number
+  }
   databaseUrl?: string
   databaseConnectionTimeoutMs: number
   databaseQueryTimeoutMs: number
@@ -24,7 +37,7 @@ export type ApiConfig = {
 const RUNTIME_ENVIRONMENTS = new Set(['development', 'test', 'staging', 'production'])
 
 function parsePort(value: string | undefined) {
-  const port = Number.parseInt(value ?? '8787', 10)
+  const port = Number(value ?? '8787')
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
     throw new Error('PORT must be an integer between 1 and 65535.')
   }
@@ -68,7 +81,48 @@ function parseCorsOrigin(value: string | undefined, environment: string | undefi
   if (environment === 'production' && !origin) {
     throw new Error('CORS_ORIGIN is required in production.')
   }
+  if (environment === 'production' && origin) {
+    let url: URL
+    try {
+      url = new URL(origin)
+    } catch {
+      throw new Error('CORS_ORIGIN must be one exact HTTPS origin in production.')
+    }
+    if (
+      url.protocol !== 'https:'
+      || url.origin !== origin
+      || url.username
+      || url.password
+      || url.search
+      || url.hash
+    ) {
+      throw new Error('CORS_ORIGIN must be one exact HTTPS origin in production.')
+    }
+  }
   return origin || false
+}
+
+function trustedProxy(value: string) {
+  const match = /^([^/]+)(?:\/(\d{1,3}))?$/.exec(value)
+  if (!match) return false
+  const address = match[1] ?? ''
+  const version = isIP(address)
+  if (version === 0) return false
+  const maximumPrefix = version === 6 ? 128 : 32
+  return match[2] === undefined || Number(match[2]) <= maximumPrefix
+}
+
+function parseTrustProxy(value: string | undefined) {
+  const configured = value?.trim()
+  if (!configured) return false
+  const entries = configured.split(',').map((entry) => entry.trim())
+  if (
+    entries.length > 32
+    || entries.some((entry) => !entry || entry.length > 128 || !trustedProxy(entry))
+  ) {
+    throw new Error('TRUST_PROXY must be a comma-separated list of at most 32 IP addresses or CIDR ranges.')
+  }
+  return [...new Set(entries)]
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
@@ -117,7 +171,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       } catch {
         throw new Error(`${name} must be a valid HTTPS URL in production.`)
       }
-      if (url.protocol !== 'https:') throw new Error(`${name} must be a valid HTTPS URL in production.`)
+      if (url.protocol !== 'https:' || url.username || url.password || url.hash) {
+        throw new Error(`${name} must be a valid HTTPS URL in production.`)
+      }
     }
   }
   const host = env.HOST?.trim() || (authMode === 'development' ? '127.0.0.1' : '0.0.0.0')
@@ -129,6 +185,35 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     host,
     port: parsePort(env.PORT),
     corsOrigin,
+    trustProxy: parseTrustProxy(env.TRUST_PROXY),
+    bodyLimit: parseInteger(env.API_BODY_LIMIT_BYTES, 'API_BODY_LIMIT_BYTES', 1_048_576, 1_024, 10_485_760),
+    connectionTimeoutMs: parseDuration(
+      env.API_CONNECTION_TIMEOUT_MS,
+      'API_CONNECTION_TIMEOUT_MS',
+      10_000,
+    ),
+    requestTimeoutMs: parseDuration(
+      env.API_REQUEST_TIMEOUT_MS,
+      'API_REQUEST_TIMEOUT_MS',
+      15_000,
+    ),
+    keepAliveTimeoutMs: parseDuration(
+      env.API_KEEP_ALIVE_TIMEOUT_MS,
+      'API_KEEP_ALIVE_TIMEOUT_MS',
+      5_000,
+    ),
+    securityHeaders: { hsts: environment === 'production' },
+    rateLimit: {
+      max: parseInteger(env.API_RATE_LIMIT_MAX, 'API_RATE_LIMIT_MAX', 600, 1, 100_000),
+      timeWindowMs: parseInteger(
+        env.API_RATE_LIMIT_WINDOW_MS,
+        'API_RATE_LIMIT_WINDOW_MS',
+        60_000,
+        1_000,
+        3_600_000,
+      ),
+      cache: parseInteger(env.API_RATE_LIMIT_CACHE, 'API_RATE_LIMIT_CACHE', 10_000, 100, 1_000_000),
+    },
     databaseUrl: databaseUrl || undefined,
     databaseConnectionTimeoutMs: parseDuration(
       env.DATABASE_CONNECTION_TIMEOUT_MS,
@@ -200,3 +285,4 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       : { mode: 'development', actorId: env.DEVELOPMENT_ACTOR_ID?.trim() || 'user-local-admin' },
   }
 }
+import { isIP } from 'node:net'

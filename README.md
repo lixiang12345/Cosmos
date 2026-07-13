@@ -67,7 +67,7 @@ docker build -f apps/web/Dockerfile -t relay-web \
   --build-arg VITE_OIDC_SILENT_REDIRECT_URI=https://relay.example.com/auth/silent-callback .
 ```
 
-API 与 Web 运行镜像均使用非 root 用户并包含健康检查。Web 容器在启动时把同源 `/api/*` 反向代理到 `RELAY_API_UPSTREAM`（默认 `http://api:8787`）；部署时必须按服务发现地址覆盖该变量，并用 `RELAY_CSP_CONNECT_SRC`、`RELAY_CSP_FRAME_SRC` 明确列出 IdP/API 所需 HTTPS origin，例如 `RELAY_CSP_CONNECT_SRC="'self' https://identity.example.com"`。TLS、WAF、镜像签名仍由生产 Edge/IaC 落地。API 默认把数据库连接、客户端查询和 PostgreSQL statement 超时分别限制为 5s/20s/15s，可通过 `.env.example` 中的变量收紧但不能禁用。
+API 与 Web 运行镜像均使用非 root 用户并包含健康检查。Web 容器在启动时把同源 `/api/*` 反向代理到 `RELAY_API_UPSTREAM`（默认 `http://api:8787`）；部署时必须按服务发现地址覆盖该变量，并用 `RELAY_CSP_CONNECT_SRC`、`RELAY_CSP_FRAME_SRC` 明确列出 IdP/API 所需 HTTPS origin，例如 `RELAY_CSP_CONNECT_SRC="'self' https://identity.example.com"`。TLS、WAF、全局限流和镜像签名仍由生产 Edge/IaC 落地。API 默认把数据库连接、客户端查询和 PostgreSQL statement 超时分别限制为 5s/20s/15s，并启用每实例有界限流、安全响应头和 1 MiB body 边界；只有显式列入 `TRUST_PROXY` 的 IP/CIDR 才能影响客户端地址。所有边界都可通过 `.env.example` 中的变量收紧但不能禁用。
 
 质量检查：
 
@@ -77,7 +77,7 @@ pnpm openapi:lint
 pnpm openapi:bundle
 ```
 
-也可单独执行 `pnpm lint`、`pnpm typecheck`、`pnpm test` 或 `pnpm build`。根命令会先构建 `@relay/contracts`，确保 API 与 Web 使用同一份生成类型。Pull Request 和主分支推送必须通过 `.github/workflows/required-checks.yml`：Node 22 + pnpm 11.7.0 冻结锁文件安装、全量检查、PostgreSQL 17 集成测试、OpenAPI lint/bundle、生产 migration/API/Web 容器与同源代理 smoke、空白错误检查和脱敏 Secret 扫描。
+也可单独执行 `pnpm lint`、`pnpm typecheck`、`pnpm test` 或 `pnpm build`。根命令会先构建 `@relay/contracts`，确保 API 与 Web 使用同一份生成类型。Pull Request 和主分支推送必须通过 `.github/workflows/required-checks.yml`：Node 22 + pnpm 11.7.0 冻结锁文件安装、生产依赖审计、全量检查、PostgreSQL 17 集成测试、OpenAPI lint/bundle、带 checksum 的逻辑备份与隔离恢复、生产 migration/API/Web 容器与同源代理 smoke、CycloneDX SBOM、HIGH/CRITICAL 镜像扫描、空白错误检查和脱敏 Secret 扫描。生产恢复边界与季度演练步骤见 [PostgreSQL 备份与恢复 Runbook](./docs/postgres-recovery-runbook.md)。
 
 ## 当前后端范围
 
@@ -114,7 +114,7 @@ pnpm openapi:bundle
 - protocol-1 Worker 使用 PostgreSQL 并发 claim、数据库权威租约、heartbeat、fencing、有限重试和过期租约恢复；每个进程另写可过期的就绪心跳，API 以此动态关闭新执行入口而不影响只读控制面；每次 Attempt 保留历史，撤销写权限会取消尚未开始或正在运行的链路。
 - 当前 Agent provider 可产出受大小限制的对话 Message，或调用 `workspace_files_list` / `workspace_file_read` 两个严格参数、单次 64 KiB 上限的只读工具；Worker 在同一租约内以最多 8 轮的模型续接执行，并把每次调用写入 ToolCall/Event/Audit。provider endpoint 的 301/302/303/307/308 重定向不会被跟随，并按终止型配置错误处理。SessionEvent 以单调 sequence 持久化，并可通过 cursor 分页或 `Last-Event-ID` 恢复 SSE。SSE 心跳期间会重新认证并重检 membership。
 
-配置 `DATABASE_URL` 后，Expert/Environment identity 与 immutable revision、Repository binding、Session、Attempt、SessionWorker、ToolCall/Approval/SideEffect、Artifact 引用、三作用域 File/FileVersion、事件和幂等记录写入 PostgreSQL；未配置时仅开发环境使用进程内存 repository。API 已实现 OIDC、membership discovery、User/Group ShareGrant、ServiceAccount exact create/send/archive binding、完整 Session 生命周期命令、Artifact 管理、Session Worker tree、ToolCall 查询、Approval 查询/决策、只读 File 浏览/版本/内容下载、复合 tenant FK，以及由事务本地 actor/org/space context 驱动的 33 张租户表 FORCE RLS；API/Worker 使用分离的受限数据库角色。FileVersion 当前以 PostgreSQL `bytea` 保存，单版本限制 1 MiB、单 Organization 默认写入配额 100 MiB；Worker 内部 repository 原子推进父子执行状态、写不可变文件版本、精确 input hash 审批、双人批准、外部副作用状态和脱敏 Event/Audit/Outbox。对话 provider 已接入一个仅开放 Session Workspace 文件列举/文本读取的受控 Tool Broker；文件写入、外部写工具与 Shell 均未向模型开放。Expert/Environment 写 API、拒绝与失败的完整审计、coding sandbox、审批后的模型写工具、对象存储以及生产备份/恢复/负载证据仍未实现，因此当前版本仍不能直接暴露到公网。这些能力按 [软件交付计划](./docs/software-delivery-plan.md) 继续演进。
+配置 `DATABASE_URL` 后，Expert/Environment identity 与 immutable revision、Repository binding、Session、Attempt、SessionWorker、ToolCall/Approval/SideEffect、Artifact 引用、三作用域 File/FileVersion、事件和幂等记录写入 PostgreSQL；未配置时仅开发环境使用进程内存 repository。API 已实现 OIDC、membership discovery、User/Group ShareGrant、ServiceAccount exact create/send/archive binding、完整 Session 生命周期命令、Artifact 管理、Session Worker tree、ToolCall 查询、Approval 查询/决策、只读 File 浏览/版本/内容下载、复合 tenant FK，以及由事务本地 actor/org/space context 驱动的 33 张租户表 FORCE RLS；API/Worker 使用分离的受限数据库角色。FileVersion 当前以 PostgreSQL `bytea` 保存，单版本限制 1 MiB、单 Organization 默认写入配额 100 MiB；Worker 内部 repository 原子推进父子执行状态、写不可变文件版本、精确 input hash 审批、双人批准、外部副作用状态和脱敏 Event/Audit/Outbox。对话 provider 已接入一个仅开放 Session Workspace 文件列举/文本读取的受控 Tool Broker；文件写入、外部写工具与 Shell 均未向模型开放。Expert/Environment 写 API、拒绝与失败的完整审计、coding sandbox、审批后的模型写工具、对象存储、生产 PITR/远端备份以及负载证据仍未实现，因此当前版本仍不能直接暴露到公网。这些能力按 [软件交付计划](./docs/software-delivery-plan.md) 继续演进。
 
 ## 原型范围
 
