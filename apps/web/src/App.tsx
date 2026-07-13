@@ -31,6 +31,7 @@ import { useRemoteSessionTimeline } from './features/session/useRemoteSessionTim
 import { usePreferences } from './preferences'
 import {
   RelayApiError,
+  type RelayApiAuthContext,
   archiveSession,
   cancelSession,
   createSession,
@@ -347,6 +348,7 @@ function SessionRoute({
 }) {
   const { sessionId } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
   const [retryVersion, setRetryVersion] = useState(0)
   const [request, setRequest] = useState<{
     key: string
@@ -391,6 +393,12 @@ function SessionRoute({
     ? controlMutation
     : { action: 'pause' as const, status: 'idle' as const, error: undefined }
   const run = runs.find((item) => item.id === sessionId)
+  const initialMessageDraft = typeof location.state === 'object'
+    && location.state !== null
+    && 'messageDraft' in location.state
+    && typeof location.state.messageDraft === 'string'
+    ? location.state.messageDraft
+    : ''
   const auth = useMemo(
     () => ({ accessToken, requestIdentity, onUnauthorized: handleUnauthorized }),
     [accessToken, handleUnauthorized, requestIdentity],
@@ -563,6 +571,7 @@ function SessionRoute({
       })
       onSessionObserved(response.session)
       sendIdempotency.current = {}
+      if (initialMessageDraft) navigate(location.pathname, { replace: true, state: null })
       setSendMutation({ key: response.session.id, status: 'idle' })
     } catch (cause) {
       const message = cause instanceof Error
@@ -575,7 +584,7 @@ function SessionRoute({
       }
       throw cause
     }
-  }, [auth, concealDetail, executionEnabled, locale, onSessionObserved, organizationId, requestKey, resolvedSession, spaceId])
+  }, [auth, concealDetail, executionEnabled, initialMessageDraft, locale, location.pathname, navigate, onSessionObserved, organizationId, requestKey, resolvedSession, spaceId])
 
   const retryTurnId = useMemo(() => [...timeline.events].reverse().find((event): event is Extract<
     SessionEventDto,
@@ -697,6 +706,8 @@ function SessionRoute({
         onResume={() => { void runControl('resume') }}
         onCancel={() => { void runControl('cancel') }}
         onRetry={retryTurnId ? () => { void runControl('retry') } : undefined}
+        initialMessageDraft={initialMessageDraft}
+        onOpenFiles={() => navigate(`/sessions/${resolvedSession.id}/files`)}
         onOpenNavigation={onOpenNavigation}
         onBack={() => navigate('/sessions')}
       />
@@ -729,6 +740,47 @@ function SessionRoute({
       </section>
     </main>
   )
+}
+
+function SessionWorkspaceFilesRoute({
+  organizationId,
+  spaceId,
+  auth,
+  credentialVersion,
+  requestModificationEnabled,
+  locale,
+  onOpenNavigation,
+}: {
+  organizationId: string
+  spaceId: string
+  auth: RelayApiAuthContext
+  credentialVersion: number
+  requestModificationEnabled: boolean
+  locale: 'zh' | 'en'
+  onOpenNavigation: () => void
+}) {
+  const { sessionId } = useParams()
+  const navigate = useNavigate()
+  if (!sessionId) return <Navigate to="/sessions" replace />
+  const sessionPath = `/sessions/${sessionId}`
+  return <RemoteFilesPage
+    organizationId={organizationId}
+    spaceId={spaceId}
+    scope="workspace"
+    sessionId={sessionId}
+    auth={auth}
+    credentialVersion={credentialVersion}
+    sessionCreationEnabled={requestModificationEnabled}
+    onOpenNavigation={onOpenNavigation}
+    onBackToSession={() => navigate(sessionPath)}
+    onRequestModification={(path) => navigate(sessionPath, {
+      state: {
+        messageDraft: locale === 'zh'
+          ? `请修改 ${path}：`
+          : `Please update ${path}:`,
+      },
+    })}
+  />
 }
 
 function LegacySessionRedirect() {
@@ -1749,6 +1801,17 @@ function RelayApp() {
             onStop={stopRun}
           />
         } />
+        <Route path="/sessions/:sessionId/files" element={demoMode
+          ? <Navigate to="/sessions" replace />
+          : <SessionWorkspaceFilesRoute
+              organizationId={organizationId}
+              spaceId={activeSpace.id}
+              auth={catalogAuth}
+              credentialVersion={credentialVersion}
+              requestModificationEnabled={productionExecutionEnabled}
+              locale={locale}
+              onOpenNavigation={openNavigation}
+            />} />
         <Route path="/runs/:sessionId" element={<LegacySessionRedirect />} />
         <Route path="/files" element={<Navigate to={demoMode ? '/files/user' : '/files/organization'} replace />} />
         <Route path="/files/user" element={demoMode

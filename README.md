@@ -119,7 +119,7 @@ pnpm openapi:bundle
 ## 原型范围
 
 - Session 管理：显式 demo 模式提供活跃、收藏、归档、搜索、重命名、恢复和删除，状态写入隔离的 `relay.demo.sessions`；生产模式不会读取该缓存，列表使用服务端 cursor 分页，并开放带 CAS/幂等保护的重命名、归档和恢复。收藏与删除仍只在 demo 模式显示。
-- Session 工作台：demo 模式提供阶段轨道、事件时间线、追加指令、终端回放、文件 Diff 和审批决策；生产模式显示 canonical Session metadata、Message、Attempt/Session/ToolCall/Approval 事件与真实执行终态，并在执行能力可用时通过幂等 API 发送后续消息。全局 User/Organization Files 使用权威只读页面；Session 内 Workspace Files、Tool、Terminal 和 Changes 操作尚未服务化，不会冒充生产事实。
+- Session 工作台：demo 模式提供阶段轨道、事件时间线、追加指令、终端回放、文件 Diff 和审批决策；生产模式显示 canonical Session metadata、Message、Attempt/Session/ToolCall/Approval 事件与真实执行终态，并在执行能力可用时通过幂等 API 发送后续消息。全局 User/Organization Files 与 Session Workspace Files 使用权威只读页面；Workspace 文件可带安全的预填消息返回对应 Session 请求修改，不把路径或草稿写入 URL。独立 Tool、Terminal 和 Changes 操作尚未服务化，不会冒充生产事实。
 - 控制平面：demo 模式包含运行记录、自动化、代码仓库、集成、治理中心和事件日志；生产 capability allowlist 当前开放 Sessions、Approvals、Experts、Environments 和只读 Files，其他直达路由不渲染模拟操作。
 - 关键交互：新建任务、切换证据视图、批准或退回、失败步骤重试、侧栏折叠和移动端抽屉。
 - 全局偏好：浅色/深色主题与中文/英文切换，偏好跨页面、跨刷新保持一致。

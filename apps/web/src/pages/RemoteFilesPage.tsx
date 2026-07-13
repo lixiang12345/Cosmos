@@ -1,6 +1,7 @@
 import type { FileDto, FileScope, FileVersionDto } from '@relay/contracts'
 import {
   AlertTriangle,
+  ArrowLeft,
   Building2,
   ChevronDown,
   ChevronRight,
@@ -17,6 +18,7 @@ import {
   RefreshCw,
   Search,
   User,
+  Workflow,
 } from 'lucide-react'
 import {
   useCallback,
@@ -38,16 +40,16 @@ import {
   type RelayFileContent,
 } from '../services/relayApi'
 
-type RemoteFileScope = Extract<FileScope, 'user' | 'organization'>
-
 export type RemoteFilesPageProps = {
   organizationId: string
   spaceId: string
-  scope: RemoteFileScope
+  scope: FileScope
+  sessionId?: string
   auth: RelayApiAuthContext
   credentialVersion: number
   sessionCreationEnabled: boolean
   onOpenNavigation?: () => void
+  onBackToSession?: () => void
   onRequestModification: (path: string) => void
 }
 
@@ -149,10 +151,12 @@ export function RemoteFilesPage({
   organizationId,
   spaceId,
   scope,
+  sessionId,
   auth,
   credentialVersion,
   sessionCreationEnabled,
   onOpenNavigation,
+  onBackToSession,
   onRequestModification,
 }: RemoteFilesPageProps) {
   const { locale } = usePreferences()
@@ -166,7 +170,7 @@ export function RemoteFilesPage({
   const deferredQuery = useDeferredValue(query.trim())
   const [retryVersion, setRetryVersion] = useState(0)
   const listIdentity = [
-    organizationId, spaceId, scope, credentialVersion, deferredQuery, retryVersion,
+    organizationId, spaceId, scope, sessionId ?? '', credentialVersion, deferredQuery, retryVersion,
   ].join('\u0000')
   const [listSnapshot, setListSnapshot] = useState<ListSnapshot>()
   const currentList = listSnapshot?.identity === listIdentity ? listSnapshot : undefined
@@ -176,6 +180,7 @@ export function RemoteFilesPage({
     const controller = new AbortController()
     void listFiles(organizationId, spaceId, {
       scope,
+      sessionId: scope === 'workspace' ? sessionId : undefined,
       search: deferredQuery || undefined,
       limit: 100,
     }, requestAuth, controller.signal).then(
@@ -200,7 +205,7 @@ export function RemoteFilesPage({
       },
     )
     return () => { controller.abort() }
-  }, [deferredQuery, listIdentity, organizationId, requestAuth, scope, spaceId])
+  }, [deferredQuery, listIdentity, organizationId, requestAuth, scope, sessionId, spaceId])
 
   const loadMore = useCallback(() => {
     if (!currentList?.nextCursor || currentList.loadingMore) return
@@ -208,6 +213,7 @@ export function RemoteFilesPage({
     setListSnapshot({ ...currentList, loadingMore: true })
     void listFiles(organizationId, spaceId, {
       scope,
+      sessionId: scope === 'workspace' ? sessionId : undefined,
       search: deferredQuery || undefined,
       cursor,
       limit: 100,
@@ -225,7 +231,7 @@ export function RemoteFilesPage({
         error: errorValue(cause, 'Unable to load more Files.'),
       } : current),
     )
-  }, [currentList, deferredQuery, listIdentity, organizationId, requestAuth, scope, spaceId])
+  }, [currentList, deferredQuery, listIdentity, organizationId, requestAuth, scope, sessionId, spaceId])
 
   const [selectedFileId, setSelectedFileId] = useState<string>()
   const selectedFile = items.find((item) => item.id === selectedFileId) ?? items[0]
@@ -371,12 +377,17 @@ export function RemoteFilesPage({
           <IconButton icon={Menu} label={text(locale, '打开导航', 'Open navigation')} className="cosmos-mobile-menu" onClick={onOpenNavigation} />
           <span className="cosmos-page-header__icon"><FileText aria-hidden="true" /></span>
           <div>
-            <h1>{scope === 'organization' ? text(locale, '组织文件', 'Organization Files') : text(locale, '个人文件', 'User Files')}</h1>
-            <p>{organizationId} / {spaceId}</p>
+            <h1>{scope === 'organization'
+              ? text(locale, '组织文件', 'Organization Files')
+              : scope === 'user'
+                ? text(locale, '个人文件', 'User Files')
+                : text(locale, '会话工作区文件', 'Session Workspace Files')}</h1>
+            <p>{organizationId} / {spaceId}{scope === 'workspace' ? ` / ${sessionId}` : ''}</p>
           </div>
         </div>
         <div className="cosmos-page-header__actions">
           <span className="remote-catalog-readonly"><LockKeyhole aria-hidden="true" />{text(locale, '只读', 'Read only')}</span>
+          {scope === 'workspace' && onBackToSession ? <button type="button" className="cosmos-button cosmos-button--secondary" onClick={onBackToSession}><ArrowLeft aria-hidden="true" />{text(locale, '返回会话', 'Back to Session')}</button> : null}
           <GlobalControls className="cosmos-global-controls" />
           <IconButton icon={RefreshCw} label={text(locale, '刷新文件', 'Refresh Files')} onClick={() => setRetryVersion((version) => version + 1)} />
         </div>
@@ -386,8 +397,10 @@ export function RemoteFilesPage({
         <div className="cosmos-files-layout">
           <aside className="cosmos-files-browser" aria-label={text(locale, '文件树', 'File tree')}>
             <div className="cosmos-segmented-control" role="tablist" aria-label={text(locale, '文件范围', 'File scope')}>
-              <button type="button" role="tab" aria-selected={scope === 'organization'} className={scope === 'organization' ? 'cosmos-segmented-control__active' : ''} onClick={() => navigate('/files/organization')}><Building2 aria-hidden="true" />{text(locale, '组织', 'Organization')}</button>
-              <button type="button" role="tab" aria-selected={scope === 'user'} className={scope === 'user' ? 'cosmos-segmented-control__active' : ''} onClick={() => navigate('/files/user')}><User aria-hidden="true" />{text(locale, '个人', 'User')}</button>
+              {scope === 'workspace' ? <button type="button" role="tab" aria-selected className="cosmos-segmented-control__active"><Workflow aria-hidden="true" />{text(locale, '工作区', 'Workspace')}</button> : <>
+                <button type="button" role="tab" aria-selected={scope === 'organization'} className={scope === 'organization' ? 'cosmos-segmented-control__active' : ''} onClick={() => navigate('/files/organization')}><Building2 aria-hidden="true" />{text(locale, '组织', 'Organization')}</button>
+                <button type="button" role="tab" aria-selected={scope === 'user'} className={scope === 'user' ? 'cosmos-segmented-control__active' : ''} onClick={() => navigate('/files/user')}><User aria-hidden="true" />{text(locale, '个人', 'User')}</button>
+              </>}
             </div>
             <label className="cosmos-search-field">
               <Search aria-hidden="true" />
@@ -418,7 +431,7 @@ export function RemoteFilesPage({
           <section className="cosmos-file-viewer" aria-label={text(locale, '文件预览', 'File preview')}>
             {selectedFile ? <>
               <header className="cosmos-file-viewer__header">
-                <div><p>{scope === 'user' ? 'User' : 'Organization'} · v{viewVersion}</p><h2>{selectedFile.path}</h2><span>{formatDate(viewedVersion?.createdAt ?? selectedFile.updatedAt, locale)}</span></div>
+                <div><p>{scope === 'user' ? 'User' : scope === 'organization' ? 'Organization' : 'Workspace'} · v{viewVersion}</p><h2>{selectedFile.path}</h2><span>{formatDate(viewedVersion?.createdAt ?? selectedFile.updatedAt, locale)}</span></div>
                 <div>
                   <IconButton icon={Copy} label={text(locale, '复制路径', 'Copy path')} onClick={() => { void copy(`${scope}/${selectedFile.path}`, text(locale, '路径已复制。', 'Path copied.')) }} />
                   <IconButton icon={FileText} label={text(locale, '复制内容', 'Copy content')} disabled={currentContent?.status !== 'ready' || currentContent.text === undefined} onClick={() => { void copy(currentContent?.text ?? '', text(locale, '内容已复制。', 'Content copied.')) }} />

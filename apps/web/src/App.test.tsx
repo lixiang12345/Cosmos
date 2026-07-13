@@ -28,6 +28,7 @@ import {
   getSession,
   listEnvironments,
   listExperts,
+  listFiles,
   listSessionEvents,
   listSessionMessages,
   listSessions,
@@ -52,6 +53,7 @@ vi.mock('./services/relayApi', async (importOriginal) => ({
   getSession: vi.fn(),
   listEnvironments: vi.fn(),
   listExperts: vi.fn(),
+  listFiles: vi.fn(),
   listSessionEvents: vi.fn(),
   listSessionMessages: vi.fn(),
   listSessions: vi.fn(),
@@ -306,6 +308,7 @@ describe('Relay prototype', () => {
     vi.mocked(getSession).mockReset()
     vi.mocked(listEnvironments).mockReset()
     vi.mocked(listExperts).mockReset()
+    vi.mocked(listFiles).mockReset()
     vi.mocked(listSessionEvents).mockReset()
     vi.mocked(listSessionMessages).mockReset()
     vi.mocked(listSessions).mockReset()
@@ -349,6 +352,15 @@ describe('Relay prototype', () => {
       page: { nextCursor: null, hasMore: false, projectionUpdatedAt: productionEnvironment.updatedAt },
     })
     vi.mocked(getEnvironment).mockResolvedValue(productionEnvironmentDetail)
+    vi.mocked(listFiles).mockImplementation(async (organizationId, spaceId, options) => ({
+      organizationId,
+      requestedSpaceId: spaceId,
+      scope: options.scope,
+      ownerUserId: options.scope === 'user' ? 'user-production' : null,
+      sessionId: options.scope === 'workspace' ? (options.sessionId ?? null) : null,
+      items: [],
+      page: { nextCursor: null, hasMore: false },
+    }))
   })
 
   it('uses Home as the Expert launcher without adding a sidebar Home item', async () => {
@@ -489,7 +501,8 @@ describe('Relay prototype', () => {
     expect(screen.queryByText('gpt-5.6-sol')).not.toBeInTheDocument()
     expect(screen.queryByText('38.2k')).not.toBeInTheDocument()
     expect(screen.queryByText('￥4.82')).not.toBeInTheDocument()
-    expect(screen.queryByRole('tab')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['对话', '文件'])
+    expect(screen.queryByRole('tab', { name: /产物|Workers|Changes|终端|审批/ })).not.toBeInTheDocument()
     for (const action of ['停止', '重试', '批准']) {
       expect(screen.queryByRole('button', { name: action })).not.toBeInTheDocument()
     }
@@ -507,6 +520,31 @@ describe('Relay prototype', () => {
       }),
       expect.any(AbortSignal),
     )
+  })
+
+  it('navigates from a production Session to its exact Workspace Files scope and back', async () => {
+    const user = userEvent.setup()
+    const detail = makeApiSession('organization-production', 'space-production', {
+      title: 'Workspace file session', expertId: 'expert-production', start: true,
+      message: { content: 'Inspect generated files.' },
+    }, { id: 'session-workspace-files', status: 'active' })
+    vi.mocked(getSession).mockResolvedValue(detail)
+
+    renderAuthenticatedApp(`/sessions/${detail.id}`)
+
+    await screen.findByRole('heading', { name: detail.title })
+    await user.click(screen.getByRole('tab', { name: '文件' }))
+    expect(await screen.findByRole('heading', { name: '会话工作区文件' })).toBeInTheDocument()
+    expect(listFiles).toHaveBeenCalledWith(
+      detail.organizationId,
+      detail.spaceId,
+      { scope: 'workspace', sessionId: detail.id, search: undefined, limit: 100 },
+      expect.objectContaining({ accessToken: 'production-access-token' }),
+      expect.any(AbortSignal),
+    )
+
+    await user.click(screen.getByRole('button', { name: '返回会话' }))
+    expect(await screen.findByRole('heading', { name: detail.title })).toBeInTheDocument()
   })
 
   it('applies production Session controls with the latest canonical version', async () => {

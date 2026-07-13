@@ -656,6 +656,9 @@ export function listFiles(
       response.organizationId !== organizationId
       || response.requestedSpaceId !== spaceId
       || response.scope !== options.scope
+      || response.sessionId !== (options.scope === 'workspace' ? (options.sessionId ?? null) : null)
+      || (options.scope !== 'user' && response.ownerUserId !== null)
+      || (options.ownerUserId !== undefined && response.ownerUserId !== options.ownerUserId)
     ) {
       throw new RelayApiError('Relay API returned a File page outside the requested scope.', {
         code: 'INVALID_RESPONSE', status: 200,

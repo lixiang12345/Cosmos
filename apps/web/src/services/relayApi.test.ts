@@ -454,6 +454,37 @@ describe('Relay API client', () => {
     ]))
   })
 
+  it('binds Workspace File pages to the exact requested Session', async () => {
+    const workspaceFile = {
+      ...file,
+      spaceId: 'space-platform',
+      scope: 'workspace' as const,
+      ownerUserId: null,
+      sessionId: session.id,
+    }
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({
+        organizationId: 'relay', requestedSpaceId: 'space-platform', scope: 'workspace',
+        ownerUserId: null, sessionId: session.id, items: [workspaceFile],
+        page: { nextCursor: null, hasMore: false },
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        organizationId: 'relay', requestedSpaceId: 'space-platform', scope: 'workspace',
+        ownerUserId: null, sessionId: 'session-other', items: [],
+        page: { nextCursor: null, hasMore: false },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listFiles('relay', 'space-platform', {
+      scope: 'workspace', sessionId: session.id,
+    })).resolves.toMatchObject({ sessionId: session.id, items: [{ id: file.id }] })
+    expect(String(fetchMock.mock.calls[0][0])).toContain(`scope=workspace&sessionId=${session.id}`)
+
+    await expect(listFiles('relay', 'space-platform', {
+      scope: 'workspace', sessionId: session.id,
+    })).rejects.toMatchObject({ code: 'INVALID_RESPONSE', status: 200 })
+  })
+
   it('downloads authorized File bytes and rejects out-of-scope File pages', async () => {
     const onUnauthorized = vi.fn()
     const fetchMock = vi.fn<typeof fetch>()

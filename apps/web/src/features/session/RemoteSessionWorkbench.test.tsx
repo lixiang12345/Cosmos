@@ -87,6 +87,8 @@ function renderWorkbench(
     onResume?: () => void
     onCancel?: () => void
     onRetry?: () => void
+    initialMessageDraft?: string
+    onOpenFiles?: () => void
   } = {},
 ) {
   const onBack = vi.fn()
@@ -284,6 +286,25 @@ describe('RemoteSessionWorkbench', () => {
     expect(within(workbench).getByRole('button', { name: 'Back to Sessions' })).toBeInTheDocument()
     expect(within(workbench).getByRole('button', { name: 'Copy link' })).toBeInTheDocument()
     expect(within(workbench).queryByRole('button', { name: /share/i })).not.toBeInTheDocument()
+  })
+
+  it('opens the governed Workspace Files view and restores a requested change draft', async () => {
+    const user = userEvent.setup()
+    const onOpenFiles = vi.fn()
+    const onSend = vi.fn().mockResolvedValue(undefined)
+    renderWorkbench({}, {}, {
+      executionEnabled: true,
+      initialMessageDraft: '请修改 workspace/standards/release.md：',
+      onOpenFiles,
+      onSend,
+    })
+
+    expect(screen.getByRole('tab', { name: '对话' })).toHaveAttribute('aria-selected', 'true')
+    await user.click(screen.getByRole('tab', { name: '文件' }))
+    expect(onOpenFiles).toHaveBeenCalledOnce()
+    expect(screen.getByRole('textbox', { name: '后续消息' })).toHaveValue(
+      '请修改 workspace/standards/release.md：',
+    )
   })
 
   it('labels unresolved legacy configuration without fabricating revision IDs', () => {

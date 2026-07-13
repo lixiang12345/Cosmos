@@ -784,6 +784,53 @@
   margin-top: 14px;
 }
 
+.remote-session-tabs {
+  display: inline-grid;
+  min-height: 34px;
+  grid-template-columns: repeat(2, minmax(112px, 1fr));
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--chrome-subtle);
+}
+
+.remote-session-tabs > button {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.remote-session-tabs > button:hover {
+  color: var(--text);
+}
+
+.remote-session-tabs > button:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+
+.remote-session-tabs > button.remote-session-tabs__active {
+  background: var(--surface);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 10%, transparent);
+  color: var(--text);
+}
+
+.remote-session-tabs svg {
+  width: 13px;
+  height: 13px;
+}
+
 .remote-session-composer {
   min-width: 0;
   padding: 10px 24px 11px;
@@ -11840,6 +11887,12 @@ button:disabled {
 }
 
 @media (max-width: 520px) {
+  .remote-session-tabs {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .cosmos-file-viewer__header {
     align-items: flex-start;
     flex-direction: column;

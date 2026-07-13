@@ -136,4 +136,54 @@ describe('Remote Files page', () => {
       expect.any(AbortSignal),
     ))
   })
+
+  it('loads the exact Session Workspace scope and returns governed changes to the conversation', async () => {
+    const user = userEvent.setup()
+    const workspaceFile: FileDto = {
+      ...file,
+      spaceId: 'space-a',
+      scope: 'workspace',
+      sessionId: 'session-1',
+    }
+    const workspaceVersions = versions.map((version) => ({ ...version, spaceId: 'space-a' }))
+    const onBackToSession = vi.fn()
+    const onRequestModification = vi.fn()
+    vi.mocked(listFiles).mockResolvedValueOnce({
+      organizationId: file.organizationId,
+      requestedSpaceId: 'space-a',
+      scope: 'workspace',
+      ownerUserId: null,
+      sessionId: 'session-1',
+      items: [workspaceFile],
+      page: { nextCursor: null, hasMore: false },
+    })
+    vi.mocked(listFileVersions).mockResolvedValueOnce({
+      organizationId: file.organizationId,
+      requestedSpaceId: 'space-a',
+      fileId: file.id,
+      items: workspaceVersions,
+      page: { nextCursor: null, hasMore: false },
+    })
+
+    renderPage({
+      scope: 'workspace',
+      sessionId: 'session-1',
+      onBackToSession,
+      onRequestModification,
+    })
+
+    expect(await screen.findByRole('heading', { name: '会话工作区文件' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '工作区' })).toHaveAttribute('aria-selected', 'true')
+    expect(listFiles).toHaveBeenCalledWith(
+      file.organizationId,
+      'space-a',
+      { scope: 'workspace', sessionId: 'session-1', search: undefined, limit: 100 },
+      expect.objectContaining({ accessToken: 'token-a' }),
+      expect.any(AbortSignal),
+    )
+    await user.click(screen.getByRole('button', { name: '返回会话' }))
+    expect(onBackToSession).toHaveBeenCalledOnce()
+    await user.click(screen.getByRole('button', { name: '请求修改' }))
+    expect(onRequestModification).toHaveBeenCalledWith('workspace/standards/release.md')
+  })
 })
