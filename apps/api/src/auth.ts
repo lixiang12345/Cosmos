@@ -8,6 +8,7 @@ import {
 export type AuthenticatedActor = {
   id: string
   kind: 'user' | 'service_account'
+  audience?: string
 }
 
 export type AuthenticateRequest = (authorization: string | undefined) => Promise<AuthenticatedActor>
@@ -29,7 +30,11 @@ function readBearerToken(authorization: string | undefined) {
   return match[1]
 }
 
-function actorFromPayload(payload: JWTPayload, currentTimeSeconds: number): AuthenticatedActor {
+function actorFromPayload(
+  payload: JWTPayload,
+  currentTimeSeconds: number,
+  audience: string,
+): AuthenticatedActor {
   const subject = payload.sub
   if (!subject || subject !== subject.trim() || subject.length > 256 || subject.startsWith('system:')) {
     throw new AuthenticationError()
@@ -52,6 +57,7 @@ function actorFromPayload(payload: JWTPayload, currentTimeSeconds: number): Auth
   return {
     id: subject,
     kind: actorType === 'service_account' ? 'service_account' : 'user',
+    ...(actorType === 'service_account' ? { audience } : {}),
   }
 }
 
@@ -76,7 +82,7 @@ export function createJwtAuthenticator(options: JwtAuthenticatorOptions): Authen
         currentDate,
       })
       if (protectedHeader.typ?.toLowerCase() !== 'at+jwt') throw new AuthenticationError()
-      return actorFromPayload(payload, Math.floor(currentDate.getTime() / 1_000))
+      return actorFromPayload(payload, Math.floor(currentDate.getTime() / 1_000), options.audience)
     } catch (error) {
       if (error instanceof AuthenticationError) throw error
       throw new AuthenticationError()

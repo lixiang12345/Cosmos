@@ -47,6 +47,7 @@ const migrationVersions = [
   '042_validate_session_execution_controls.sql',
   '043_session_share_grants.sql',
   '044_validate_session_share_grants.sql',
+  '045_service_account_session_scopes.sql',
 ]
 
 function poolWithVersions(versions: string[]) {

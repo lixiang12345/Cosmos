@@ -1077,7 +1077,19 @@ export class PostgresSessionRepository implements SessionRepository {
       FOR UPDATE OF session
     `, [record.organizationId, record.spaceId, record.sessionId, record.actorId])
     const row = candidate.rows[0]
-    if (!row || (row.visibility === 'private' && row.created_by !== record.actorId && row.active_share_role === null)) {
+    if (!row) return null
+    if (record.actorKind === 'service_account') {
+      if (!('action' in record) || record.action !== 'archive') throw new AuthorizationChangedError()
+      await this.assertServiceAccountBinding(
+        client,
+        record,
+        'session.archive',
+        'session',
+        record.sessionId,
+      )
+      return { session: mapSession(row), policyReason: 'service_account_session_binding' }
+    }
+    if (row.visibility === 'private' && row.created_by !== record.actorId && row.active_share_role === null) {
       return null
     }
     if (row.created_by === record.actorId) {
@@ -1091,6 +1103,52 @@ export class PostgresSessionRepository implements SessionRepository {
       return { session: mapSession(row), policyReason: 'space_manager' }
     }
     throw new AuthorizationChangedError()
+  }
+
+  private async assertServiceAccountBinding(
+    client: PoolClient,
+    record: {
+      organizationId: string
+      spaceId: string
+      actorId: string
+      actorKind: 'user' | 'service_account'
+      actorAudience?: string
+    },
+    scope: 'session.create' | 'session.send' | 'session.archive',
+    resourceType: 'expert' | 'session',
+    resourceId: string,
+  ) {
+    if (record.actorKind !== 'service_account') return false
+    if (!record.actorAudience) throw new AuthorizationChangedError()
+    const binding = await client.query(`
+      SELECT 1
+      FROM relay_service_accounts service_account
+      JOIN relay_service_account_bindings binding
+        ON binding.organization_id = service_account.organization_id
+        AND binding.service_account_id = service_account.id
+      WHERE service_account.organization_id = $1
+        AND service_account.id = $3
+        AND service_account.audience = $4
+        AND service_account.status = 'active'
+        AND service_account.revoked_at IS NULL
+        AND binding.space_id = $2
+        AND binding.scope = $5
+        AND binding.resource_type = $6
+        AND binding.resource_id = $7
+        AND binding.revoked_at IS NULL
+        AND (binding.expires_at IS NULL OR binding.expires_at > transaction_timestamp())
+      FOR SHARE OF service_account, binding
+    `, [
+      record.organizationId,
+      record.spaceId,
+      record.actorId,
+      record.actorAudience,
+      scope,
+      resourceType,
+      resourceId,
+    ])
+    if (!binding.rowCount) throw new AuthorizationChangedError()
+    return true
   }
 
   private async renameInTransaction(
@@ -1959,6 +2017,13 @@ export class PostgresSessionRepository implements SessionRepository {
       FOR UPDATE OF organization_membership, space_membership
     `, [record.organizationId, record.spaceId, record.actorId])
     if (!access.rowCount || !canWriteSpace(access.rows[0])) throw new AuthorizationChangedError()
+    const serviceAccountPolicy = await this.assertServiceAccountBinding(
+      client,
+      record,
+      'session.send',
+      'session',
+      record.sessionId,
+    )
 
     const candidate = await client.query<SessionRow & {
       created_by: string
@@ -1994,13 +2059,25 @@ export class PostgresSessionRepository implements SessionRepository {
       FOR UPDATE OF session
     `, [record.organizationId, record.spaceId, record.sessionId, record.actorId])
     const row = candidate.rows[0]
-    if (!row || (row.visibility === 'private' && row.created_by !== record.actorId && row.active_share_role === null)) {
+    if (!row || (
+      !serviceAccountPolicy
+      && row.visibility === 'private'
+      && row.created_by !== record.actorId
+      && row.active_share_role === null
+    )) {
       return null
     }
-    if (row.visibility === 'private' && row.created_by !== record.actorId && row.active_share_role !== 'collaborator') {
+    if (
+      !serviceAccountPolicy
+      && row.visibility === 'private'
+      && row.created_by !== record.actorId
+      && row.active_share_role !== 'collaborator'
+    ) {
       throw new AuthorizationChangedError()
     }
-    const policyReason = row.created_by === record.actorId
+    const policyReason = serviceAccountPolicy
+      ? 'service_account_session_binding'
+      : row.created_by === record.actorId
       ? 'session_creator'
       : row.active_share_role === 'collaborator'
         ? 'active_collaborator_share'
@@ -2399,6 +2476,13 @@ export class PostgresSessionRepository implements SessionRepository {
       FOR UPDATE OF organization_membership, space_membership
     `, [record.organizationId, record.spaceId, record.actorId])
     if (!access.rowCount || !canWriteSpace(access.rows[0])) throw new AuthorizationChangedError()
+    await this.assertServiceAccountBinding(
+      client,
+      record,
+      'session.create',
+      'expert',
+      record.request.expertId,
+    )
 
     const keyHash = hash(record.idempotencyKey)
     const requestHash = hash(canonicalJson(record.request))
@@ -2665,8 +2749,8 @@ export class PostgresSessionRepository implements SessionRepository {
         after_state, occurred_at
       ) VALUES (
         $1, $2, $3, $4, $5, $6, 'session.create', 'session', $4,
-        'success', $7, $8, 'allow', 'organization_and_space_write', NULL,
-        $9::jsonb, $10
+        'success', $7, $8, 'allow', $9, NULL,
+        $10::jsonb, $11
       )
     `, [
       session.organizationId,
@@ -2677,6 +2761,9 @@ export class PostgresSessionRepository implements SessionRepository {
       record.actorKind,
       record.requestId,
       idempotencyKeyHash,
+      record.actorKind === 'service_account'
+        ? 'service_account_expert_binding'
+        : 'organization_and_space_write',
       JSON.stringify({
         status: session.status,
         visibility: session.visibility,

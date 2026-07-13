@@ -91,6 +91,12 @@ import {
   SessionTimelineCursorAheadError,
   type SessionTimelineRepository,
 } from './session-timeline-repository.js'
+import {
+  DenyServiceAccountPolicyRepository,
+  type ServiceAccountPolicyRepository,
+  type ServiceAccountSessionResourceType,
+  type ServiceAccountSessionScope,
+} from './service-account-policy-repository.js'
 
 const IDEMPOTENCY_KEY_PATTERN = /^[\x21-\x7e]{1,128}$/
 const SPACE_ID_PATTERN = /^.{1,128}$/u
@@ -144,6 +150,7 @@ type ValidationIssue = {
 export type CreateAppOptions = {
   sessionRepository?: SessionRepository
   sessionTimelineRepository?: SessionTimelineRepository
+  serviceAccountPolicyRepository?: ServiceAccountPolicyRepository
   configurationCatalogRepository?: ConfigurationCatalogRepository
   readinessCheck?: () => Promise<void>
   logger?: FastifyServerOptions['logger']
@@ -345,6 +352,8 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   })
   const sessionRepository = options.sessionRepository ?? new InMemorySessionRepository()
   const sessionTimelineRepository = options.sessionTimelineRepository
+  const serviceAccountPolicyRepository = options.serviceAccountPolicyRepository
+    ?? new DenyServiceAccountPolicyRepository()
   const configurationCatalogRepository = options.configurationCatalogRepository
     ?? new EmptyConfigurationCatalogRepository()
   const authenticate = options.authenticate ?? rejectAuthentication
@@ -607,7 +616,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     if (!actor) throw new AuthenticationError()
     reply.header('Cache-Control', 'no-store')
     return MeResponseSchema.parse({
-      actor,
+      actor: { id: actor.id, kind: actor.kind },
       organizations: await sessionRepository.listActorOrganizations(actor.id),
     })
   })
@@ -663,18 +672,57 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     request: FastifyRequest,
     reply: FastifyReply,
     params: SpaceParams,
+    operation?: {
+      scope: ServiceAccountSessionScope
+      resourceType: ServiceAccountSessionResourceType
+      resourceId: string
+    },
   ) {
     const actor = actorsByRequest.get(request)
     if (!actor) throw new AuthenticationError()
-    if (actor.kind === 'service_account') {
+    const authorization = await authorizeSpace(request, reply, params)
+    if (!authorization) return null
+    if (actor.kind === 'service_account' && !await authorizeServiceAccountOperation(
+      request,
+      reply,
+      actor,
+      authorization.organizationId,
+      authorization.spaceId,
+      operation,
+    )) return null
+    return authorization
+  }
+
+  async function authorizeServiceAccountOperation(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    actor: AuthenticatedActor,
+    organizationId: string,
+    spaceId: string,
+    operation?: {
+      scope: ServiceAccountSessionScope
+      resourceType: ServiceAccountSessionResourceType
+      resourceId: string
+    },
+  ) {
+    if (actor.kind !== 'service_account') return true
+    const allowed = actor.audience !== undefined && operation !== undefined
+      && await serviceAccountPolicyRepository.authorizeSessionOperation({
+        organizationId,
+        spaceId,
+        serviceAccountId: actor.id,
+        audience: actor.audience,
+        ...operation,
+      })
+    if (!allowed) {
       sendApiError(reply, 403, request, {
         code: 'PERMISSION_DENIED',
-        message: 'Service accounts cannot access Sessions until operation scopes and bindings are enforced.',
+        message: 'The service account is not bound to this Session operation and resource.',
         retryable: false,
       })
-      return null
+      return false
     }
-    return authorizeSpace(request, reply, params)
+    return true
   }
 
   function catalogListResponse<T extends { updatedAt: string }>(
@@ -1034,7 +1082,14 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     app.post<{ Params: SessionParams }>(
       `/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/${action}`,
       async (request, reply) => {
-        const authorization = await authorizeSessionSpace(request, reply, request.params)
+        const authorization = await authorizeSessionSpace(
+          request,
+          reply,
+          request.params,
+          action === 'archive'
+            ? { scope: 'session.archive', resourceType: 'session', resourceId: request.params.sessionId }
+            : undefined,
+        )
         if (!authorization) return
         const sessionId = parseSpaceId(request.params.sessionId)
         if (!sessionId) return sendResourceNotFound(reply, request)
@@ -1072,6 +1127,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
           sessionId,
           actorId: authorization.actor.id,
           actorKind: authorization.actor.kind,
+          actorAudience: authorization.actor.audience,
           requestId: request.id,
           expectedVersion,
           action,
@@ -1245,7 +1301,11 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   app.post<{ Params: SessionParams }>(
     '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/messages',
     async (request, reply) => {
-      const authorization = await authorizeSessionSpace(request, reply, request.params)
+      const authorization = await authorizeSessionSpace(request, reply, request.params, {
+        scope: 'session.send',
+        resourceType: 'session',
+        resourceId: request.params.sessionId,
+      })
       if (!authorization) return
       const sessionId = parseSpaceId(request.params.sessionId)
       if (!sessionId) return sendResourceNotFound(reply, request)
@@ -1290,6 +1350,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         sessionId,
         actorId: authorization.actor.id,
         actorKind: authorization.actor.kind,
+        actorAudience: authorization.actor.audience,
         requestId: request.id,
         idempotencyKey,
         request: parsed.data,
@@ -1477,7 +1538,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   )
 
   app.post<{ Params: SpaceParams }>('/api/v1/organizations/:organizationId/spaces/:spaceId/sessions', async (request, reply) => {
-    const authorization = await authorizeSessionSpace(request, reply, request.params)
+    const authorization = await authorizeSpace(request, reply, request.params)
     if (!authorization) return
 
     if (!canWriteSpace(authorization.access)) {
@@ -1510,6 +1571,15 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       })
     }
 
+    if (!await authorizeServiceAccountOperation(
+      request,
+      reply,
+      authorization.actor,
+      authorization.organizationId,
+      authorization.spaceId,
+      { scope: 'session.create', resourceType: 'expert', resourceId: parsed.data.expertId },
+    )) return
+
     let executionAvailability: 'available' | 'disabled' | 'worker_unavailable' = 'available'
     if (parsed.data.start) {
       if (!executionEnabled) {
@@ -1524,6 +1594,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       spaceId: authorization.spaceId,
       actorId: authorization.actor.id,
       actorKind: authorization.actor.kind,
+      actorAudience: authorization.actor.audience,
       requestId: request.id,
       idempotencyKey,
       request: parsed.data,

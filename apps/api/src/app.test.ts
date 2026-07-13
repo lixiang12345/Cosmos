@@ -510,7 +510,7 @@ describe('Relay API', () => {
     expect(reads).toBe(0)
   })
 
-  it('denies service accounts all Session access before membership checks or repository operations', async () => {
+  it('denies service accounts without bindings before Session repository operations', async () => {
     const repository = testRepository({
       actorOrganizations: {
         'service-session-operator': [{
@@ -547,9 +547,9 @@ describe('Relay API', () => {
       expect(error).toMatchObject({ code: 'PERMISSION_DENIED', retryable: false })
     }
     expect(new Set(errors.map((error) => error.message))).toEqual(new Set([
-      'Service accounts cannot access Sessions until operation scopes and bindings are enforced.',
+      'The service account is not bound to this Session operation and resource.',
     ]))
-    expect(getSpaceAccess).not.toHaveBeenCalled()
+    expect(getSpaceAccess).toHaveBeenCalled()
     expect(listBySpace).not.toHaveBeenCalled()
     expect(getById).not.toHaveBeenCalled()
     expect(create).not.toHaveBeenCalled()

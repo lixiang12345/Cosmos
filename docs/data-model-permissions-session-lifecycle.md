@@ -21,15 +21,15 @@
 
 | 能力 | Current | Target / 发布门槛 |
 | --- | --- | --- |
-| Session API | 已实现 tenant-scoped list/create/get/rename/archive/restore/draft-start/send、Session list cursor/filter、Message/Event cursor 分页和可恢复 SSE；强版本写返回 ETag | pause/resume/cancel、share 与显式 Turn retry 命令 |
+| Session API | 已实现 tenant-scoped list/create/get/rename/archive/restore/draft-start/send/pause/resume/cancel/retry、ShareGrant 管理、Session list cursor/filter、Message/Event cursor 分页和可恢复 SSE；强版本写返回 ETag | Pin、合规访问与后续 File/Artifact/Tool 表面 |
 | 创建/启动/发送事务 | `start=true` create 原子写 Session、首条 Message、首个 Turn、`session.start` Command、Outbox、3 条连续 SessionEvent、1 条脱敏 AuditEvent 和完整幂等响应；`start=false` 写 draft Session、Message、2 条 Event 与 1 条 Audit，不创建执行记录；draft start 复用首条 Message；send 在 Session 行锁内原子追加连续 Message/Turn、`session.send` Command、Outbox、3 条 Event、1 条 Audit 和幂等响应；重放不重复账本 | 其余后续命令也统一使用领域事务、SessionEvent、Command、Outbox、幂等响应和必要审计 |
 | 配置固定 | 新 Session 由服务端固定 Published ExpertRevision、Ready EnvironmentRevision 和 Repository binding | 增加不可变 ExecutionSnapshot；legacy `configurationResolutionVersion=0` 在修复前只读 |
-| 可见性 | `private` 仅 creator；`space` 对有效 Organization + Space member 可见；查询中重检 membership | User/Group ShareGrant、实时撤权、合规访问与一致的 404 concealment |
-| ServiceAccount | token 可被认证；Session list/get/create 与 Catalog 均在 repository 访问前显式拒绝 ServiceAccount，不接受 membership 作为替代授权 | 绑定 Organization、Space、Automation/Session、audience 与 operation scope；无通配默认权限 |
-| 并发 | create/start/send/archive/restore 幂等记录按 organization + actor + method + canonical path + key 隔离；rename/draft start/archive/restore 使用 `If-Match`；send 使用 Session 行锁分配连续 Message sequence/Turn ordinal；Worker 只 claim 最早的非终态 Turn；PostgreSQL 并发 CAS、重放与 FIFO 已测试 | 其余命令统一幂等；跨 Session 调度仍需配额与权重 |
+| 可见性 | `private` creator 与有效 User/Group ShareGrant 可见；`space` 对有效 Organization + Space member 可见；查询中动态重检 membership、Group membership、grant 状态与 expiry；单资源统一 conceal | 实时撤权通知与合规访问 |
+| ServiceAccount | JWT audience、当前 Organization/Space membership、active credential 和无通配 exact binding 取交集；仅允许绑定 Expert 的 `session.create` 及绑定 Session 的 `session.send`/`session.archive`，并在写事务内重检；其他 Session/Catalog 请求 fail closed | 受控身份面之外的凭据/绑定管理 API、Automation delegation chain 与命令领取时重检 |
+| 并发 | 所有 Session 命令和 ShareGrant 写的幂等记录按 organization + actor + method + canonical path + key 隔离；强版本写使用 `If-Match`；send 使用 Session 行锁分配连续 Message sequence/Turn ordinal；Worker 只 claim 最早的非终态 Turn；PostgreSQL 并发 CAS、重放与 FIFO 已测试 | 跨 Session 调度仍需配额与权重 |
 | 数据隔离 | 已持久化 Session 子表和幂等引用使用复合 tenant FK；在线索引 + `NOT VALID/VALIDATE` 迁移可修复已版本化旧库；repository SQL 在单条查询中重检 membership | FORCE RLS/统一 tenant guard；受限运行角色不可绕过；覆盖后续新增实体 |
-| 生命周期 | draft start 与 protocol-1 create 均进入 queued；send 在 active/waiting/paused 追加 FIFO，在 completed/failed 重新进入 queued；archive/restore 与执行状态正交且不伪造 activity；Worker 可驱动 queued -> active -> completed/failed/canceled，当前 Turn 终止后有排队 Turn 则回到 queued；retry 回到 queued 并追加 Attempt，租约过期可恢复 | pause/resume/cancel 等用户命令 |
-| 实时与审计 | create/start/send/rename/archive/restore/execution 写连续、不可 UPDATE/DELETE 的 allowlist SessionEvent；Message/Event 有分页读 API，Event 支持 `Last-Event-ID` SSE；对应成功路径写脱敏 AuditEvent | 所有拒绝/失败的可靠 append-only 审计、独立受限数据库角色 |
+| 生命周期 | draft start 与 protocol-1 create 均进入 queued；send 在 active/waiting/paused 追加 FIFO，在 completed/failed 重新进入 queued；pause/cancel 以安全点 Command 异步收敛，resume/retry 追加新执行记录；archive/restore 与执行状态正交；Worker 可驱动 queued -> active -> completed/failed/canceled，租约过期可恢复 | ToolCall/Approval 等完整运行时状态机 |
+| 实时与审计 | create/start/send/rename/archive/restore/pause/resume/cancel/retry/share/revoke/execution 写连续、不可 UPDATE/DELETE 的 allowlist SessionEvent；Message/Event 有分页读 API，Event 支持 `Last-Event-ID` SSE；对应成功路径写脱敏 AuditEvent | 所有拒绝/失败的可靠 append-only 审计、独立受限数据库角色 |
 | 保留/删除 | 没有 Session retention job；普通 API 没有删除 Session | legal hold、幂等 retention job、deletion ledger、备份恢复后重放删除 |
 
 当前准确名称是“权威 Session、只读 Catalog 与基础对话执行纵向切片”。上表 Target 未全部通过前不得标记生产可用或 GA。
@@ -270,7 +270,7 @@ authenticated identity
 | Organization admin/owner，Private 且无 grant | conceal 404 | conceal 404 | conceal 404 | 普通访问 conceal 404 |
 | Approver，仅因关联 Approval | 不允许 | 不允许 | 不允许 | 仅最小决策证据，不自动获得 Session 正文 |
 | Compliance actor + 独立 permission + reason | 不允许普通 mutation | 不允许普通 mutation | 不允许普通 mutation | break-glass 只读并强制审计 |
-| ServiceAccount | 默认拒绝 | 仅绑定 Automation 的 `session.archive` scope | 默认拒绝 | 仅绑定 Session/Automation 和 operation scope |
+| ServiceAccount | 默认拒绝 | 仅 exact Session binding 的 `session.archive` scope | 默认拒绝 | 默认拒绝；不提供 list/get/SSE |
 
 Session title 是共享元数据，因此 collaborator rename 会影响所有授权用户并产生 AuditEvent。Pin 是个人偏好，不使用本矩阵。
 
@@ -292,17 +292,17 @@ ShareGrant 只支持同 Organization 的 User/Group principal、`viewer|collabor
 - grant 只授予 Session 协作表面，不扩大 Expert、Environment、Secret、Tool、File Organization scope 或 Approval 权限。
 - Share URL 只携带不可枚举 Session ID，不是 bearer credential；所有请求仍需认证。
 
-Target ShareGrant 单资源必须有 version/ETag；更新或 revoke 要求 If-Match。当前 OpenAPI 的 revoke 尚未声明 If-Match/412，必须先修订契约再实现，避免管理员与 creator 并发覆盖 grant 状态。
+Current ShareGrant 单资源具有 version/ETag；revoke 要求 If-Match 并使用事务内 CAS。创建、撤销、过期与 Group membership 变化都会在读取和写入时按当前事实重新鉴权，撤权后的幂等重放不返回旧响应。
 
 ## 9. ServiceAccount 规则
 
-Target ServiceAccount credential 必须绑定 `organizationId`、`spaceId`、`audience`、允许的 operation scopes，以及 Automation/Session/Expert 中至少一个资源约束。权限是绑定、角色和 policy 的交集，不允许 `*` 默认 scope。
+Current ServiceAccount credential 绑定 `organizationId` 与 `audience`；operation binding 绑定 `spaceId`、允许的 scope 以及 Expert 或 Session exact resource。权限是当前 Organization/Space membership、credential 状态、audience 与 operation binding 的交集，数据库约束拒绝 `*` resource。
 
 - 自动化可用 `session.create`、`session.send` 和按 Trigger 配置的 `session.archive`；不能 rename、restore、share、作人工 Approval 或进行 compliance access。
 - worker 使用短期 delegation token，只能操作绑定 Session/Turn/Attempt，不能枚举其他 Session。
-- 每次 Command claim 和高风险 ToolCall 执行前重检 ServiceAccount 状态、scope、资源 binding 和 policy；撤销后未执行命令进入 canceled/failed policy 状态，不继续外部副作用。
-- ServiceAccount 活动的 AuditEvent 记录 service account ID、发起 Automation/Command 和 delegation chain，不把它伪装成人类 actor。
-- Current Session 路由尚未执行上述 operation scope，因此 ServiceAccount 生产访问是 **Blocked**；在 scope 集成测试通过前边缘应拒绝其 Session 领域请求。
+- create/send/archive 在应用策略预检后，于同一 PostgreSQL 写事务内重新锁定并检查 membership、credential、audience 和 exact binding；撤权后的幂等重放不返回旧响应。
+- ServiceAccount 活动的 Turn 使用 `initiatorType=event`，AuditEvent 记录 service account actor 与命中的 policy reason，不把它伪装成人类 actor。
+- 其他 Session 路由与 Catalog 继续 fail closed。ServiceAccount credential/binding 当前只由受控数据库/身份面配置，没有公开管理 API；Automation/Command delegation chain 和命令领取时重检仍是 Target。
 
 ## 10. Rename、archive 与 restore 命令契约
 

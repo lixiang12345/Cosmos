@@ -32,6 +32,7 @@ export type CreateSessionRecord = {
   spaceId: string
   actorId: string
   actorKind: 'user' | 'service_account'
+  actorAudience?: string
   requestId: string
   idempotencyKey: string
   request: CreateSessionRequest
@@ -52,6 +53,7 @@ export type StartSessionRecord = {
   sessionId: string
   actorId: string
   actorKind: 'user' | 'service_account'
+  actorAudience?: string
   requestId: string
   idempotencyKey: string
   expectedVersion: number
@@ -68,6 +70,7 @@ export type SendSessionMessageRecord = {
   sessionId: string
   actorId: string
   actorKind: 'user' | 'service_account'
+  actorAudience?: string
   requestId: string
   idempotencyKey: string
   request: CreateSessionRequest['message']
@@ -84,6 +87,7 @@ type SessionMutationRecord = {
   sessionId: string
   actorId: string
   actorKind: 'user' | 'service_account'
+  actorAudience?: string
   requestId: string
   expectedVersion: number
 }
@@ -470,7 +474,7 @@ export function createSessionRecords(
     id: createId(),
     sessionId: session.id,
     ordinal: 1,
-    initiatorType: 'user',
+    initiatorType: record.actorKind === 'service_account' ? 'event' : 'user',
     initiatorId: record.actorId,
     inputMessageId: message.id,
     status: 'queued',
@@ -547,7 +551,7 @@ export function createSessionFollowUpRecords(
     id: createId(),
     sessionId: session.id,
     ordinal: options.turnOrdinal,
-    initiatorType: 'user',
+    initiatorType: record.actorKind === 'service_account' ? 'event' : 'user',
     initiatorId: record.actorId,
     inputMessageId: message.id,
     status: 'queued',

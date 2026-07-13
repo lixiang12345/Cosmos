@@ -51,7 +51,7 @@ describe('JWT authentication', () => {
       .setIssuedAt().setExpirationTime('5m').sign(privateKey)
 
     await expect(serviceAuthenticate(`Bearer ${token}`)).resolves.toEqual({
-      id: 'service-1', kind: 'service_account',
+      id: 'service-1', kind: 'service_account', audience: 'relay-api',
     })
   })
 

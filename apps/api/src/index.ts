@@ -61,6 +61,14 @@ export {
 } from './postgres-session-repository.js'
 export { PostgresSessionTimelineRepository } from './postgres-session-timeline-repository.js'
 export {
+  DenyServiceAccountPolicyRepository,
+  PostgresServiceAccountPolicyRepository,
+  type ServiceAccountAuthorization,
+  type ServiceAccountPolicyRepository,
+  type ServiceAccountSessionResourceType,
+  type ServiceAccountSessionScope,
+} from './service-account-policy-repository.js'
+export {
   SessionTimelineProjectionError,
   type SessionTimelineListOptions,
   type SessionTimelineRepository,
