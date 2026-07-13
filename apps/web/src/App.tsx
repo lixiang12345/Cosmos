@@ -1,4 +1,4 @@
-import type { SessionDto, SessionEventDto, SessionMessageDto } from '@relay/contracts'
+import { DEFAULT_AGENT_MODEL, type SessionDto, type SessionEventDto, type SessionMessageDto } from '@relay/contracts'
 import { AlertTriangle, CheckCircle2, Home, LoaderCircle, Menu, RefreshCw, X } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
@@ -58,6 +58,7 @@ const RemoteExpertsPage = lazy(() => import('./pages/RemoteCatalogPages').then((
 const RemoteExpertDetailPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteExpertDetailPage })))
 const RemoteEnvironmentsPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteEnvironmentsPage })))
 const RemoteFilesPage = lazy(() => import('./pages/RemoteFilesPage').then((module) => ({ default: module.RemoteFilesPage })))
+const RemoteApprovalsPage = lazy(() => import('./pages/RemoteApprovalsPage').then((module) => ({ default: module.RemoteApprovalsPage })))
 const CosmosHomePage = lazy(() => import('./pages/CosmosOperationsPages').then((module) => ({ default: module.CosmosHomePage })))
 const CosmosFilesPage = lazy(() => import('./pages/CosmosOperationsPages').then((module) => ({ default: module.CosmosFilesPage })))
 const CosmosApprovalsPage = lazy(() => import('./pages/CosmosOperationsPages').then((module) => ({ default: module.CosmosApprovalsPage })))
@@ -106,7 +107,7 @@ function sessionDtoToDemoRun(session: SessionDto, locale: 'zh' | 'en'): Run {
     updatedAt: session.updatedAt,
     elapsed: '0s',
     progress: session.status === 'completed' ? 100 : 0,
-    model: 'GPT-5.4',
+    model: DEFAULT_AGENT_MODEL,
     summary: session.summary,
     baseBranch: session.baseBranch,
     acceptanceCriteria: [],
@@ -1095,7 +1096,7 @@ function RelayApp() {
     const isDraft = mode === 'draft'
     const expert = input.expertId ? scopedExpertStore.experts.find((item) => item.id === input.expertId) : undefined
     const version = expert?.publishedVersionId ? getExpertVersion(scopedExpertStore, expert.publishedVersionId) : undefined
-    const model = version?.configSnapshot.model ?? expert?.draftConfig.model ?? 'GPT-5.4'
+    const model = version?.configSnapshot.model ?? expert?.draftConfig.model ?? DEFAULT_AGENT_MODEL
     const requestFingerprint = JSON.stringify({ spaceId: activeSpace.id, mode, input })
     const idempotencyKey = sessionIdempotencyKeys.current.get(requestFingerprint) ?? makeSessionIdempotencyKey()
     sessionIdempotencyKeys.current.set(requestFingerprint, idempotencyKey)
@@ -1323,7 +1324,7 @@ function RelayApp() {
     const result = createBlankExpert(scopedExpertStore, {
       config: {
         name: locale === 'zh' ? '未命名专家' : 'Untitled expert',
-        model: 'GPT-5.4',
+        model: DEFAULT_AGENT_MODEL,
         repositories: repository ? [repository] : [],
         environment: environment ? { environmentId: environment.id, image: environment.image } : undefined,
       },
@@ -1337,7 +1338,7 @@ function RelayApp() {
     const environment = scope.environments.find((item) => item.status === 'ready')
     const result = createExpertFromTemplate(scopedExpertStore, templateId, {
       config: {
-        model: 'GPT-5.4',
+        model: DEFAULT_AGENT_MODEL,
         repositories: repository ? [repository] : [],
         capabilities: ['read-code', 'write-code', 'run-command', 'create-pr'],
         constraints: locale === 'zh' ? ['只修改任务范围内的代码', '外部写操作遵循审批策略'] : ['Only change code within task scope', 'Respect approval policy for external writes'],
@@ -1664,7 +1665,7 @@ function RelayApp() {
         updatedAt: now,
         elapsed: '4s',
         progress: 8,
-        model: expert?.draftConfig.model ?? 'GPT-5.4',
+        model: expert?.draftConfig.model ?? DEFAULT_AGENT_MODEL,
         summary: draft.summary,
         baseBranch: repository?.defaultBranch ?? 'main',
         environmentId: scope.environments.find((environment) => environment.status === 'ready')?.id,
@@ -1776,7 +1777,16 @@ function RelayApp() {
               onOpenNavigation={openNavigation}
               onRequestModification={(path) => openNewTask(undefined, locale === 'zh' ? `请修改 ${path}：` : `Please update ${path}:`)}
             />} />
-        <Route path="/approvals" element={demoMode ? <CosmosApprovalsPage runs={scopedRuns} onOpenNavigation={openNavigation} onOpenSession={openSession} onDecision={decide} /> : productionUnavailable} />
+        <Route path="/approvals" element={demoMode
+          ? <CosmosApprovalsPage runs={scopedRuns} onOpenNavigation={openNavigation} onOpenSession={openSession} onDecision={decide} />
+          : <RemoteApprovalsPage
+              organizationId={organizationId}
+              spaceId={activeSpace.id}
+              auth={catalogAuth}
+              credentialVersion={credentialVersion}
+              onOpenNavigation={openNavigation}
+              onOpenSession={openSession}
+            />} />
         <Route path="/automations" element={demoMode ? <CosmosAutomationsPage onOpenNavigation={openNavigation} /> : productionUnavailable} />
         <Route path="/automations/events" element={demoMode ? <CosmosEventLogPage onOpenNavigation={openNavigation} onSessionCreated={materializeAutomationSession} /> : productionUnavailable} />
         <Route path="/automations/history" element={demoMode ? <CosmosRunHistoryPage runs={scopedRuns} onOpenNavigation={openNavigation} onOpenSession={openSession} /> : productionUnavailable} />

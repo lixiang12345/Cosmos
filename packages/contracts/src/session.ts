@@ -1,4 +1,10 @@
 import { z } from 'zod'
+import {
+  ApprovalDecisionValueSchema,
+  ApprovalStatusSchema,
+  ToolCallStatusSchema,
+  ToolRiskLevelSchema,
+} from './tool-approval.js'
 
 export const SessionStatusSchema = z.enum([
   'draft',
@@ -357,6 +363,9 @@ export const SessionEventTypeSchema = z.enum([
   'artifact.updated',
   'artifact.removed',
   'file.version.created',
+  'tool_call.updated',
+  'approval.requested',
+  'approval.decided',
 ])
 
 export type SessionEventType = z.infer<typeof SessionEventTypeSchema>
@@ -484,6 +493,54 @@ export const SessionEventDtoSchema = z.discriminatedUnion('type', [
       size: z.number().int().nonnegative().max(1_048_576),
     }).strict(),
   }).strict(),
+  z.object({
+    ...SessionEventBaseShape,
+    type: z.literal('tool_call.updated'),
+    resourceType: z.literal('tool_call'),
+    resourceId: IdentifierSchema,
+    payload: z.object({
+      toolCallId: IdentifierSchema,
+      turnId: IdentifierSchema,
+      attemptId: IdentifierSchema,
+      toolName: z.string().trim().min(1).max(160),
+      operation: z.string().trim().min(1).max(160),
+      riskLevel: ToolRiskLevelSchema,
+      status: ToolCallStatusSchema,
+      approvalId: IdentifierSchema.nullable(),
+      version: z.number().int().positive(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    ...SessionEventBaseShape,
+    type: z.literal('approval.requested'),
+    resourceType: z.literal('approval'),
+    resourceId: IdentifierSchema,
+    payload: z.object({
+      approvalId: IdentifierSchema,
+      toolCallId: IdentifierSchema,
+      action: z.string().trim().min(1).max(240),
+      riskLevel: ToolRiskLevelSchema,
+      status: z.literal('pending'),
+      requiredApprovals: z.number().int().min(1).max(2),
+      expiresAt: TimestampSchema,
+      version: z.number().int().positive(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    ...SessionEventBaseShape,
+    type: z.literal('approval.decided'),
+    resourceType: z.literal('approval'),
+    resourceId: IdentifierSchema,
+    payload: z.object({
+      approvalId: IdentifierSchema,
+      toolCallId: IdentifierSchema,
+      recordedDecision: z.union([ApprovalDecisionValueSchema, z.literal('expired'), z.literal('canceled')]),
+      status: ApprovalStatusSchema,
+      approvalCount: z.number().int().min(0).max(2),
+      requiredApprovals: z.number().int().min(1).max(2),
+      version: z.number().int().positive(),
+    }).strict(),
+  }).strict(),
 ]).superRefine((event, context) => {
   if (event.resourceType === 'session'
     && event.resourceId !== event.sessionId) {
@@ -545,6 +602,14 @@ export const SessionEventDtoSchema = z.discriminatedUnion('type', [
       path: ['payload', 'fileId'],
       message: 'fileId must match resourceId',
     })
+  }
+  if ('toolCallId' in event.payload && event.resourceType === 'tool_call'
+    && event.resourceId !== event.payload.toolCallId) {
+    context.addIssue({ code: 'custom', path: ['payload', 'toolCallId'], message: 'toolCallId must match resourceId' })
+  }
+  if ('approvalId' in event.payload && event.resourceType === 'approval'
+    && event.resourceId !== event.payload.approvalId) {
+    context.addIssue({ code: 'custom', path: ['payload', 'approvalId'], message: 'approvalId must match resourceId' })
   }
 })
 

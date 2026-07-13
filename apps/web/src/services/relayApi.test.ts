@@ -1,4 +1,5 @@
 import type {
+  ApprovalDto,
   CreateSessionRequestInput,
   EnvironmentDetailDto,
   EnvironmentSummaryDto,
@@ -17,6 +18,8 @@ import {
   archiveSession,
   cancelSession,
   createSession,
+  decideApproval,
+  getApproval,
   getEnvironment,
   getExpert,
   getFile,
@@ -26,6 +29,7 @@ import {
   getSession,
   getRelayApiBaseUrl,
   listEnvironments,
+  listApprovals,
   listExperts,
   listFiles,
   listFileVersions,
@@ -80,6 +84,17 @@ const fileVersion: FileVersionDto = {
   version: 2, contentHash: 'a'.repeat(64), size: file.size,
   createdByToolCallId: file.lastWrittenByToolCallId, sourceSessionId: session.id,
   sourceTurnId: 'turn-2', createdAt: session.updatedAt,
+}
+
+const approval: ApprovalDto = {
+  organizationId: 'relay', spaceId: 'space-platform', id: 'approval-1',
+  sessionId: session.id, turnId: 'turn-1', toolCallId: 'tool-call-1',
+  action: 'Merge pull request #42', riskLevel: 'high', reasons: ['Protected branch write'],
+  evidence: [{ type: 'test', label: 'CI', value: 'Required checks passed' }],
+  status: 'pending', requestedBy: 'requester-1', assignedTo: ['reviewer-1'],
+  requiredApprovals: 1, approvalCount: 0, actorHasDecided: false, expiresAt: '2026-07-14T01:00:00.000Z',
+  decidedBy: null, decisionNote: null, decidedAt: null, createdAt: session.createdAt,
+  updatedAt: session.updatedAt, version: 1,
 }
 
 const messagePage: SessionMessagePage = {
@@ -957,6 +972,44 @@ describe('Relay API client', () => {
     await expect(getEnvironment('relay', 'space-platform', environmentDetail.id)).rejects.toMatchObject({
       code: 'INVALID_RESPONSE', status: 200,
     })
+  })
+
+  it('lists, scopes, and decides Approvals with concurrency and idempotency headers', async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({
+        organizationId: approval.organizationId,
+        spaceId: approval.spaceId,
+        items: [approval],
+        page: { nextCursor: null, hasMore: false },
+      }))
+      .mockResolvedValueOnce(jsonResponse(approval))
+      .mockResolvedValueOnce(jsonResponse({
+        ...approval,
+        status: 'approved',
+        approvalCount: 1,
+        decidedBy: 'reviewer-1',
+        decisionNote: 'Reviewed.',
+        decidedAt: '2026-07-13T02:00:00.000Z',
+        updatedAt: '2026-07-13T02:00:00.000Z',
+        version: 2,
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listApprovals('relay', 'space-platform', {
+      status: 'pending', assignedToMe: true, sessionId: session.id, limit: 25,
+    })).resolves.toMatchObject({ items: [{ id: approval.id }] })
+    await expect(getApproval('relay', 'space-platform', approval.id)).resolves.toEqual(approval)
+    await expect(decideApproval(
+      'relay', 'space-platform', approval.id,
+      { decision: 'approved', note: 'Reviewed.' }, 1, 'approval-decision-key',
+    )).resolves.toMatchObject({ status: 'approved', version: 2 })
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      `/api/v1/organizations/relay/spaces/space-platform/approvals?limit=25&status=pending&assignedToMe=true&sessionId=${session.id}`,
+    )
+    const decisionHeaders = new Headers(fetchMock.mock.calls[2][1]?.headers)
+    expect(decisionHeaders.get('Idempotency-Key')).toBe('approval-decision-key')
+    expect(decisionHeaders.get('If-Match')).toBe('"1"')
   })
 
   it('discovers the authenticated actor and authorized tenant hierarchy', async () => {

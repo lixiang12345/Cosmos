@@ -57,7 +57,9 @@ export class AgentProviderError extends Error {
 
 export type OpenAiCompatibleChatCompletionsProviderOptions = Readonly<{
   baseUrl: string
-  apiKey: string
+  apiKey?: string
+  apiKeysByModel?: Readonly<Record<string, string>>
+  allowedModels?: readonly string[]
   connectionTimeoutMs?: number
   totalTimeoutMs?: number
   maxOutputTokens?: number
@@ -78,7 +80,9 @@ const PROVIDER_REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
 
 type ResolvedProviderOptions = {
   endpoint: URL
-  apiKey: string
+  fallbackApiKey: string | null
+  apiKeysByModel: ReadonlyMap<string, string>
+  allowedModels: ReadonlySet<string> | null
   connectionTimeoutMs: number
   totalTimeoutMs: number
   maxOutputTokens: number
@@ -125,10 +129,42 @@ function createEndpoint(baseUrl: string) {
   return new URL('chat/completions', url)
 }
 
+function validateApiKey(value: string, name: string) {
+  const apiKey = value.trim()
+  if (!apiKey || apiKey !== value || /\s/.test(apiKey)) {
+    throw terminalError('provider_validation_error', `${name} must be a non-empty bearer token.`)
+  }
+  return apiKey
+}
+
+function validateModelIdentifier(value: string, name: string) {
+  if (!value || value !== value.trim() || value.length > MAX_MODEL_LENGTH) {
+    throw terminalError('provider_validation_error', `${name} must be a valid model identifier.`)
+  }
+  return value
+}
+
 function resolveOptions(options: OpenAiCompatibleChatCompletionsProviderOptions): ResolvedProviderOptions {
-  const apiKey = options.apiKey.trim()
-  if (!apiKey || apiKey !== options.apiKey || /\s/.test(apiKey)) {
-    throw terminalError('provider_validation_error', 'Provider API key must be a non-empty bearer token.')
+  const fallbackApiKey = options.apiKey === undefined
+    ? null
+    : validateApiKey(options.apiKey, 'Provider API key')
+  const apiKeysByModel = new Map(Object.entries(options.apiKeysByModel ?? {}).map(([model, apiKey]) => [
+    validateModelIdentifier(model, 'Provider credential model'),
+    validateApiKey(apiKey, 'Provider model API key'),
+  ]))
+  if (fallbackApiKey === null && apiKeysByModel.size === 0) {
+    throw terminalError('provider_validation_error', 'At least one Provider API key is required.')
+  }
+  const allowedModels = options.allowedModels === undefined
+    ? null
+    : new Set(options.allowedModels.map((model) => validateModelIdentifier(model, 'Allowed Provider model')))
+  if (allowedModels?.size === 0 || allowedModels?.size !== options.allowedModels?.length) {
+    throw terminalError('provider_validation_error', 'Allowed Provider models must be non-empty and unique.')
+  }
+  for (const model of allowedModels ?? []) {
+    if (fallbackApiKey === null && !apiKeysByModel.has(model)) {
+      throw terminalError('provider_validation_error', 'Every allowed Provider model requires a credential.')
+    }
   }
   const connectionTimeoutMs = validateInteger(
     options.connectionTimeoutMs ?? DEFAULT_CONNECTION_TIMEOUT_MS,
@@ -150,7 +186,9 @@ function resolveOptions(options: OpenAiCompatibleChatCompletionsProviderOptions)
   }
   return {
     endpoint: createEndpoint(options.baseUrl),
-    apiKey,
+    fallbackApiKey,
+    apiKeysByModel,
+    allowedModels,
     connectionTimeoutMs,
     totalTimeoutMs,
     maxOutputTokens: validateInteger(
@@ -173,6 +211,17 @@ function resolveOptions(options: OpenAiCompatibleChatCompletionsProviderOptions)
     ),
     fetchImpl: options.fetchImpl ?? fetch,
   }
+}
+
+function apiKeyForModel(options: ResolvedProviderOptions, model: string) {
+  if (options.allowedModels && !options.allowedModels.has(model)) {
+    throw terminalError('provider_validation_error', 'Pinned model is not enabled for this Worker.')
+  }
+  const apiKey = options.apiKeysByModel.get(model) ?? options.fallbackApiKey
+  if (!apiKey) {
+    throw terminalError('provider_configuration_error', 'Pinned model has no configured Provider credential.')
+  }
+  return apiKey
 }
 
 function validateInput(input: ConversationAgentExecutionInput) {
@@ -367,6 +416,7 @@ export class OpenAiCompatibleChatCompletionsProvider implements ConversationAgen
 
   async execute(input: ConversationAgentExecutionInput): Promise<ConversationAgentExecutionResult> {
     validateInput(input)
+    const apiKey = apiKeyForModel(this.#options, input.model)
     if (input.signal?.aborted) {
       throw terminalError('execution_cancelled', 'Agent execution was cancelled.')
     }
@@ -388,7 +438,7 @@ export class OpenAiCompatibleChatCompletionsProvider implements ConversationAgen
           method: 'POST',
           headers: {
             accept: 'application/json',
-            authorization: `Bearer ${this.#options.apiKey}`,
+            authorization: `Bearer ${apiKey}`,
             'content-type': 'application/json',
           },
           body: JSON.stringify({

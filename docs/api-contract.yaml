@@ -1491,12 +1491,13 @@ paths:
 
   /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/tool-calls:
     parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
       - $ref: '#/components/parameters/SessionId'
     get:
       tags: [ToolCalls]
       operationId: listSessionToolCalls
+      x-relay-implementation-status: implemented
       summary: List redacted ToolCall metadata
       parameters:
         - $ref: '#/components/parameters/Cursor'
@@ -1504,8 +1505,7 @@ paths:
         - name: turnId
           in: query
           schema:
-            type: string
-            format: uuid
+            $ref: '#/components/schemas/RuntimeIdentifier'
         - name: status
           in: query
           schema:
@@ -1516,17 +1516,17 @@ paths:
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: '#/components/schemas/Page'
-                  - type: object
-                    required: [items]
-                    properties:
-                      items:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/ToolCall'
+                $ref: '#/components/schemas/RuntimeToolCallListResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
 
   /organizations/{organizationId}/spaces/{spaceId}/files:
     parameters:
@@ -2178,11 +2178,12 @@ paths:
 
   /organizations/{organizationId}/spaces/{spaceId}/approvals:
     parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
     get:
       tags: [Approvals]
       operationId: listApprovals
+      x-relay-implementation-status: implemented
       summary: List approvals visible or assigned to the caller
       parameters:
         - $ref: '#/components/parameters/Cursor'
@@ -2198,34 +2199,32 @@ paths:
         - name: sessionId
           in: query
           schema:
-            type: string
-            format: uuid
+            $ref: '#/components/schemas/RuntimeIdentifier'
       responses:
         '200':
           description: Approval page
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: '#/components/schemas/Page'
-                  - type: object
-                    required: [items]
-                    properties:
-                      items:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/Approval'
+                $ref: '#/components/schemas/RuntimeApprovalListResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/RuntimeForbidden'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
 
   /organizations/{organizationId}/spaces/{spaceId}/approvals/{approvalId}:
     parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
       - $ref: '#/components/parameters/ApprovalId'
     get:
       tags: [Approvals]
       operationId: getApproval
+      x-relay-implementation-status: implemented
       summary: Get an Approval and redacted evidence
       responses:
         '200':
@@ -2236,18 +2235,27 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Approval'
+                $ref: '#/components/schemas/RuntimeApproval'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
 
   /organizations/{organizationId}/spaces/{spaceId}/approvals/{approvalId}/decision:
     parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
       - $ref: '#/components/parameters/ApprovalId'
     post:
       tags: [Approvals]
       operationId: decideApproval
+      x-relay-implementation-status: implemented
       summary: Atomically decide a pending Approval
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -2264,15 +2272,23 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Approval'
+                $ref: '#/components/schemas/RuntimeApproval'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
         '409':
-          description: Approval already decided or invalid transition
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
+          $ref: '#/components/responses/RuntimeConflict'
         '412':
-          $ref: '#/components/responses/PreconditionFailed'
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '428':
+          $ref: '#/components/responses/RuntimePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
 
 components:
   securitySchemes:
@@ -2381,8 +2397,7 @@ components:
       in: path
       required: true
       schema:
-        type: string
-        format: uuid
+        $ref: '#/components/schemas/RuntimeIdentifier'
     Cursor:
       name: cursor
       in: query
@@ -4229,9 +4244,16 @@ components:
             - message.created
             - turn.queued
             - attempt.updated
+            - artifact.created
+            - artifact.updated
+            - artifact.removed
+            - file.version.created
+            - tool_call.updated
+            - approval.requested
+            - approval.decided
         resourceType:
           type: string
-          enum: [session, message, turn, attempt]
+          enum: [session, message, turn, attempt, artifact, file, tool_call, approval]
         resourceId:
           $ref: '#/components/schemas/RuntimeIdentifier'
         actorId:
@@ -4326,6 +4348,134 @@ components:
                 failureCode:
                   type: [string, 'null']
                   maxLength: 128
+              additionalProperties: false
+            - type: object
+              required: [artifactId, type, label, status, version, removedAt]
+              properties:
+                artifactId:
+                  $ref: '#/components/schemas/RuntimeIdentifier'
+                type:
+                  type: string
+                  enum: [pull_request, branch, commit, issue, link, test_report, deployment, document]
+                label:
+                  type: string
+                  minLength: 1
+                  maxLength: 240
+                status:
+                  type: [string, 'null']
+                  minLength: 1
+                  maxLength: 128
+                version:
+                  type: integer
+                  minimum: 1
+                removedAt:
+                  oneOf:
+                    - $ref: '#/components/schemas/Timestamp'
+                    - type: 'null'
+              additionalProperties: false
+            - type: object
+              required: [fileId, fileVersionId, scope, path, version, size]
+              properties:
+                fileId:
+                  $ref: '#/components/schemas/RuntimeIdentifier'
+                fileVersionId:
+                  $ref: '#/components/schemas/RuntimeIdentifier'
+                scope:
+                  type: string
+                  enum: [workspace, user, organization]
+                path:
+                  type: string
+                  minLength: 1
+                  maxLength: 1024
+                version:
+                  type: integer
+                  minimum: 1
+                size:
+                  type: integer
+                  minimum: 0
+                  maximum: 1048576
+              additionalProperties: false
+            - type: object
+              required: [toolCallId, turnId, attemptId, toolName, operation, riskLevel, status, approvalId, version]
+              properties:
+                toolCallId:
+                  $ref: '#/components/schemas/RuntimeIdentifier'
+                turnId:
+                  $ref: '#/components/schemas/RuntimeIdentifier'
+                attemptId:
+                  $ref: '#/components/schemas/RuntimeIdentifier'
+                toolName:
+                  type: string
+                  minLength: 1
+                  maxLength: 160
+                operation:
+                  type: string
+                  minLength: 1
+                  maxLength: 160
+                riskLevel:
+                  type: string
+                  enum: [low, medium, high, critical]
+                status:
+                  type: string
+                  enum: [queued, approval_required, running, succeeded, failed, canceled]
+                approvalId:
+                  oneOf:
+                    - $ref: '#/components/schemas/RuntimeIdentifier'
+                    - type: 'null'
+                version:
+                  type: integer
+                  minimum: 1
+              additionalProperties: false
+            - type: object
+              required: [approvalId, toolCallId, action, riskLevel, status, requiredApprovals, expiresAt, version]
+              properties:
+                approvalId:
+                  $ref: '#/components/schemas/RuntimeIdentifier'
+                toolCallId:
+                  $ref: '#/components/schemas/RuntimeIdentifier'
+                action:
+                  type: string
+                  minLength: 1
+                  maxLength: 240
+                riskLevel:
+                  type: string
+                  enum: [low, medium, high, critical]
+                status:
+                  type: string
+                  const: pending
+                requiredApprovals:
+                  type: integer
+                  minimum: 1
+                  maximum: 2
+                expiresAt:
+                  $ref: '#/components/schemas/Timestamp'
+                version:
+                  type: integer
+                  minimum: 1
+              additionalProperties: false
+            - type: object
+              required: [approvalId, toolCallId, recordedDecision, status, approvalCount, requiredApprovals, version]
+              properties:
+                approvalId:
+                  $ref: '#/components/schemas/RuntimeIdentifier'
+                toolCallId:
+                  $ref: '#/components/schemas/RuntimeIdentifier'
+                recordedDecision:
+                  type: string
+                  enum: [approved, changes_requested, rejected, expired, canceled]
+                status:
+                  $ref: '#/components/schemas/ApprovalStatus'
+                approvalCount:
+                  type: integer
+                  minimum: 0
+                  maximum: 2
+                requiredApprovals:
+                  type: integer
+                  minimum: 1
+                  maximum: 2
+                version:
+                  type: integer
+                  minimum: 1
               additionalProperties: false
       additionalProperties: false
     SessionEventPage:
@@ -5217,23 +5367,24 @@ components:
       enum: [queued, approval_required, running, succeeded, failed, canceled]
     ToolCall:
       type: object
-      required: [id, sessionId, turnId, attemptId, toolName, operation, riskLevel, status, inputSummary, createdAt]
+      required: [organizationId, spaceId, id, sessionId, turnId, attemptId, workerId, toolName, operation, riskLevel, status, inputSummary, outputSummary, approvalId, createdAt, startedAt, completedAt, version]
       properties:
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        spaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
         id:
-          type: string
-          format: uuid
+          $ref: '#/components/schemas/RuntimeIdentifier'
         sessionId:
-          type: string
-          format: uuid
+          $ref: '#/components/schemas/RuntimeIdentifier'
         turnId:
-          type: string
-          format: uuid
+          $ref: '#/components/schemas/RuntimeIdentifier'
         attemptId:
-          type: string
-          format: uuid
+          $ref: '#/components/schemas/RuntimeIdentifier'
         workerId:
-          type: [string, 'null']
-          format: uuid
+          oneOf:
+            - $ref: '#/components/schemas/RuntimeIdentifier'
+            - type: 'null'
         toolName:
           type: string
         operation:
@@ -5248,8 +5399,9 @@ components:
         outputSummary:
           type: [string, 'null']
         approvalId:
-          type: [string, 'null']
-          format: uuid
+          oneOf:
+            - $ref: '#/components/schemas/RuntimeIdentifier'
+            - type: 'null'
         createdAt:
           $ref: '#/components/schemas/Timestamp'
         startedAt:
@@ -5258,6 +5410,37 @@ components:
         completedAt:
           type: [string, 'null']
           format: date-time
+        version:
+          type: integer
+          minimum: 1
+      additionalProperties: false
+
+    RuntimeToolCallListResponse:
+      type: object
+      required: [organizationId, spaceId, sessionId, items, page]
+      properties:
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        spaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        sessionId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/ToolCall'
+        page:
+          type: object
+          required: [nextCursor, hasMore]
+          properties:
+            nextCursor:
+              type: [string, 'null']
+              maxLength: 2048
+            hasMore:
+              type: boolean
+          additionalProperties: false
+      additionalProperties: false
 
     FileScope:
       type: string
@@ -5464,67 +5647,6 @@ components:
     ApprovalStatus:
       type: string
       enum: [pending, approved, changes_requested, rejected, expired, canceled]
-    Approval:
-      allOf:
-        - $ref: '#/components/schemas/ResourceBase'
-        - type: object
-          required:
-            - spaceId
-            - sessionId
-            - turnId
-            - toolCallId
-            - action
-            - riskLevel
-            - reasons
-            - status
-            - requestedBy
-            - expiresAt
-          properties:
-            spaceId:
-              type: string
-              format: uuid
-            sessionId:
-              type: string
-              format: uuid
-            turnId:
-              type: string
-              format: uuid
-            toolCallId:
-              type: string
-              format: uuid
-            action:
-              type: string
-            riskLevel:
-              type: string
-              enum: [low, medium, high, critical]
-            reasons:
-              type: array
-              items:
-                type: string
-            evidence:
-              type: array
-              items:
-                $ref: '#/components/schemas/ApprovalEvidence'
-            status:
-              $ref: '#/components/schemas/ApprovalStatus'
-            requestedBy:
-              type: string
-              format: uuid
-            assignedTo:
-              type: array
-              items:
-                type: string
-                format: uuid
-            expiresAt:
-              $ref: '#/components/schemas/Timestamp'
-            decidedBy:
-              type: [string, 'null']
-              format: uuid
-            decisionNote:
-              type: [string, 'null']
-            decidedAt:
-              type: [string, 'null']
-              format: date-time
     ApprovalEvidence:
       type: object
       required: [type, label, value]
@@ -5546,4 +5668,129 @@ components:
         note:
           type: string
           maxLength: 5000
+      additionalProperties: false
+
+    RuntimeApproval:
+      type: object
+      required:
+        - organizationId
+        - spaceId
+        - id
+        - sessionId
+        - turnId
+        - toolCallId
+        - action
+        - riskLevel
+        - reasons
+        - evidence
+        - status
+        - requestedBy
+        - assignedTo
+        - requiredApprovals
+        - approvalCount
+        - actorHasDecided
+        - expiresAt
+        - decidedBy
+        - decisionNote
+        - decidedAt
+        - createdAt
+        - updatedAt
+        - version
+      properties:
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        spaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        id:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        sessionId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        turnId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        toolCallId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        action:
+          type: string
+          minLength: 1
+          maxLength: 240
+        riskLevel:
+          type: string
+          enum: [low, medium, high, critical]
+        reasons:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            type: string
+            minLength: 1
+            maxLength: 1000
+        evidence:
+          type: array
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/ApprovalEvidence'
+        status:
+          $ref: '#/components/schemas/ApprovalStatus'
+        requestedBy:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        assignedTo:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/RuntimeIdentifier'
+        requiredApprovals:
+          type: integer
+          minimum: 1
+          maximum: 2
+        approvalCount:
+          type: integer
+          minimum: 0
+          maximum: 2
+        actorHasDecided:
+          type: boolean
+        expiresAt:
+          $ref: '#/components/schemas/Timestamp'
+        decidedBy:
+          oneOf:
+            - $ref: '#/components/schemas/RuntimeIdentifier'
+            - type: 'null'
+        decisionNote:
+          type: [string, 'null']
+          maxLength: 5000
+        decidedAt:
+          type: [string, 'null']
+          format: date-time
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        updatedAt:
+          $ref: '#/components/schemas/Timestamp'
+        version:
+          type: integer
+          minimum: 1
+      additionalProperties: false
+
+    RuntimeApprovalListResponse:
+      type: object
+      required: [organizationId, spaceId, items, page]
+      properties:
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        spaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/RuntimeApproval'
+        page:
+          type: object
+          required: [nextCursor, hasMore]
+          properties:
+            nextCursor:
+              type: [string, 'null']
+              maxLength: 2048
+            hasMore:
+              type: boolean
+          additionalProperties: false
       additionalProperties: false

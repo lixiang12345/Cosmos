@@ -139,6 +139,21 @@ function eventLabel(event: SessionEventDto, locale: Locale) {
     `文件已写入：${event.payload.path} · v${event.payload.version}`,
     `File written: ${event.payload.path} · v${event.payload.version}`,
   )
+  if (event.type === 'tool_call.updated') return text(
+    locale,
+    `工具调用：${event.payload.toolName}.${event.payload.operation} · ${event.payload.status}`,
+    `Tool call: ${event.payload.toolName}.${event.payload.operation} · ${event.payload.status}`,
+  )
+  if (event.type === 'approval.requested') return text(
+    locale,
+    `等待审批：${event.payload.action}`,
+    `Approval requested: ${event.payload.action}`,
+  )
+  if (event.type === 'approval.decided') return text(
+    locale,
+    `审批已记录：${event.payload.recordedDecision} · ${event.payload.approvalCount}/${event.payload.requiredApprovals}`,
+    `Approval recorded: ${event.payload.recordedDecision} · ${event.payload.approvalCount}/${event.payload.requiredApprovals}`,
+  )
   if (!('number' in event.payload)) return event.type
   const attempt = `${text(locale, '第', 'Attempt ')}${event.payload.number}${text(locale, ' 次尝试', '')}`
   const statuses = {

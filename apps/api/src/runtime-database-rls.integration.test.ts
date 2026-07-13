@@ -150,9 +150,9 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
         AND relname NOT IN ('relay_schema_migrations', 'relay_worker_heartbeats')
     `)
     expect(protection.rows[0]).toEqual({
-      tenant_tables: '27',
-      rls_tables: '27',
-      forced_tables: '27',
+      tenant_tables: '32',
+      rls_tables: '32',
+      forced_tables: '32',
     })
   })
 
@@ -274,8 +274,10 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
     )
     expect(sessionsVisible.rows[0]?.count).toBe('2')
 
-    await expect(workerPool.query('SELECT * FROM relay_service_accounts'))
-      .rejects.toMatchObject({ code: '42501' })
+    const serviceAccountsVisible = await workerPool.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM relay_service_accounts',
+    )
+    expect(serviceAccountsVisible.rows[0]?.count).toBe('0')
     await expect(apiPool.query('SELECT * FROM relay_audit_events'))
       .rejects.toMatchObject({ code: '42501' })
     await expect(workerPool.query(`

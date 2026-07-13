@@ -1,5 +1,7 @@
 import {
   ApiErrorSchema,
+  ApprovalDtoSchema,
+  ApprovalListResponseSchema,
   CreateSessionResponseSchema,
   EnvironmentDetailDtoSchema,
   EnvironmentListResponseSchema,
@@ -20,6 +22,10 @@ import {
   SendSessionMessageResponseSchema,
   StartSessionResponseSchema,
   type ApiError,
+  type ApprovalDecisionRequestInput,
+  type ApprovalDto,
+  type ApprovalListResponse,
+  type ApprovalStatus,
   type CreateSessionRequestInput,
   type CreateSessionResponse,
   type EnvironmentDetailDto,
@@ -99,6 +105,12 @@ export type RelayFileContent = {
   contentType: string
   fileName?: string
   etag?: string
+}
+
+export type RelayApprovalListOptions = RelayCatalogListOptions & {
+  status?: ApprovalStatus
+  assignedToMe?: boolean
+  sessionId?: string
 }
 
 const sessionListRequests = new Map<string, Promise<SessionListResponse>>()
@@ -404,6 +416,14 @@ function filesPath(organizationId: string, spaceId: string) {
   return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/files`
 }
 
+function approvalsPath(organizationId: string, spaceId: string) {
+  return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/approvals`
+}
+
+function approvalPath(organizationId: string, spaceId: string, approvalId: string) {
+  return `${approvalsPath(organizationId, spaceId)}/${encodeURIComponent(approvalId)}`
+}
+
 function filePath(organizationId: string, spaceId: string, fileId: string) {
   return `${filesPath(organizationId, spaceId)}/${encodeURIComponent(fileId)}`
 }
@@ -423,6 +443,17 @@ function catalogListPath(path: string, options: RelayCatalogListOptions | undefi
   const query = new URLSearchParams()
   if (options?.cursor) query.set('cursor', options.cursor)
   if (options?.limit !== undefined) query.set('limit', String(options.limit))
+  const value = query.toString()
+  return value ? `${path}?${value}` : path
+}
+
+function approvalListPath(path: string, options: RelayApprovalListOptions | undefined) {
+  const query = new URLSearchParams()
+  if (options?.cursor) query.set('cursor', options.cursor)
+  if (options?.limit !== undefined) query.set('limit', String(options.limit))
+  if (options?.status) query.set('status', options.status)
+  if (options?.assignedToMe !== undefined) query.set('assignedToMe', String(options.assignedToMe))
+  if (options?.sessionId) query.set('sessionId', options.sessionId)
   const value = query.toString()
   return value ? `${path}?${value}` : path
 }
@@ -689,6 +720,82 @@ export function getFileContent(
   return requestBlob(`${filePath(organizationId, spaceId, fileId)}/content${suffix}`, {
     method: 'GET', headers: { Accept: '*/*' }, signal,
   }, auth)
+}
+
+function assertApprovalScope(
+  approval: ApprovalDto,
+  organizationId: string,
+  spaceId: string,
+  approvalId?: string,
+) {
+  if (
+    approval.organizationId !== organizationId
+    || approval.spaceId !== spaceId
+    || (approvalId !== undefined && approval.id !== approvalId)
+  ) {
+    throw new RelayApiError('Relay API returned an Approval outside the requested scope.', {
+      code: 'INVALID_RESPONSE', status: 200,
+    })
+  }
+}
+
+export function listApprovals(
+  organizationId: string,
+  spaceId: string,
+  options?: RelayApprovalListOptions,
+  auth?: RelayApiAuthContext,
+  signal?: AbortSignal,
+): Promise<ApprovalListResponse> {
+  return request(approvalListPath(approvalsPath(organizationId, spaceId), options), {
+    method: 'GET', headers: { Accept: 'application/json' }, signal,
+  }, ApprovalListResponseSchema, auth).then((response) => {
+    if (response.organizationId !== organizationId || response.spaceId !== spaceId) {
+      throw new RelayApiError('Relay API returned an Approval page outside the requested scope.', {
+        code: 'INVALID_RESPONSE', status: 200,
+      })
+    }
+    for (const approval of response.items) assertApprovalScope(approval, organizationId, spaceId)
+    return response
+  })
+}
+
+export function getApproval(
+  organizationId: string,
+  spaceId: string,
+  approvalId: string,
+  auth?: RelayApiAuthContext,
+  signal?: AbortSignal,
+): Promise<ApprovalDto> {
+  return request(approvalPath(organizationId, spaceId, approvalId), {
+    method: 'GET', headers: { Accept: 'application/json' }, signal,
+  }, ApprovalDtoSchema, auth).then((approval) => {
+    assertApprovalScope(approval, organizationId, spaceId, approvalId)
+    return approval
+  })
+}
+
+export function decideApproval(
+  organizationId: string,
+  spaceId: string,
+  approvalId: string,
+  decision: ApprovalDecisionRequestInput,
+  version: number,
+  idempotencyKey: string,
+  auth?: RelayApiAuthContext,
+): Promise<ApprovalDto> {
+  return request(`${approvalPath(organizationId, spaceId, approvalId)}/decision`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': `"${version}"`,
+    },
+    body: JSON.stringify(decision),
+  }, ApprovalDtoSchema, auth).then((approval) => {
+    assertApprovalScope(approval, organizationId, spaceId, approvalId)
+    return approval
+  })
 }
 
 export function renameSession(

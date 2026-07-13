@@ -11,6 +11,7 @@
     "dev": "AUTH_MODE=development VITE_AUTH_MODE=development VITE_DEMO_MODE=true pnpm --parallel --filter @relay/api --filter @relay/web dev",
     "dev:web": "VITE_AUTH_MODE=development VITE_DEMO_MODE=true pnpm --filter @relay/web dev",
     "dev:api": "AUTH_MODE=development pnpm --filter @relay/api dev",
+    "dev:worker": "pnpm --filter @relay/api dev:worker",
     "db:up": "docker compose up -d --wait postgres",
     "db:down": "docker compose down",
     "db:migrate": "pnpm --filter @relay/api migrate",

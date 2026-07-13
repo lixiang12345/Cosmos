@@ -8,6 +8,43 @@ export {
 } from './artifact-repository.js'
 export { PostgresArtifactRepository } from './postgres-artifact-repository.js'
 export {
+  PostgresToolApprovalRepository,
+  type PostgresToolApprovalRepositoryOptions,
+} from './postgres-tool-approval-repository.js'
+export {
+  PostgresToolCoordinatorRepository,
+  type PostgresToolCoordinatorRepositoryOptions,
+} from './postgres-tool-coordinator-repository.js'
+export {
+  ToolCoordinatorConflictError,
+  ToolCoordinatorValidationError,
+  type CreateToolCallRecord,
+  type FinishToolCallRecord,
+  type PrepareToolSideEffectRecord,
+  type RequestToolApprovalRecord,
+  type ResolveToolSideEffectRecord,
+  type StartToolCallRecord,
+  type ToolCoordinatorRepository,
+  type ToolSideEffect,
+  type ToolSideEffectStatus,
+} from './tool-coordinator-repository.js'
+export {
+  ApprovalAlreadyDecidedError,
+  ApprovalDecisionConflictError,
+  ApprovalPermissionDeniedError,
+  ApprovalVersionConflictError,
+  EmptyToolApprovalRepository,
+  type ApprovalDecisionResult,
+  type ApprovalListCursor,
+  type ApprovalListOptions,
+  type ApprovalListPage,
+  type DecideApprovalRecord,
+  type ToolApprovalRepository,
+  type ToolCallListCursor,
+  type ToolCallListOptions,
+  type ToolCallListPage,
+} from './tool-approval-repository.js'
+export {
   EmptyFileRepository,
   FileQuotaExceededError,
   FileValidationError,

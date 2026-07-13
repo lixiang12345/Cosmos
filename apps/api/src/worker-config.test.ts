@@ -24,11 +24,40 @@ describe('execution worker configuration', () => {
       provider: {
         baseUrl: 'https://provider.example/v1/',
         apiKey: 'provider-secret',
+        apiKeysByModel: {},
+        allowedModels: [
+          'gpt-5.6-sol',
+          'claude-fable-5',
+          'claude-opus-4-8',
+          'claude-sonnet-5',
+          'grok-4.5',
+        ],
         connectionTimeoutMs: 10_000,
         totalTimeoutMs: 120_000,
         maxOutputTokens: 4_096,
         maxOutputCharacters: 100_000,
         maxResponseBytes: 1_048_576,
+      },
+    })
+  })
+
+  it('maps family credentials onto the fixed model catalog', () => {
+    const config = loadWorkerConfig({
+      DATABASE_URL: required.DATABASE_URL,
+      WORKER_ID: required.WORKER_ID,
+      AGENT_PROVIDER_BASE_URL: required.AGENT_PROVIDER_BASE_URL,
+      AGENT_PROVIDER_GPT_API_KEY: 'gpt-secret',
+      AGENT_PROVIDER_CLAUDE_API_KEY: 'claude-secret',
+      AGENT_PROVIDER_GROK_API_KEY: 'grok-secret',
+    })
+    expect(config.provider).toMatchObject({
+      apiKey: undefined,
+      apiKeysByModel: {
+        'gpt-5.6-sol': 'gpt-secret',
+        'claude-fable-5': 'claude-secret',
+        'claude-opus-4-8': 'claude-secret',
+        'claude-sonnet-5': 'claude-secret',
+        'grok-4.5': 'grok-secret',
       },
     })
   })

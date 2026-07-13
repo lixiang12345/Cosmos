@@ -1,3 +1,4 @@
+import { SUPPORTED_AGENT_MODELS } from '@relay/contracts'
 import {
   Archive,
   ArrowLeft,
@@ -684,7 +685,7 @@ export function ExpertEditorPage({
             <section className="expert-form-section" id="expert-section-runtime">
               <header><span><h2>{copy.sections.runtime}</h2><p>{copy.sectionDescriptions.runtime}</p></span></header>
               <div className="expert-form-grid expert-form-grid--two">
-                <label className="field field--select"><span>{copy.model}</span><span className="select-shell"><Sparkles aria-hidden="true" /><select aria-label={copy.model} value={draft.model} onChange={(event) => replaceDraft('model', event.target.value)}><option>GPT-5.4</option><option>Claude 4.7</option><option>Gemini 3.1 Pro</option><option>Managed Auto</option></select><ChevronRight aria-hidden="true" /></span></label>
+                <label className="field field--select"><span>{copy.model}</span><span className="select-shell"><Sparkles aria-hidden="true" /><select aria-label={copy.model} value={draft.model} onChange={(event) => replaceDraft('model', event.target.value)}>{SUPPORTED_AGENT_MODELS.map((model) => <option key={model} value={model}>{model}</option>)}</select><ChevronRight aria-hidden="true" /></span></label>
                 <label className="field field--select"><span>{copy.environment}</span><span className="select-shell"><Box aria-hidden="true" /><select aria-label={copy.environment} value={draft.environment.image} onChange={(event) => replaceDraft('environment', { ...draft.environment, image: event.target.value })}><option value="">{locale === 'zh' ? '选择环境' : 'Select environment'}</option><option>relay-ubuntu-22.04</option><option>node-22-browser</option><option>go-1.24-services</option><option>read-only-analysis</option></select><ChevronRight aria-hidden="true" /></span></label>
                 <label className="field"><span>{copy.timeout}</span><input aria-label={copy.timeout} type="number" min="1" max="480" value={draft.environment.timeoutMinutes} onChange={(event) => replaceDraft('environment', { ...draft.environment, timeoutMinutes: Number(event.target.value) })} /></label>
                 <label className="field field--select"><span>{copy.networkPolicy}</span><span className="select-shell"><Network aria-hidden="true" /><select aria-label={copy.networkPolicy} value={draft.environment.networkPolicy} onChange={(event) => replaceDraft('environment', { ...draft.environment, networkPolicy: event.target.value as ExpertConfig['environment']['networkPolicy'] })}><option value="restricted">{copy.restricted}</option><option value="allowlist">{copy.allowlist}</option><option value="unrestricted">{copy.unrestricted}</option></select><ChevronRight aria-hidden="true" /></span></label>

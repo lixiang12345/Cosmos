@@ -52,6 +52,9 @@ type EventRow = {
   artifact_id: string | null
   file_id: string | null
   file_version_id: string | null
+  tool_call_id: string | null
+  approval_id: string | null
+  runtime_payload: unknown | null
   session_status: string | null
   session_visibility: string | null
   session_version: string | null
@@ -248,6 +251,11 @@ function mapEvent(row: EventRow): SessionEventDto {
         },
       }
       break
+    case 'tool_call.updated':
+    case 'approval.requested':
+    case 'approval.decided':
+      projected = { ...base, type: row.event_type, payload: row.runtime_payload }
+      break
     default:
       throw new SessionTimelineProjectionError('The Session event type is not supported.')
   }
@@ -420,6 +428,10 @@ export class PostgresSessionTimelineRepository implements SessionTimelineReposit
           event.resource_id, event.actor_id, event.command_id, event.request_id,
           event.occurred_at, event.message_id, event.turn_id, event.attempt_id,
           event.artifact_id, event.file_id, event.file_version_id,
+          event.tool_call_id, event.approval_id,
+          CASE WHEN event.event_type IN (
+            'tool_call.updated', 'approval.requested', 'approval.decided'
+          ) THEN event.payload END AS runtime_payload,
           CASE WHEN event.event_type IN (
             'session.created', 'session.updated', 'session.renamed',
             'session.archived', 'session.restored'

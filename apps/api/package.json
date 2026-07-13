@@ -11,6 +11,7 @@
   },
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "dev:worker": "tsx --env-file-if-exists=../../.env.local watch src/worker.ts",
     "build": "tsup src/index.ts src/server.ts src/worker.ts src/worker-health.ts src/migrate.ts --format esm --dts --clean",
     "migrate": "tsx src/migrate.ts",
     "start": "node dist/server.js",

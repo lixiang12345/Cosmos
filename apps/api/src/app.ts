@@ -1,6 +1,9 @@
 import cors from '@fastify/cors'
 import {
   ApiErrorSchema,
+  ApprovalDecisionRequestSchema,
+  ApprovalDtoSchema,
+  ApprovalListResponseSchema,
   ArtifactDtoSchema,
   ArtifactListResponseSchema,
   CancelSessionRequestSchema,
@@ -29,6 +32,7 @@ import {
   SessionMessagePageSchema,
   SendSessionMessageResponseSchema,
   StartSessionResponseSchema,
+  ToolCallListResponseSchema,
   UpdateArtifactRequestSchema,
   type ApiError,
   type SessionEventDto,
@@ -128,6 +132,23 @@ import {
   type SessionTimelineRepository,
 } from './session-timeline-repository.js'
 import {
+  ApprovalAlreadyDecidedError,
+  ApprovalDecisionConflictError,
+  ApprovalPermissionDeniedError,
+  ApprovalVersionConflictError,
+  EmptyToolApprovalRepository,
+  type ToolApprovalRepository,
+} from './tool-approval-repository.js'
+import {
+  InvalidToolApprovalPaginationError,
+  encodeApprovalCursor,
+  encodeToolCallCursor,
+  parseApprovalPagination,
+  parseToolCallPagination,
+  type ApprovalListQuery,
+  type ToolCallListQuery,
+} from './tool-approval-pagination.js'
+import {
   DenyServiceAccountPolicyRepository,
   type ServiceAccountPolicyRepository,
   type ServiceAccountSessionResourceType,
@@ -156,6 +177,10 @@ type ShareParams = SessionParams & {
 
 type ArtifactParams = SessionParams & {
   artifactId: string
+}
+
+type ApprovalParams = SpaceParams & {
+  approvalId: string
 }
 
 type FileParams = SpaceParams & {
@@ -196,6 +221,7 @@ export type CreateAppOptions = {
   sessionTimelineRepository?: SessionTimelineRepository
   artifactRepository?: ArtifactRepository
   fileRepository?: FileRepository
+  toolApprovalRepository?: ToolApprovalRepository
   serviceAccountPolicyRepository?: ServiceAccountPolicyRepository
   configurationCatalogRepository?: ConfigurationCatalogRepository
   readinessCheck?: () => Promise<void>
@@ -437,6 +463,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   const sessionTimelineRepository = options.sessionTimelineRepository
   const artifactRepository = options.artifactRepository ?? new EmptyArtifactRepository()
   const fileRepository = options.fileRepository ?? new EmptyFileRepository()
+  const toolApprovalRepository = options.toolApprovalRepository ?? new EmptyToolApprovalRepository()
   const serviceAccountPolicyRepository = options.serviceAccountPolicyRepository
     ?? new DenyServiceAccountPolicyRepository()
   const configurationCatalogRepository = options.configurationCatalogRepository
@@ -543,6 +570,43 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
           expectedVersion: error.expectedVersion,
           currentVersion: error.currentVersion,
         },
+      })
+    }
+
+    if (error instanceof ApprovalVersionConflictError) {
+      return sendApiError(reply, 412, request, {
+        code: 'PRECONDITION_FAILED',
+        message: error.message,
+        retryable: false,
+        details: {
+          expectedVersion: error.expectedVersion,
+          currentVersion: error.currentVersion,
+        },
+      })
+    }
+
+    if (error instanceof ApprovalAlreadyDecidedError) {
+      return sendApiError(reply, 409, request, {
+        code: 'APPROVAL_ALREADY_DECIDED',
+        message: error.message,
+        retryable: false,
+        details: { status: error.currentStatus },
+      })
+    }
+
+    if (error instanceof ApprovalDecisionConflictError) {
+      return sendApiError(reply, 409, request, {
+        code: 'APPROVAL_DECISION_CONFLICT',
+        message: error.message,
+        retryable: false,
+      })
+    }
+
+    if (error instanceof ApprovalPermissionDeniedError) {
+      return sendApiError(reply, 403, request, {
+        code: 'PERMISSION_DENIED',
+        message: error.message,
+        retryable: false,
       })
     }
 
@@ -692,6 +756,17 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       })
     }
 
+    if (error instanceof InvalidToolApprovalPaginationError) {
+      return sendApiError(reply, 400, request, {
+        code: 'VALIDATION_FAILED',
+        message: `The ${error.resource} list parameters are invalid.`,
+        retryable: false,
+        fieldErrors: {
+          [`query.${error.field}`]: ['Use a valid value and a cursor bound to this filter set.'],
+        },
+      })
+    }
+
     if (error instanceof InvalidSessionTimelinePaginationError) {
       return sendApiError(reply, 400, request, {
         code: 'VALIDATION_FAILED',
@@ -815,6 +890,24 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       sendApiError(reply, 403, request, {
         code: 'PERMISSION_DENIED',
         message: 'Service accounts cannot browse or download Files.',
+        retryable: false,
+      })
+      return null
+    }
+    return authorizeSpace(request, reply, params)
+  }
+
+  async function authorizeApprovalSpace(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    params: SpaceParams,
+  ) {
+    const actor = actorsByRequest.get(request)
+    if (!actor) throw new AuthenticationError()
+    if (actor.kind === 'service_account') {
+      sendApiError(reply, 403, request, {
+        code: 'PERMISSION_DENIED',
+        message: 'Service accounts cannot view or record human Approval decisions.',
         retryable: false,
       })
       return null
@@ -1506,6 +1599,148 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       reply.header('Idempotency-Replayed', String(result.replayed))
       reply.header('ETag', resourceEtag(result.artifact))
       return reply.code(204).send()
+    },
+  )
+
+  app.get<{ Params: SessionParams; Querystring: ToolCallListQuery }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/tool-calls',
+    async (request, reply) => {
+      const authorization = await authorizeSessionSpace(request, reply, request.params)
+      if (!authorization) return
+      const sessionId = parseSpaceId(request.params.sessionId)
+      if (!sessionId) return sendResourceNotFound(reply, request)
+      const pagination = parseToolCallPagination(
+        request.query,
+        authorization.organizationId,
+        authorization.spaceId,
+        sessionId,
+      )
+      const page = await toolApprovalRepository.listToolCalls(
+        authorization.organizationId,
+        authorization.spaceId,
+        sessionId,
+        authorization.actor.id,
+        pagination,
+      )
+      if (!page) return sendResourceNotFound(reply, request)
+      return ToolCallListResponseSchema.parse({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        sessionId,
+        items: page.items,
+        page: {
+          nextCursor: page.nextCursor
+            ? encodeToolCallCursor(
+              page.nextCursor,
+              authorization.organizationId,
+              authorization.spaceId,
+              sessionId,
+              pagination,
+            )
+            : null,
+          hasMore: page.hasMore,
+        },
+      })
+    },
+  )
+
+  app.get<{ Params: SpaceParams; Querystring: ApprovalListQuery }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/approvals',
+    async (request, reply) => {
+      const authorization = await authorizeApprovalSpace(request, reply, request.params)
+      if (!authorization) return
+      const pagination = parseApprovalPagination(
+        request.query,
+        authorization.organizationId,
+        authorization.spaceId,
+      )
+      const page = await toolApprovalRepository.listApprovals(
+        authorization.organizationId,
+        authorization.spaceId,
+        authorization.actor.id,
+        pagination,
+      )
+      return ApprovalListResponseSchema.parse({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        items: page.items,
+        page: {
+          nextCursor: page.nextCursor
+            ? encodeApprovalCursor(
+              page.nextCursor,
+              authorization.organizationId,
+              authorization.spaceId,
+              pagination,
+            )
+            : null,
+          hasMore: page.hasMore,
+        },
+      })
+    },
+  )
+
+  app.get<{ Params: ApprovalParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/approvals/:approvalId',
+    async (request, reply) => {
+      const authorization = await authorizeApprovalSpace(request, reply, request.params)
+      if (!authorization) return
+      const approvalId = parseSpaceId(request.params.approvalId)
+      if (!approvalId) return sendResourceNotFound(reply, request)
+      const candidate = await toolApprovalRepository.getApproval(
+        authorization.organizationId,
+        authorization.spaceId,
+        approvalId,
+        authorization.actor.id,
+      )
+      if (!candidate) return sendResourceNotFound(reply, request)
+      const approval = ApprovalDtoSchema.parse(candidate)
+      reply.header('ETag', resourceEtag(approval))
+      return approval
+    },
+  )
+
+  app.post<{ Params: ApprovalParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/approvals/:approvalId/decision',
+    async (request, reply) => {
+      const authorization = await authorizeApprovalSpace(request, reply, request.params)
+      if (!authorization) return
+      const approvalId = parseSpaceId(request.params.approvalId)
+      if (!approvalId) return sendResourceNotFound(reply, request)
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED',
+          message: 'A valid Idempotency-Key header is required.',
+          retryable: false,
+          fieldErrors: { 'Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      const expectedVersion = requireIfMatchVersion(request, reply, 'Approval')
+      if (expectedVersion === null) return
+      const parsed = ApprovalDecisionRequestSchema.safeParse(request.body)
+      if (!parsed.success) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED',
+          message: 'The Approval decision is invalid.',
+          retryable: false,
+          fieldErrors: validationFieldErrors(parsed.error.issues),
+        })
+      }
+      const result = await toolApprovalRepository.decideApproval({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        approvalId,
+        actorId: authorization.actor.id,
+        requestId: request.id,
+        idempotencyKey,
+        expectedVersion,
+        request: parsed.data,
+      })
+      if (!result) return sendResourceNotFound(reply, request)
+      const approval = ApprovalDtoSchema.parse(result.approval)
+      reply.header('Idempotency-Replayed', String(result.replayed))
+      reply.header('ETag', resourceEtag(approval))
+      return approval
     },
   )
 

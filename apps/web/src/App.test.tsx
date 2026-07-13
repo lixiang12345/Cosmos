@@ -486,7 +486,7 @@ describe('Relay prototype', () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: '直接恢复的生产会话' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '已排队，等待执行' })).toBeInTheDocument()
-    expect(screen.queryByText('GPT-5.4')).not.toBeInTheDocument()
+    expect(screen.queryByText('gpt-5.6-sol')).not.toBeInTheDocument()
     expect(screen.queryByText('38.2k')).not.toBeInTheDocument()
     expect(screen.queryByText('￥4.82')).not.toBeInTheDocument()
     expect(screen.queryByRole('tab')).not.toBeInTheDocument()
@@ -1023,7 +1023,7 @@ describe('Relay prototype', () => {
   it('does not read or overwrite prototype stores for a production identity', async () => {
     const privateExpert = 'PRIVATE EXPERT FROM ANOTHER USER'
     window.localStorage.setItem('relay.experts', JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       experts: [{ id: 'private-expert', spaceId: 'space-production', draftConfig: { name: privateExpert } }],
       versions: [],
     }))

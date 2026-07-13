@@ -1,6 +1,7 @@
+import { DEFAULT_AGENT_MODEL, SupportedAgentModelSchema } from '@relay/contracts'
 import { expertTemplateCategories, expertTemplates, type ExpertTemplateCategory } from '../../data/expertTemplates'
 
-export const EXPERT_STORE_SCHEMA_VERSION = 1 as const
+export const EXPERT_STORE_SCHEMA_VERSION = 2 as const
 
 export type ExpertStatus = 'draft' | 'published' | 'disabled' | 'archived'
 
@@ -245,7 +246,7 @@ export function createExpertConfig(
     category,
     icon: 'Bot',
     instructions: '',
-    model: 'GPT-5.4',
+    model: DEFAULT_AGENT_MODEL,
     repositories: [],
     capabilities: [],
     constraints: [],
@@ -372,6 +373,9 @@ export function validateExpertConfig(config: ExpertConfig): ExpertValidationIssu
   if (!config.description.trim()) issues.push({ field: 'description', code: 'required', message: 'Description is required' })
   if (!config.instructions.trim()) issues.push({ field: 'instructions', code: 'required', message: 'Instructions are required' })
   if (!config.model.trim()) issues.push({ field: 'model', code: 'required', message: 'Model is required' })
+  else if (!SupportedAgentModelSchema.safeParse(config.model).success) {
+    issues.push({ field: 'model', code: 'invalid', message: 'Model is not enabled' })
+  }
   if (!expertTemplateCategories.includes(config.category)) {
     issues.push({ field: 'category', code: 'invalid', message: 'Category is invalid' })
   }

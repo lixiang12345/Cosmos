@@ -63,6 +63,11 @@ describeWithDatabase('PostgresSessionRepository', () => {
       ALTER TABLE relay_artifacts DISABLE TRIGGER relay_artifacts_reject_truncate;
       ALTER TABLE relay_files DISABLE TRIGGER relay_files_reject_truncate;
       ALTER TABLE relay_file_versions DISABLE TRIGGER relay_file_versions_reject_truncate;
+      ALTER TABLE relay_tool_calls DISABLE TRIGGER relay_tool_calls_reject_truncate;
+      ALTER TABLE relay_approvals DISABLE TRIGGER relay_approvals_reject_truncate;
+      ALTER TABLE relay_tool_side_effects DISABLE TRIGGER relay_tool_side_effects_reject_truncate;
+      ALTER TABLE relay_approval_assignments DISABLE TRIGGER relay_approval_assignments_reject_truncate;
+      ALTER TABLE relay_approval_decisions DISABLE TRIGGER relay_approval_decisions_reject_truncate;
     `)
     try {
       await pool.query(`
@@ -77,6 +82,11 @@ describeWithDatabase('PostgresSessionRepository', () => {
         ALTER TABLE relay_artifacts ENABLE TRIGGER relay_artifacts_reject_truncate;
         ALTER TABLE relay_files ENABLE TRIGGER relay_files_reject_truncate;
         ALTER TABLE relay_file_versions ENABLE TRIGGER relay_file_versions_reject_truncate;
+        ALTER TABLE relay_tool_calls ENABLE TRIGGER relay_tool_calls_reject_truncate;
+        ALTER TABLE relay_approvals ENABLE TRIGGER relay_approvals_reject_truncate;
+        ALTER TABLE relay_tool_side_effects ENABLE TRIGGER relay_tool_side_effects_reject_truncate;
+        ALTER TABLE relay_approval_assignments ENABLE TRIGGER relay_approval_assignments_reject_truncate;
+        ALTER TABLE relay_approval_decisions ENABLE TRIGGER relay_approval_decisions_reject_truncate;
       `)
     }
     const spaces = [

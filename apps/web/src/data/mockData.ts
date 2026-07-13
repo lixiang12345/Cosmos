@@ -18,7 +18,7 @@ export const initialRuns: Run[] = [
     updatedAt: '刚刚',
     elapsed: '18m 42s',
     progress: 83,
-    model: 'GPT-5.4',
+    model: 'gpt-5.6-sol',
     summary:
       '将指数退避上限从 3 次调整为 5 次，补充幂等保护，并为高延迟支付渠道增加可观测字段。',
     steps: [
@@ -133,7 +133,7 @@ export const initialRuns: Run[] = [
     updatedAt: '12 分钟前',
     elapsed: '11m 07s',
     progress: 100,
-    model: 'Claude 4.7',
+    model: 'claude-sonnet-5',
     summary: '统一服务端与 CSV 导出的时区转换逻辑，并补充夏令时边界测试。',
     steps: [
       { id: 'trigger', label: '触发', detail: 'Jira', status: 'completed' },
@@ -183,7 +183,7 @@ export const initialRuns: Run[] = [
     updatedAt: '37 分钟前',
     elapsed: '7m 51s',
     progress: 54,
-    model: 'GPT-5.4 mini',
+    model: 'gpt-5.6-sol',
     summary: '补充并发预占与超卖保护测试，沙箱依赖的 Redis 集群暂时不可用。',
     steps: [
       { id: 'trigger', label: '触发', detail: 'GitHub', status: 'completed' },
@@ -231,7 +231,7 @@ export const initialRuns: Run[] = [
     updatedAt: '1 小时前',
     elapsed: '4m 09s',
     progress: 46,
-    model: 'Gemini 3.1 Pro',
+    model: 'grok-4.5',
     summary: '分析 OIDC 客户端大版本升级的兼容性、安全公告与回滚风险。',
     steps: [
       { id: 'trigger', label: '触发', detail: 'GitHub', status: 'completed' },

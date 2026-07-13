@@ -1,4 +1,12 @@
 export {
+  AGENT_MODEL_FAMILY_BY_MODEL,
+  DEFAULT_AGENT_MODEL,
+  SUPPORTED_AGENT_MODELS,
+  SupportedAgentModelSchema,
+  type SupportedAgentModel,
+} from './model.js'
+
+export {
   FileDtoSchema,
   FileListResponseSchema,
   FilePathSchema,
@@ -167,3 +175,28 @@ export {
   type OrganizationRole,
   type SpaceRole,
 } from './me.js'
+
+export {
+  ApprovalDecisionRequestSchema,
+  ApprovalDecisionValueSchema,
+  ApprovalDtoSchema,
+  ApprovalEvidenceSchema,
+  ApprovalListResponseSchema,
+  ApprovalStatusSchema,
+  ToolCallDtoSchema,
+  ToolCallInputHashSchema,
+  ToolCallListResponseSchema,
+  ToolCallStatusSchema,
+  ToolRiskLevelSchema,
+  type ApprovalDecisionRequest,
+  type ApprovalDecisionRequestInput,
+  type ApprovalDecisionValue,
+  type ApprovalDto,
+  type ApprovalEvidence,
+  type ApprovalListResponse,
+  type ApprovalStatus,
+  type ToolCallDto,
+  type ToolCallListResponse,
+  type ToolCallStatus,
+  type ToolRiskLevel,
+} from './tool-approval.js'

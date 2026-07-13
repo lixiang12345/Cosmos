@@ -1,4 +1,9 @@
 import { hostname } from 'node:os'
+import {
+  AGENT_MODEL_FAMILY_BY_MODEL,
+  SUPPORTED_AGENT_MODELS,
+  type SupportedAgentModel,
+} from '@relay/contracts'
 
 export type WorkerConfig = {
   databaseUrl: string
@@ -13,7 +18,9 @@ export type WorkerConfig = {
   recoveryBatchSize: number
   provider: {
     baseUrl: string
-    apiKey: string
+    apiKey?: string
+    apiKeysByModel: Readonly<Record<string, string>>
+    allowedModels: readonly SupportedAgentModel[]
     connectionTimeoutMs: number
     totalTimeoutMs: number
     maxOutputTokens: number
@@ -26,6 +33,31 @@ function required(env: NodeJS.ProcessEnv, name: string) {
   const value = env[name]?.trim()
   if (!value) throw new Error(`${name} is required to run the execution worker.`)
   return value
+}
+
+function optional(env: NodeJS.ProcessEnv, name: string) {
+  return env[name]?.trim() || undefined
+}
+
+function providerCredentials(env: NodeJS.ProcessEnv) {
+  const fallback = optional(env, 'AGENT_PROVIDER_API_KEY')
+  const byFamily = {
+    gpt: optional(env, 'AGENT_PROVIDER_GPT_API_KEY'),
+    claude: optional(env, 'AGENT_PROVIDER_CLAUDE_API_KEY'),
+    grok: optional(env, 'AGENT_PROVIDER_GROK_API_KEY'),
+  }
+  const missingFamilies = Object.entries(byFamily)
+    .filter(([, apiKey]) => !apiKey && !fallback)
+    .map(([family]) => family)
+  if (missingFamilies.length > 0) {
+    throw new Error('AGENT_PROVIDER_API_KEY or all model-family Provider API keys are required to run the execution worker.')
+  }
+  const apiKeysByModel: Record<string, string> = {}
+  for (const model of SUPPORTED_AGENT_MODELS) {
+    const apiKey = byFamily[AGENT_MODEL_FAMILY_BY_MODEL[model]]
+    if (apiKey) apiKeysByModel[model] = apiKey
+  }
+  return { fallback, apiKeysByModel }
 }
 
 function boundedInteger(
@@ -83,6 +115,7 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
   if (providerConnectionTimeoutMs > providerTotalTimeoutMs) {
     throw new Error('AGENT_PROVIDER_CONNECTION_TIMEOUT_MS must not exceed the total timeout.')
   }
+  const credentials = providerCredentials(env)
 
   return {
     databaseUrl: required(env, 'DATABASE_URL'),
@@ -103,7 +136,9 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
     recoveryBatchSize: boundedInteger(env, 'WORKER_RECOVERY_BATCH_SIZE', 20, 1, 100),
     provider: {
       baseUrl: required(env, 'AGENT_PROVIDER_BASE_URL'),
-      apiKey: required(env, 'AGENT_PROVIDER_API_KEY'),
+      apiKey: credentials.fallback,
+      apiKeysByModel: credentials.apiKeysByModel,
+      allowedModels: SUPPORTED_AGENT_MODELS,
       connectionTimeoutMs: providerConnectionTimeoutMs,
       totalTimeoutMs: providerTotalTimeoutMs,
       maxOutputTokens: boundedInteger(

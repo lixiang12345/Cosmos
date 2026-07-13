@@ -89,6 +89,32 @@ describe('OpenAI-compatible conversation provider', () => {
     expect(body).not.toHaveProperty('function_call')
   })
 
+  it('routes credentials by pinned model and rejects models outside the allowlist', async () => {
+    const fetchMock = vi.fn(async () => completionResponse())
+    const provider = new OpenAiCompatibleChatCompletionsProvider({
+      baseUrl: 'https://provider.example/v1',
+      apiKeysByModel: {
+        'gpt-5.6-sol': 'gpt-provider-key',
+        'claude-sonnet-5': 'claude-provider-key',
+      },
+      allowedModels: ['gpt-5.6-sol', 'claude-sonnet-5'],
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    await provider.execute({ ...input, model: 'gpt-5.6-sol' })
+    await provider.execute({ ...input, model: 'claude-sonnet-5' })
+    const calls = fetchMock.mock.calls as unknown as Array<[URL, RequestInit]>
+    expect(new Headers(calls[0]?.[1].headers).get('authorization'))
+      .toBe('Bearer gpt-provider-key')
+    expect(new Headers(calls[1]?.[1].headers).get('authorization'))
+      .toBe('Bearer claude-provider-key')
+    await expect(provider.execute({ ...input, model: 'unlisted-model' })).rejects.toMatchObject({
+      classification: 'terminal', code: 'provider_validation_error',
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(JSON.stringify(provider)).not.toContain('provider-key')
+  })
+
   it('preserves a provider-reported model alias for downstream provenance', async () => {
     const provider = providerWith(
       vi.fn(async () => completionResponse('Alias response.', {
@@ -315,6 +341,11 @@ describe('OpenAI-compatible conversation provider', () => {
       baseUrl: 'https://provider.example/v1', apiKey: 'secret',
       connectionTimeoutMs: 200, totalTimeoutMs: 100,
     })).toThrow('must not exceed')
+    expect(() => new OpenAiCompatibleChatCompletionsProvider({
+      baseUrl: 'https://provider.example/v1',
+      apiKeysByModel: { 'gpt-5.6-sol': 'secret' },
+      allowedModels: ['gpt-5.6-sol', 'claude-sonnet-5'],
+    })).toThrow('Every allowed Provider model requires a credential')
 
     const fetchImpl = vi.fn(async () => completionResponse()) as unknown as typeof fetch
     const provider = providerWith(fetchImpl)
