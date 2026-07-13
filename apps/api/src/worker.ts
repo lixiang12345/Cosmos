@@ -1,14 +1,14 @@
-import { Pool } from 'pg'
 import { OpenAiCompatibleChatCompletionsProvider } from './conversation-agent-provider.js'
 import { ExecutionWorker, type ExecutionWorkerLogger } from './execution-worker.js'
 import { assertMigrationsCurrent } from './migrations.js'
 import { PostgresExecutionRepository } from './postgres-execution-repository.js'
+import { assertRuntimeDatabaseRole, createRuntimePool } from './postgres-runtime-database.js'
 import { PostgresWorkerReadinessRepository } from './postgres-worker-readiness-repository.js'
 import { loadWorkerConfig } from './worker-config.js'
 import { maintainWorkerReadiness } from './worker-readiness-heartbeat.js'
 
 const config = loadWorkerConfig()
-const pool = new Pool({
+const pool = createRuntimePool('relay_worker_runtime', {
   connectionString: config.databaseUrl,
   connectionTimeoutMillis: config.databaseConnectionTimeoutMs,
   query_timeout: config.databaseQueryTimeoutMs,
@@ -28,6 +28,7 @@ process.once('SIGINT', () => shutdown.abort())
 process.once('SIGTERM', () => shutdown.abort())
 
 try {
+  await assertRuntimeDatabaseRole(pool, 'relay_worker_runtime')
   await assertMigrationsCurrent(pool)
   const provider = new OpenAiCompatibleChatCompletionsProvider(config.provider)
   const repository = new PostgresExecutionRepository(pool)

@@ -53,9 +53,19 @@ const environmentRow = {
 
 function repositoryReturning(rows: unknown[]) {
   const query = vi.fn().mockResolvedValue({ rows })
+  const transactionQuery = vi.fn(async (sql: string, parameters?: unknown[]) => {
+    if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK' || sql.includes('set_config(')) {
+      return { rows: [] }
+    }
+    return query(sql, parameters)
+  })
+  const client = { query: transactionQuery, release: vi.fn() }
   return {
     query,
-    repository: new PostgresConfigurationCatalogRepository({ query } as unknown as Pool),
+    transactionQuery,
+    repository: new PostgresConfigurationCatalogRepository({
+      connect: vi.fn().mockResolvedValue(client),
+    } as unknown as Pool),
   }
 }
 

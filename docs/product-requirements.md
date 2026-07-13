@@ -86,12 +86,12 @@ Relay 是面向研发团队的 Agent 工作系统。用户选择一个可复用 
 | 能力 | 状态 | 当前真实边界 | 进入生产前的必要条件 |
 | --- | --- | --- | --- |
 | Web 产品壳层 | **Partial** | React 页面、主题/语言和响应式导航可用；生产模式开放 canonical Session timeline、draft create/start、幂等后续消息与只读 Catalog，按 Organization/Space role 和 execution capability 控制写入口；未服务化路由和本地伪成功操作仅保留在显式 demo 模式 | 逐域连接真实权限、审计和服务端数据；继续用 capability 开放其余运行控制 |
-| Session 创建/列表/续聊 | **Partial** | Web 已调用真实 API；API 支持 OIDC、membership、Private creator 隔离；服务端固定 Expert/Environment revision，原子 create/start/send 并完整幂等重放；后续 Message/Turn 连续且由 Worker 按 Session FIFO 执行 | 其余生命周期、Private 分享、分页、ExecutionSnapshot 和 coding/tool 执行面 |
-| PostgreSQL 持久化 | **Implemented (limited)** | 配置 `DATABASE_URL` 时持久化 Expert/Environment identity 与不可变 revision、Session 和幂等记录；未配置的开发模式使用内存 | 备份/恢复、数据库高可用、RLS/统一 tenant guard、容量与迁移回滚演练 |
+| Session 创建/列表/续聊 | **Partial** | Web 已调用真实 API；API 支持 OIDC、membership、Private User/Group ShareGrant、列表分页/筛选、完整 metadata/execution controls；服务端固定 revision，原子写入并完整幂等重放；Worker 按 Session FIFO 执行 | Web 仍需接入全部执行/分享控制；ExecutionSnapshot 和 coding/tool 执行面 |
+| PostgreSQL 持久化 | **Implemented (limited)** | 持久化权威 revision、Session 聚合与幂等记录；24 张租户表 FORCE RLS，API/Worker 分离受限角色，transaction-local context 与跨 tenant 负向测试已实现；未配置数据库的开发模式使用内存 | 备份/恢复、数据库高可用、容量、在线迁移与回滚演练 |
 | Expert、Environment 查询 | **Implemented (limited)** | 生产 Web 使用 tenant-scoped 只读 Catalog API；列表和详情重检 membership，隐藏 Private/未发布或未就绪资源，并以 version/ETag 表达资源版本 | 创建、编辑、发布、重新配置、审计和 operation policy |
 | Automation、Files、Approval | **Prototype** | 界面和本地控制面仅用于确定性演示，没有服务端权威模型 | 实现 API、RBAC、审计、失败恢复并移除生产假操作 |
 | Agent 执行 | **Implemented (limited)** | 独立 Worker 通过 PostgreSQL lease/fencing/FIFO 领取 protocol-1 Turn，调用受限 OpenAI-compatible 对话 provider，持久化 Attempt、Agent Message 和可恢复 SessionEvent；不提供 coding sandbox 或 Tool runtime | 执行面隔离强化、配额调度、策略校验、幂等工具调用、dead-letter 与负载/恢复证据 |
-| 安全与合规 | **Partial** | 生产配置强制数据库、OIDC 与 CORS；已有基础 membership/RBAC 和跨 tenant 负向测试 | 补齐 RLS/统一 tenant guard、Private 分享、Secret 管理、operation policy 与 append-only audit，并完成 [数据模型、权限与 Session 生命周期](./data-model-permissions-session-lifecycle.md) 和 [生产架构基线](./production-architecture.md) 的 P0 门槛 |
+| 安全与合规 | **Partial** | 生产配置强制数据库、OIDC 与 CORS；已有 membership/RBAC、Private ShareGrant、ServiceAccount exact operation policy、FORCE RLS/受限数据库角色、append-only success audit 和跨 tenant 负向测试 | 补齐 Secret 管理、合规访问、拒绝/失败审计、实时撤权与生产安全复核，并完成 [数据模型、权限与 Session 生命周期](./data-model-permissions-session-lifecycle.md) 和 [生产架构基线](./production-architecture.md) 的 P0 门槛 |
 
 结论：当前版本是“可验证的全栈纵向切片 + 完整原型”，不是可公网暴露或承载客户数据的生产版。
 

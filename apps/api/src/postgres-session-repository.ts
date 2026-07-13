@@ -21,6 +21,11 @@ import {
 } from '@relay/contracts'
 import type { Pool, PoolClient } from 'pg'
 import {
+  queryWithApiDatabaseContext,
+  setLocalApiDatabaseContext,
+  withApiDatabaseContext,
+} from './postgres-runtime-database.js'
+import {
   AuthorizationChangedError,
   EnvironmentNotReadyError,
   ExecutionUnavailableError,
@@ -268,14 +273,14 @@ export class PostgresSessionRepository implements SessionRepository {
   }
 
   async listActorOrganizations(actorId: string): Promise<MeOrganization[]> {
-    const result = await this.pool.query<{
+    const result = await queryWithApiDatabaseContext<{
       organization_id: string
       organization_name: string
       organization_role: OrganizationRole
       space_id: string | null
       space_name: string | null
       space_role: SpaceRole | null
-    }>(`
+    }>(this.pool, { actorId }, `
       SELECT organization.id AS organization_id, organization.name AS organization_name,
         organization_membership.role AS organization_role,
         space.id AS space_id, space.name AS space_name, space_membership.role AS space_role
@@ -318,10 +323,10 @@ export class PostgresSessionRepository implements SessionRepository {
   }
 
   async getSpaceAccess(organizationId: string, spaceId: string, actorId: string): Promise<SpaceAccess | null> {
-    const result = await this.pool.query<{
+    const result = await queryWithApiDatabaseContext<{
       organization_role: OrganizationRole
       space_role: SpaceRole
-    }>(`
+    }>(this.pool, { organizationId, spaceId, actorId }, `
       SELECT organization_membership.role AS organization_role, space_membership.role AS space_role
       FROM relay_organization_memberships organization_membership
       JOIN relay_space_memberships space_membership
@@ -400,7 +405,10 @@ export class PostgresSessionRepository implements SessionRepository {
       )`)
     }
     parameters.push(limit + 1)
-    const result = await this.pool.query<SessionRow & { cursor_last_activity_at: string }>(`
+    const result = await queryWithApiDatabaseContext<SessionRow & { cursor_last_activity_at: string }>(
+      this.pool,
+      { organizationId, spaceId, actorId },
+      `
       SELECT ${sessionColumns.split(',').map((column) => `session.${column.trim()}`).join(', ')},
         to_char(
           session.last_activity_at AT TIME ZONE 'UTC',
@@ -418,7 +426,9 @@ export class PostgresSessionRepository implements SessionRepository {
         AND ${clauses.join('\n        AND ')}
       ORDER BY session.last_activity_at DESC, session.id DESC
       LIMIT $${parameters.length}
-    `, parameters)
+      `,
+      parameters,
+    )
     const hasMore = result.rows.length > limit
     const selectedRows = result.rows.slice(0, limit)
     const items = selectedRows.map(mapSession)
@@ -439,7 +449,10 @@ export class PostgresSessionRepository implements SessionRepository {
     sessionId: string,
     actorId: string,
   ): Promise<SessionDto | null> {
-    const result = await this.pool.query<SessionRow>(`
+    const result = await queryWithApiDatabaseContext<SessionRow>(
+      this.pool,
+      { organizationId, spaceId, actorId },
+      `
       SELECT ${sessionColumns.split(',').map((column) => `session.${column.trim()}`).join(', ')}
       FROM relay_sessions session
       JOIN relay_organization_memberships organization_membership
@@ -477,7 +490,9 @@ export class PostgresSessionRepository implements SessionRepository {
               )
           )
         )
-    `, [organizationId, spaceId, sessionId, actorId])
+      `,
+      [organizationId, spaceId, sessionId, actorId],
+    )
     return result.rows[0] ? mapSession(result.rows[0]) : null
   }
 
@@ -492,13 +507,17 @@ export class PostgresSessionRepository implements SessionRepository {
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
       throw new RangeError('ShareGrant page limit must be an integer between 1 and 100.')
     }
-    const management = await this.getShareManagementTarget(
+    const management = await withApiDatabaseContext(
       this.pool,
-      organizationId,
-      spaceId,
-      sessionId,
-      actorId,
-      false,
+      { organizationId, spaceId, actorId },
+      (client) => this.getShareManagementTarget(
+        client,
+        organizationId,
+        spaceId,
+        sessionId,
+        actorId,
+        false,
+      ),
     )
     if (!management) return null
 
@@ -512,14 +531,19 @@ export class PostgresSessionRepository implements SessionRepository {
       cursorClause = `AND (created_at, id) < ($4::timestamptz, $5)`
     }
     parameters.push(limit + 1)
-    const result = await this.pool.query<ShareGrantRow>(`
+    const result = await queryWithApiDatabaseContext<ShareGrantRow>(
+      this.pool,
+      { organizationId, spaceId, actorId },
+      `
       SELECT ${shareGrantColumns}
       FROM relay_session_share_grants
       WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
         ${cursorClause}
       ORDER BY created_at DESC, id DESC
       LIMIT $${parameters.length}
-    `, parameters)
+      `,
+      parameters,
+    )
     const hasMore = result.rows.length > limit
     const items = result.rows.slice(0, limit).map(mapShareGrant)
     const last = items.at(-1)
@@ -535,6 +559,7 @@ export class PostgresSessionRepository implements SessionRepository {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
+      await setLocalApiDatabaseContext(client, record)
       const result = await this.createShareInTransaction(client, record)
       await client.query('COMMIT')
       return result
@@ -550,6 +575,7 @@ export class PostgresSessionRepository implements SessionRepository {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
+      await setLocalApiDatabaseContext(client, record)
       const result = await this.revokeShareInTransaction(client, record)
       await client.query('COMMIT')
       return result
@@ -565,6 +591,7 @@ export class PostgresSessionRepository implements SessionRepository {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
+      await setLocalApiDatabaseContext(client, record)
       const result = await this.renameInTransaction(client, record)
       await client.query('COMMIT')
       return result
@@ -580,6 +607,7 @@ export class PostgresSessionRepository implements SessionRepository {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
+      await setLocalApiDatabaseContext(client, record)
       const result = await this.setArchivedInTransaction(client, record)
       await client.query('COMMIT')
       return result
@@ -595,6 +623,7 @@ export class PostgresSessionRepository implements SessionRepository {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
+      await setLocalApiDatabaseContext(client, record)
       const result = await this.controlInTransaction(client, record)
       await client.query('COMMIT')
       return result
@@ -610,6 +639,7 @@ export class PostgresSessionRepository implements SessionRepository {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
+      await setLocalApiDatabaseContext(client, record)
       const result = await this.retryTurnInTransaction(client, record)
       await client.query('COMMIT')
       return result
@@ -625,6 +655,7 @@ export class PostgresSessionRepository implements SessionRepository {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
+      await setLocalApiDatabaseContext(client, record)
       const result = await this.createInTransaction(client, record)
       await client.query('COMMIT')
       return result
@@ -640,6 +671,7 @@ export class PostgresSessionRepository implements SessionRepository {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
+      await setLocalApiDatabaseContext(client, record)
       const result = await this.startInTransaction(client, record)
       await client.query('COMMIT')
       return result
@@ -655,6 +687,7 @@ export class PostgresSessionRepository implements SessionRepository {
     const client = await this.pool.connect()
     try {
       await client.query('BEGIN')
+      await setLocalApiDatabaseContext(client, record)
       const result = await this.sendInTransaction(client, record)
       await client.query('COMMIT')
       return result

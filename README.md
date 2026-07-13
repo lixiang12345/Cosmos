@@ -41,7 +41,7 @@ DATABASE_URL=postgres://relay:relay-local-only@127.0.0.1:55432/relay pnpm dev:ap
 TEST_DATABASE_URL=postgres://relay:relay-local-only@127.0.0.1:55432/relay pnpm test:integration
 ```
 
-开发环境默认自动执行版本化 SQL migration；也可显式运行 `AUTH_MODE=development DATABASE_URL=... pnpm db:migrate`。staging/production 禁止 API 启动时迁移，发布流程必须先以独立 migration job 运行同一镜像的 `node dist/migrate.js`。`/api/health` 是唯一公开的进程存活探针；`/api/ready` 受鉴权保护并检查 API 的 PostgreSQL 与 migration 依赖，但不会因执行 Worker 下线而关闭只读控制面。生产 API 必须显式设置 `NODE_ENV=production`、`AUTH_MODE=oidc`、`DATABASE_URL`、`CORS_ORIGIN`、`OIDC_ISSUER`、`OIDC_AUDIENCE` 和 `OIDC_JWKS_URI`；生产 Web 必须设置 `VITE_AUTH_MODE=oidc` 与 OIDC public-client 配置，Organization/Space 由受鉴权的 `/api/v1/me` membership discovery 返回，缺失身份配置时显示错误而非进入 demo。
+开发环境默认自动执行版本化 SQL migration；也可显式运行 `AUTH_MODE=development DATABASE_URL=... pnpm db:migrate`。staging/production 禁止 API 启动时迁移，发布流程必须先以独立 migration job 运行同一镜像的 `node dist/migrate.js`。migration 身份必须拥有目标 schema 及创建/加固 `relay_api_runtime`、`relay_worker_runtime` NOLOGIN 角色所需的 `CREATEROLE`；API/Worker 登录身份只授予对应角色 membership，不能拥有表 ownership、superuser 或 `BYPASSRLS`。运行进程会 `SET ROLE` 并在启动时验证实际 `current_user`，角色或 migration 不正确时 fail closed。`/api/health` 是唯一公开的进程存活探针；`/api/ready` 受鉴权保护并检查 API 的 PostgreSQL 与 migration 依赖，但不会因执行 Worker 下线而关闭只读控制面。生产 API 必须显式设置 `NODE_ENV=production`、`AUTH_MODE=oidc`、`DATABASE_URL`、`CORS_ORIGIN`、`OIDC_ISSUER`、`OIDC_AUDIENCE` 和 `OIDC_JWKS_URI`；生产 Web 必须设置 `VITE_AUTH_MODE=oidc` 与 OIDC public-client 配置，Organization/Space 由受鉴权的 `/api/v1/me` membership discovery 返回，缺失身份配置时显示错误而非进入 demo。
 
 要运行 protocol-1 基础对话 Worker，还需配置 `.env.example` 中的 Worker 与 OpenAI-compatible provider 变量，并在 migration 完成后启动独立进程：
 
@@ -91,6 +91,11 @@ pnpm openapi:bundle
 - `POST /api/v1/organizations/:organizationId/spaces/:spaceId/sessions`
 - `POST /api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/start`
 - `POST /api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/messages`
+- `PATCH /api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId`
+- `POST /api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/{archive|restore|pause|resume|cancel}`
+- `POST /api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/turns/:turnId/retry`
+- `GET|POST /api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/shares`
+- `DELETE /api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/shares/:shareId`
 - `GET /api/v1/organizations/:organizationId/spaces/:spaceId/experts`
 - `GET /api/v1/organizations/:organizationId/spaces/:spaceId/experts/:expertId`
 - `GET /api/v1/organizations/:organizationId/spaces/:spaceId/environments`
@@ -107,7 +112,7 @@ pnpm openapi:bundle
 - protocol-1 Worker 使用 PostgreSQL 并发 claim、数据库权威租约、heartbeat、fencing、有限重试和过期租约恢复；每个进程另写可过期的就绪心跳，API 以此动态关闭新执行入口而不影响只读控制面；每次 Attempt 保留历史，撤销写权限会取消尚未开始或正在运行的链路。
 - 当前 Agent provider 只产出受大小限制的对话 Message；provider endpoint 的 301/302/303/307/308 重定向不会被跟随，并按终止型配置错误处理。SessionEvent 以单调 sequence 持久化，并可通过 cursor 分页或 `Last-Event-ID` 恢复 SSE。SSE 心跳期间会重新认证并重检 membership。
 
-配置 `DATABASE_URL` 后，Expert/Environment identity 与 immutable revision、Repository binding、Session、Attempt、事件和幂等记录写入 PostgreSQL；未配置时仅开发环境使用进程内存 repository。API 已实现 OIDC access token 校验、actor membership discovery、Organization/Space 角色交集写限制、ServiceAccount Session fail-closed、Private creator 隔离、权威配置解析、只读 Catalog、actor/路径级幂等、Session 子表复合 tenant FK、Session 重命名/归档/恢复、基础对话 Worker 和可恢复 timeline。Expert/Environment 写 API、Private 分享、FORCE RLS/受限 runtime role、拒绝与失败审计、coding sandbox、Tool Broker、附件对象存储和生产运维证据仍未实现，因此当前版本仍不能直接暴露到公网。这些能力按 [软件交付计划](./docs/software-delivery-plan.md) 继续演进。
+配置 `DATABASE_URL` 后，Expert/Environment identity 与 immutable revision、Repository binding、Session、Attempt、事件和幂等记录写入 PostgreSQL；未配置时仅开发环境使用进程内存 repository。API 已实现 OIDC、membership discovery、User/Group ShareGrant、ServiceAccount exact create/send/archive binding、完整 Session 生命周期命令、复合 tenant FK，以及由事务本地 actor/org/space context 驱动的 FORCE RLS；API/Worker 使用分离的受限数据库角色，Worker 只有执行表跨租户策略。Expert/Environment 写 API、拒绝与失败的完整审计、coding sandbox、Tool Broker、File/Artifact 对象存储和生产备份/恢复/负载证据仍未实现，因此当前版本仍不能直接暴露到公网。这些能力按 [软件交付计划](./docs/software-delivery-plan.md) 继续演进。
 
 ## 原型范围
 

@@ -1,4 +1,5 @@
 import type { Pool } from 'pg'
+import { queryWithApiDatabaseContext } from './postgres-runtime-database.js'
 
 export type ServiceAccountSessionScope =
   | 'session.create'
@@ -31,7 +32,14 @@ export class PostgresServiceAccountPolicyRepository implements ServiceAccountPol
   constructor(private readonly pool: Pool) {}
 
   async authorizeSessionOperation(input: ServiceAccountAuthorization): Promise<boolean> {
-    const result = await this.pool.query(`
+    const result = await queryWithApiDatabaseContext(
+      this.pool,
+      {
+        organizationId: input.organizationId,
+        spaceId: input.spaceId,
+        actorId: input.serviceAccountId,
+      },
+      `
       SELECT 1
       FROM relay_service_accounts service_account
       JOIN relay_organization_memberships organization_membership
@@ -58,7 +66,8 @@ export class PostgresServiceAccountPolicyRepository implements ServiceAccountPol
         AND binding.revoked_at IS NULL
         AND (binding.expires_at IS NULL OR binding.expires_at > transaction_timestamp())
       LIMIT 1
-    `, [
+      `,
+      [
       input.organizationId,
       input.spaceId,
       input.serviceAccountId,
@@ -66,7 +75,8 @@ export class PostgresServiceAccountPolicyRepository implements ServiceAccountPol
       input.scope,
       input.resourceType,
       input.resourceId,
-    ])
+      ],
+    )
     return Boolean(result.rowCount)
   }
 }

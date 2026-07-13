@@ -46,6 +46,15 @@ export {
   type PostgresExecutionRepositoryOptions,
 } from './postgres-execution-repository.js'
 export {
+  assertRuntimeDatabaseRole,
+  createRuntimePool,
+  queryWithApiDatabaseContext,
+  setLocalApiDatabaseContext,
+  withApiDatabaseContext,
+  type ApiDatabaseContext,
+  type RuntimeDatabaseRole,
+} from './postgres-runtime-database.js'
+export {
   PostgresConfigurationCatalogRepository,
 } from './postgres-configuration-catalog-repository.js'
 export {

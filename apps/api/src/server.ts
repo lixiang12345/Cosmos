@@ -4,6 +4,7 @@ import { createDevelopmentAuthenticator, createJwtAuthenticator } from './auth.j
 import { loadConfig } from './config.js'
 import { assertMigrationsCurrent, runMigrations } from './migrations.js'
 import { PostgresConfigurationCatalogRepository } from './postgres-configuration-catalog-repository.js'
+import { assertRuntimeDatabaseRole, createRuntimePool } from './postgres-runtime-database.js'
 import { PostgresSessionRepository } from './postgres-session-repository.js'
 import { PostgresSessionTimelineRepository } from './postgres-session-timeline-repository.js'
 import { PostgresServiceAccountPolicyRepository } from './service-account-policy-repository.js'
@@ -11,13 +12,22 @@ import { PostgresWorkerReadinessRepository } from './postgres-worker-readiness-r
 import { InMemorySessionRepository } from './session-repository.js'
 
 const config = loadConfig()
-const pool = config.databaseUrl ? new Pool({
+const poolConfig = config.databaseUrl ? {
   connectionString: config.databaseUrl,
   connectionTimeoutMillis: config.databaseConnectionTimeoutMs,
   query_timeout: config.databaseQueryTimeoutMs,
   statement_timeout: config.databaseStatementTimeoutMs,
-}) : undefined
-if (pool && config.migrateOnStart) await runMigrations(pool)
+} : undefined
+if (poolConfig && config.migrateOnStart) {
+  const migrationPool = new Pool(poolConfig)
+  try {
+    await runMigrations(migrationPool)
+  } finally {
+    await migrationPool.end()
+  }
+}
+const pool = poolConfig ? createRuntimePool('relay_api_runtime', poolConfig) : undefined
+if (pool) await assertRuntimeDatabaseRole(pool, 'relay_api_runtime')
 const authenticate = config.authentication.mode === 'oidc'
   ? createJwtAuthenticator(config.authentication)
   : createDevelopmentAuthenticator(config.authentication.actorId)

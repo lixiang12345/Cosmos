@@ -48,6 +48,8 @@ const migrationVersions = [
   '043_session_share_grants.sql',
   '044_validate_session_share_grants.sql',
   '045_service_account_session_scopes.sql',
+  '046_runtime_roles_and_tenant_rls.sql',
+  '047_harden_runtime_rls_policies.sql',
 ]
 
 function poolWithVersions(versions: string[]) {

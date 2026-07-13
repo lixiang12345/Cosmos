@@ -9,6 +9,7 @@ import {
   type SessionMessagePage,
 } from '@relay/contracts'
 import type { Pool } from 'pg'
+import { queryWithApiDatabaseContext } from './postgres-runtime-database.js'
 import {
   SessionTimelineCursorAheadError,
   SessionTimelineProjectionError,
@@ -236,7 +237,10 @@ export class PostgresSessionTimelineRepository implements SessionTimelineReposit
     options: SessionTimelineListOptions = {},
   ): Promise<SessionMessagePage | null> {
     const { afterSequence, limit } = queryOptions(options, 100)
-    const result = await this.pool.query<MessageRow>(`
+    const result = await queryWithApiDatabaseContext<MessageRow>(
+      this.pool,
+      { organizationId, spaceId, actorId },
+      `
       WITH access AS (
         SELECT session.id AS session_id
         FROM relay_sessions session
@@ -291,7 +295,9 @@ export class PostgresSessionTimelineRepository implements SessionTimelineReposit
         LIMIT $6
       ) item ON true
       ORDER BY item.sequence ASC NULLS LAST
-    `, [organizationId, spaceId, sessionId, actorId, afterSequence, limit + 1])
+      `,
+      [organizationId, spaceId, sessionId, actorId, afterSequence, limit + 1],
+    )
 
     if (result.rows.length === 0) return null
 
@@ -321,7 +327,10 @@ export class PostgresSessionTimelineRepository implements SessionTimelineReposit
     options: SessionTimelineListOptions = {},
   ): Promise<SessionEventPage | null> {
     const { afterSequence, limit } = queryOptions(options, 500)
-    const result = await this.pool.query<EventRow>(`
+    const result = await queryWithApiDatabaseContext<EventRow>(
+      this.pool,
+      { organizationId, spaceId, actorId },
+      `
       WITH access AS (
         SELECT session.id AS session_id, session.last_event_sequence AS current_sequence
         FROM relay_sessions session
@@ -395,7 +404,9 @@ export class PostgresSessionTimelineRepository implements SessionTimelineReposit
         LIMIT $6
       ) item ON true
       ORDER BY item.sequence ASC NULLS LAST
-    `, [organizationId, spaceId, sessionId, actorId, afterSequence, limit + 1])
+      `,
+      [organizationId, spaceId, sessionId, actorId, afterSequence, limit + 1],
+    )
 
     if (result.rows.length === 0) return null
 

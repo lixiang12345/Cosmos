@@ -9,6 +9,7 @@ import {
   type ExpertSummaryDto,
 } from '@relay/contracts'
 import type { Pool } from 'pg'
+import { queryWithApiDatabaseContext } from './postgres-runtime-database.js'
 import type {
   ConfigurationCatalogCursor,
   ConfigurationCatalogListOptions,
@@ -320,7 +321,10 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
   ): Promise<ConfigurationCatalogPage<ExpertSummaryDto> | null> {
     const limit = pageSize(options.limit)
     const cursor = cursorClause('expert', options.cursor, limit)
-    const result = await this.pool.query<ExpertRow>(`
+    const result = await queryWithApiDatabaseContext<ExpertRow>(
+      this.pool,
+      { organizationId, spaceId, actorId },
+      `
       ${accessCte}
       SELECT item.*
       FROM access
@@ -345,7 +349,9 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
         LIMIT $${cursor.limitParameter}
       ) item ON true
       ORDER BY item.updated_at DESC NULLS LAST, item.id DESC NULLS LAST
-    `, [organizationId, spaceId, actorId, ...cursor.parameters])
+      `,
+      [organizationId, spaceId, actorId, ...cursor.parameters],
+    )
     return mapPage(result.rows, limit, mapExpertSummary)
   }
 
@@ -355,7 +361,10 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
     expertId: string,
     actorId: string,
   ): Promise<ExpertDetailDto | null> {
-    const result = await this.pool.query<ExpertRow>(`
+    const result = await queryWithApiDatabaseContext<ExpertRow>(
+      this.pool,
+      { organizationId, spaceId, actorId },
+      `
       ${accessCte}
       SELECT item.*
       FROM access
@@ -377,7 +386,9 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
             OR (access.organization_role <> 'viewer' AND access.space_role <> 'viewer')
           )
       ) item ON true
-    `, [organizationId, spaceId, actorId, expertId])
+      `,
+      [organizationId, spaceId, actorId, expertId],
+    )
     const row = result.rows[0]
     return !row || row.id === null ? null : mapExpertDetail(row)
   }
@@ -390,7 +401,10 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
   ): Promise<ConfigurationCatalogPage<EnvironmentSummaryDto> | null> {
     const limit = pageSize(options.limit)
     const cursor = cursorClause('environment', options.cursor, limit)
-    const result = await this.pool.query<EnvironmentRow>(`
+    const result = await queryWithApiDatabaseContext<EnvironmentRow>(
+      this.pool,
+      { organizationId, spaceId, actorId },
+      `
       ${accessCte}
       SELECT item.*
       FROM access
@@ -420,7 +434,9 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
         LIMIT $${cursor.limitParameter}
       ) item ON true
       ORDER BY item.updated_at DESC NULLS LAST, item.id DESC NULLS LAST
-    `, [organizationId, spaceId, actorId, ...cursor.parameters])
+      `,
+      [organizationId, spaceId, actorId, ...cursor.parameters],
+    )
     return mapPage(result.rows, limit, mapEnvironmentSummary)
   }
 
@@ -430,7 +446,10 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
     environmentId: string,
     actorId: string,
   ): Promise<EnvironmentDetailDto | null> {
-    const result = await this.pool.query<EnvironmentDetailRow>(`
+    const result = await queryWithApiDatabaseContext<EnvironmentDetailRow>(
+      this.pool,
+      { organizationId, spaceId, actorId },
+      `
       ${accessCte}
       SELECT item.*,
         repository_binding.repository_id AS binding_repository_id,
@@ -467,7 +486,9 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
         AND repository_binding.environment_id = item.id
         AND repository_binding.environment_revision_id = item.revision_id
       ORDER BY repository_binding.is_default DESC NULLS LAST, repository_binding.repository_id ASC NULLS LAST
-    `, [organizationId, spaceId, actorId, environmentId])
+      `,
+      [organizationId, spaceId, actorId, environmentId],
+    )
     const first = result.rows[0]
     return !first || first.id === null ? null : mapEnvironmentDetail(result.rows)
   }
