@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto'
 import {
   MeOrganizationSchema,
   SessionDtoSchema,
+  type AttemptDto,
+  type CancelSessionRequest,
   type CreateSessionRequest,
   type CreateSessionResponse,
   type MeOrganization,
@@ -9,11 +11,13 @@ import {
   type RenameSessionRequest,
   type SessionConfigurationResolutionVersion,
   type SessionCommand,
+  type SessionControlResponse,
   type SessionDto,
   type SessionMessage,
   type SessionStatus,
   type SendSessionMessageResponse,
   type StartSessionResponse,
+  type RetryTurnResponse,
   type SessionTurn,
   type SpaceRole,
 } from '@relay/contracts'
@@ -92,6 +96,27 @@ export type SetSessionArchivedRecord = SessionMutationRecord & {
 
 export type SessionLifecycleResult = {
   session: SessionDto
+  replayed: boolean
+}
+
+export type SessionControlAction = 'pause' | 'resume' | 'cancel'
+
+export type ControlSessionRecord = SessionMutationRecord & {
+  action: SessionControlAction
+  idempotencyKey: string
+  request: CancelSessionRequest
+}
+
+export type SessionControlResult = SessionControlResponse & {
+  replayed: boolean
+}
+
+export type RetryTurnRecord = SessionMutationRecord & {
+  turnId: string
+  idempotencyKey: string
+}
+
+export type RetryTurnResult = RetryTurnResponse & {
   replayed: boolean
 }
 
@@ -198,12 +223,27 @@ export class SessionVersionConflictError extends Error {
 export class SessionStateConflictError extends Error {
   constructor(
     readonly status: SessionDto['status'],
-    readonly operation: 'start' | 'send' = 'start',
+    readonly operation: 'start' | 'send' | 'pause' | 'resume' | 'cancel' | 'retry' = 'start',
   ) {
-    super(operation === 'start'
-      ? `A Session in the ${status} state cannot be started.`
-      : `A message cannot be sent to a Session in the ${status} state.`)
+    const messages = {
+      start: `A Session in the ${status} state cannot be started.`,
+      send: `A message cannot be sent to a Session in the ${status} state.`,
+      pause: `A Session in the ${status} state cannot be paused.`,
+      resume: `A Session in the ${status} state cannot be resumed.`,
+      cancel: `A Session in the ${status} state cannot be canceled.`,
+      retry: `A Turn cannot be retried while its Session is in the ${status} state.`,
+    }
+    super(messages[operation])
     this.name = 'SessionStateConflictError'
+  }
+}
+
+export class TurnStateConflictError extends Error {
+  constructor(readonly status: SessionTurn['status'] | 'missing') {
+    super(status === 'missing'
+      ? 'The requested Turn was not found in this Session.'
+      : `A Turn in the ${status} state cannot be retried.`)
+    this.name = 'TurnStateConflictError'
   }
 }
 
@@ -262,6 +302,8 @@ export interface SessionRepository {
   getById(organizationId: string, spaceId: string, sessionId: string, actorId: string): Promise<SessionDto | null>
   rename(record: RenameSessionRecord): Promise<SessionDto | null>
   setArchived(record: SetSessionArchivedRecord): Promise<SessionLifecycleResult | null>
+  control(record: ControlSessionRecord): Promise<SessionControlResult | null>
+  retryTurn(record: RetryTurnRecord): Promise<RetryTurnResult | null>
   create(record: CreateSessionRecord): Promise<CreateSessionResult>
   start(record: StartSessionRecord): Promise<StartSessionResult | null>
   send(record: SendSessionMessageRecord): Promise<SendSessionMessageResult | null>
@@ -587,8 +629,17 @@ export class InMemorySessionRepository implements SessionRepository {
     requestFingerprint: string
     result: SessionLifecycleResult
   }>()
+  private readonly controlsByIdempotencyKey = new Map<string, {
+    requestFingerprint: string
+    result: SessionControlResult
+  }>()
+  private readonly retriesByIdempotencyKey = new Map<string, {
+    requestFingerprint: string
+    result: RetryTurnResult
+  }>()
   private readonly messagesBySessionId = new Map<string, SessionMessage[]>()
   private readonly turnsBySessionId = new Map<string, SessionTurn[]>()
+  private readonly attemptsByTurnId = new Map<string, AttemptDto[]>()
   private readonly createId: () => string
   private readonly now: () => Date
   private readonly authoritativeCatalog: readonly InMemoryExpertCatalogEntry[]
@@ -749,6 +800,163 @@ export class InMemorySessionRepository implements SessionRepository {
     }
     const result = { session: cloneSession(session), replayed: false }
     this.lifecycleByIdempotencyKey.set(idempotencyScope, { requestFingerprint, result })
+    return result
+  }
+
+  async control(record: ControlSessionRecord): Promise<SessionControlResult | null> {
+    const access = await this.getSpaceAccess(record.organizationId, record.spaceId, record.actorId)
+    if (!access || !canWriteSpace(access)) throw new AuthorizationChangedError()
+    const key = spaceKey(record.organizationId, record.spaceId)
+    const sessions = this.sessionsBySpace.get(key) ?? []
+    const sessionIndex = sessions.findIndex((candidate) => candidate.id === record.sessionId)
+    const current = sessions[sessionIndex]
+    if (!current || (current.visibility === 'private' && this.sessionCreators.get(current.id) !== record.actorId)) {
+      return null
+    }
+    const isCreator = this.sessionCreators.get(current.id) === record.actorId
+    if (!isCreator && (current.visibility !== 'space' || access.spaceRole !== 'space_manager')) {
+      throw new AuthorizationChangedError()
+    }
+
+    const idempotencyScope = `${key}\u0000${record.actorId}\u0000${record.sessionId}\u0000control\u0000${record.action}\u0000${record.idempotencyKey}`
+    const requestFingerprint = JSON.stringify({
+      expectedVersion: record.expectedVersion,
+      request: record.request,
+    })
+    const existing = this.controlsByIdempotencyKey.get(idempotencyScope)
+    if (existing) {
+      if (existing.requestFingerprint !== requestFingerprint) throw new IdempotencyConflictError()
+      return {
+        session: cloneSession(existing.result.session),
+        command: { ...existing.result.command },
+        replayed: true,
+      }
+    }
+    if (current.version !== record.expectedVersion) {
+      throw new SessionVersionConflictError(record.expectedVersion, current.version)
+    }
+
+    const allowed = record.action === 'pause'
+      ? ['queued', 'active', 'waiting'].includes(current.status)
+      : record.action === 'resume'
+        ? current.status === 'paused'
+        : ['draft', 'queued', 'active', 'waiting', 'paused'].includes(current.status)
+    if (!allowed) throw new SessionStateConflictError(current.status, record.action)
+
+    const timestamp = this.now().toISOString()
+    const status: SessionDto['status'] = record.action === 'pause'
+      ? 'paused'
+      : record.action === 'resume'
+        ? 'queued'
+        : 'canceled'
+    const session = SessionDtoSchema.parse({
+      ...current,
+      status,
+      updatedAt: timestamp,
+      lastActivityAt: timestamp,
+      version: current.version + 1,
+    })
+    const turns = this.turnsBySessionId.get(session.id) ?? []
+    this.turnsBySessionId.set(session.id, turns.map((turn) => {
+      if (record.action === 'pause' && ['running', 'waiting_tool', 'waiting_approval'].includes(turn.status)) {
+        return { ...turn, status: 'queued' as const, version: turn.version + 1 }
+      }
+      if (record.action === 'cancel' && !['completed', 'failed', 'canceled'].includes(turn.status)) {
+        return { ...turn, status: 'canceled' as const, version: turn.version + 1 }
+      }
+      return turn
+    }))
+    sessions[sessionIndex] = session
+    const command: SessionCommand = {
+      id: this.createId(),
+      type: `session.${record.action}`,
+      status: 'succeeded',
+      resourceType: 'session',
+      resourceId: session.id,
+      acceptedAt: timestamp,
+    }
+    const result = { session: cloneSession(session), command, replayed: false }
+    this.controlsByIdempotencyKey.set(idempotencyScope, { requestFingerprint, result })
+    return result
+  }
+
+  async retryTurn(record: RetryTurnRecord): Promise<RetryTurnResult | null> {
+    const access = await this.getSpaceAccess(record.organizationId, record.spaceId, record.actorId)
+    if (!access || !canWriteSpace(access)) throw new AuthorizationChangedError()
+    const key = spaceKey(record.organizationId, record.spaceId)
+    const sessions = this.sessionsBySpace.get(key) ?? []
+    const sessionIndex = sessions.findIndex((candidate) => candidate.id === record.sessionId)
+    const current = sessions[sessionIndex]
+    if (!current || (current.visibility === 'private' && this.sessionCreators.get(current.id) !== record.actorId)) {
+      return null
+    }
+    const isCreator = this.sessionCreators.get(current.id) === record.actorId
+    if (!isCreator && (current.visibility !== 'space' || access.spaceRole !== 'space_manager')) {
+      throw new AuthorizationChangedError()
+    }
+
+    const idempotencyScope = `${key}\u0000${record.actorId}\u0000${record.sessionId}\u0000${record.turnId}\u0000retry\u0000${record.idempotencyKey}`
+    const requestFingerprint = JSON.stringify({ expectedVersion: record.expectedVersion })
+    const existing = this.retriesByIdempotencyKey.get(idempotencyScope)
+    if (existing) {
+      if (existing.requestFingerprint !== requestFingerprint) throw new IdempotencyConflictError()
+      return {
+        session: cloneSession(existing.result.session),
+        attempt: { ...existing.result.attempt },
+        command: { ...existing.result.command },
+        replayed: true,
+      }
+    }
+    if (current.version !== record.expectedVersion) {
+      throw new SessionVersionConflictError(record.expectedVersion, current.version)
+    }
+    if (current.status !== 'failed') throw new SessionStateConflictError(current.status, 'retry')
+
+    const turns = this.turnsBySessionId.get(current.id) ?? []
+    const turnIndex = turns.findIndex((turn) => turn.id === record.turnId)
+    const currentTurn = turns[turnIndex]
+    if (!currentTurn) return null
+    if (currentTurn.status !== 'failed') throw new TurnStateConflictError(currentTurn.status)
+
+    const timestamp = this.now().toISOString()
+    const session = SessionDtoSchema.parse({
+      ...current,
+      status: 'queued',
+      updatedAt: timestamp,
+      lastActivityAt: timestamp,
+      version: current.version + 1,
+    })
+    turns[turnIndex] = { ...currentTurn, status: 'queued', version: currentTurn.version + 1 }
+    const attempts = this.attemptsByTurnId.get(currentTurn.id) ?? []
+    const attempt: AttemptDto = {
+      organizationId: record.organizationId,
+      spaceId: record.spaceId,
+      sessionId: record.sessionId,
+      id: this.createId(),
+      turnId: record.turnId,
+      number: (attempts.at(-1)?.number ?? 0) + 1,
+      status: 'queued',
+      model: 'development-runtime',
+      providerModel: null,
+      runtimeId: null,
+      failureCode: null,
+      createdAt: timestamp,
+      startedAt: null,
+      finishedAt: null,
+    }
+    const command: SessionCommand = {
+      id: this.createId(),
+      type: 'turn.retry',
+      status: 'queued',
+      resourceType: 'turn',
+      resourceId: record.turnId,
+      acceptedAt: timestamp,
+    }
+    attempts.push(attempt)
+    this.attemptsByTurnId.set(record.turnId, attempts)
+    sessions[sessionIndex] = session
+    const result = { session: cloneSession(session), attempt, command, replayed: false }
+    this.retriesByIdempotencyKey.set(idempotencyScope, { requestFingerprint, result })
     return result
   }
 

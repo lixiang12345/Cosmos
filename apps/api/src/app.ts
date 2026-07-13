@@ -1,6 +1,7 @@
 import cors from '@fastify/cors'
 import {
   ApiErrorSchema,
+  CancelSessionRequestSchema,
   CreateSessionRequestSchema,
   CreateSessionResponseSchema,
   EnvironmentDetailDtoSchema,
@@ -10,8 +11,10 @@ import {
   MeResponseSchema,
   MessageCreateSchema,
   RenameSessionRequestSchema,
+  RetryTurnResponseSchema,
   RuntimeCapabilitiesSchema,
   SessionDtoSchema,
+  SessionControlResponseSchema,
   SessionEventPageSchema,
   SessionListResponseSchema,
   SessionMessagePageSchema,
@@ -54,6 +57,7 @@ import {
   SessionConfigurationValidationError,
   SessionStateConflictError,
   SessionVersionConflictError,
+  TurnStateConflictError,
   canWriteSpace,
   type SessionRepository,
 } from './session-repository.js'
@@ -85,6 +89,10 @@ type SpaceParams = {
 
 type SessionParams = SpaceParams & {
   sessionId: string
+}
+
+type TurnParams = SessionParams & {
+  turnId: string
 }
 
 type SessionEventStreamOptions = {
@@ -402,6 +410,15 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     if (error instanceof SessionStateConflictError) {
       return sendApiError(reply, 409, request, {
         code: 'SESSION_STATE_CONFLICT',
+        message: error.message,
+        retryable: false,
+        details: { status: error.status, operation: error.operation },
+      })
+    }
+
+    if (error instanceof TurnStateConflictError) {
+      return sendApiError(reply, error.status === 'missing' ? 404 : 409, request, {
+        code: error.status === 'missing' ? 'RESOURCE_NOT_FOUND' : 'TURN_STATE_CONFLICT',
         message: error.message,
         retryable: false,
         details: { status: error.status },
@@ -862,6 +879,128 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       },
     )
   }
+
+  for (const action of ['pause', 'resume', 'cancel'] as const) {
+    app.post<{ Params: SessionParams }>(
+      `/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/${action}`,
+      async (request, reply) => {
+        const authorization = await authorizeSessionSpace(request, reply, request.params)
+        if (!authorization) return
+        const sessionId = parseSpaceId(request.params.sessionId)
+        if (!sessionId) return sendResourceNotFound(reply, request)
+        if (!canWriteSpace(authorization.access)) {
+          return sendApiError(reply, 403, request, {
+            code: 'PERMISSION_DENIED',
+            message: `You do not have permission to ${action} Sessions in this Space.`,
+            retryable: false,
+          })
+        }
+        const idempotencyKey = readIdempotencyKey(request)
+        if (!idempotencyKey) {
+          return sendApiError(reply, 400, request, {
+            code: 'IDEMPOTENCY_KEY_REQUIRED',
+            message: 'A valid Idempotency-Key header is required.',
+            retryable: false,
+            fieldErrors: { 'Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+          })
+        }
+        const expectedVersion = requireIfMatchVersion(request, reply)
+        if (expectedVersion === null) return
+        const parsed = CancelSessionRequestSchema.safeParse(
+          action === 'cancel' ? (request.body ?? {}) : request.body === undefined ? {} : request.body,
+        )
+        if (!parsed.success || (action !== 'cancel' && request.body !== undefined)) {
+          return sendApiError(reply, 400, request, {
+            code: 'VALIDATION_FAILED',
+            message: `The Session ${action} request is invalid.`,
+            retryable: false,
+            fieldErrors: parsed.success
+              ? { body: ['Send the request without a body.'] }
+              : validationFieldErrors(parsed.error.issues),
+          })
+        }
+        const result = await sessionRepository.control({
+          organizationId: authorization.organizationId,
+          spaceId: authorization.spaceId,
+          sessionId,
+          actorId: authorization.actor.id,
+          actorKind: authorization.actor.kind,
+          requestId: request.id,
+          expectedVersion,
+          action,
+          idempotencyKey,
+          request: action === 'cancel' ? parsed.data : {},
+        })
+        if (!result) return sendResourceNotFound(reply, request)
+        const response = SessionControlResponseSchema.parse({
+          session: result.session,
+          command: result.command,
+        })
+        reply.code(202)
+        reply.header('ETag', sessionEtag(response.session))
+        reply.header('Idempotency-Replayed', String(result.replayed))
+        return response
+      },
+    )
+  }
+
+  app.post<{ Params: TurnParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/turns/:turnId/retry',
+    async (request, reply) => {
+      const authorization = await authorizeSessionSpace(request, reply, request.params)
+      if (!authorization) return
+      const sessionId = parseSpaceId(request.params.sessionId)
+      const turnId = parseSpaceId(request.params.turnId)
+      if (!sessionId || !turnId) return sendResourceNotFound(reply, request)
+      if (!canWriteSpace(authorization.access)) {
+        return sendApiError(reply, 403, request, {
+          code: 'PERMISSION_DENIED',
+          message: 'You do not have permission to retry Turns in this Space.',
+          retryable: false,
+        })
+      }
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED',
+          message: 'A valid Idempotency-Key header is required.',
+          retryable: false,
+          fieldErrors: { 'Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      const expectedVersion = requireIfMatchVersion(request, reply)
+      if (expectedVersion === null) return
+      if (request.body !== undefined) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED',
+          message: 'The Turn retry operation does not accept a request body.',
+          retryable: false,
+          fieldErrors: { body: ['Send the request without a body.'] },
+        })
+      }
+      const result = await sessionRepository.retryTurn({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        sessionId,
+        turnId,
+        actorId: authorization.actor.id,
+        actorKind: authorization.actor.kind,
+        requestId: request.id,
+        expectedVersion,
+        idempotencyKey,
+      })
+      if (!result) return sendResourceNotFound(reply, request)
+      const response = RetryTurnResponseSchema.parse({
+        session: result.session,
+        attempt: result.attempt,
+        command: result.command,
+      })
+      reply.code(202)
+      reply.header('ETag', sessionEtag(response.session))
+      reply.header('Idempotency-Replayed', String(result.replayed))
+      return response
+    },
+  )
 
   app.get<{ Params: SessionParams; Querystring: SessionTimelineQuery }>(
     '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/messages',

@@ -21,6 +21,8 @@ type CandidateRow = {
   request_id: string
   requested_by: string
   attempts: number
+  queued_attempt_id: string | null
+  queued_attempt_number: number | null
   model: string
   instructions: string
   input_content: string
@@ -156,6 +158,8 @@ export class PostgresExecutionRepository implements ExecutionRepository {
           command_record.request_id,
           command_record.requested_by,
           command_record.attempts,
+          queued_attempt.id AS queued_attempt_id,
+          queued_attempt.number AS queued_attempt_number,
           expert_revision.model,
           expert_revision.instructions,
           input_message.content AS input_content
@@ -174,6 +178,12 @@ export class PostgresExecutionRepository implements ExecutionRepository {
           AND input_message.space_id = turn_record.space_id
           AND input_message.session_id = turn_record.session_id
           AND input_message.id = turn_record.input_message_id
+        LEFT JOIN relay_attempts queued_attempt
+          ON queued_attempt.organization_id = turn_record.organization_id
+          AND queued_attempt.space_id = turn_record.space_id
+          AND queued_attempt.session_id = turn_record.session_id
+          AND queued_attempt.turn_id = turn_record.id
+          AND queued_attempt.status = 'queued'
         JOIN relay_expert_revisions expert_revision
           ON expert_revision.organization_id = session_record.organization_id
           AND expert_revision.space_id = session_record.space_id
@@ -218,7 +228,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
       const selected = candidate.rows[0]
       if (!selected) return null
 
-      const attemptId = this.createId()
+      const attemptId = selected.queued_attempt_id ?? this.createId()
       requireIdentifier(attemptId, 'Generated Attempt id')
       const command = await client.query<ClaimedCommandRow>(`
         WITH execution_time AS (
@@ -254,23 +264,60 @@ export class PostgresExecutionRepository implements ExecutionRepository {
       if (!claimed) throw new Error('Locked execution Command could not be claimed.')
       const claimedAt = timestamp(claimed.claimed_at)
 
-      const attempt = await client.query(`
-        INSERT INTO relay_attempts (
-          organization_id, space_id, session_id, turn_id, id, number, status,
-          model, runtime_id, created_at, started_at, heartbeat_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, 'running', $7, $8, $9, $9, $9)
-      `, [
-        selected.organization_id,
-        selected.space_id,
-        selected.session_id,
-        selected.turn_id,
-        attemptId,
-        claimed.attempts,
-        selected.model,
-        options.leaseOwner,
-        claimedAt,
-      ])
-      if (attempt.rowCount !== 1) throw new Error('Execution Attempt could not be created.')
+      if (selected.queued_attempt_id) {
+        if (selected.queued_attempt_number !== claimed.attempts) {
+          throw new Error('The queued retry Attempt does not match the Command fence.')
+        }
+        const startingAttempt = await client.query(`
+          UPDATE relay_attempts
+          SET status = 'starting', runtime_id = $7, started_at = $8
+          WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
+            AND turn_id = $4 AND id = $5 AND number = $6 AND status = 'queued'
+        `, [
+          selected.organization_id,
+          selected.space_id,
+          selected.session_id,
+          selected.turn_id,
+          attemptId,
+          claimed.attempts,
+          options.leaseOwner,
+          claimedAt,
+        ])
+        if (startingAttempt.rowCount !== 1) throw new Error('Queued retry Attempt could not be started.')
+        const runningAttempt = await client.query(`
+          UPDATE relay_attempts
+          SET status = 'running', heartbeat_at = $7
+          WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
+            AND turn_id = $4 AND id = $5 AND number = $6 AND status = 'starting'
+        `, [
+          selected.organization_id,
+          selected.space_id,
+          selected.session_id,
+          selected.turn_id,
+          attemptId,
+          claimed.attempts,
+          claimedAt,
+        ])
+        if (runningAttempt.rowCount !== 1) throw new Error('Queued retry Attempt could not begin running.')
+      } else {
+        const attempt = await client.query(`
+          INSERT INTO relay_attempts (
+            organization_id, space_id, session_id, turn_id, id, number, status,
+            model, runtime_id, created_at, started_at, heartbeat_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, 'running', $7, $8, $9, $9, $9)
+        `, [
+          selected.organization_id,
+          selected.space_id,
+          selected.session_id,
+          selected.turn_id,
+          attemptId,
+          claimed.attempts,
+          selected.model,
+          options.leaseOwner,
+          claimedAt,
+        ])
+        if (attempt.rowCount !== 1) throw new Error('Execution Attempt could not be created.')
+      }
       const turn = await client.query(`
         UPDATE relay_turns
         SET status = 'running',

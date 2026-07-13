@@ -1,4 +1,4 @@
-import type { SessionDto, SessionMessageDto } from '@relay/contracts'
+import type { SessionDto, SessionEventDto, SessionMessageDto } from '@relay/contracts'
 import { AlertTriangle, CheckCircle2, Home, LoaderCircle, Menu, RefreshCw, X } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
@@ -32,12 +32,16 @@ import { usePreferences } from './preferences'
 import {
   RelayApiError,
   archiveSession,
+  cancelSession,
   createSession,
   getRuntimeCapabilities,
   getSession,
   listSessions,
+  pauseSession,
   renameSession as renameSessionRequest,
   restoreSession,
+  resumeSession,
+  retrySessionTurn,
   sendSessionMessage,
   startSession,
 } from './services/relayApi'
@@ -360,11 +364,18 @@ function SessionRoute({
     status: 'idle' | 'submitting' | 'error'
     error?: string
   }>()
+  const [controlMutation, setControlMutation] = useState<{
+    key: string
+    action: 'pause' | 'resume' | 'cancel' | 'retry'
+    status: 'idle' | 'submitting' | 'error'
+    error?: string
+  }>()
   const [acceptedMessages, setAcceptedMessages] = useState<{
     key: string
     items: SessionMessageDto[]
   }>()
   const sendIdempotency = useRef<{ sessionId?: string; content?: string; key?: string }>({})
+  const controlIdempotency = useRef(new Map<string, string>())
   const startRequest: { status: 'idle' | 'submitting' | 'error'; error?: string } = startMutation
     && startMutation.key === sessionId
     ? startMutation
@@ -374,6 +385,9 @@ function SessionRoute({
     && sendMutation.key === sessionId
     ? sendMutation
     : { status: 'idle' as const }
+  const controlRequest = sessionId && controlMutation?.key === sessionId
+    ? controlMutation
+    : { action: 'pause' as const, status: 'idle' as const, error: undefined }
   const run = runs.find((item) => item.id === sessionId)
   const auth = useMemo(
     () => ({ accessToken, requestIdentity, onUnauthorized: handleUnauthorized }),
@@ -561,6 +575,66 @@ function SessionRoute({
     }
   }, [auth, concealDetail, executionEnabled, locale, onSessionObserved, organizationId, requestKey, resolvedSession, spaceId])
 
+  const retryTurnId = useMemo(() => [...timeline.events].reverse().find((event): event is Extract<
+    SessionEventDto,
+    { type: 'attempt.updated' }
+  > => event.type === 'attempt.updated' && event.payload.status === 'failed')?.payload.turnId, [timeline.events])
+
+  const runControl = useCallback(async (
+    action: 'pause' | 'resume' | 'cancel' | 'retry',
+  ) => {
+    if (!resolvedSession || (action === 'retry' && !retryTurnId)) return
+    const scope = `${action}:${resolvedSession.id}:${retryTurnId ?? ''}:${resolvedSession.version}`
+    const idempotencyKey = controlIdempotency.current.get(scope)
+      ?? makeSessionIdempotencyKey(scope)
+    controlIdempotency.current.set(scope, idempotencyKey)
+    setControlMutation({ key: resolvedSession.id, action, status: 'submitting' })
+    try {
+      const response = action === 'retry'
+        ? await retrySessionTurn(
+          organizationId,
+          spaceId,
+          resolvedSession.id,
+          retryTurnId!,
+          resolvedSession.version,
+          idempotencyKey,
+          auth,
+        )
+        : await (action === 'pause'
+          ? pauseSession
+          : action === 'resume'
+            ? resumeSession
+            : (organization: string, space: string, id: string, version: number, key: string, context: typeof auth) => (
+              cancelSession(organization, space, id, version, key, undefined, context)
+            ))(
+          organizationId,
+          spaceId,
+          resolvedSession.id,
+          resolvedSession.version,
+          idempotencyKey,
+          auth,
+        )
+      controlIdempotency.current.delete(scope)
+      setRequest((current) => current?.key === requestKey
+        ? { key: requestKey, status: 'ready', session: response.session }
+        : current)
+      onSessionObserved(response.session)
+      setControlMutation({ key: resolvedSession.id, action, status: 'idle' })
+    } catch (cause) {
+      const message = cause instanceof Error
+        ? cause.message
+        : (locale === 'zh' ? '无法更新会话执行状态。' : 'Unable to update Session execution state.')
+      if (cause instanceof RelayApiError && cause.status === 412) {
+        setRetryVersion((version) => version + 1)
+      }
+      if (cause instanceof RelayApiError && cause.status !== undefined && [401, 403, 404].includes(cause.status)) {
+        concealDetail(message)
+        return
+      }
+      setControlMutation({ key: resolvedSession.id, action, status: 'error', error: message })
+    }
+  }, [auth, concealDetail, locale, onSessionObserved, organizationId, requestKey, resolvedSession, retryTurnId, spaceId])
+
   useEffect(() => {
     if (!resolvedSession || resolvedSession === currentRequest?.session) return
     onSessionObserved(resolvedSession)
@@ -614,6 +688,13 @@ function SessionRoute({
         sendStatus={sendRequest.status}
         sendError={sendRequest.error}
         onSend={sendFollowUp}
+        controlStatus={controlRequest.status}
+        controlAction={controlRequest.action}
+        controlError={controlRequest.error}
+        onPause={() => { void runControl('pause') }}
+        onResume={() => { void runControl('resume') }}
+        onCancel={() => { void runControl('cancel') }}
+        onRetry={retryTurnId ? () => { void runControl('retry') } : undefined}
         onOpenNavigation={onOpenNavigation}
         onBack={() => navigate('/sessions')}
       />

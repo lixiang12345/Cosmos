@@ -19,10 +19,12 @@ import {
   LoaderCircle,
   Menu,
   MessageSquare,
+  Pause,
   Play,
   RotateCcw,
   Send,
   ShieldCheck,
+  Square,
   XCircle,
 } from 'lucide-react'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
@@ -43,6 +45,13 @@ export type RemoteSessionWorkbenchProps = {
   sendStatus?: 'idle' | 'submitting' | 'error'
   sendError?: string
   onSend?: (content: string) => Promise<void>
+  controlStatus?: 'idle' | 'submitting' | 'error'
+  controlAction?: 'pause' | 'resume' | 'cancel' | 'retry'
+  controlError?: string
+  onPause?: () => void
+  onResume?: () => void
+  onCancel?: () => void
+  onRetry?: () => void
   onBack: () => void
   onOpenNavigation?: () => void
 }
@@ -237,6 +246,13 @@ export function RemoteSessionWorkbench({
   sendStatus = 'idle',
   sendError,
   onSend,
+  controlStatus = 'idle',
+  controlAction,
+  controlError,
+  onPause,
+  onResume,
+  onCancel,
+  onRetry,
   onBack,
   onOpenNavigation,
 }: RemoteSessionWorkbenchProps) {
@@ -290,6 +306,11 @@ export function RemoteSessionWorkbench({
   }
 
   const canAppendMessage = session.status !== 'draft' && session.status !== 'canceled'
+  const controlSubmitting = controlStatus === 'submitting'
+  const canPause = session.status === 'queued' || session.status === 'active' || session.status === 'waiting'
+  const canResume = session.status === 'paused'
+  const canCancel = ['draft', 'queued', 'active', 'waiting', 'paused'].includes(session.status)
+  const canRetry = session.status === 'failed' && Boolean(onRetry)
 
   return (
     <main className="remote-session-workbench">
@@ -360,6 +381,63 @@ export function RemoteSessionWorkbench({
               {startStatus === 'error' && startError ? (
                 <span role="alert">{startError}</span>
               ) : null}
+            </div>
+          ) : null}
+          {(canPause || canResume || canCancel || canRetry) ? (
+            <div className="remote-session-execution-state__action">
+              {canPause && onPause ? (
+                <button
+                  type="button"
+                  className="cosmos-button cosmos-button--secondary"
+                  disabled={controlSubmitting}
+                  onClick={onPause}
+                >
+                  {controlSubmitting && controlAction === 'pause'
+                    ? <LoaderCircle className="cosmos-spin" aria-hidden="true" />
+                    : <Pause aria-hidden="true" />}
+                  {text(locale, '暂停', 'Pause')}
+                </button>
+              ) : null}
+              {canResume && onResume ? (
+                <button
+                  type="button"
+                  className="cosmos-button cosmos-button--primary"
+                  disabled={controlSubmitting || !executionEnabled}
+                  onClick={onResume}
+                >
+                  {controlSubmitting && controlAction === 'resume'
+                    ? <LoaderCircle className="cosmos-spin" aria-hidden="true" />
+                    : <Play aria-hidden="true" />}
+                  {text(locale, '恢复', 'Resume')}
+                </button>
+              ) : null}
+              {canRetry && onRetry ? (
+                <button
+                  type="button"
+                  className="cosmos-button cosmos-button--primary"
+                  disabled={controlSubmitting || !executionEnabled}
+                  onClick={onRetry}
+                >
+                  {controlSubmitting && controlAction === 'retry'
+                    ? <LoaderCircle className="cosmos-spin" aria-hidden="true" />
+                    : <RotateCcw aria-hidden="true" />}
+                  {text(locale, '重试', 'Retry')}
+                </button>
+              ) : null}
+              {canCancel && onCancel ? (
+                <button
+                  type="button"
+                  className="cosmos-button cosmos-button--secondary"
+                  disabled={controlSubmitting}
+                  onClick={onCancel}
+                >
+                  {controlSubmitting && controlAction === 'cancel'
+                    ? <LoaderCircle className="cosmos-spin" aria-hidden="true" />
+                    : <Square aria-hidden="true" />}
+                  {text(locale, '取消执行', 'Cancel execution')}
+                </button>
+              ) : null}
+              {controlStatus === 'error' && controlError ? <span role="alert">{controlError}</span> : null}
             </div>
           ) : null}
         </section>

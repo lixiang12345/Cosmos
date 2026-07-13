@@ -7,7 +7,9 @@ import {
   ExpertListResponseSchema,
   MeResponseSchema,
   RuntimeCapabilitiesSchema,
+  RetryTurnResponseSchema,
   SessionDtoSchema,
+  SessionControlResponseSchema,
   SessionEventDtoSchema,
   SessionEventPageSchema,
   SessionListResponseSchema,
@@ -24,7 +26,9 @@ import {
   type MeResponse,
   type MessageCreateInput,
   type RuntimeCapabilities,
+  type RetryTurnResponse,
   type SessionDto,
+  type SessionControlResponse,
   type SessionEventCursor,
   type SessionEventDto,
   type SessionEventPage,
@@ -550,6 +554,99 @@ export function restoreSession(
   return setSessionArchived(
     organizationId, spaceId, sessionId, 'restore', version, idempotencyKey, auth,
   )
+}
+
+function controlSession(
+  organizationId: string,
+  spaceId: string,
+  sessionId: string,
+  action: 'pause' | 'resume' | 'cancel',
+  version: number,
+  idempotencyKey: string,
+  reason: string | undefined,
+  auth?: RelayApiAuthContext,
+): Promise<SessionControlResponse> {
+  const hasBody = action === 'cancel' && reason !== undefined
+  return request(`${sessionPath(organizationId, spaceId, sessionId)}/${action}`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': `"${version}"`,
+    },
+    ...(hasBody ? { body: JSON.stringify({ reason }) } : {}),
+  }, SessionControlResponseSchema, auth).then((response) => {
+    assertSessionScope(response.session, organizationId, spaceId, sessionId)
+    return response
+  })
+}
+
+export function pauseSession(
+  organizationId: string,
+  spaceId: string,
+  sessionId: string,
+  version: number,
+  idempotencyKey: string,
+  auth?: RelayApiAuthContext,
+) {
+  return controlSession(
+    organizationId, spaceId, sessionId, 'pause', version, idempotencyKey, undefined, auth,
+  )
+}
+
+export function resumeSession(
+  organizationId: string,
+  spaceId: string,
+  sessionId: string,
+  version: number,
+  idempotencyKey: string,
+  auth?: RelayApiAuthContext,
+) {
+  return controlSession(
+    organizationId, spaceId, sessionId, 'resume', version, idempotencyKey, undefined, auth,
+  )
+}
+
+export function cancelSession(
+  organizationId: string,
+  spaceId: string,
+  sessionId: string,
+  version: number,
+  idempotencyKey: string,
+  reason: string | undefined,
+  auth?: RelayApiAuthContext,
+) {
+  return controlSession(
+    organizationId, spaceId, sessionId, 'cancel', version, idempotencyKey, reason, auth,
+  )
+}
+
+export function retrySessionTurn(
+  organizationId: string,
+  spaceId: string,
+  sessionId: string,
+  turnId: string,
+  version: number,
+  idempotencyKey: string,
+  auth?: RelayApiAuthContext,
+): Promise<RetryTurnResponse> {
+  return request(`${sessionPath(organizationId, spaceId, sessionId)}/turns/${encodeURIComponent(turnId)}/retry`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': `"${version}"`,
+    },
+  }, RetryTurnResponseSchema, auth).then((response) => {
+    assertSessionScope(response.session, organizationId, spaceId, sessionId)
+    if (response.attempt.sessionId !== sessionId || response.attempt.turnId !== turnId) {
+      throw new RelayApiError('The retry response scope does not match the requested Turn.', {
+        code: 'INVALID_RESPONSE',
+      })
+    }
+    return response
+  })
 }
 
 export function startSession(

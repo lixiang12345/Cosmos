@@ -149,6 +149,277 @@ describeWithDatabase('PostgresExecutionRepository', () => {
     })).resolves.toBe(true)
   })
 
+  it('fences a paused execution and resumes it with a fresh Attempt', async () => {
+    const created = await createSession({ maxAttempts: 3 })
+    const executionRepository = new PostgresExecutionRepository(pool)
+    const sessionRepository = new PostgresSessionRepository(pool, { executionMaxAttempts: 3 })
+    const claimedAt = new Date(Date.now() + 10)
+    const firstClaim = await executionRepository.claimNext({
+      leaseOwner: 'pause-worker-1', leaseDurationMs: 30_000, now: claimedAt,
+    })
+    if (!firstClaim) throw new Error('Expected an execution to pause.')
+    const active = await sessionRepository.getById(
+      created.session.organizationId,
+      created.session.spaceId,
+      created.session.id,
+      'execution-user',
+    )
+    if (!active) throw new Error('Expected an active Session.')
+
+    const paused = await sessionRepository.control({
+      organizationId: created.session.organizationId,
+      spaceId: created.session.spaceId,
+      sessionId: created.session.id,
+      actorId: 'execution-user',
+      actorKind: 'user',
+      requestId: 'pause-control-request',
+      expectedVersion: active.version,
+      action: 'pause',
+      idempotencyKey: 'pause-control-key',
+      request: {},
+    })
+    expect(paused).toMatchObject({
+      replayed: false,
+      session: { status: 'paused', version: active.version + 1 },
+      command: { type: 'session.pause', status: 'succeeded', resourceId: created.session.id },
+    })
+    const pausedReplay = await sessionRepository.control({
+      organizationId: created.session.organizationId,
+      spaceId: created.session.spaceId,
+      sessionId: created.session.id,
+      actorId: 'execution-user',
+      actorKind: 'user',
+      requestId: 'pause-control-request-replay',
+      expectedVersion: active.version,
+      action: 'pause',
+      idempotencyKey: 'pause-control-key',
+      request: {},
+    })
+    expect(pausedReplay).toMatchObject({ replayed: true, session: paused?.session, command: paused?.command })
+    await expect(executionRepository.heartbeat({
+      claim: firstClaim,
+      leaseDurationMs: 30_000,
+      now: new Date(claimedAt.getTime() + 100),
+    })).resolves.toBe(false)
+    await expect(executionRepository.complete({
+      claim: firstClaim,
+      output: 'A fenced worker must not commit this output.',
+      providerModel: 'provider-model-fenced',
+      now: new Date(claimedAt.getTime() + 100),
+    })).resolves.toBe(false)
+    await expect(executionRepository.claimNext({
+      leaseOwner: 'pause-worker-blocked', leaseDurationMs: 30_000,
+      now: new Date(claimedAt.getTime() + 110),
+    })).resolves.toBeNull()
+
+    if (!paused) throw new Error('Expected a paused Session.')
+    const resumed = await sessionRepository.control({
+      organizationId: created.session.organizationId,
+      spaceId: created.session.spaceId,
+      sessionId: created.session.id,
+      actorId: 'execution-user',
+      actorKind: 'user',
+      requestId: 'resume-control-request',
+      expectedVersion: paused.session.version,
+      action: 'resume',
+      idempotencyKey: 'resume-control-key',
+      request: {},
+    })
+    expect(resumed).toMatchObject({
+      session: { status: 'queued', version: paused.session.version + 1 },
+      command: { type: 'session.resume', status: 'succeeded' },
+    })
+
+    const secondClaim = await executionRepository.claimNext({
+      leaseOwner: 'pause-worker-2', leaseDurationMs: 30_000,
+    })
+    if (!secondClaim) throw new Error('Expected the resumed execution to be claimed.')
+    expect(secondClaim).toMatchObject({
+      commandId: firstClaim.commandId,
+      turnId: firstClaim.turnId,
+      attemptNumber: 2,
+    })
+    expect(secondClaim.attemptId).not.toBe(firstClaim.attemptId)
+    await expect(executionRepository.complete({
+      claim: secondClaim,
+      output: 'The resumed execution completed on a fresh Attempt.',
+      providerModel: 'provider-model-resumed',
+      now: new Date(claimedAt.getTime() + 130),
+    })).resolves.toBe(true)
+
+    const attempts = await pool.query<{ number: number; status: string }>(`
+      SELECT number, status FROM relay_attempts
+      WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND turn_id = $4
+      ORDER BY number
+    `, [firstClaim.organizationId, firstClaim.spaceId, firstClaim.sessionId, firstClaim.turnId])
+    expect(attempts.rows).toEqual([
+      { number: 1, status: 'canceled' },
+      { number: 2, status: 'succeeded' },
+    ])
+  })
+
+  it('cancels running work and rejects every stale Worker write', async () => {
+    const created = await createSession({ maxAttempts: 2 })
+    const executionRepository = new PostgresExecutionRepository(pool)
+    const sessionRepository = new PostgresSessionRepository(pool, { executionMaxAttempts: 2 })
+    const now = new Date(Date.now() + 10)
+    const claim = await executionRepository.claimNext({
+      leaseOwner: 'cancel-worker', leaseDurationMs: 30_000, now,
+    })
+    if (!claim) throw new Error('Expected an execution to cancel.')
+    const active = await sessionRepository.getById(
+      created.session.organizationId,
+      created.session.spaceId,
+      created.session.id,
+      'execution-user',
+    )
+    if (!active) throw new Error('Expected an active Session.')
+
+    const canceled = await sessionRepository.control({
+      organizationId: created.session.organizationId,
+      spaceId: created.session.spaceId,
+      sessionId: created.session.id,
+      actorId: 'execution-user',
+      actorKind: 'user',
+      requestId: 'cancel-control-request',
+      expectedVersion: active.version,
+      action: 'cancel',
+      idempotencyKey: 'cancel-control-key',
+      request: { reason: 'Operator canceled the execution.' },
+    })
+    expect(canceled).toMatchObject({
+      session: { status: 'canceled', version: active.version + 1 },
+      command: { type: 'session.cancel', status: 'succeeded' },
+    })
+    await expect(executionRepository.heartbeat({
+      claim, leaseDurationMs: 30_000, now: new Date(now.getTime() + 100),
+    })).resolves.toBe(false)
+    await expect(executionRepository.complete({
+      claim,
+      output: 'Canceled output must be rejected.',
+      providerModel: 'provider-model-canceled',
+      now: new Date(now.getTime() + 100),
+    })).resolves.toBe(false)
+    await expect(executionRepository.fail({
+      claim,
+      classification: 'terminal',
+      code: 'stale_after_cancel',
+      message: 'Canceled failures must be rejected.',
+      now: new Date(now.getTime() + 100),
+    })).resolves.toBe('stale')
+
+    const state = await pool.query<{
+      command_status: string
+      attempt_status: string
+      turn_status: string
+      session_status: string
+      outputs: string
+    }>(`
+      SELECT
+        (SELECT status FROM relay_commands WHERE id = $4) AS command_status,
+        (SELECT status FROM relay_attempts WHERE id = $5) AS attempt_status,
+        (SELECT status FROM relay_turns WHERE id = $6) AS turn_status,
+        (SELECT status FROM relay_sessions WHERE id = $3) AS session_status,
+        (SELECT count(*) FROM relay_messages
+          WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND role = 'agent') AS outputs
+    `, [claim.organizationId, claim.spaceId, claim.sessionId, claim.commandId, claim.attemptId, claim.turnId])
+    expect(state.rows[0]).toEqual({
+      command_status: 'canceled',
+      attempt_status: 'canceled',
+      turn_status: 'canceled',
+      session_status: 'canceled',
+      outputs: '0',
+    })
+    const outbox = await pool.query<{ event_type: string }>(`
+      SELECT event_type FROM relay_outbox_events
+      WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
+        AND event_type = 'session.canceled'
+    `, [claim.organizationId, claim.spaceId, claim.sessionId])
+    expect(outbox.rows).toEqual([{ event_type: 'session.canceled' }])
+  })
+
+  it('claims the exact queued Attempt created by a manual Turn retry', async () => {
+    const created = await createSession({ maxAttempts: 1 })
+    const executionRepository = new PostgresExecutionRepository(pool)
+    const sessionRepository = new PostgresSessionRepository(pool, { executionMaxAttempts: 1 })
+    const now = new Date(Date.now() + 10)
+    const firstClaim = await executionRepository.claimNext({
+      leaseOwner: 'manual-retry-worker-1', leaseDurationMs: 30_000, now,
+    })
+    if (!firstClaim) throw new Error('Expected an execution to fail before manual retry.')
+    await expect(executionRepository.fail({
+      claim: firstClaim,
+      classification: 'terminal',
+      code: 'manual_retry_required',
+      message: 'The operator can retry this Turn.',
+      now: new Date(now.getTime() + 10),
+    })).resolves.toBe('failed')
+    const failed = await sessionRepository.getById(
+      created.session.organizationId,
+      created.session.spaceId,
+      created.session.id,
+      'execution-user',
+    )
+    if (!failed) throw new Error('Expected a failed Session.')
+
+    const retryRecord = {
+      organizationId: created.session.organizationId,
+      spaceId: created.session.spaceId,
+      sessionId: created.session.id,
+      turnId: firstClaim.turnId,
+      actorId: 'execution-user',
+      actorKind: 'user' as const,
+      requestId: 'manual-retry-request',
+      expectedVersion: failed.version,
+      idempotencyKey: 'manual-retry-key',
+    }
+    const retried = await sessionRepository.retryTurn(retryRecord)
+    if (!retried) throw new Error('Expected a queued manual retry.')
+    expect(retried).toMatchObject({
+      replayed: false,
+      session: { status: 'queued', version: failed.version + 1 },
+      attempt: { turnId: firstClaim.turnId, number: 2, status: 'queued' },
+      command: { type: 'turn.retry', status: 'queued', resourceId: firstClaim.turnId },
+    })
+    await expect(sessionRepository.retryTurn(retryRecord)).resolves.toMatchObject({
+      replayed: true,
+      session: retried.session,
+      attempt: retried.attempt,
+      command: retried.command,
+    })
+
+    const secondClaim = await executionRepository.claimNext({
+      leaseOwner: 'manual-retry-worker-2', leaseDurationMs: 30_000,
+    })
+    if (!secondClaim) throw new Error('Expected the manual retry to be claimed.')
+    expect(secondClaim).toMatchObject({
+      commandId: retried.command.id,
+      attemptId: retried.attempt.id,
+      attemptNumber: retried.attempt.number,
+      turnId: firstClaim.turnId,
+    })
+    const attemptCount = await pool.query<{ count: string }>(`
+      SELECT count(*) FROM relay_attempts
+      WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND turn_id = $4
+    `, [secondClaim.organizationId, secondClaim.spaceId, secondClaim.sessionId, secondClaim.turnId])
+    expect(attemptCount.rows[0].count).toBe('2')
+    await expect(executionRepository.complete({
+      claim: secondClaim,
+      output: 'Manual retry completed exactly once.',
+      providerModel: 'provider-model-manual-retry',
+      now: new Date(now.getTime() + 30),
+    })).resolves.toBe(true)
+
+    const audit = await pool.query<{ action: string; target_type: string; target_id: string }>(`
+      SELECT action, target_type, target_id FROM relay_audit_events
+      WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
+        AND action = 'turn.retry'
+    `, [secondClaim.organizationId, secondClaim.spaceId, secondClaim.sessionId])
+    expect(audit.rows).toEqual([{
+      action: 'turn.retry', target_type: 'turn', target_id: firstClaim.turnId,
+    }])
+  })
+
   it('keeps active follow-up Turns in FIFO through success and terminal failure', async () => {
     const created = await createSession({ maxAttempts: 1 })
     const executionRepository = new PostgresExecutionRepository(pool)

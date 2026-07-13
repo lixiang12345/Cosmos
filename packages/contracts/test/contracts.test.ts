@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
   ApiErrorSchema,
+  CancelSessionRequestSchema,
   CreateSessionAdvancedOverridesSchema,
   CreateSessionRequestSchema,
   CreateSessionResponseSchema,
   MeResponseSchema,
   SessionDtoSchema,
+  RetryTurnResponseSchema,
+  SessionCommandSchema,
+  SessionControlResponseSchema,
   SessionListResponseSchema,
   SendSessionMessageResponseSchema,
   SessionStatusSchema,
@@ -148,6 +152,61 @@ describe('session contracts', () => {
       items: [session],
       page: { nextCursor: null, hasMore: false, projectionUpdatedAt: session.updatedAt },
     }).items).toEqual([session])
+  })
+
+  it('validates execution controls and retry resource linkage', () => {
+    const session = SessionDtoSchema.parse(sessionInput)
+    const controlCommand = {
+      id: 'command-pause',
+      type: 'session.pause' as const,
+      status: 'succeeded' as const,
+      resourceType: 'session' as const,
+      resourceId: session.id,
+      acceptedAt: session.updatedAt,
+    }
+    const attempt = {
+      organizationId: session.organizationId,
+      spaceId: session.spaceId,
+      sessionId: session.id,
+      id: 'attempt-2',
+      turnId: 'turn-1',
+      number: 2,
+      status: 'queued' as const,
+      model: 'relay-default',
+      providerModel: null,
+      runtimeId: null,
+      failureCode: null,
+      createdAt: session.updatedAt,
+      startedAt: null,
+      finishedAt: null,
+    }
+    const retryCommand = {
+      ...controlCommand,
+      id: 'command-retry',
+      type: 'turn.retry' as const,
+      status: 'queued' as const,
+      resourceType: 'turn' as const,
+      resourceId: attempt.turnId,
+    }
+
+    expect(CancelSessionRequestSchema.parse({ reason: '  operator request  ' }))
+      .toEqual({ reason: 'operator request' })
+    expect(CancelSessionRequestSchema.safeParse({ reason: '', unexpected: true }).success).toBe(false)
+    expect(SessionCommandSchema.safeParse({ ...controlCommand, resourceType: 'turn' }).success).toBe(false)
+    expect(SessionCommandSchema.safeParse({ ...retryCommand, resourceType: 'session' }).success).toBe(false)
+    expect(SessionControlResponseSchema.parse({ session, command: controlCommand }))
+      .toEqual({ session, command: controlCommand })
+    expect(SessionControlResponseSchema.safeParse({
+      session,
+      command: { ...controlCommand, resourceId: 'session-other' },
+    }).success).toBe(false)
+    expect(RetryTurnResponseSchema.parse({ session, attempt, command: retryCommand }))
+      .toEqual({ session, attempt, command: retryCommand })
+    expect(RetryTurnResponseSchema.safeParse({
+      session,
+      attempt: { ...attempt, sessionId: 'session-other' },
+      command: retryCommand,
+    }).success).toBe(false)
   })
 
   it('requires every authoritative configuration id for resolved sessions', () => {

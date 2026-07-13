@@ -60,6 +60,13 @@ export const RenameSessionRequestSchema = z.object({
 export type RenameSessionRequest = z.infer<typeof RenameSessionRequestSchema>
 export type RenameSessionRequestInput = z.input<typeof RenameSessionRequestSchema>
 
+export const CancelSessionRequestSchema = z.object({
+  reason: z.string().trim().min(1).max(1_000).optional(),
+}).strict()
+
+export type CancelSessionRequest = z.infer<typeof CancelSessionRequestSchema>
+export type CancelSessionRequestInput = z.input<typeof CancelSessionRequestSchema>
+
 export const SessionConfigurationResolutionVersionSchema = z.union([
   z.literal(0),
   z.literal(1),
@@ -505,14 +512,76 @@ export type SessionTurn = z.infer<typeof SessionTurnSchema>
 
 export const SessionCommandSchema = z.object({
   id: IdentifierSchema,
-  type: z.enum(['session.start', 'session.send']),
+  type: z.enum([
+    'session.start',
+    'session.send',
+    'session.pause',
+    'session.resume',
+    'session.cancel',
+    'turn.retry',
+  ]),
   status: z.enum(['accepted', 'queued', 'running', 'succeeded', 'failed', 'canceled']),
-  resourceType: z.literal('turn'),
+  resourceType: z.enum(['session', 'turn']),
   resourceId: IdentifierSchema,
   acceptedAt: TimestampSchema,
-}).strict()
+}).strict().superRefine((command, context) => {
+  const expectedResourceType = command.type === 'session.pause'
+    || command.type === 'session.resume'
+    || command.type === 'session.cancel'
+    ? 'session'
+    : 'turn'
+  if (command.resourceType !== expectedResourceType) {
+    context.addIssue({
+      code: 'custom',
+      path: ['resourceType'],
+      message: `${command.type} commands must target a ${expectedResourceType}`,
+    })
+  }
+})
 
 export type SessionCommand = z.infer<typeof SessionCommandSchema>
+
+export const SessionControlResponseSchema = z.object({
+  session: SessionDtoSchema,
+  command: SessionCommandSchema,
+}).strict().superRefine((response, context) => {
+  if (response.command.resourceId !== response.session.id) {
+    context.addIssue({
+      code: 'custom',
+      path: ['command', 'resourceId'],
+      message: 'The control command must target the returned Session',
+    })
+  }
+})
+
+export type SessionControlResponse = z.infer<typeof SessionControlResponseSchema>
+
+export const RetryTurnResponseSchema = z.object({
+  session: SessionDtoSchema,
+  attempt: AttemptDtoSchema,
+  command: SessionCommandSchema,
+}).strict().superRefine((response, context) => {
+  if (
+    response.attempt.organizationId !== response.session.organizationId
+    || response.attempt.spaceId !== response.session.spaceId
+    || response.attempt.sessionId !== response.session.id
+  ) {
+    context.addIssue({
+      code: 'custom',
+      path: ['attempt'],
+      message: 'The retry Attempt scope must match the returned Session',
+    })
+  }
+  if (response.command.resourceId !== response.attempt.turnId) {
+    context.addIssue({
+      code: 'custom',
+      path: ['command', 'resourceId'],
+      message: 'The retry command must target the returned Attempt Turn',
+    })
+  }
+})
+
+export type RetryTurnResponse = z.infer<typeof RetryTurnResponseSchema>
 
 export const CreateSessionResponseSchema = z.object({
   session: SessionDtoSchema,

@@ -20,6 +20,7 @@ import { PREFERENCE_STORAGE_KEYS, PreferencesProvider } from './preferences'
 import {
   RelayApiError,
   archiveSession,
+  cancelSession,
   createSession,
   getEnvironment,
   getExpert,
@@ -30,9 +31,12 @@ import {
   listSessionEvents,
   listSessionMessages,
   listSessions,
+  pauseSession,
   renameSession,
+  resumeSession,
   sendSessionMessage,
   restoreSession,
+  retrySessionTurn,
   startSession,
 } from './services/relayApi'
 import { WorkspaceContext, type WorkspaceContextValue } from './workspace'
@@ -40,6 +44,7 @@ import { WorkspaceContext, type WorkspaceContextValue } from './workspace'
 vi.mock('./services/relayApi', async (importOriginal) => ({
   ...await importOriginal<typeof import('./services/relayApi')>(),
   archiveSession: vi.fn(),
+  cancelSession: vi.fn(),
   createSession: vi.fn(),
   getEnvironment: vi.fn(),
   getExpert: vi.fn(),
@@ -50,9 +55,12 @@ vi.mock('./services/relayApi', async (importOriginal) => ({
   listSessionEvents: vi.fn(),
   listSessionMessages: vi.fn(),
   listSessions: vi.fn(),
+  pauseSession: vi.fn(),
   renameSession: vi.fn(),
+  resumeSession: vi.fn(),
   sendSessionMessage: vi.fn(),
   restoreSession: vi.fn(),
+  retrySessionTurn: vi.fn(),
   startSession: vi.fn(),
 }))
 
@@ -290,6 +298,7 @@ describe('Relay prototype', () => {
     window.localStorage.removeItem('relay.experts')
     window.localStorage.removeItem('relay.controlPlane.v1')
     vi.mocked(archiveSession).mockReset()
+    vi.mocked(cancelSession).mockReset()
     vi.mocked(createSession).mockReset()
     vi.mocked(getEnvironment).mockReset()
     vi.mocked(getExpert).mockReset()
@@ -300,8 +309,11 @@ describe('Relay prototype', () => {
     vi.mocked(listSessionEvents).mockReset()
     vi.mocked(listSessionMessages).mockReset()
     vi.mocked(listSessions).mockReset()
+    vi.mocked(pauseSession).mockReset()
     vi.mocked(renameSession).mockReset()
+    vi.mocked(resumeSession).mockReset()
     vi.mocked(restoreSession).mockReset()
+    vi.mocked(retrySessionTurn).mockReset()
     vi.mocked(sendSessionMessage).mockReset()
     vi.mocked(startSession).mockReset()
     vi.mocked(listSessions).mockResolvedValue({
@@ -478,9 +490,10 @@ describe('Relay prototype', () => {
     expect(screen.queryByText('38.2k')).not.toBeInTheDocument()
     expect(screen.queryByText('￥4.82')).not.toBeInTheDocument()
     expect(screen.queryByRole('tab')).not.toBeInTheDocument()
-    for (const action of ['暂停', '停止', '重试', '批准']) {
+    for (const action of ['停止', '重试', '批准']) {
       expect(screen.queryByRole('button', { name: action })).not.toBeInTheDocument()
     }
+    expect(screen.getByRole('button', { name: '暂停' })).toBeEnabled()
     expect(screen.getByRole('textbox', { name: '后续消息' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
     expect(screen.getByText('当前部署未开放执行。')).toBeInTheDocument()
@@ -493,6 +506,135 @@ describe('Relay prototype', () => {
         onUnauthorized: expect.any(Function),
       }),
       expect.any(AbortSignal),
+    )
+  })
+
+  it('applies production Session controls with the latest canonical version', async () => {
+    const user = userEvent.setup()
+    const queued = makeApiSession('organization-production', 'space-production', {
+      title: '可控制的生产会话',
+      expertId: 'expert-authoritative',
+      message: { content: '验证执行控制。' },
+    }, { id: 'session-controls', status: 'queued', version: 2 })
+    const command = (
+      type: 'session.pause' | 'session.resume' | 'session.cancel',
+      status: 'paused' | 'queued' | 'canceled',
+      version: number,
+    ) => ({
+      session: { ...queued, status, version },
+      command: {
+        id: `command-${type}`,
+        type,
+        status: 'succeeded' as const,
+        resourceType: 'session' as const,
+        resourceId: queued.id,
+        acceptedAt: queued.updatedAt,
+      },
+    })
+    const paused = command('session.pause', 'paused', 3)
+    const resumed = command('session.resume', 'queued', 4)
+    const canceled = command('session.cancel', 'canceled', 5)
+    vi.mocked(getRuntimeCapabilities).mockResolvedValueOnce({
+      execution: { enabled: true, events: 'polling' },
+    })
+    vi.mocked(getSession).mockResolvedValue(queued)
+    vi.mocked(pauseSession).mockResolvedValueOnce(paused)
+    vi.mocked(resumeSession).mockResolvedValueOnce(resumed)
+    vi.mocked(cancelSession).mockResolvedValueOnce(canceled)
+
+    renderAuthenticatedApp('/sessions/session-controls')
+    await user.click(await screen.findByRole('button', { name: '暂停' }))
+    expect(await screen.findByRole('heading', { name: '执行已暂停' })).toBeInTheDocument()
+    expect(pauseSession).toHaveBeenCalledWith(
+      'organization-production', 'space-production', queued.id, 2, expect.any(String),
+      expect.objectContaining({ accessToken: 'production-access-token' }),
+    )
+
+    await user.click(screen.getByRole('button', { name: '恢复' }))
+    expect(await screen.findByRole('heading', { name: '已排队，等待执行' })).toBeInTheDocument()
+    expect(resumeSession).toHaveBeenCalledWith(
+      'organization-production', 'space-production', queued.id, 3, expect.any(String),
+      expect.objectContaining({ accessToken: 'production-access-token' }),
+    )
+
+    await user.click(screen.getByRole('button', { name: '取消执行' }))
+    expect(await screen.findByRole('heading', { name: '执行已取消' })).toBeInTheDocument()
+    expect(cancelSession).toHaveBeenCalledWith(
+      'organization-production', 'space-production', queued.id, 4, expect.any(String), undefined,
+      expect.objectContaining({ accessToken: 'production-access-token' }),
+    )
+  })
+
+  it('retries the failed Turn identified by the authoritative Attempt event', async () => {
+    const user = userEvent.setup()
+    const failed = makeApiSession('organization-production', 'space-production', {
+      title: '需要人工重试的会话',
+      expertId: 'expert-authoritative',
+      message: { content: '验证失败 Turn 重试。' },
+    }, { id: 'session-manual-retry', status: 'failed', version: 5 })
+    const turnId = 'turn-failed'
+    const retried = {
+      session: { ...failed, status: 'queued' as const, version: 6 },
+      attempt: {
+        organizationId: failed.organizationId,
+        spaceId: failed.spaceId,
+        sessionId: failed.id,
+        id: 'attempt-retry-2',
+        turnId,
+        number: 2,
+        status: 'queued' as const,
+        model: 'relay-production',
+        providerModel: null,
+        runtimeId: null,
+        failureCode: null,
+        createdAt: failed.updatedAt,
+        startedAt: null,
+        finishedAt: null,
+      },
+      command: {
+        id: 'command-retry-2',
+        type: 'turn.retry' as const,
+        status: 'queued' as const,
+        resourceType: 'turn' as const,
+        resourceId: turnId,
+        acceptedAt: failed.updatedAt,
+      },
+    }
+    vi.mocked(getRuntimeCapabilities).mockResolvedValueOnce({
+      execution: { enabled: true, events: 'polling' },
+    })
+    vi.mocked(getSession).mockResolvedValue(failed)
+    vi.mocked(listSessionEvents).mockResolvedValue({
+      organizationId: failed.organizationId,
+      spaceId: failed.spaceId,
+      sessionId: failed.id,
+      items: [{
+        eventId: 'event-attempt-failed',
+        organizationId: failed.organizationId,
+        spaceId: failed.spaceId,
+        sessionId: failed.id,
+        sequence: 7,
+        type: 'attempt.updated',
+        resourceType: 'attempt',
+        resourceId: 'attempt-1',
+        actorId: 'worker-1',
+        commandId: 'command-1',
+        requestId: 'request-1',
+        occurredAt: failed.updatedAt,
+        payload: {
+          attemptId: 'attempt-1', turnId, number: 1, status: 'failed', failureCode: 'provider_timeout',
+        },
+      }],
+      page: { nextCursor: null, hasMore: false },
+    })
+    vi.mocked(retrySessionTurn).mockResolvedValueOnce(retried)
+
+    renderAuthenticatedApp('/sessions/session-manual-retry')
+    await user.click(await screen.findByRole('button', { name: '重试' }))
+    expect(await screen.findByRole('heading', { name: '正在等待重试' })).toBeInTheDocument()
+    expect(retrySessionTurn).toHaveBeenCalledWith(
+      'organization-production', 'space-production', failed.id, turnId, 5, expect.any(String),
+      expect.objectContaining({ accessToken: 'production-access-token' }),
     )
   })
 

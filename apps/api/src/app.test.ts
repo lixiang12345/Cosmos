@@ -7,7 +7,9 @@ import {
   ExpertDetailDtoSchema,
   ExpertListResponseSchema,
   MeResponseSchema,
+  RetryTurnResponseSchema,
   SessionDtoSchema,
+  SessionControlResponseSchema,
   SessionListResponseSchema,
   SendSessionMessageResponseSchema,
   StartSessionResponseSchema,
@@ -1401,6 +1403,147 @@ describe('Relay API', () => {
       headers: { 'idempotency-key': 'restore-2', 'if-match': '"3"' },
     })
     expect(SessionDtoSchema.parse(noOpRestore.json())).toMatchObject({ archivedAt: null, version: 3 })
+  })
+
+  it('pauses, resumes, and cancels a Session with strong CAS and idempotent replay', async () => {
+    const app = testApp()
+    const createdResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      headers: { 'idempotency-key': 'control-source' },
+      payload: sessionRequest,
+    })
+    const created = CreateSessionResponseSchema.parse(createdResponse.json()).session
+    const baseUrl = `/api/v1/organizations/relay/spaces/platform/sessions/${created.id}`
+
+    expect((await app.inject({ method: 'POST', url: `${baseUrl}/pause` })).statusCode).toBe(400)
+    expect((await app.inject({
+      method: 'POST', url: `${baseUrl}/pause`, headers: { 'idempotency-key': 'pause-missing-cas' },
+    })).statusCode).toBe(428)
+    expect((await app.inject({
+      method: 'POST',
+      url: `${baseUrl}/pause`,
+      headers: { 'idempotency-key': 'pause-body', 'if-match': '"1"' },
+      payload: {},
+    })).statusCode).toBe(400)
+
+    const pauseRequest = {
+      method: 'POST' as const,
+      url: `${baseUrl}/pause`,
+      headers: { 'idempotency-key': 'pause-1', 'if-match': '"1"' },
+    }
+    const pausedResponse = await app.inject(pauseRequest)
+    expect(pausedResponse.statusCode, pausedResponse.body).toBe(202)
+    const paused = SessionControlResponseSchema.parse(pausedResponse.json())
+    expect(pausedResponse.headers.etag).toBe('"2"')
+    expect(pausedResponse.headers['idempotency-replayed']).toBe('false')
+    expect(paused).toMatchObject({
+      session: { id: created.id, status: 'paused', version: 2 },
+      command: { type: 'session.pause', status: 'succeeded', resourceId: created.id },
+    })
+    const pauseReplay = await app.inject(pauseRequest)
+    expect(pauseReplay.headers['idempotency-replayed']).toBe('true')
+    expect(pauseReplay.json()).toEqual(pausedResponse.json())
+
+    const resumedResponse = await app.inject({
+      method: 'POST',
+      url: `${baseUrl}/resume`,
+      headers: { 'idempotency-key': 'resume-1', 'if-match': '"2"' },
+    })
+    expect(SessionControlResponseSchema.parse(resumedResponse.json())).toMatchObject({
+      session: { status: 'queued', version: 3 },
+      command: { type: 'session.resume', status: 'succeeded' },
+    })
+
+    const canceledResponse = await app.inject({
+      method: 'POST',
+      url: `${baseUrl}/cancel`,
+      headers: { 'idempotency-key': 'cancel-1', 'if-match': '"3"' },
+      payload: { reason: 'Operator requested cancellation.' },
+    })
+    expect(SessionControlResponseSchema.parse(canceledResponse.json())).toMatchObject({
+      session: { status: 'canceled', version: 4 },
+      command: { type: 'session.cancel', status: 'succeeded' },
+    })
+
+    const invalidResume = await app.inject({
+      method: 'POST',
+      url: `${baseUrl}/resume`,
+      headers: { 'idempotency-key': 'resume-canceled', 'if-match': '"4"' },
+    })
+    expect(invalidResume.statusCode).toBe(409)
+    expect(ApiErrorSchema.parse(invalidResume.json())).toMatchObject({
+      code: 'SESSION_STATE_CONFLICT', details: { status: 'canceled', operation: 'resume' },
+    })
+  })
+
+  it('returns the queued Attempt when retrying a failed Turn', async () => {
+    const repository = testRepository()
+    const app = testApp(repository)
+    const createdResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      headers: { 'idempotency-key': 'retry-source' },
+      payload: sessionRequest,
+    })
+    const created = CreateSessionResponseSchema.parse(createdResponse.json()).session
+    const failedSession = SessionDtoSchema.parse({
+      ...created,
+      status: 'failed',
+      version: 2,
+      updatedAt: '2026-07-13T09:00:00.000Z',
+      lastActivityAt: '2026-07-13T09:00:00.000Z',
+    })
+    const turnId = 'turn-failed'
+    const result = RetryTurnResponseSchema.parse({
+      session: { ...failedSession, status: 'queued', version: 3 },
+      attempt: {
+        organizationId: failedSession.organizationId,
+        spaceId: failedSession.spaceId,
+        sessionId: failedSession.id,
+        id: 'attempt-retry-2',
+        turnId,
+        number: 2,
+        status: 'queued',
+        model: 'relay-default',
+        providerModel: null,
+        runtimeId: null,
+        failureCode: null,
+        createdAt: failedSession.updatedAt,
+        startedAt: null,
+        finishedAt: null,
+      },
+      command: {
+        id: 'command-retry-2',
+        type: 'turn.retry',
+        status: 'queued',
+        resourceType: 'turn',
+        resourceId: turnId,
+        acceptedAt: failedSession.updatedAt,
+      },
+    })
+    const retryTurn = vi.spyOn(repository, 'retryTurn').mockResolvedValue({ ...result, replayed: false })
+    const url = `/api/v1/organizations/relay/spaces/platform/sessions/${created.id}/turns/${turnId}/retry`
+
+    const response = await app.inject({
+      method: 'POST',
+      url,
+      headers: { 'idempotency-key': 'retry-1', 'if-match': '"2"' },
+    })
+    expect(response.statusCode, response.body).toBe(202)
+    expect(response.headers.etag).toBe('"3"')
+    expect(RetryTurnResponseSchema.parse(response.json())).toEqual(result)
+    expect(retryTurn).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: created.id, turnId, expectedVersion: 2, idempotencyKey: 'retry-1',
+    }))
+
+    const invalidBody = await app.inject({
+      method: 'POST',
+      url,
+      headers: { 'idempotency-key': 'retry-body', 'if-match': '"2"' },
+      payload: {},
+    })
+    expect(invalidBody.statusCode).toBe(400)
   })
 
   it('returns a contract-shaped error for invalid input', async () => {

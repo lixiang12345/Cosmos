@@ -112,6 +112,10 @@ describe('OpenAPI runtime route coverage', () => {
     const detail = document.paths['/organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}']
     const start = document.paths['/organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/start']
     const messages = document.paths['/organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/messages']
+    const pause = document.paths['/organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/pause']
+    const resume = document.paths['/organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/resume']
+    const cancel = document.paths['/organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/cancel']
+    const retry = document.paths['/organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/turns/{turnId}/retry']
     expect(collection?.get?.responses?.['200']?.content?.['application/json']?.schema?.$ref)
       .toBe('#/components/schemas/RuntimeSessionListResponse')
     expect(collection?.post?.requestBody?.content?.['application/json']?.schema?.$ref)
@@ -127,5 +131,14 @@ describe('OpenAPI runtime route coverage', () => {
       .toBe('#/components/schemas/RuntimeSessionMessageCreate')
     expect(messages?.post?.responses?.['202']?.content?.['application/json']?.schema?.$ref)
       .toBe('#/components/schemas/RuntimeSessionSendResult')
+    for (const control of [pause, resume, cancel]) {
+      expect(control?.post?.responses?.['202']?.content?.['application/json']?.schema?.$ref)
+        .toBe('#/components/schemas/RuntimeSessionControlResult')
+    }
+    expect(cancel?.post?.requestBody?.content?.['application/json']?.schema?.$ref)
+      .toBe('#/components/schemas/RuntimeCancelSessionRequest')
+    expect(retry?.post?.requestBody).toBeUndefined()
+    expect(retry?.post?.responses?.['202']?.content?.['application/json']?.schema?.$ref)
+      .toBe('#/components/schemas/RuntimeRetryTurnResult')
   })
 })

@@ -13,6 +13,7 @@ import {
   RelayApiError,
   RELAY_API_TIMEOUT_MS,
   archiveSession,
+  cancelSession,
   createSession,
   getEnvironment,
   getExpert,
@@ -25,10 +26,13 @@ import {
   listSessionEvents,
   listSessionMessages,
   listSessions,
+  pauseSession,
   renameSession,
+  resumeSession,
   resolveRelayApiBaseUrl,
   resolveRelayApiRequestUrl,
   restoreSession,
+  retrySessionTurn,
   sendSessionMessage,
   startSession,
   streamSessionEvents,
@@ -417,6 +421,81 @@ describe('Relay API client', () => {
     const archiveHeaders = new Headers(fetchMock.mock.calls[0][1]?.headers)
     expect(archiveHeaders.get('If-Match')).toBe('"1"')
     expect(archiveHeaders.get('Idempotency-Key')).toBe('archive-key')
+  })
+
+  it('sends Session controls and Turn retries with exact CAS and idempotency headers', async () => {
+    const controlCommand = (type: 'session.pause' | 'session.resume' | 'session.cancel') => ({
+      id: `command-${type}`,
+      type,
+      status: 'succeeded' as const,
+      resourceType: 'session' as const,
+      resourceId: session.id,
+      acceptedAt: session.updatedAt,
+    })
+    const paused = { session: { ...session, status: 'paused' as const, version: 2 }, command: controlCommand('session.pause') }
+    const resumed = { session: { ...session, status: 'queued' as const, version: 3 }, command: controlCommand('session.resume') }
+    const canceled = { session: { ...session, status: 'canceled' as const, version: 4 }, command: controlCommand('session.cancel') }
+    const turnId = 'turn-1'
+    const retried = {
+      session: { ...session, status: 'queued' as const, version: 6 },
+      attempt: {
+        organizationId: session.organizationId,
+        spaceId: session.spaceId,
+        sessionId: session.id,
+        id: 'attempt-2',
+        turnId,
+        number: 2,
+        status: 'queued' as const,
+        model: 'relay-default',
+        providerModel: null,
+        runtimeId: null,
+        failureCode: null,
+        createdAt: session.updatedAt,
+        startedAt: null,
+        finishedAt: null,
+      },
+      command: {
+        id: 'command-retry',
+        type: 'turn.retry' as const,
+        status: 'queued' as const,
+        resourceType: 'turn' as const,
+        resourceId: turnId,
+        acceptedAt: session.updatedAt,
+      },
+    }
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(paused, 202))
+      .mockResolvedValueOnce(jsonResponse(resumed, 202))
+      .mockResolvedValueOnce(jsonResponse(canceled, 202))
+      .mockResolvedValueOnce(jsonResponse(retried, 202))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(pauseSession('relay', 'space-platform', session.id, 1, 'pause-key'))
+      .resolves.toEqual(paused)
+    await expect(resumeSession('relay', 'space-platform', session.id, 2, 'resume-key'))
+      .resolves.toEqual(resumed)
+    await expect(cancelSession(
+      'relay', 'space-platform', session.id, 3, 'cancel-key', 'Operator request.',
+    )).resolves.toEqual(canceled)
+    await expect(retrySessionTurn(
+      'relay', 'space-platform', session.id, turnId, 5, 'retry-key',
+    )).resolves.toEqual(retried)
+
+    expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
+      ['/api/v1/organizations/relay/spaces/space-platform/sessions/session-1/pause', 'POST'],
+      ['/api/v1/organizations/relay/spaces/space-platform/sessions/session-1/resume', 'POST'],
+      ['/api/v1/organizations/relay/spaces/space-platform/sessions/session-1/cancel', 'POST'],
+      ['/api/v1/organizations/relay/spaces/space-platform/sessions/session-1/turns/turn-1/retry', 'POST'],
+    ])
+    expect(fetchMock.mock.calls[0][1]?.body).toBeUndefined()
+    expect(fetchMock.mock.calls[1][1]?.body).toBeUndefined()
+    expect(fetchMock.mock.calls[2][1]?.body).toBe(JSON.stringify({ reason: 'Operator request.' }))
+    expect(fetchMock.mock.calls[3][1]?.body).toBeUndefined()
+    for (const [index, [version, key]] of [[1, 'pause-key'], [2, 'resume-key'], [3, 'cancel-key'], [5, 'retry-key']].entries()) {
+      const headers = new Headers(fetchMock.mock.calls[index][1]?.headers)
+      expect(headers.get('If-Match')).toBe(`"${version}"`)
+      expect(headers.get('Idempotency-Key')).toBe(key)
+    }
   })
 
   it('starts a draft without resending its Message and validates the linked result', async () => {

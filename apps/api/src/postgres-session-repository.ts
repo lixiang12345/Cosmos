@@ -1,12 +1,18 @@
 import { createHash, randomUUID } from 'node:crypto'
 import {
+  AttemptDtoSchema,
   CreateSessionResponseSchema,
   MeOrganizationSchema,
+  RetryTurnResponseSchema,
+  SessionCommandSchema,
+  SessionControlResponseSchema,
   SessionDtoSchema,
   SendSessionMessageResponseSchema,
   StartSessionResponseSchema,
   type CreateSessionResponse,
   type MeOrganization,
+  type RetryTurnResponse,
+  type SessionControlResponse,
   type SessionDto,
   type SendSessionMessageResponse,
   type StartSessionResponse,
@@ -26,17 +32,21 @@ import {
   createSessionDto,
   orderActorOrganizations,
   resolveRepositoryBinding,
+  type ControlSessionRecord,
   type CreateSessionRecord,
   type CreateSessionResult,
   type InMemoryRepositoryBinding,
   type OrganizationRole,
   type ResolvedSessionConfiguration,
   type RenameSessionRecord,
+  type RetryTurnRecord,
+  type RetryTurnResult,
   type SendSessionMessageRecord,
   type SendSessionMessageResult,
   type SessionListOptions,
   type SessionListPage,
   type SessionLifecycleResult,
+  type SessionControlResult,
   type SessionRepository,
   type SpaceAccess,
   type SpaceRole,
@@ -45,6 +55,7 @@ import {
   type StartSessionResult,
   SessionStateConflictError,
   SessionVersionConflictError,
+  TurnStateConflictError,
 } from './session-repository.js'
 
 type SessionRow = {
@@ -160,6 +171,17 @@ function responseToSendResult(
 
 function responseToLifecycleResult(session: SessionDto, replayed: boolean): SessionLifecycleResult {
   return { session, replayed }
+}
+
+function responseToControlResult(
+  response: SessionControlResponse,
+  replayed: boolean,
+): SessionControlResult {
+  return { ...response, replayed }
+}
+
+function responseToRetryResult(response: RetryTurnResponse, replayed: boolean): RetryTurnResult {
+  return { ...response, replayed }
 }
 
 const sessionColumns = `
@@ -391,6 +413,36 @@ export class PostgresSessionRepository implements SessionRepository {
     }
   }
 
+  async control(record: ControlSessionRecord): Promise<SessionControlResult | null> {
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      const result = await this.controlInTransaction(client, record)
+      await client.query('COMMIT')
+      return result
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+  }
+
+  async retryTurn(record: RetryTurnRecord): Promise<RetryTurnResult | null> {
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      const result = await this.retryTurnInTransaction(client, record)
+      await client.query('COMMIT')
+      return result
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+  }
+
   async create(record: CreateSessionRecord): Promise<CreateSessionResult> {
     const client = await this.pool.connect()
     try {
@@ -438,7 +490,7 @@ export class PostgresSessionRepository implements SessionRepository {
 
   private async lockMetadataTarget(
     client: PoolClient,
-    record: RenameSessionRecord | SetSessionArchivedRecord,
+    record: RenameSessionRecord | SetSessionArchivedRecord | ControlSessionRecord | RetryTurnRecord,
   ): Promise<{ session: SessionDto; policyReason: string } | null> {
     const access = await client.query<SpaceAccess>(`
       SELECT organization_membership.role AS "organizationRole", space_membership.role AS "spaceRole"
@@ -618,6 +670,614 @@ export class PostgresSessionRepository implements SessionRepository {
       expiresAt,
     ])
     return responseToLifecycleResult(session, false)
+  }
+
+  private async prepareCommandIdempotency(
+    client: PoolClient,
+    input: {
+      organizationId: string
+      spaceId: string
+      actorId: string
+      sessionId: string
+      idempotencyKey: string
+      canonicalPath: string
+      request: unknown
+    },
+  ) {
+    const keyHash = hash(input.idempotencyKey)
+    const requestHash = hash(canonicalJson(input.request))
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+      JSON.stringify([input.organizationId, input.actorId, 'POST', input.canonicalPath, keyHash]),
+    ])
+    const now = this.now()
+    const existing = await client.query<{ request_hash: string; response_body: unknown | null }>(`
+      SELECT idempotency.request_hash, response.response_body
+      FROM relay_idempotency_records idempotency
+      LEFT JOIN relay_idempotency_responses response
+        ON response.organization_id = idempotency.organization_id
+        AND response.actor_id = idempotency.actor_id
+        AND response.method = idempotency.method
+        AND response.canonical_path = idempotency.canonical_path
+        AND response.idempotency_key_hash = idempotency.idempotency_key_hash
+        AND response.expires_at > $5
+      WHERE idempotency.organization_id = $1 AND idempotency.actor_id = $2
+        AND idempotency.method = 'POST' AND idempotency.canonical_path = $3
+        AND idempotency.idempotency_key_hash = $4 AND idempotency.expires_at > $5
+    `, [input.organizationId, input.actorId, input.canonicalPath, keyHash, now.toISOString()])
+    if (existing.rowCount) {
+      if (existing.rows[0].request_hash !== requestHash) throw new IdempotencyConflictError()
+      if (!existing.rows[0].response_body) throw new Error('The idempotent command response is unavailable.')
+      return {
+        keyHash,
+        requestHash,
+        now,
+        expiresAt: new Date(now.getTime() + this.idempotencyTtlMs).toISOString(),
+        responseBody: existing.rows[0].response_body,
+      }
+    }
+
+    await client.query(`
+      DELETE FROM relay_idempotency_responses
+      WHERE organization_id = $1 AND actor_id = $2 AND method = 'POST'
+        AND canonical_path = $3 AND idempotency_key_hash = $4
+        AND expires_at <= $5
+    `, [input.organizationId, input.actorId, input.canonicalPath, keyHash, now.toISOString()])
+    await client.query(`
+      DELETE FROM relay_idempotency_records
+      WHERE organization_id = $1 AND actor_id = $2 AND method = 'POST'
+        AND canonical_path = $3 AND idempotency_key_hash = $4
+        AND expires_at <= $5
+    `, [input.organizationId, input.actorId, input.canonicalPath, keyHash, now.toISOString()])
+    return {
+      keyHash,
+      requestHash,
+      now,
+      expiresAt: new Date(now.getTime() + this.idempotencyTtlMs).toISOString(),
+      responseBody: null,
+    }
+  }
+
+  private async saveCommandIdempotency(
+    client: PoolClient,
+    input: {
+      organizationId: string
+      spaceId: string
+      actorId: string
+      sessionId: string
+      canonicalPath: string
+      keyHash: string
+      requestHash: string
+      expiresAt: string
+      response: unknown
+      etag: string
+    },
+  ) {
+    await client.query(`
+      INSERT INTO relay_idempotency_records (
+        organization_id, space_id, actor_id, method, canonical_path,
+        idempotency_key_hash, request_hash, session_id, expires_at
+      ) VALUES ($1, $2, $3, 'POST', $4, $5, $6, $7, $8)
+    `, [
+      input.organizationId,
+      input.spaceId,
+      input.actorId,
+      input.canonicalPath,
+      input.keyHash,
+      input.requestHash,
+      input.sessionId,
+      input.expiresAt,
+    ])
+    await client.query(`
+      INSERT INTO relay_idempotency_responses (
+        organization_id, actor_id, method, canonical_path, idempotency_key_hash,
+        status_code, response_body, response_headers, expires_at
+      ) VALUES ($1, $2, 'POST', $3, $4, 202, $5::jsonb, $6::jsonb, $7)
+    `, [
+      input.organizationId,
+      input.actorId,
+      input.canonicalPath,
+      input.keyHash,
+      JSON.stringify(input.response),
+      JSON.stringify({ etag: input.etag }),
+      input.expiresAt,
+    ])
+  }
+
+  private async controlInTransaction(
+    client: PoolClient,
+    record: ControlSessionRecord,
+  ): Promise<SessionControlResult | null> {
+    const target = await this.lockMetadataTarget(client, record)
+    if (!target) return null
+    const canonicalPath = `/v1/organizations/${record.organizationId}/spaces/${record.spaceId}/sessions/${record.sessionId}/${record.action}`
+    const idempotency = await this.prepareCommandIdempotency(client, {
+      ...record,
+      canonicalPath,
+      request: { expectedVersion: record.expectedVersion, body: record.request },
+    })
+    if (idempotency.responseBody) {
+      return responseToControlResult(SessionControlResponseSchema.parse(idempotency.responseBody), true)
+    }
+
+    const before = target.session
+    if (before.version !== record.expectedVersion) {
+      throw new SessionVersionConflictError(record.expectedVersion, before.version)
+    }
+    const allowed = record.action === 'pause'
+      ? ['queued', 'active', 'waiting'].includes(before.status)
+      : record.action === 'resume'
+        ? before.status === 'paused'
+        : ['draft', 'queued', 'active', 'waiting', 'paused'].includes(before.status)
+    if (!allowed) throw new SessionStateConflictError(before.status, record.action)
+
+    const occurredAt = idempotency.now.toISOString()
+    let canceledAttempts: Array<{ id: string; turn_id: string; number: number }> = []
+    if (record.action === 'pause') {
+      const attempts = await client.query<{ id: string; turn_id: string; number: number }>(`
+        UPDATE relay_attempts
+        SET status = 'canceled', completed_at = $4,
+            failure_code = NULL, failure_message = NULL
+        WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
+          AND status IN ('queued', 'starting', 'running', 'waiting', 'paused')
+        RETURNING id, turn_id, number
+      `, [record.organizationId, record.spaceId, record.sessionId, occurredAt])
+      canceledAttempts = attempts.rows
+      await client.query(`
+        UPDATE relay_commands
+        SET status = 'queued', available_at = $4, queued_at = COALESCE(queued_at, $4),
+            started_at = NULL, heartbeat_at = NULL, completed_at = NULL,
+            lease_owner = NULL, lease_expires_at = NULL,
+            failure_code = NULL, failure_message = NULL
+        WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
+          AND resource_type = 'turn' AND status = 'running'
+      `, [record.organizationId, record.spaceId, record.sessionId, occurredAt])
+      await client.query(`
+        UPDATE relay_turns
+        SET status = 'queued', started_at = NULL, heartbeat_at = NULL,
+            completed_at = NULL, failure_code = NULL, failure_message = NULL,
+            version = version + 1
+        WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
+          AND status IN ('running', 'waiting_tool', 'waiting_approval')
+      `, [record.organizationId, record.spaceId, record.sessionId])
+    } else if (record.action === 'cancel') {
+      const attempts = await client.query<{ id: string; turn_id: string; number: number }>(`
+        UPDATE relay_attempts
+        SET status = 'canceled', completed_at = $4,
+            failure_code = NULL, failure_message = NULL
+        WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
+          AND status IN ('queued', 'starting', 'running', 'waiting', 'paused')
+        RETURNING id, turn_id, number
+      `, [record.organizationId, record.spaceId, record.sessionId, occurredAt])
+      canceledAttempts = attempts.rows
+      await client.query(`
+        UPDATE relay_commands
+        SET status = 'canceled', completed_at = $4,
+            lease_owner = NULL, lease_expires_at = NULL,
+            failure_code = NULL, failure_message = NULL
+        WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
+          AND status IN ('accepted', 'queued', 'running')
+      `, [record.organizationId, record.spaceId, record.sessionId, occurredAt])
+      await client.query(`
+        UPDATE relay_turns
+        SET status = 'canceled', completed_at = $4,
+            failure_code = NULL, failure_message = NULL,
+            version = version + 1
+        WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
+          AND status IN ('queued', 'running', 'waiting_tool', 'waiting_approval')
+      `, [record.organizationId, record.spaceId, record.sessionId, occurredAt])
+    }
+
+    const targetStatus: SessionDto['status'] = record.action === 'pause'
+      ? 'paused'
+      : record.action === 'resume'
+        ? 'queued'
+        : 'canceled'
+    const updated = await client.query<SessionRow>(`
+      UPDATE relay_sessions
+      SET status = $4, updated_at = $5, last_activity_at = $5, version = version + 1
+      WHERE organization_id = $1 AND space_id = $2 AND id = $3
+      RETURNING ${sessionColumns}
+    `, [record.organizationId, record.spaceId, record.sessionId, targetStatus, occurredAt])
+    const session = mapSession(updated.rows[0])
+    const command = SessionCommandSchema.parse({
+      id: this.createId(),
+      type: `session.${record.action}`,
+      status: 'succeeded',
+      resourceType: 'session',
+      resourceId: session.id,
+      acceptedAt: occurredAt,
+    })
+    await client.query(`
+      INSERT INTO relay_commands (
+        id, organization_id, space_id, session_id, type, status,
+        resource_type, resource_id, payload, accepted_at, available_at,
+        protocol_version, requested_by, request_id, max_attempts, attempts,
+        queued_at, started_at, heartbeat_at, completed_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, 'succeeded', 'session', $4, $6::jsonb, $7, $7,
+        1, $8, $9, 1, 1, $7, $7, $7, $7
+      )
+    `, [
+      command.id,
+      record.organizationId,
+      record.spaceId,
+      record.sessionId,
+      command.type,
+      JSON.stringify(record.request),
+      occurredAt,
+      record.actorId,
+      record.requestId,
+    ])
+
+    const eventCount = 1 + canceledAttempts.length
+    const sequence = await client.query<{ first_sequence: string }>(`
+      UPDATE relay_sessions
+      SET last_event_sequence = last_event_sequence + $4
+      WHERE organization_id = $1 AND space_id = $2 AND id = $3
+      RETURNING last_event_sequence - $4 + 1 AS first_sequence
+    `, [session.organizationId, session.spaceId, session.id, eventCount])
+    const firstSequence = Number(sequence.rows[0]?.first_sequence)
+    if (!Number.isSafeInteger(firstSequence)) {
+      throw new Error('The Session control event sequence could not be reserved.')
+    }
+    await client.query(`
+      INSERT INTO relay_session_events (
+        organization_id, space_id, session_id, event_id, sequence,
+        event_type, resource_type, resource_id, payload, actor_id,
+        actor_kind, message_id, turn_id, command_id, request_id, occurred_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, 'session.updated', 'session', $3, $6::jsonb,
+        $7, $8, NULL, NULL, $9, $10, $11
+      )
+    `, [
+      session.organizationId,
+      session.spaceId,
+      session.id,
+      this.createId(),
+      firstSequence,
+      JSON.stringify({ status: session.status, version: session.version }),
+      record.actorId,
+      record.actorKind,
+      command.id,
+      record.requestId,
+      occurredAt,
+    ])
+    for (const [index, attempt] of canceledAttempts.entries()) {
+      await client.query(`
+        INSERT INTO relay_session_events (
+          organization_id, space_id, session_id, event_id, sequence,
+          event_type, resource_type, resource_id, payload, actor_id,
+          actor_kind, message_id, turn_id, attempt_id, command_id, request_id, occurred_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, 'attempt.updated', 'attempt', $6, $7::jsonb,
+          $8, $9, NULL, $10, $6, $11, $12, $13
+        )
+      `, [
+        session.organizationId,
+        session.spaceId,
+        session.id,
+        this.createId(),
+        firstSequence + index + 1,
+        attempt.id,
+        JSON.stringify({
+          attemptId: attempt.id,
+          turnId: attempt.turn_id,
+          number: attempt.number,
+          status: 'canceled',
+          failureCode: null,
+        }),
+        record.actorId,
+        record.actorKind,
+        attempt.turn_id,
+        command.id,
+        record.requestId,
+        occurredAt,
+      ])
+    }
+    await client.query(`
+      INSERT INTO relay_outbox_events (
+        id, organization_id, space_id, session_id, aggregate_type,
+        aggregate_id, event_type, payload, occurred_at
+      ) VALUES ($1, $2, $3, $4, 'session', $4, $5, $6::jsonb, $7)
+    `, [
+      this.createId(),
+      session.organizationId,
+      session.spaceId,
+      session.id,
+      record.action === 'pause'
+        ? 'session.paused'
+        : record.action === 'resume'
+          ? 'session.resumed'
+          : 'session.canceled',
+      JSON.stringify({ sessionId: session.id, commandId: command.id, version: session.version }),
+      occurredAt,
+    ])
+    await client.query(`
+      INSERT INTO relay_audit_events (
+        organization_id, audit_event_id, space_id, session_id, actor_id,
+        actor_kind, action, target_type, target_id, result, request_id,
+        idempotency_key_hash, policy_decision, policy_reason, before_state,
+        after_state, occurred_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, 'session', $4, 'success', $8,
+        $9, 'allow', $10, $11::jsonb, $12::jsonb, $13
+      )
+    `, [
+      session.organizationId,
+      this.createId(),
+      session.spaceId,
+      session.id,
+      record.actorId,
+      record.actorKind,
+      `session.${record.action}`,
+      record.requestId,
+      idempotency.keyHash,
+      target.policyReason,
+      JSON.stringify({ status: before.status, version: before.version }),
+      JSON.stringify({ status: session.status, version: session.version, commandId: command.id }),
+      occurredAt,
+    ])
+
+    const response = SessionControlResponseSchema.parse({ session, command })
+    await this.saveCommandIdempotency(client, {
+      ...record,
+      canonicalPath,
+      keyHash: idempotency.keyHash,
+      requestHash: idempotency.requestHash,
+      expiresAt: idempotency.expiresAt,
+      response,
+      etag: `"${session.version}"`,
+    })
+    return responseToControlResult(response, false)
+  }
+
+  private async retryTurnInTransaction(
+    client: PoolClient,
+    record: RetryTurnRecord,
+  ): Promise<RetryTurnResult | null> {
+    const target = await this.lockMetadataTarget(client, record)
+    if (!target) return null
+    const canonicalPath = `/v1/organizations/${record.organizationId}/spaces/${record.spaceId}/sessions/${record.sessionId}/turns/${record.turnId}/retry`
+    const idempotency = await this.prepareCommandIdempotency(client, {
+      ...record,
+      canonicalPath,
+      request: { expectedVersion: record.expectedVersion },
+    })
+    if (idempotency.responseBody) {
+      return responseToRetryResult(RetryTurnResponseSchema.parse(idempotency.responseBody), true)
+    }
+
+    const before = target.session
+    if (before.version !== record.expectedVersion) {
+      throw new SessionVersionConflictError(record.expectedVersion, before.version)
+    }
+    if (before.status !== 'failed') throw new SessionStateConflictError(before.status, 'retry')
+
+    const turn = await client.query<{
+      status: 'queued' | 'running' | 'waiting_tool' | 'waiting_approval' | 'completed' | 'failed' | 'canceled'
+      version: number
+    }>(`
+      SELECT status, version
+      FROM relay_turns
+      WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
+      FOR UPDATE
+    `, [record.organizationId, record.spaceId, record.sessionId, record.turnId])
+    if (!turn.rowCount) return null
+    if (turn.rows[0].status !== 'failed') throw new TurnStateConflictError(turn.rows[0].status)
+
+    const attemptContext = await client.query<{ next_number: string; model: string }>(`
+      SELECT
+        COALESCE(MAX(attempt.number), 0) + 1 AS next_number,
+        expert_revision.model
+      FROM relay_sessions session
+      JOIN relay_expert_revisions expert_revision
+        ON expert_revision.organization_id = session.organization_id
+        AND expert_revision.space_id = session.space_id
+        AND expert_revision.expert_id = session.expert_id
+        AND expert_revision.id = session.expert_revision_id
+      LEFT JOIN relay_attempts attempt
+        ON attempt.organization_id = session.organization_id
+        AND attempt.space_id = session.space_id
+        AND attempt.session_id = session.id
+        AND attempt.turn_id = $4
+      WHERE session.organization_id = $1 AND session.space_id = $2 AND session.id = $3
+      GROUP BY expert_revision.model
+    `, [record.organizationId, record.spaceId, record.sessionId, record.turnId])
+    const attemptNumber = Number(attemptContext.rows[0]?.next_number)
+    if (!Number.isSafeInteger(attemptNumber) || attemptNumber < 1 || !attemptContext.rows[0]?.model) {
+      throw new Error('The retry Attempt context could not be resolved.')
+    }
+
+    const occurredAt = idempotency.now.toISOString()
+    const attemptId = this.createId()
+    await client.query(`
+      UPDATE relay_turns
+      SET status = 'queued', started_at = NULL, heartbeat_at = NULL,
+          completed_at = NULL, failure_code = NULL, failure_message = NULL,
+          version = version + 1
+      WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
+    `, [record.organizationId, record.spaceId, record.sessionId, record.turnId])
+    await client.query(`
+      INSERT INTO relay_attempts (
+        organization_id, space_id, session_id, turn_id, id, number,
+        status, model, provider_model, runtime_id, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, 'queued', $7, NULL, NULL, $8)
+    `, [
+      record.organizationId,
+      record.spaceId,
+      record.sessionId,
+      record.turnId,
+      attemptId,
+      attemptNumber,
+      attemptContext.rows[0].model,
+      occurredAt,
+    ])
+    const command = SessionCommandSchema.parse({
+      id: this.createId(),
+      type: 'turn.retry',
+      status: 'queued',
+      resourceType: 'turn',
+      resourceId: record.turnId,
+      acceptedAt: occurredAt,
+    })
+    await client.query(`
+      INSERT INTO relay_commands (
+        id, organization_id, space_id, session_id, type, status,
+        resource_type, resource_id, payload, accepted_at, available_at,
+        protocol_version, requested_by, request_id, max_attempts, attempts, queued_at
+      ) VALUES (
+        $1, $2, $3, $4, 'turn.retry', 'queued', 'turn', $5, $6::jsonb, $7, $7,
+        1, $8, $9, $10, $11, $7
+      )
+    `, [
+      command.id,
+      record.organizationId,
+      record.spaceId,
+      record.sessionId,
+      record.turnId,
+      JSON.stringify({ turnId: record.turnId, attemptId, attemptNumber }),
+      occurredAt,
+      record.actorId,
+      record.requestId,
+      attemptNumber - 1 + this.executionMaxAttempts,
+      attemptNumber - 1,
+    ])
+    const updated = await client.query<SessionRow>(`
+      UPDATE relay_sessions
+      SET status = 'queued', updated_at = $4, last_activity_at = $4,
+          version = version + 1, last_event_sequence = last_event_sequence + 3
+      WHERE organization_id = $1 AND space_id = $2 AND id = $3
+      RETURNING ${sessionColumns}, last_event_sequence - 2 AS first_sequence
+    `, [record.organizationId, record.spaceId, record.sessionId, occurredAt])
+    const session = mapSession(updated.rows[0])
+    const firstSequence = Number((updated.rows[0] as SessionRow & { first_sequence: string }).first_sequence)
+    if (!Number.isSafeInteger(firstSequence)) throw new Error('The retry event sequence could not be reserved.')
+    const attempt = AttemptDtoSchema.parse({
+      organizationId: record.organizationId,
+      spaceId: record.spaceId,
+      sessionId: record.sessionId,
+      id: attemptId,
+      turnId: record.turnId,
+      number: attemptNumber,
+      status: 'queued',
+      model: attemptContext.rows[0].model,
+      providerModel: null,
+      runtimeId: null,
+      failureCode: null,
+      createdAt: occurredAt,
+      startedAt: null,
+      finishedAt: null,
+    })
+    const eventDrafts = [
+      {
+        type: 'session.updated', resourceType: 'session', resourceId: session.id,
+        payload: { status: session.status, version: session.version },
+      },
+      {
+        type: 'turn.queued', resourceType: 'turn', resourceId: record.turnId,
+        payload: { turnId: record.turnId, status: 'queued' },
+      },
+      {
+        type: 'attempt.updated', resourceType: 'attempt', resourceId: attempt.id,
+        payload: {
+          attemptId: attempt.id,
+          turnId: attempt.turnId,
+          number: attempt.number,
+          status: attempt.status,
+          failureCode: null,
+        },
+      },
+    ] as const
+    for (const [index, event] of eventDrafts.entries()) {
+      await client.query(`
+        INSERT INTO relay_session_events (
+          organization_id, space_id, session_id, event_id, sequence,
+          event_type, resource_type, resource_id, payload, actor_id,
+          actor_kind, message_id, turn_id, attempt_id, command_id, request_id, occurred_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11,
+          NULL, $12, $13, $14, $15, $16
+        )
+      `, [
+        session.organizationId,
+        session.spaceId,
+        session.id,
+        this.createId(),
+        firstSequence + index,
+        event.type,
+        event.resourceType,
+        event.resourceId,
+        JSON.stringify(event.payload),
+        record.actorId,
+        record.actorKind,
+        event.resourceType === 'turn' || event.resourceType === 'attempt' ? record.turnId : null,
+        event.resourceType === 'attempt' ? attempt.id : null,
+        command.id,
+        record.requestId,
+        occurredAt,
+      ])
+    }
+    await client.query(`
+      INSERT INTO relay_outbox_events (
+        id, organization_id, space_id, session_id, aggregate_type,
+        aggregate_id, event_type, payload, occurred_at
+      ) VALUES ($1, $2, $3, $4, 'turn', $5, 'turn.retry_queued', $6::jsonb, $7)
+    `, [
+      this.createId(),
+      session.organizationId,
+      session.spaceId,
+      session.id,
+      record.turnId,
+      JSON.stringify({
+        sessionId: session.id,
+        turnId: record.turnId,
+        attemptId: attempt.id,
+        commandId: command.id,
+      }),
+      occurredAt,
+    ])
+    await client.query(`
+      INSERT INTO relay_audit_events (
+        organization_id, audit_event_id, space_id, session_id, actor_id,
+        actor_kind, action, target_type, target_id, result, request_id,
+        idempotency_key_hash, policy_decision, policy_reason, before_state,
+        after_state, occurred_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, 'turn.retry', 'turn', $13, 'success', $7,
+        $8, 'allow', $9, $10::jsonb, $11::jsonb, $12
+      )
+    `, [
+      session.organizationId,
+      this.createId(),
+      session.spaceId,
+      session.id,
+      record.actorId,
+      record.actorKind,
+      record.requestId,
+      idempotency.keyHash,
+      target.policyReason,
+      JSON.stringify({ status: before.status, version: before.version, turnStatus: 'failed' }),
+      JSON.stringify({
+        status: session.status,
+        version: session.version,
+        turnStatus: 'queued',
+        attemptNumber: attempt.number,
+      }),
+      occurredAt,
+      record.turnId,
+    ])
+
+    const response = RetryTurnResponseSchema.parse({ session, attempt, command })
+    await this.saveCommandIdempotency(client, {
+      ...record,
+      canonicalPath,
+      keyHash: idempotency.keyHash,
+      requestHash: idempotency.requestHash,
+      expiresAt: idempotency.expiresAt,
+      response,
+      etag: `"${session.version}"`,
+    })
+    return responseToRetryResult(response, false)
   }
 
   private async appendMetadataLedger(

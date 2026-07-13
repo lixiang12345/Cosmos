@@ -43,6 +43,8 @@ const migrationVersions = [
   '038_session_archived_activity_index.sql',
   '039_session_metadata_lifecycle_ledgers.sql',
   '040_validate_session_metadata_lifecycle_ledgers.sql',
+  '041_session_execution_controls.sql',
+  '042_validate_session_execution_controls.sql',
 ]
 
 function poolWithVersions(versions: string[]) {

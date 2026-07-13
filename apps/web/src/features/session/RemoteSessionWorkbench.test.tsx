@@ -80,6 +80,13 @@ function renderWorkbench(
     sendStatus?: 'idle' | 'submitting' | 'error'
     sendError?: string
     onSend?: (content: string) => Promise<void>
+    controlStatus?: 'idle' | 'submitting' | 'error'
+    controlAction?: 'pause' | 'resume' | 'cancel' | 'retry'
+    controlError?: string
+    onPause?: () => void
+    onResume?: () => void
+    onCancel?: () => void
+    onRetry?: () => void
   } = {},
 ) {
   const onBack = vi.fn()
@@ -124,6 +131,42 @@ describe('RemoteSessionWorkbench', () => {
     expect(screen.getByText('私有')).toBeInTheDocument()
     expect(document.querySelector(`time[datetime="${session.createdAt}"]`)).toBeInTheDocument()
     expect(document.querySelector(`time[datetime="${session.updatedAt}"]`)).toBeInTheDocument()
+  })
+
+  it('exposes only legal execution controls and keeps local fencing available', async () => {
+    const user = userEvent.setup()
+    const onPause = vi.fn()
+    const onResume = vi.fn()
+    const onCancel = vi.fn()
+    const onRetry = vi.fn()
+    const queuedView = renderWorkbench({}, {}, { executionEnabled: true, onPause, onResume, onCancel, onRetry })
+
+    expect(screen.getByRole('button', { name: '暂停' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '取消执行' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: '恢复' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '暂停' }))
+    await user.click(screen.getByRole('button', { name: '取消执行' }))
+    expect(onPause).toHaveBeenCalledOnce()
+    expect(onCancel).toHaveBeenCalledOnce()
+    queuedView.unmount()
+
+    const pausedView = renderWorkbench(
+      { status: 'paused' },
+      {},
+      { executionEnabled: false, onPause, onResume, onCancel, onRetry },
+    )
+    expect(screen.getByRole('button', { name: '恢复' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '取消执行' })).toBeEnabled()
+    pausedView.unmount()
+
+    renderWorkbench(
+      { status: 'failed' },
+      { events: [attemptEvent(1, 'failed', 'PROVIDER_TIMEOUT')] },
+      { executionEnabled: true, onPause, onResume, onCancel, onRetry },
+    )
+    expect(screen.getByRole('button', { name: '重试' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: '取消执行' })).not.toBeInTheDocument()
   })
 
   it('does not invent execution data, views, controls, or a message composer', () => {

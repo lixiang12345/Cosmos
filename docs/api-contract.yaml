@@ -962,48 +962,97 @@ paths:
 
   /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/pause:
     parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
       - $ref: '#/components/parameters/SessionId'
     post:
       tags: [Sessions]
       operationId: pauseSession
-      summary: Pause a Session at the next safe point
+      x-relay-implementation-status: implemented
+      summary: Fence active work and pause a Session
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/IfMatch'
       responses:
         '202':
-          $ref: '#/components/responses/CommandAccepted'
+          description: Session paused and active work fenced
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Idempotency-Replayed:
+              $ref: '#/components/headers/IdempotencyReplayed'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeSessionControlResult'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/RuntimeConflict'
+        '412':
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '428':
+          $ref: '#/components/responses/RuntimePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
 
   /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/resume:
     parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
       - $ref: '#/components/parameters/SessionId'
     post:
       tags: [Sessions]
       operationId: resumeSession
+      x-relay-implementation-status: implemented
       summary: Resume a paused Session without replaying completed ToolCalls
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/IfMatch'
       responses:
         '202':
-          $ref: '#/components/responses/CommandAccepted'
+          description: Session resumed and queued for a fresh Attempt
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Idempotency-Replayed:
+              $ref: '#/components/headers/IdempotencyReplayed'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeSessionControlResult'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/RuntimeConflict'
+        '412':
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '428':
+          $ref: '#/components/responses/RuntimePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
 
   /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/cancel:
     parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
       - $ref: '#/components/parameters/SessionId'
     post:
       tags: [Sessions]
       operationId: cancelSession
+      x-relay-implementation-status: implemented
       summary: Cancel active and queued work in a Session
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1012,16 +1061,35 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                reason:
-                  type: string
-                  maxLength: 1000
+              $ref: '#/components/schemas/RuntimeCancelSessionRequest'
       responses:
         '202':
-          $ref: '#/components/responses/CommandAccepted'
+          description: Session and all nonterminal work canceled
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Idempotency-Replayed:
+              $ref: '#/components/headers/IdempotencyReplayed'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeSessionControlResult'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/RuntimeConflict'
+        '412':
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '428':
+          $ref: '#/components/responses/RuntimePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
 
   /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/archive:
     parameters:
@@ -1303,13 +1371,14 @@ paths:
 
   /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/turns/{turnId}/retry:
     parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
       - $ref: '#/components/parameters/SessionId'
       - $ref: '#/components/parameters/TurnId'
     post:
       tags: [Turns]
       operationId: retryTurn
+      x-relay-implementation-status: implemented
       summary: Append and enqueue a new Attempt for a failed Turn
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1317,18 +1386,31 @@ paths:
       responses:
         '202':
           description: New Attempt queued
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Idempotency-Replayed:
+              $ref: '#/components/headers/IdempotencyReplayed'
           content:
             application/json:
               schema:
-                type: object
-                required: [attempt, command]
-                properties:
-                  attempt:
-                    $ref: '#/components/schemas/Attempt'
-                  command:
-                    $ref: '#/components/schemas/Command'
+                $ref: '#/components/schemas/RuntimeRetryTurnResult'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/RuntimeConflict'
+        '412':
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '428':
+          $ref: '#/components/responses/RuntimePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
 
   /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/workers:
     parameters:
@@ -2130,8 +2212,7 @@ components:
       in: path
       required: true
       schema:
-        type: string
-        format: uuid
+        $ref: '#/components/schemas/RuntimeIdentifier'
     FileId:
       name: fileId
       in: path
@@ -3039,6 +3120,14 @@ components:
           minLength: 1
           maxLength: 240
       additionalProperties: false
+    RuntimeCancelSessionRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 1000
+      additionalProperties: false
     RuntimeSessionCreate:
       type: object
       required: [expertId, title, message]
@@ -3279,17 +3368,82 @@ components:
           $ref: '#/components/schemas/RuntimeIdentifier'
         type:
           type: string
-          enum: [session.start, session.send]
+          enum: [session.start, session.send, session.pause, session.resume, session.cancel, turn.retry]
         status:
           type: string
           enum: [accepted, queued, running, succeeded, failed, canceled]
         resourceType:
           type: string
-          const: turn
+          enum: [session, turn]
         resourceId:
           $ref: '#/components/schemas/RuntimeIdentifier'
         acceptedAt:
           $ref: '#/components/schemas/Timestamp'
+      additionalProperties: false
+    RuntimeAttempt:
+      type: object
+      required:
+        - organizationId
+        - spaceId
+        - sessionId
+        - id
+        - turnId
+        - number
+        - status
+        - model
+        - providerModel
+        - runtimeId
+        - failureCode
+        - createdAt
+        - startedAt
+        - finishedAt
+      properties:
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        spaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        sessionId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        id:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        turnId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        number:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          enum: [queued, starting, running, waiting, paused, succeeded, failed, canceled]
+        model:
+          type: string
+          minLength: 1
+          maxLength: 256
+        providerModel:
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 256
+            - type: 'null'
+        runtimeId:
+          oneOf:
+            - $ref: '#/components/schemas/RuntimeIdentifier'
+            - type: 'null'
+        failureCode:
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 128
+            - type: 'null'
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        startedAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        finishedAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
       additionalProperties: false
     RuntimeSessionCreateResult:
       type: object
@@ -3325,6 +3479,26 @@ components:
           $ref: '#/components/schemas/RuntimeSessionMessage'
         turn:
           $ref: '#/components/schemas/RuntimeSessionTurn'
+        command:
+          $ref: '#/components/schemas/RuntimeSessionCommand'
+      additionalProperties: false
+    RuntimeSessionControlResult:
+      type: object
+      required: [session, command]
+      properties:
+        session:
+          $ref: '#/components/schemas/RuntimeSession'
+        command:
+          $ref: '#/components/schemas/RuntimeSessionCommand'
+      additionalProperties: false
+    RuntimeRetryTurnResult:
+      type: object
+      required: [session, attempt, command]
+      properties:
+        session:
+          $ref: '#/components/schemas/RuntimeSession'
+        attempt:
+          $ref: '#/components/schemas/RuntimeAttempt'
         command:
           $ref: '#/components/schemas/RuntimeSessionCommand'
       additionalProperties: false
