@@ -50,6 +50,8 @@ const migrationVersions = [
   '045_service_account_session_scopes.sql',
   '046_runtime_roles_and_tenant_rls.sql',
   '047_harden_runtime_rls_policies.sql',
+  '048_session_artifacts.sql',
+  '049_validate_session_artifacts.sql',
 ]
 
 function poolWithVersions(versions: string[]) {

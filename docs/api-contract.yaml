@@ -1674,15 +1674,22 @@ paths:
 
   /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/artifacts:
     parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
       - $ref: '#/components/parameters/SessionId'
     get:
       tags: [Artifacts]
       operationId: listSessionArtifacts
+      x-relay-implementation-status: implemented
       summary: List Session Artifacts
       parameters:
-        - $ref: '#/components/parameters/Cursor'
+        - name: cursor
+          in: query
+          description: Scope- and filter-bound base64url cursor returned by the previous page.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 4096
         - $ref: '#/components/parameters/Limit'
         - name: type
           in: query
@@ -1694,20 +1701,21 @@ paths:
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: '#/components/schemas/Page'
-                  - type: object
-                    required: [items]
-                    properties:
-                      items:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/Artifact'
+                $ref: '#/components/schemas/RuntimeArtifactListResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
     post:
       tags: [Artifacts]
       operationId: createSessionArtifact
+      x-relay-implementation-status: implemented
       summary: Associate a manually supplied Artifact reference with a Session
       description: This does not mutate the external provider object.
       parameters:
@@ -1717,28 +1725,44 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ArtifactCreate'
+              $ref: '#/components/schemas/RuntimeArtifactCreate'
       responses:
         '201':
           description: Artifact created
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Location:
+              $ref: '#/components/headers/Location'
+            Idempotency-Replayed:
+              $ref: '#/components/headers/IdempotencyReplayed'
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Artifact'
+                $ref: '#/components/schemas/RuntimeArtifact'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/RuntimeConflict'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
 
   /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/artifacts/{artifactId}:
     parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
       - $ref: '#/components/parameters/SessionId'
       - $ref: '#/components/parameters/ArtifactId'
     patch:
       tags: [Artifacts]
       operationId: updateSessionArtifact
+      x-relay-implementation-status: implemented
       summary: Update Relay metadata for an Artifact reference
       parameters:
         - $ref: '#/components/parameters/IfMatch'
@@ -1747,19 +1771,35 @@ paths:
         content:
           application/merge-patch+json:
             schema:
-              $ref: '#/components/schemas/ArtifactPatch'
+              $ref: '#/components/schemas/RuntimeArtifactPatch'
       responses:
         '200':
           description: Artifact updated
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Artifact'
+                $ref: '#/components/schemas/RuntimeArtifact'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
         '412':
-          $ref: '#/components/responses/PreconditionFailed'
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '428':
+          $ref: '#/components/responses/RuntimePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
     delete:
       tags: [Artifacts]
       operationId: removeSessionArtifact
+      x-relay-implementation-status: implemented
       summary: Remove the association while retaining audit history
       parameters:
         - $ref: '#/components/parameters/IfMatch'
@@ -1767,8 +1807,27 @@ paths:
       responses:
         '204':
           description: Artifact association removed
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Idempotency-Replayed:
+              $ref: '#/components/headers/IdempotencyReplayed'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
         '412':
-          $ref: '#/components/responses/PreconditionFailed'
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '428':
+          $ref: '#/components/responses/RuntimePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
 
   /organizations/{organizationId}/spaces/{spaceId}/automations:
     parameters:
@@ -2272,8 +2331,7 @@ components:
       in: path
       required: true
       schema:
-        type: string
-        format: uuid
+        $ref: '#/components/schemas/RuntimeIdentifier'
     AutomationId:
       name: automationId
       in: path
@@ -3320,6 +3378,174 @@ components:
               oneOf:
                 - $ref: '#/components/schemas/Timestamp'
                 - type: 'null'
+          additionalProperties: false
+      additionalProperties: false
+    RuntimeArtifactCreate:
+      type: object
+      required: [type, label, url]
+      properties:
+        turnId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        type:
+          $ref: '#/components/schemas/ArtifactType'
+        provider:
+          type: string
+          minLength: 1
+          maxLength: 128
+        externalId:
+          type: string
+          minLength: 1
+          maxLength: 512
+        label:
+          type: string
+          minLength: 1
+          maxLength: 240
+        url:
+          type: string
+          format: uri
+          minLength: 1
+          maxLength: 2048
+          pattern: '^https://'
+        status:
+          type: string
+          minLength: 1
+          maxLength: 128
+        attributes:
+          $ref: '#/components/schemas/JsonObject'
+      additionalProperties: false
+    RuntimeArtifactPatch:
+      type: object
+      minProperties: 1
+      properties:
+        label:
+          type: string
+          minLength: 1
+          maxLength: 240
+        url:
+          type: string
+          format: uri
+          minLength: 1
+          maxLength: 2048
+          pattern: '^https://'
+        status:
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 128
+            - type: 'null'
+        attributes:
+          $ref: '#/components/schemas/JsonObject'
+      additionalProperties: false
+    RuntimeArtifact:
+      type: object
+      required:
+        - organizationId
+        - spaceId
+        - sessionId
+        - id
+        - turnId
+        - type
+        - provider
+        - externalId
+        - label
+        - url
+        - status
+        - attributes
+        - createdByToolCallId
+        - createdBy
+        - createdAt
+        - updatedAt
+        - removedAt
+        - version
+      properties:
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        spaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        sessionId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        id:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        turnId:
+          oneOf:
+            - $ref: '#/components/schemas/RuntimeIdentifier'
+            - type: 'null'
+        type:
+          $ref: '#/components/schemas/ArtifactType'
+        provider:
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 128
+            - type: 'null'
+        externalId:
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 512
+            - type: 'null'
+        label:
+          type: string
+          minLength: 1
+          maxLength: 240
+        url:
+          type: string
+          format: uri
+          maxLength: 2048
+          pattern: '^https://'
+        status:
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 128
+            - type: 'null'
+        attributes:
+          $ref: '#/components/schemas/JsonObject'
+        createdByToolCallId:
+          oneOf:
+            - $ref: '#/components/schemas/RuntimeIdentifier'
+            - type: 'null'
+        createdBy:
+          $ref: '#/components/schemas/RuntimeActorIdentifier'
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        updatedAt:
+          $ref: '#/components/schemas/Timestamp'
+        removedAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        version:
+          type: integer
+          minimum: 1
+      additionalProperties: false
+    RuntimeArtifactListResponse:
+      type: object
+      required: [organizationId, spaceId, sessionId, items, page]
+      properties:
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        spaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        sessionId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/RuntimeArtifact'
+        page:
+          type: object
+          required: [nextCursor, hasMore]
+          properties:
+            nextCursor:
+              oneOf:
+                - type: string
+                  minLength: 1
+                  maxLength: 2048
+                - type: 'null'
+            hasMore:
+              type: boolean
           additionalProperties: false
       additionalProperties: false
     RuntimeSession:
@@ -4899,82 +5125,6 @@ components:
     ArtifactType:
       type: string
       enum: [pull_request, branch, commit, issue, link, test_report, deployment, document]
-    Artifact:
-      allOf:
-        - $ref: '#/components/schemas/ResourceBase'
-        - type: object
-          required: [spaceId, sessionId, type, label, url, status]
-          properties:
-            spaceId:
-              type: string
-              format: uuid
-            sessionId:
-              type: string
-              format: uuid
-            turnId:
-              type: [string, 'null']
-              format: uuid
-            type:
-              $ref: '#/components/schemas/ArtifactType'
-            provider:
-              type: [string, 'null']
-            externalId:
-              type: [string, 'null']
-            label:
-              type: string
-            url:
-              type: string
-              format: uri
-            status:
-              type: string
-            attributes:
-              $ref: '#/components/schemas/JsonObject'
-            createdByToolCallId:
-              type: [string, 'null']
-              format: uuid
-            removedAt:
-              type: [string, 'null']
-              format: date-time
-    ArtifactCreate:
-      type: object
-      required: [type, label, url]
-      properties:
-        turnId:
-          type: string
-          format: uuid
-        type:
-          $ref: '#/components/schemas/ArtifactType'
-        provider:
-          type: string
-        externalId:
-          type: string
-        label:
-          type: string
-          minLength: 1
-          maxLength: 500
-        url:
-          type: string
-          format: uri
-        status:
-          type: string
-        attributes:
-          $ref: '#/components/schemas/JsonObject'
-      additionalProperties: false
-    ArtifactPatch:
-      type: object
-      properties:
-        label:
-          type: string
-          minLength: 1
-          maxLength: 500
-        url:
-          type: string
-          format: uri
-        status:
-          type: string
-        attributes:
-          $ref: '#/components/schemas/JsonObject'
-      additionalProperties: false
 
     EventSource:
       type: string

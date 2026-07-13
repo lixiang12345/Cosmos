@@ -49,6 +49,7 @@ type EventRow = {
   message_id: string | null
   turn_id: string | null
   attempt_id: string | null
+  artifact_id: string | null
   session_status: string | null
   session_visibility: string | null
   session_version: string | null
@@ -57,6 +58,11 @@ type EventRow = {
   attempt_number: string | null
   attempt_status: string | null
   attempt_failure_code: string | null
+  artifact_type: string | null
+  artifact_label: string | null
+  artifact_status: string | null
+  artifact_version: string | null
+  artifact_removed_at: string | null
 }
 
 const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER)
@@ -203,6 +209,22 @@ function mapEvent(row: EventRow): SessionEventDto {
           number: safeInteger(row.attempt_number, 'Attempt event number', 1),
           status: row.attempt_status,
           failureCode: row.attempt_failure_code,
+        },
+      }
+      break
+    case 'artifact.created':
+    case 'artifact.updated':
+    case 'artifact.removed':
+      projected = {
+        ...base,
+        type: row.event_type,
+        payload: {
+          artifactId: row.artifact_id,
+          type: row.artifact_type,
+          label: row.artifact_label,
+          status: row.artifact_status,
+          version: safeInteger(row.artifact_version, 'Artifact event version', 1),
+          removedAt: row.artifact_removed_at,
         },
       }
       break
@@ -377,6 +399,7 @@ export class PostgresSessionTimelineRepository implements SessionTimelineReposit
           event.event_id, event.sequence, event.event_type, event.resource_type,
           event.resource_id, event.actor_id, event.command_id, event.request_id,
           event.occurred_at, event.message_id, event.turn_id, event.attempt_id,
+          event.artifact_id,
           CASE WHEN event.event_type IN (
             'session.created', 'session.updated', 'session.renamed',
             'session.archived', 'session.restored'
@@ -394,7 +417,17 @@ export class PostgresSessionTimelineRepository implements SessionTimelineReposit
             THEN event.payload->>'archivedAt' END AS session_archived_at,
           CASE WHEN event.event_type = 'attempt.updated' THEN event.payload->>'number' END AS attempt_number,
           CASE WHEN event.event_type = 'attempt.updated' THEN event.payload->>'status' END AS attempt_status,
-          CASE WHEN event.event_type = 'attempt.updated' THEN event.payload->>'failureCode' END AS attempt_failure_code
+          CASE WHEN event.event_type = 'attempt.updated' THEN event.payload->>'failureCode' END AS attempt_failure_code,
+          CASE WHEN event.event_type IN ('artifact.created', 'artifact.updated', 'artifact.removed')
+            THEN event.payload->>'type' END AS artifact_type,
+          CASE WHEN event.event_type IN ('artifact.created', 'artifact.updated', 'artifact.removed')
+            THEN event.payload->>'label' END AS artifact_label,
+          CASE WHEN event.event_type IN ('artifact.created', 'artifact.updated', 'artifact.removed')
+            THEN event.payload->>'status' END AS artifact_status,
+          CASE WHEN event.event_type IN ('artifact.created', 'artifact.updated', 'artifact.removed')
+            THEN event.payload->>'version' END AS artifact_version,
+          CASE WHEN event.event_type = 'artifact.removed'
+            THEN event.payload->>'removedAt' END AS artifact_removed_at
         FROM relay_session_events event
         WHERE event.organization_id = $1
           AND event.space_id = $2

@@ -1,5 +1,13 @@
 export { createApp, type CreateAppOptions } from './app.js'
 export {
+  ArtifactConflictError,
+  ArtifactValidationError,
+  ArtifactVersionConflictError,
+  EmptyArtifactRepository,
+  type ArtifactRepository,
+} from './artifact-repository.js'
+export { PostgresArtifactRepository } from './postgres-artifact-repository.js'
+export {
   AuthenticationError,
   createDevelopmentAuthenticator,
   createJwtAuthenticator,

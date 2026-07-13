@@ -1,4 +1,19 @@
 export {
+  ArtifactDtoSchema,
+  ArtifactListResponseSchema,
+  ArtifactTypeSchema,
+  CreateArtifactRequestSchema,
+  UpdateArtifactRequestSchema,
+  type ArtifactDto,
+  type ArtifactListResponse,
+  type ArtifactType,
+  type CreateArtifactRequest,
+  type CreateArtifactRequestInput,
+  type UpdateArtifactRequest,
+  type UpdateArtifactRequestInput,
+} from './artifact.js'
+
+export {
   RuntimeCapabilitiesSchema,
   type RuntimeCapabilities,
 } from './capabilities.js'

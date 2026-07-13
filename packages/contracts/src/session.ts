@@ -353,6 +353,9 @@ export const SessionEventTypeSchema = z.enum([
   'message.created',
   'turn.queued',
   'attempt.updated',
+  'artifact.created',
+  'artifact.updated',
+  'artifact.removed',
 ])
 
 export type SessionEventType = z.infer<typeof SessionEventTypeSchema>
@@ -449,6 +452,23 @@ export const SessionEventDtoSchema = z.discriminatedUnion('type', [
       failureCode: FailureCodeSchema.nullable(),
     }).strict(),
   }).strict(),
+  z.object({
+    ...SessionEventBaseShape,
+    type: z.enum(['artifact.created', 'artifact.updated', 'artifact.removed']),
+    resourceType: z.literal('artifact'),
+    resourceId: IdentifierSchema,
+    payload: z.object({
+      artifactId: IdentifierSchema,
+      type: z.enum([
+        'pull_request', 'branch', 'commit', 'issue', 'link',
+        'test_report', 'deployment', 'document',
+      ]),
+      label: z.string().trim().min(1).max(240),
+      status: z.string().trim().min(1).max(128).nullable(),
+      version: z.number().int().positive(),
+      removedAt: TimestampSchema.nullable(),
+    }).strict(),
+  }).strict(),
 ]).superRefine((event, context) => {
   if (event.resourceType === 'session'
     && event.resourceId !== event.sessionId) {
@@ -485,6 +505,22 @@ export const SessionEventDtoSchema = z.discriminatedUnion('type', [
         code: 'custom',
         path: ['payload', 'failureCode'],
         message: 'failureCode must be present exactly for failed Attempt events',
+      })
+    }
+  }
+  if ('artifactId' in event.payload) {
+    if (event.resourceId !== event.payload.artifactId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['payload', 'artifactId'],
+        message: 'artifactId must match resourceId',
+      })
+    }
+    if ((event.type === 'artifact.removed') !== (event.payload.removedAt !== null)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['payload', 'removedAt'],
+        message: 'removedAt must be present exactly for removed Artifact events',
       })
     }
   }

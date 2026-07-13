@@ -119,6 +119,22 @@ function eventLabel(event: SessionEventDto, locale: Locale) {
   if (event.type === 'session.restored') return text(locale, '会话已恢复', 'Session restored')
   if (event.type === 'message.created') return text(locale, '消息已记录', 'Message recorded')
   if (event.type === 'turn.queued') return text(locale, '任务回合已排队', 'Turn queued')
+  if (event.type === 'artifact.created') return text(
+    locale,
+    `已关联产物：${event.payload.label}`,
+    `Artifact associated: ${event.payload.label}`,
+  )
+  if (event.type === 'artifact.updated') return text(
+    locale,
+    `产物已更新：${event.payload.label}`,
+    `Artifact updated: ${event.payload.label}`,
+  )
+  if (event.type === 'artifact.removed') return text(
+    locale,
+    `已移除产物关联：${event.payload.label}`,
+    `Artifact association removed: ${event.payload.label}`,
+  )
+  if (!('number' in event.payload)) return event.type
   const attempt = `${text(locale, '第', 'Attempt ')}${event.payload.number}${text(locale, ' 次尝试', '')}`
   const statuses = {
     queued: ['已排队', 'queued'],

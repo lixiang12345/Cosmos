@@ -1,6 +1,7 @@
 import { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { runMigrations } from './migrations.js'
+import { PostgresArtifactRepository } from './postgres-artifact-repository.js'
 import { PostgresExecutionRepository } from './postgres-execution-repository.js'
 import {
   assertRuntimeDatabaseRole,
@@ -30,6 +31,7 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
     options: `-c role=relay_worker_runtime -c search_path=${schema}`,
   })
   const sessions = new PostgresSessionRepository(apiPool)
+  const artifacts = new PostgresArtifactRepository(apiPool)
   const execution = new PostgresExecutionRepository(workerPool)
   let sessionA = ''
   let sessionB = ''
@@ -148,9 +150,9 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
         AND relname NOT IN ('relay_schema_migrations', 'relay_worker_heartbeats')
     `)
     expect(protection.rows[0]).toEqual({
-      tenant_tables: '24',
-      rls_tables: '24',
-      forced_tables: '24',
+      tenant_tables: '25',
+      rls_tables: '25',
+      forced_tables: '25',
     })
   })
 
@@ -209,6 +211,54 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
       'SELECT count(*)::text AS count FROM relay_sessions',
     )
     expect(afterRelease.rows[0]?.count).toBe('0')
+  })
+
+  it('applies API runtime RLS to Artifact writes and reads', async () => {
+    const created = await artifacts.create({
+      organizationId: 'rls-org-a',
+      spaceId: 'rls-space-a',
+      sessionId: sessionA,
+      actorId: 'rls-user-a',
+      actorKind: 'user',
+      requestId: 'rls-artifact-create',
+      idempotencyKey: 'rls-artifact-key',
+      request: {
+        type: 'link',
+        label: 'RLS evidence',
+        url: 'https://evidence.example.com/rls/artifact',
+        attributes: {},
+      },
+    })
+    expect(created).toMatchObject({
+      replayed: false,
+      artifact: { organizationId: 'rls-org-a', sessionId: sessionA },
+    })
+
+    const unscoped = await apiPool.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM relay_artifacts',
+    )
+    expect(unscoped.rows[0]?.count).toBe('0')
+
+    const visible = await withApiDatabaseContext(
+      apiPool,
+      { organizationId: 'rls-org-a', spaceId: 'rls-space-a', actorId: 'rls-user-a' },
+      (client) => client.query<{ count: string }>(
+        'SELECT count(*)::text AS count FROM relay_artifacts',
+      ),
+    )
+    expect(visible.rows[0]?.count).toBe('1')
+
+    const spoofed = await withApiDatabaseContext(
+      apiPool,
+      { organizationId: 'rls-org-b', spaceId: 'rls-space-b', actorId: 'rls-user-a' },
+      (client) => client.query<{ count: string }>(
+        'SELECT count(*)::text AS count FROM relay_artifacts',
+      ),
+    )
+    expect(spoofed.rows[0]?.count).toBe('0')
+    await expect(artifacts.list(
+      'rls-org-a', 'rls-space-a', sessionA, 'rls-user-b',
+    )).resolves.toBeNull()
   })
 
   it('limits the Worker role to cross-tenant execution data', async () => {

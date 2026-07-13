@@ -1,7 +1,10 @@
 import cors from '@fastify/cors'
 import {
   ApiErrorSchema,
+  ArtifactDtoSchema,
+  ArtifactListResponseSchema,
   CancelSessionRequestSchema,
+  CreateArtifactRequestSchema,
   CreateShareGrantRequestSchema,
   CreateSessionRequestSchema,
   CreateSessionResponseSchema,
@@ -23,6 +26,7 @@ import {
   SessionMessagePageSchema,
   SendSessionMessageResponseSchema,
   StartSessionResponseSchema,
+  UpdateArtifactRequestSchema,
   type ApiError,
   type SessionEventDto,
   type SessionEventPage,
@@ -33,6 +37,19 @@ import Fastify, {
   type FastifyRequest,
   type FastifyServerOptions,
 } from 'fastify'
+import {
+  ArtifactConflictError,
+  ArtifactValidationError,
+  ArtifactVersionConflictError,
+  EmptyArtifactRepository,
+  type ArtifactRepository,
+} from './artifact-repository.js'
+import {
+  InvalidArtifactPaginationError,
+  encodeArtifactCursor,
+  parseArtifactPagination,
+  type ArtifactListQuery,
+} from './artifact-pagination.js'
 import {
   AuthenticationError,
   rejectAuthentication,
@@ -118,6 +135,10 @@ type ShareParams = SessionParams & {
   shareId: string
 }
 
+type ArtifactParams = SessionParams & {
+  artifactId: string
+}
+
 type SessionEventStreamOptions = {
   heartbeatMs?: number
   pollMs?: number
@@ -150,6 +171,7 @@ type ValidationIssue = {
 export type CreateAppOptions = {
   sessionRepository?: SessionRepository
   sessionTimelineRepository?: SessionTimelineRepository
+  artifactRepository?: ArtifactRepository
   serviceAccountPolicyRepository?: ServiceAccountPolicyRepository
   configurationCatalogRepository?: ConfigurationCatalogRepository
   readinessCheck?: () => Promise<void>
@@ -350,8 +372,20 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     logger: options.logger ?? false,
     bodyLimit: options.bodyLimit ?? 1_048_576,
   })
+  app.addContentTypeParser(
+    'application/merge-patch+json',
+    { parseAs: 'string' },
+    (_request, body, done) => {
+      try {
+        done(null, JSON.parse(typeof body === 'string' ? body : body.toString('utf8')))
+      } catch (error) {
+        done(error as Error)
+      }
+    },
+  )
   const sessionRepository = options.sessionRepository ?? new InMemorySessionRepository()
   const sessionTimelineRepository = options.sessionTimelineRepository
+  const artifactRepository = options.artifactRepository ?? new EmptyArtifactRepository()
   const serviceAccountPolicyRepository = options.serviceAccountPolicyRepository
     ?? new DenyServiceAccountPolicyRepository()
   const configurationCatalogRepository = options.configurationCatalogRepository
@@ -446,6 +480,35 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
           expectedVersion: error.expectedVersion,
           currentVersion: error.currentVersion,
         },
+      })
+    }
+
+    if (error instanceof ArtifactVersionConflictError) {
+      return sendApiError(reply, 412, request, {
+        code: 'PRECONDITION_FAILED',
+        message: error.message,
+        retryable: false,
+        details: {
+          expectedVersion: error.expectedVersion,
+          currentVersion: error.currentVersion,
+        },
+      })
+    }
+
+    if (error instanceof ArtifactConflictError) {
+      return sendApiError(reply, 409, request, {
+        code: 'ARTIFACT_CONFLICT',
+        message: error.message,
+        retryable: false,
+      })
+    }
+
+    if (error instanceof ArtifactValidationError) {
+      return sendApiError(reply, 400, request, {
+        code: 'VALIDATION_FAILED',
+        message: error.message,
+        retryable: false,
+        fieldErrors: { [`body.${error.field}`]: [error.message] },
       })
     }
 
@@ -552,6 +615,17 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         retryable: false,
         fieldErrors: {
           [`query.${error.field}`]: ['Use a valid value and a cursor for this Session.'],
+        },
+      })
+    }
+
+    if (error instanceof InvalidArtifactPaginationError) {
+      return sendApiError(reply, 400, request, {
+        code: 'VALIDATION_FAILED',
+        message: 'The Artifact list parameters are invalid.',
+        retryable: false,
+        fieldErrors: {
+          [`query.${error.field}`]: ['Use a valid value and a cursor for this Session and filter.'],
         },
       })
     }
@@ -1033,6 +1107,196 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       reply.header('Idempotency-Replayed', String(result.replayed))
       reply.header('ETag', resourceEtag(grant))
       return grant
+    },
+  )
+
+  app.get<{ Params: SessionParams; Querystring: ArtifactListQuery }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/artifacts',
+    async (request, reply) => {
+      const authorization = await authorizeSessionSpace(request, reply, request.params)
+      if (!authorization) return
+      const sessionId = parseSpaceId(request.params.sessionId)
+      if (!sessionId) return sendResourceNotFound(reply, request)
+      const options = parseArtifactPagination(
+        request.query,
+        authorization.organizationId,
+        authorization.spaceId,
+        sessionId,
+      )
+      const page = await artifactRepository.list(
+        authorization.organizationId,
+        authorization.spaceId,
+        sessionId,
+        authorization.actor.id,
+        options,
+      )
+      if (!page) return sendResourceNotFound(reply, request)
+      return ArtifactListResponseSchema.parse({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        sessionId,
+        items: page.items,
+        page: {
+          nextCursor: page.nextCursor
+            ? encodeArtifactCursor(
+              page.nextCursor,
+              authorization.organizationId,
+              authorization.spaceId,
+              sessionId,
+              options.type,
+            )
+            : null,
+          hasMore: page.hasMore,
+        },
+      })
+    },
+  )
+
+  app.post<{ Params: SessionParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/artifacts',
+    async (request, reply) => {
+      const authorization = await authorizeSessionSpace(request, reply, request.params)
+      if (!authorization) return
+      const sessionId = parseSpaceId(request.params.sessionId)
+      if (!sessionId) return sendResourceNotFound(reply, request)
+      if (!canWriteSpace(authorization.access)) {
+        return sendApiError(reply, 403, request, {
+          code: 'PERMISSION_DENIED',
+          message: 'You do not have permission to associate Artifacts in this Space.',
+          retryable: false,
+        })
+      }
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED',
+          message: 'A valid Idempotency-Key header is required.',
+          retryable: false,
+          fieldErrors: { 'Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      const parsed = CreateArtifactRequestSchema.safeParse(request.body)
+      if (!parsed.success) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED',
+          message: 'The Artifact request is invalid.',
+          retryable: false,
+          fieldErrors: validationFieldErrors(parsed.error.issues),
+        })
+      }
+      const result = await artifactRepository.create({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        sessionId,
+        actorId: authorization.actor.id,
+        actorKind: authorization.actor.kind,
+        requestId: request.id,
+        idempotencyKey,
+        request: parsed.data,
+      })
+      if (!result) return sendResourceNotFound(reply, request)
+      const artifact = ArtifactDtoSchema.parse(result.artifact)
+      const location = `/api/v1/organizations/${authorization.organizationId}/spaces/${authorization.spaceId}/sessions/${sessionId}/artifacts/${artifact.id}`
+      reply.header('Idempotency-Replayed', String(result.replayed))
+      reply.header('Location', location)
+      reply.header('ETag', resourceEtag(artifact))
+      return reply.code(201).send(artifact)
+    },
+  )
+
+  app.patch<{ Params: ArtifactParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/artifacts/:artifactId',
+    async (request, reply) => {
+      const authorization = await authorizeSessionSpace(request, reply, request.params)
+      if (!authorization) return
+      const sessionId = parseSpaceId(request.params.sessionId)
+      const artifactId = parseSpaceId(request.params.artifactId)
+      if (!sessionId || !artifactId) return sendResourceNotFound(reply, request)
+      if (!canWriteSpace(authorization.access)) {
+        return sendApiError(reply, 403, request, {
+          code: 'PERMISSION_DENIED',
+          message: 'You do not have permission to update Artifacts in this Space.',
+          retryable: false,
+        })
+      }
+      const expectedVersion = requireIfMatchVersion(request, reply, 'Artifact')
+      if (expectedVersion === null) return
+      const parsed = UpdateArtifactRequestSchema.safeParse(request.body)
+      if (!parsed.success) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED',
+          message: 'The Artifact patch is invalid.',
+          retryable: false,
+          fieldErrors: validationFieldErrors(parsed.error.issues),
+        })
+      }
+      const candidate = await artifactRepository.update({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        sessionId,
+        artifactId,
+        actorId: authorization.actor.id,
+        actorKind: authorization.actor.kind,
+        requestId: request.id,
+        expectedVersion,
+        request: parsed.data,
+      })
+      if (!candidate) return sendResourceNotFound(reply, request)
+      const artifact = ArtifactDtoSchema.parse(candidate)
+      reply.header('ETag', resourceEtag(artifact))
+      return artifact
+    },
+  )
+
+  app.delete<{ Params: ArtifactParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/artifacts/:artifactId',
+    async (request, reply) => {
+      const authorization = await authorizeSessionSpace(request, reply, request.params)
+      if (!authorization) return
+      const sessionId = parseSpaceId(request.params.sessionId)
+      const artifactId = parseSpaceId(request.params.artifactId)
+      if (!sessionId || !artifactId) return sendResourceNotFound(reply, request)
+      if (!canWriteSpace(authorization.access)) {
+        return sendApiError(reply, 403, request, {
+          code: 'PERMISSION_DENIED',
+          message: 'You do not have permission to remove Artifacts in this Space.',
+          retryable: false,
+        })
+      }
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED',
+          message: 'A valid Idempotency-Key header is required.',
+          retryable: false,
+          fieldErrors: { 'Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      const expectedVersion = requireIfMatchVersion(request, reply, 'Artifact')
+      if (expectedVersion === null) return
+      if (request.body !== undefined) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED',
+          message: 'Removing an Artifact does not accept a request body.',
+          retryable: false,
+          fieldErrors: { body: ['Send the request without a body.'] },
+        })
+      }
+      const result = await artifactRepository.remove({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        sessionId,
+        artifactId,
+        actorId: authorization.actor.id,
+        actorKind: authorization.actor.kind,
+        requestId: request.id,
+        idempotencyKey,
+        expectedVersion,
+      })
+      if (!result) return sendResourceNotFound(reply, request)
+      reply.header('Idempotency-Replayed', String(result.replayed))
+      reply.header('ETag', resourceEtag(result.artifact))
+      return reply.code(204).send()
     },
   )
 

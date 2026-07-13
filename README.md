@@ -112,7 +112,7 @@ pnpm openapi:bundle
 - protocol-1 Worker 使用 PostgreSQL 并发 claim、数据库权威租约、heartbeat、fencing、有限重试和过期租约恢复；每个进程另写可过期的就绪心跳，API 以此动态关闭新执行入口而不影响只读控制面；每次 Attempt 保留历史，撤销写权限会取消尚未开始或正在运行的链路。
 - 当前 Agent provider 只产出受大小限制的对话 Message；provider endpoint 的 301/302/303/307/308 重定向不会被跟随，并按终止型配置错误处理。SessionEvent 以单调 sequence 持久化，并可通过 cursor 分页或 `Last-Event-ID` 恢复 SSE。SSE 心跳期间会重新认证并重检 membership。
 
-配置 `DATABASE_URL` 后，Expert/Environment identity 与 immutable revision、Repository binding、Session、Attempt、事件和幂等记录写入 PostgreSQL；未配置时仅开发环境使用进程内存 repository。API 已实现 OIDC、membership discovery、User/Group ShareGrant、ServiceAccount exact create/send/archive binding、完整 Session 生命周期命令、复合 tenant FK，以及由事务本地 actor/org/space context 驱动的 FORCE RLS；API/Worker 使用分离的受限数据库角色，Worker 只有执行表跨租户策略。Expert/Environment 写 API、拒绝与失败的完整审计、coding sandbox、Tool Broker、File/Artifact 对象存储和生产备份/恢复/负载证据仍未实现，因此当前版本仍不能直接暴露到公网。这些能力按 [软件交付计划](./docs/software-delivery-plan.md) 继续演进。
+配置 `DATABASE_URL` 后，Expert/Environment identity 与 immutable revision、Repository binding、Session、Attempt、Artifact 引用、事件和幂等记录写入 PostgreSQL；未配置时仅开发环境使用进程内存 repository。API 已实现 OIDC、membership discovery、User/Group ShareGrant、ServiceAccount exact create/send/archive binding、完整 Session 生命周期命令、Artifact list/create/update/remove、复合 tenant FK，以及由事务本地 actor/org/space context 驱动的 FORCE RLS；API/Worker 使用分离的受限数据库角色，Worker 只有执行表跨租户策略。Expert/Environment 写 API、拒绝与失败的完整审计、coding sandbox、Tool Broker、File 内容存储和生产备份/恢复/负载证据仍未实现，因此当前版本仍不能直接暴露到公网。这些能力按 [软件交付计划](./docs/software-delivery-plan.md) 继续演进。
 
 ## 原型范围
 

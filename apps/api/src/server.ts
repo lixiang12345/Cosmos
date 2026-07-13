@@ -3,6 +3,7 @@ import { createApp } from './app.js'
 import { createDevelopmentAuthenticator, createJwtAuthenticator } from './auth.js'
 import { loadConfig } from './config.js'
 import { assertMigrationsCurrent, runMigrations } from './migrations.js'
+import { PostgresArtifactRepository } from './postgres-artifact-repository.js'
 import { PostgresConfigurationCatalogRepository } from './postgres-configuration-catalog-repository.js'
 import { assertRuntimeDatabaseRole, createRuntimePool } from './postgres-runtime-database.js'
 import { PostgresSessionRepository } from './postgres-session-repository.js'
@@ -55,6 +56,7 @@ const app = createApp({
       allowLegacyDevelopmentConfigurationFallback: config.authentication.mode === 'development',
     }),
   sessionTimelineRepository: pool ? new PostgresSessionTimelineRepository(pool) : undefined,
+  artifactRepository: pool ? new PostgresArtifactRepository(pool) : undefined,
   serviceAccountPolicyRepository: pool ? new PostgresServiceAccountPolicyRepository(pool) : undefined,
   configurationCatalogRepository: pool
     ? new PostgresConfigurationCatalogRepository(pool)
