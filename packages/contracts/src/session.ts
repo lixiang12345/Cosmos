@@ -53,6 +53,13 @@ export const CreateSessionRequestSchema = z.object({
 export type CreateSessionRequest = z.infer<typeof CreateSessionRequestSchema>
 export type CreateSessionRequestInput = z.input<typeof CreateSessionRequestSchema>
 
+export const RenameSessionRequestSchema = z.object({
+  title: z.string().trim().min(1).max(240),
+}).strict()
+
+export type RenameSessionRequest = z.infer<typeof RenameSessionRequestSchema>
+export type RenameSessionRequestInput = z.input<typeof RenameSessionRequestSchema>
+
 export const SessionConfigurationResolutionVersionSchema = z.union([
   z.literal(0),
   z.literal(1),
@@ -265,6 +272,9 @@ export type AttemptDto = z.infer<typeof AttemptDtoSchema>
 export const SessionEventTypeSchema = z.enum([
   'session.created',
   'session.updated',
+  'session.renamed',
+  'session.archived',
+  'session.restored',
   'message.created',
   'turn.queued',
   'attempt.updated',
@@ -306,6 +316,36 @@ export const SessionEventDtoSchema = z.discriminatedUnion('type', [
   }).strict(),
   z.object({
     ...SessionEventBaseShape,
+    type: z.literal('session.renamed'),
+    resourceType: z.literal('session'),
+    resourceId: IdentifierSchema,
+    payload: z.object({
+      title: z.string().trim().min(1).max(240),
+      version: z.number().int().positive(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    ...SessionEventBaseShape,
+    type: z.literal('session.archived'),
+    resourceType: z.literal('session'),
+    resourceId: IdentifierSchema,
+    payload: z.object({
+      archivedAt: TimestampSchema,
+      version: z.number().int().positive(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    ...SessionEventBaseShape,
+    type: z.literal('session.restored'),
+    resourceType: z.literal('session'),
+    resourceId: IdentifierSchema,
+    payload: z.object({
+      archivedAt: z.null(),
+      version: z.number().int().positive(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    ...SessionEventBaseShape,
     type: z.literal('message.created'),
     resourceType: z.literal('message'),
     resourceId: IdentifierSchema,
@@ -335,12 +375,12 @@ export const SessionEventDtoSchema = z.discriminatedUnion('type', [
     }).strict(),
   }).strict(),
 ]).superRefine((event, context) => {
-  if ((event.type === 'session.created' || event.type === 'session.updated')
+  if (event.resourceType === 'session'
     && event.resourceId !== event.sessionId) {
     context.addIssue({
       code: 'custom',
       path: ['resourceId'],
-      message: 'A session.created resource must match sessionId',
+      message: 'A Session event resource must match sessionId',
     })
   }
   if (event.type === 'message.created' && event.resourceId !== event.payload.messageId) {

@@ -31,13 +31,16 @@ import {
   type InMemoryRepositoryBinding,
   type OrganizationRole,
   type ResolvedSessionConfiguration,
+  type RenameSessionRecord,
   type SendSessionMessageRecord,
   type SendSessionMessageResult,
   type SessionListOptions,
   type SessionListPage,
+  type SessionLifecycleResult,
   type SessionRepository,
   type SpaceAccess,
   type SpaceRole,
+  type SetSessionArchivedRecord,
   type StartSessionRecord,
   type StartSessionResult,
   SessionStateConflictError,
@@ -72,7 +75,14 @@ type SessionRow = {
 }
 
 type SessionEventDraft = {
-  eventType: 'session.created' | 'session.updated' | 'message.created' | 'turn.queued'
+  eventType:
+    | 'session.created'
+    | 'session.updated'
+    | 'session.renamed'
+    | 'session.archived'
+    | 'session.restored'
+    | 'message.created'
+    | 'turn.queued'
   resourceType: 'session' | 'message' | 'turn'
   resourceId: string
   payload: Record<string, unknown>
@@ -146,6 +156,10 @@ function responseToSendResult(
   replayed: boolean,
 ): SendSessionMessageResult {
   return { ...response, replayed }
+}
+
+function responseToLifecycleResult(session: SessionDto, replayed: boolean): SessionLifecycleResult {
+  return { session, replayed }
 }
 
 const sessionColumns = `
@@ -347,6 +361,36 @@ export class PostgresSessionRepository implements SessionRepository {
     return result.rows[0] ? mapSession(result.rows[0]) : null
   }
 
+  async rename(record: RenameSessionRecord): Promise<SessionDto | null> {
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      const result = await this.renameInTransaction(client, record)
+      await client.query('COMMIT')
+      return result
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+  }
+
+  async setArchived(record: SetSessionArchivedRecord): Promise<SessionLifecycleResult | null> {
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      const result = await this.setArchivedInTransaction(client, record)
+      await client.query('COMMIT')
+      return result
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+  }
+
   async create(record: CreateSessionRecord): Promise<CreateSessionResult> {
     const client = await this.pool.connect()
     try {
@@ -390,6 +434,272 @@ export class PostgresSessionRepository implements SessionRepository {
     } finally {
       client.release()
     }
+  }
+
+  private async lockMetadataTarget(
+    client: PoolClient,
+    record: RenameSessionRecord | SetSessionArchivedRecord,
+  ): Promise<{ session: SessionDto; policyReason: string } | null> {
+    const access = await client.query<SpaceAccess>(`
+      SELECT organization_membership.role AS "organizationRole", space_membership.role AS "spaceRole"
+      FROM relay_organization_memberships organization_membership
+      JOIN relay_space_memberships space_membership
+        ON space_membership.organization_id = organization_membership.organization_id
+        AND space_membership.actor_id = organization_membership.actor_id
+      WHERE organization_membership.organization_id = $1
+        AND space_membership.space_id = $2
+        AND organization_membership.actor_id = $3
+      FOR UPDATE OF organization_membership, space_membership
+    `, [record.organizationId, record.spaceId, record.actorId])
+    if (!access.rowCount || !canWriteSpace(access.rows[0])) throw new AuthorizationChangedError()
+
+    const candidate = await client.query<SessionRow & { created_by: string }>(`
+      SELECT ${sessionColumns}, created_by
+      FROM relay_sessions
+      WHERE organization_id = $1 AND space_id = $2 AND id = $3
+      FOR UPDATE
+    `, [record.organizationId, record.spaceId, record.sessionId])
+    const row = candidate.rows[0]
+    if (!row || (row.visibility === 'private' && row.created_by !== record.actorId)) return null
+    if (row.created_by === record.actorId) {
+      return { session: mapSession(row), policyReason: 'session_creator' }
+    }
+    if (row.visibility === 'space' && access.rows[0].spaceRole === 'space_manager') {
+      return { session: mapSession(row), policyReason: 'space_manager' }
+    }
+    throw new AuthorizationChangedError()
+  }
+
+  private async renameInTransaction(
+    client: PoolClient,
+    record: RenameSessionRecord,
+  ): Promise<SessionDto | null> {
+    const target = await this.lockMetadataTarget(client, record)
+    if (!target) return null
+    const before = target.session
+    if (before.version !== record.expectedVersion) {
+      throw new SessionVersionConflictError(record.expectedVersion, before.version)
+    }
+    if (before.title === record.request.title) return before
+
+    const updated = await client.query<SessionRow>(`
+      UPDATE relay_sessions
+      SET title = $4, updated_at = $5, version = version + 1
+      WHERE organization_id = $1 AND space_id = $2 AND id = $3
+      RETURNING ${sessionColumns}
+    `, [
+      record.organizationId,
+      record.spaceId,
+      record.sessionId,
+      record.request.title,
+      this.now().toISOString(),
+    ])
+    const session = mapSession(updated.rows[0])
+    await this.appendMetadataLedger(
+      client,
+      record,
+      before,
+      session,
+      'rename',
+      target.policyReason,
+      null,
+    )
+    return session
+  }
+
+  private async setArchivedInTransaction(
+    client: PoolClient,
+    record: SetSessionArchivedRecord,
+  ): Promise<SessionLifecycleResult | null> {
+    const target = await this.lockMetadataTarget(client, record)
+    if (!target) return null
+
+    const keyHash = hash(record.idempotencyKey)
+    const requestHash = hash(canonicalJson({ expectedVersion: record.expectedVersion }))
+    const canonicalPath = `/v1/organizations/${record.organizationId}/spaces/${record.spaceId}/sessions/${record.sessionId}/${record.action}`
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+      JSON.stringify([record.organizationId, record.actorId, 'POST', canonicalPath, keyHash]),
+    ])
+    const now = this.now()
+    const existing = await client.query<{ request_hash: string; response_body: unknown | null }>(`
+      SELECT idempotency.request_hash, response.response_body
+      FROM relay_idempotency_records idempotency
+      LEFT JOIN relay_idempotency_responses response
+        ON response.organization_id = idempotency.organization_id
+        AND response.actor_id = idempotency.actor_id
+        AND response.method = idempotency.method
+        AND response.canonical_path = idempotency.canonical_path
+        AND response.idempotency_key_hash = idempotency.idempotency_key_hash
+        AND response.expires_at > $5
+      WHERE idempotency.organization_id = $1 AND idempotency.actor_id = $2
+        AND idempotency.method = 'POST' AND idempotency.canonical_path = $3
+        AND idempotency.idempotency_key_hash = $4 AND idempotency.expires_at > $5
+    `, [record.organizationId, record.actorId, canonicalPath, keyHash, now.toISOString()])
+    if (existing.rowCount) {
+      if (existing.rows[0].request_hash !== requestHash) throw new IdempotencyConflictError()
+      if (!existing.rows[0].response_body) throw new Error('The idempotent Session lifecycle response is unavailable.')
+      return responseToLifecycleResult(SessionDtoSchema.parse(existing.rows[0].response_body), true)
+    }
+
+    await client.query(`
+      DELETE FROM relay_idempotency_responses
+      WHERE organization_id = $1 AND actor_id = $2 AND method = 'POST'
+        AND canonical_path = $3 AND idempotency_key_hash = $4
+        AND expires_at <= $5
+    `, [record.organizationId, record.actorId, canonicalPath, keyHash, now.toISOString()])
+    await client.query(`
+      DELETE FROM relay_idempotency_records
+      WHERE organization_id = $1 AND actor_id = $2 AND method = 'POST'
+        AND canonical_path = $3 AND idempotency_key_hash = $4
+        AND expires_at <= $5
+    `, [record.organizationId, record.actorId, canonicalPath, keyHash, now.toISOString()])
+
+    const before = target.session
+    if (before.version !== record.expectedVersion) {
+      throw new SessionVersionConflictError(record.expectedVersion, before.version)
+    }
+    const alreadyInTargetState = record.action === 'archive'
+      ? before.archivedAt !== null
+      : before.archivedAt === null
+    let session = before
+    if (!alreadyInTargetState) {
+      const updated = await client.query<SessionRow>(`
+        UPDATE relay_sessions
+        SET archived_at = $4, updated_at = $5, version = version + 1
+        WHERE organization_id = $1 AND space_id = $2 AND id = $3
+        RETURNING ${sessionColumns}
+      `, [
+        record.organizationId,
+        record.spaceId,
+        record.sessionId,
+        record.action === 'archive' ? now.toISOString() : null,
+        now.toISOString(),
+      ])
+      session = mapSession(updated.rows[0])
+      await this.appendMetadataLedger(
+        client,
+        record,
+        before,
+        session,
+        record.action,
+        target.policyReason,
+        keyHash,
+      )
+    }
+
+    const expiresAt = new Date(now.getTime() + this.idempotencyTtlMs).toISOString()
+    await client.query(`
+      INSERT INTO relay_idempotency_records (
+        organization_id, space_id, actor_id, method, canonical_path,
+        idempotency_key_hash, request_hash, session_id, expires_at
+      ) VALUES ($1, $2, $3, 'POST', $4, $5, $6, $7, $8)
+    `, [
+      record.organizationId,
+      record.spaceId,
+      record.actorId,
+      canonicalPath,
+      keyHash,
+      requestHash,
+      session.id,
+      expiresAt,
+    ])
+    await client.query(`
+      INSERT INTO relay_idempotency_responses (
+        organization_id, actor_id, method, canonical_path, idempotency_key_hash,
+        status_code, response_body, response_headers, expires_at
+      ) VALUES ($1, $2, 'POST', $3, $4, 200, $5::jsonb, $6::jsonb, $7)
+    `, [
+      record.organizationId,
+      record.actorId,
+      canonicalPath,
+      keyHash,
+      JSON.stringify(session),
+      JSON.stringify({ etag: `"${session.version}"` }),
+      expiresAt,
+    ])
+    return responseToLifecycleResult(session, false)
+  }
+
+  private async appendMetadataLedger(
+    client: PoolClient,
+    record: RenameSessionRecord | SetSessionArchivedRecord,
+    before: SessionDto,
+    session: SessionDto,
+    action: 'rename' | 'archive' | 'restore',
+    policyReason: string,
+    idempotencyKeyHash: string | null,
+  ) {
+    const eventType = action === 'rename'
+      ? 'session.renamed'
+      : action === 'archive'
+        ? 'session.archived'
+        : 'session.restored'
+    const auditAction = `session.${action}` as const
+    const payload = action === 'rename'
+      ? { title: session.title, version: session.version }
+      : { archivedAt: session.archivedAt, version: session.version }
+    const sequence = await client.query<{ sequence: string }>(`
+      UPDATE relay_sessions
+      SET last_event_sequence = last_event_sequence + 1
+      WHERE organization_id = $1 AND space_id = $2 AND id = $3
+      RETURNING last_event_sequence AS sequence
+    `, [session.organizationId, session.spaceId, session.id])
+    if (!sequence.rowCount) throw new Error('The Session event sequence could not be reserved.')
+
+    await client.query(`
+      INSERT INTO relay_session_events (
+        organization_id, space_id, session_id, event_id, sequence,
+        event_type, resource_type, resource_id, payload, actor_id,
+        actor_kind, message_id, turn_id, command_id, request_id, occurred_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, 'session', $3, $7::jsonb, $8, $9,
+        NULL, NULL, NULL, $10, $11
+      )
+    `, [
+      session.organizationId,
+      session.spaceId,
+      session.id,
+      this.createId(),
+      sequence.rows[0].sequence,
+      eventType,
+      JSON.stringify(payload),
+      record.actorId,
+      record.actorKind,
+      record.requestId,
+      session.updatedAt,
+    ])
+
+    const beforeState = action === 'rename'
+      ? { title: before.title, version: before.version }
+      : { archivedAt: before.archivedAt, version: before.version }
+    const afterState = action === 'rename'
+      ? { title: session.title, version: session.version }
+      : { archivedAt: session.archivedAt, version: session.version }
+    await client.query(`
+      INSERT INTO relay_audit_events (
+        organization_id, audit_event_id, space_id, session_id, actor_id,
+        actor_kind, action, target_type, target_id, result, request_id,
+        idempotency_key_hash, policy_decision, policy_reason, before_state,
+        after_state, occurred_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, 'session', $4,
+        'success', $8, $9, 'allow', $10, $11::jsonb, $12::jsonb, $13
+      )
+    `, [
+      session.organizationId,
+      this.createId(),
+      session.spaceId,
+      session.id,
+      record.actorId,
+      record.actorKind,
+      auditAction,
+      record.requestId,
+      idempotencyKeyHash,
+      policyReason,
+      JSON.stringify(beforeState),
+      JSON.stringify(afterState),
+      session.updatedAt,
+    ])
   }
 
   private async sendInTransaction(

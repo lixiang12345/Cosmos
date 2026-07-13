@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   RelayApiError,
   RELAY_API_TIMEOUT_MS,
+  archiveSession,
   createSession,
   getEnvironment,
   getExpert,
@@ -24,8 +25,10 @@ import {
   listSessionEvents,
   listSessionMessages,
   listSessions,
+  renameSession,
   resolveRelayApiBaseUrl,
   resolveRelayApiRequestUrl,
+  restoreSession,
   sendSessionMessage,
   startSession,
   streamSessionEvents,
@@ -374,6 +377,46 @@ describe('Relay API client', () => {
       '/api/v1/organizations/relay/spaces/space-platform/sessions/session-1',
       expect.objectContaining({ method: 'GET' }),
     )
+  })
+
+  it('renames a Session with its current ETag', async () => {
+    const renamed = { ...session, title: 'Renamed Session', version: 2 }
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(renamed))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(renameSession(
+      'relay', 'space-platform', session.id, renamed.title, 1, { accessToken: 'access-token' },
+    )).resolves.toEqual(renamed)
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/organizations/relay/spaces/space-platform/sessions/session-1',
+      expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ title: renamed.title }) }),
+    )
+    const headers = new Headers(fetchMock.mock.calls[0][1]?.headers)
+    expect(headers.get('If-Match')).toBe('"1"')
+    expect(headers.get('Content-Type')).toBe('application/merge-patch+json')
+  })
+
+  it('archives and restores a Session with CAS and idempotency', async () => {
+    const archived = { ...session, archivedAt: session.updatedAt, version: 2 }
+    const restored = { ...archived, archivedAt: null, version: 3 }
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(archived))
+      .mockResolvedValueOnce(jsonResponse(restored))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(archiveSession(
+      'relay', 'space-platform', session.id, 1, 'archive-key', { accessToken: 'access-token' },
+    )).resolves.toEqual(archived)
+    await expect(restoreSession(
+      'relay', 'space-platform', session.id, 2, 'restore-key', { accessToken: 'access-token' },
+    )).resolves.toEqual(restored)
+    expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
+      ['/api/v1/organizations/relay/spaces/space-platform/sessions/session-1/archive', 'POST'],
+      ['/api/v1/organizations/relay/spaces/space-platform/sessions/session-1/restore', 'POST'],
+    ])
+    const archiveHeaders = new Headers(fetchMock.mock.calls[0][1]?.headers)
+    expect(archiveHeaders.get('If-Match')).toBe('"1"')
+    expect(archiveHeaders.get('Idempotency-Key')).toBe('archive-key')
   })
 
   it('starts a draft without resending its Message and validates the linked result', async () => {

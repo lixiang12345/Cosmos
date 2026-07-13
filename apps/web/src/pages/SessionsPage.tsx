@@ -45,14 +45,19 @@ type SessionsPageProps = {
   loadState?: 'loading' | 'ready' | 'error'
   loadError?: string
   managementEnabled?: boolean
+  favoritesEnabled?: boolean
+  deletionEnabled?: boolean
   sessionCreationEnabled?: boolean
+  hasMore?: boolean
+  loadingMore?: boolean
+  onLoadMore?: () => void
   onRetry?: () => void
   onOpenNavigation: () => void
   onNewTask: (expert?: string) => void
   onOpenSession: (id: string) => void
-  onRename: (id: string, title: string) => void
+  onRename: (id: string, title: string) => boolean | Promise<boolean>
   onToggleFavorite: (id: string) => void
-  onToggleArchive: (id: string) => void
+  onToggleArchive: (id: string) => boolean | Promise<boolean>
   onDelete: (id: string) => void
 }
 
@@ -228,7 +233,12 @@ export function SessionsPage({
   loadState = 'ready',
   loadError = '',
   managementEnabled = true,
+  favoritesEnabled = true,
+  deletionEnabled = true,
   sessionCreationEnabled = true,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore,
   onRetry,
   onOpenNavigation,
   onNewTask,
@@ -252,6 +262,7 @@ export function SessionsPage({
   const [renameTarget, setRenameTarget] = useState<Run>()
   const [renameValue, setRenameValue] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<Run>()
+  const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set())
   const filterRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const selectAllRef = useRef<HTMLInputElement>(null)
@@ -374,12 +385,23 @@ export function SessionsPage({
     setRenameTarget(run)
   }
 
-  const submitRename = (event: FormEvent<HTMLFormElement>) => {
+  const submitRename = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const title = renameValue.trim()
     if (!renameTarget || !title) return
-    if (title !== renameTarget.title) onRename(renameTarget.id, title)
-    setRenameTarget(undefined)
+    if (title === renameTarget.title) {
+      setRenameTarget(undefined)
+      return
+    }
+    const targetId = renameTarget.id
+    setPendingIds((current) => new Set(current).add(targetId))
+    const completed = await onRename(targetId, title)
+    setPendingIds((current) => {
+      const next = new Set(current)
+      next.delete(targetId)
+      return next
+    })
+    if (completed) setRenameTarget(undefined)
   }
 
   const confirmDelete = () => {
@@ -419,19 +441,40 @@ export function SessionsPage({
     })
   }
 
-  const toggleArchive = (run: Run) => {
-    onToggleArchive(run.id)
-    setSelectedIds((current) => {
+  const toggleArchive = async (run: Run) => {
+    setMenuRunId(undefined)
+    setPendingIds((current) => new Set(current).add(run.id))
+    const completed = await onToggleArchive(run.id)
+    setPendingIds((current) => {
       const next = new Set(current)
       next.delete(run.id)
       return next
     })
-    setMenuRunId(undefined)
+    if (completed) {
+      setSelectedIds((current) => {
+        const next = new Set(current)
+        next.delete(run.id)
+        return next
+      })
+    }
   }
 
-  const bulkArchive = () => {
-    selectedArchivableIds.forEach(onToggleArchive)
-    setSelectedIds(new Set())
+  const bulkArchive = async () => {
+    setPendingIds((current) => new Set([...current, ...selectedArchivableIds]))
+    const results = await Promise.all(selectedArchivableIds.map(async (id) => ({
+      id,
+      completed: await onToggleArchive(id),
+    })))
+    setPendingIds((current) => {
+      const next = new Set(current)
+      for (const { id } of results) next.delete(id)
+      return next
+    })
+    setSelectedIds((current) => {
+      const next = new Set(current)
+      for (const { id, completed } of results) if (completed) next.delete(id)
+      return next
+    })
   }
 
   const clearFilters = () => {
@@ -451,6 +494,9 @@ export function SessionsPage({
       : view === 'favorites'
         ? t('sessions.emptyFavorites')
         : t('sessions.emptyArchived')
+  const availableViews: SessionView[] = managementEnabled
+    ? (favoritesEnabled ? ['active', 'favorites', 'archived'] : ['active', 'archived'])
+    : ['active']
 
   return (
     <main className="module-page sessions-page">
@@ -477,7 +523,7 @@ export function SessionsPage({
         <section className="data-section sessions-section" aria-label={t('sessions.title')}>
           <div className="sessions-control-row">
             <div className="template-filters sessions-tabs" role="tablist" aria-label={t('sessions.title')}>
-              {(managementEnabled ? ['active', 'favorites', 'archived'] as const : ['active'] as const).map((item) => (
+              {availableViews.map((item) => (
                 <button
                   type="button"
                   role="tab"
@@ -614,7 +660,7 @@ export function SessionsPage({
                   type="button"
                   className="button button--ghost button--compact"
                   onClick={bulkArchive}
-                  disabled={selectedArchivableIds.length === 0}
+                  disabled={selectedArchivableIds.length === 0 || selectedArchivableIds.some((id) => pendingIds.has(id))}
                 >
                   <Archive aria-hidden="true" />{t('sessions.bulkArchive')} ({selectedArchivableIds.length})
                 </button>
@@ -673,6 +719,7 @@ export function SessionsPage({
                         type="checkbox"
                         className="session-select-checkbox"
                         checked={selectedIds.has(run.id)}
+                        disabled={pendingIds.has(run.id)}
                         aria-label={`${t('sessions.selectSession')}: ${run.title}`}
                         onClick={(event) => event.stopPropagation()}
                         onChange={() => toggleSelection(run.id)}
@@ -688,7 +735,7 @@ export function SessionsPage({
                       <span className="status-badge__dot" aria-hidden="true" />
                       {t(statusCopyKeys[run.status])}
                     </span>
-                    {managementEnabled ? <small className="session-status-progress">
+                    {managementEnabled && run.steps.length > 0 ? <small className="session-status-progress">
                       {completedSteps}/{run.steps.length} · {currentStep?.detail ?? '—'}
                     </small> : null}
                   </span>
@@ -725,7 +772,7 @@ export function SessionsPage({
                     {formatUpdatedAt(run.updatedAt, locale)}
                   </time>
                   {managementEnabled ? <span className="session-row__actions" role="cell" onClick={stopRowClick}>
-                    <button
+                    {favoritesEnabled ? <button
                       type="button"
                       className={`icon-button icon-button--sm${run.favorite ? ' session-favorite--active' : ''}`}
                       aria-label={t(run.favorite ? 'sessions.unfavorite' : 'sessions.favorite')}
@@ -734,7 +781,7 @@ export function SessionsPage({
                       onClick={() => onToggleFavorite(run.id)}
                     >
                       <Star aria-hidden="true" fill={run.favorite ? 'currentColor' : 'none'} />
-                    </button>
+                    </button> : null}
                     <div className="session-menu-shell" ref={menuRunId === run.id ? menuRef : undefined}>
                       <IconButton
                         icon={MoreHorizontal}
@@ -749,19 +796,19 @@ export function SessionsPage({
                       />
                       {menuRunId === run.id ? (
                         <div className="session-menu" role="menu" aria-label={t('sessions.menuLabel')}>
-                          <button type="button" role="menuitem" onClick={() => openRename(run)}>
+                          <button type="button" role="menuitem" disabled={pendingIds.has(run.id)} onClick={() => openRename(run)}>
                             <PencilLine aria-hidden="true" />{t('sessions.rename')}
                           </button>
-                          <button type="button" role="menuitem" onClick={() => toggleArchive(run)}>
+                          <button type="button" role="menuitem" disabled={pendingIds.has(run.id)} onClick={() => toggleArchive(run)}>
                             {run.archived ? <ArchiveRestore aria-hidden="true" /> : <Archive aria-hidden="true" />}
                             {t(run.archived ? 'sessions.restore' : 'sessions.archive')}
                           </button>
-                          <button type="button" role="menuitem" className="session-menu__danger" onClick={() => {
+                          {deletionEnabled ? <button type="button" role="menuitem" className="session-menu__danger" onClick={() => {
                             setDeleteTarget(run)
                             setMenuRunId(undefined)
                           }}>
                             <Trash2 aria-hidden="true" />{t('sessions.delete')}
-                          </button>
+                          </button> : null}
                         </div>
                       ) : null}
                     </div>
@@ -786,6 +833,14 @@ export function SessionsPage({
               </div>
             ) : null}
           </div> : null}
+          {loadState === 'ready' && hasMore && onLoadMore ? (
+            <div className="session-load-more">
+              <button type="button" className="button button--ghost" onClick={onLoadMore} disabled={loadingMore}>
+                {loadingMore ? <span className="auth-spinner" aria-hidden="true" /> : <RefreshCw aria-hidden="true" />}
+                {t(loadingMore ? 'common.loadingMore' : 'common.loadMore')}
+              </button>
+            </div>
+          ) : null}
         </section>
       </div>
 
@@ -812,14 +867,17 @@ export function SessionsPage({
               <span />
               <div className="dialog__actions">
                 <button type="button" className="button button--ghost" onClick={() => setRenameTarget(undefined)}>{t('sessions.cancel')}</button>
-                <button type="submit" className="button button--primary" disabled={!renameValue.trim()}>{t('sessions.save')}</button>
+                <button type="submit" className="button button--primary" disabled={!renameValue.trim() || pendingIds.has(renameTarget.id)}>
+                  {pendingIds.has(renameTarget.id) ? <span className="auth-spinner" aria-hidden="true" /> : null}
+                  {t('sessions.save')}
+                </button>
               </div>
             </footer>
           </form>
         </div>
       ) : null}
 
-      {managementEnabled && deleteTarget ? (
+      {managementEnabled && deletionEnabled && deleteTarget ? (
         <div className="dialog-backdrop" onMouseDown={(event) => {
           if (event.target === event.currentTarget) setDeleteTarget(undefined)
         }}>

@@ -6,6 +6,7 @@ import {
   type CreateSessionResponse,
   type MeOrganization,
   type OrganizationRole,
+  type RenameSessionRequest,
   type SessionConfigurationResolutionVersion,
   type SessionCommand,
   type SessionDto,
@@ -67,6 +68,30 @@ export type SendSessionMessageRecord = {
 }
 
 export type SendSessionMessageResult = SendSessionMessageResponse & {
+  replayed: boolean
+}
+
+type SessionMutationRecord = {
+  organizationId: string
+  spaceId: string
+  sessionId: string
+  actorId: string
+  actorKind: 'user' | 'service_account'
+  requestId: string
+  expectedVersion: number
+}
+
+export type RenameSessionRecord = SessionMutationRecord & {
+  request: RenameSessionRequest
+}
+
+export type SetSessionArchivedRecord = SessionMutationRecord & {
+  action: 'archive' | 'restore'
+  idempotencyKey: string
+}
+
+export type SessionLifecycleResult = {
+  session: SessionDto
   replayed: boolean
 }
 
@@ -155,7 +180,7 @@ export class IdempotencyConflictError extends Error {
 
 export class AuthorizationChangedError extends Error {
   constructor() {
-    super('The actor no longer has permission to create Sessions in this Space.')
+    super('The actor no longer has permission to mutate Sessions in this Space.')
     this.name = 'AuthorizationChangedError'
   }
 }
@@ -235,6 +260,8 @@ export interface SessionRepository {
     options?: SessionListOptions,
   ): Promise<SessionListPage>
   getById(organizationId: string, spaceId: string, sessionId: string, actorId: string): Promise<SessionDto | null>
+  rename(record: RenameSessionRecord): Promise<SessionDto | null>
+  setArchived(record: SetSessionArchivedRecord): Promise<SessionLifecycleResult | null>
   create(record: CreateSessionRecord): Promise<CreateSessionResult>
   start(record: StartSessionRecord): Promise<StartSessionResult | null>
   send(record: SendSessionMessageRecord): Promise<SendSessionMessageResult | null>
@@ -556,6 +583,10 @@ export class InMemorySessionRepository implements SessionRepository {
     requestFingerprint: string
     result: SendSessionMessageResult
   }>()
+  private readonly lifecycleByIdempotencyKey = new Map<string, {
+    requestFingerprint: string
+    result: SessionLifecycleResult
+  }>()
   private readonly messagesBySessionId = new Map<string, SessionMessage[]>()
   private readonly turnsBySessionId = new Map<string, SessionTurn[]>()
   private readonly createId: () => string
@@ -648,6 +679,77 @@ export class InMemorySessionRepository implements SessionRepository {
       .find((candidate) => candidate.id === sessionId)
     if (!session || (session.visibility === 'private' && this.sessionCreators.get(session.id) !== actorId)) return null
     return cloneSession(session)
+  }
+
+  async rename(record: RenameSessionRecord): Promise<SessionDto | null> {
+    const access = await this.getSpaceAccess(record.organizationId, record.spaceId, record.actorId)
+    if (!access || !canWriteSpace(access)) throw new AuthorizationChangedError()
+    const sessions = this.sessionsBySpace.get(spaceKey(record.organizationId, record.spaceId)) ?? []
+    const sessionIndex = sessions.findIndex((candidate) => candidate.id === record.sessionId)
+    const current = sessions[sessionIndex]
+    if (!current || (current.visibility === 'private' && this.sessionCreators.get(current.id) !== record.actorId)) {
+      return null
+    }
+    const isCreator = this.sessionCreators.get(current.id) === record.actorId
+    if (!isCreator && (current.visibility !== 'space' || access.spaceRole !== 'space_manager')) {
+      throw new AuthorizationChangedError()
+    }
+    if (current.version !== record.expectedVersion) {
+      throw new SessionVersionConflictError(record.expectedVersion, current.version)
+    }
+    if (current.title === record.request.title) return cloneSession(current)
+    const session = SessionDtoSchema.parse({
+      ...current,
+      title: record.request.title,
+      updatedAt: this.now().toISOString(),
+      version: current.version + 1,
+    })
+    sessions[sessionIndex] = session
+    return cloneSession(session)
+  }
+
+  async setArchived(record: SetSessionArchivedRecord): Promise<SessionLifecycleResult | null> {
+    const access = await this.getSpaceAccess(record.organizationId, record.spaceId, record.actorId)
+    if (!access || !canWriteSpace(access)) throw new AuthorizationChangedError()
+    const idempotencyScope = `${spaceKey(record.organizationId, record.spaceId)}\u0000${record.actorId}\u0000${record.sessionId}\u0000${record.action}\u0000${record.idempotencyKey}`
+    const requestFingerprint = JSON.stringify({ expectedVersion: record.expectedVersion })
+    const existing = this.lifecycleByIdempotencyKey.get(idempotencyScope)
+    if (existing) {
+      if (existing.requestFingerprint !== requestFingerprint) throw new IdempotencyConflictError()
+      return { session: cloneSession(existing.result.session), replayed: true }
+    }
+
+    const sessions = this.sessionsBySpace.get(spaceKey(record.organizationId, record.spaceId)) ?? []
+    const sessionIndex = sessions.findIndex((candidate) => candidate.id === record.sessionId)
+    const current = sessions[sessionIndex]
+    if (!current || (current.visibility === 'private' && this.sessionCreators.get(current.id) !== record.actorId)) {
+      return null
+    }
+    const isCreator = this.sessionCreators.get(current.id) === record.actorId
+    if (!isCreator && (current.visibility !== 'space' || access.spaceRole !== 'space_manager')) {
+      throw new AuthorizationChangedError()
+    }
+    if (current.version !== record.expectedVersion) {
+      throw new SessionVersionConflictError(record.expectedVersion, current.version)
+    }
+
+    const alreadyInTargetState = record.action === 'archive'
+      ? current.archivedAt !== null
+      : current.archivedAt === null
+    let session = current
+    if (!alreadyInTargetState) {
+      const timestamp = this.now().toISOString()
+      session = SessionDtoSchema.parse({
+        ...current,
+        archivedAt: record.action === 'archive' ? timestamp : null,
+        updatedAt: timestamp,
+        version: current.version + 1,
+      })
+      sessions[sessionIndex] = session
+    }
+    const result = { session: cloneSession(session), replayed: false }
+    this.lifecycleByIdempotencyKey.set(idempotencyScope, { requestFingerprint, result })
+    return result
   }
 
   async create(record: CreateSessionRecord): Promise<CreateSessionResult> {

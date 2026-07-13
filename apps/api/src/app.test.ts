@@ -1304,6 +1304,105 @@ describe('Relay API', () => {
     expect(ApiErrorSchema.parse(invalidLimit.json()).fieldErrors).toHaveProperty('query.limit')
   })
 
+  it('renames a Session with strong CAS without changing activity ordering', async () => {
+    const app = testApp()
+    const createdResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      headers: { 'idempotency-key': 'rename-source' },
+      payload: sessionRequest,
+    })
+    const created = CreateSessionResponseSchema.parse(createdResponse.json()).session
+    const url = `/api/v1/organizations/relay/spaces/platform/sessions/${created.id}`
+
+    const missingPrecondition = await app.inject({ method: 'PATCH', url, payload: { title: 'Renamed' } })
+    expect(missingPrecondition.statusCode).toBe(428)
+
+    const renamedResponse = await app.inject({
+      method: 'PATCH', url, headers: { 'if-match': '"1"' }, payload: { title: '  Renamed Session  ' },
+    })
+    const renamed = SessionDtoSchema.parse(renamedResponse.json())
+    expect(renamedResponse.statusCode).toBe(200)
+    expect(renamedResponse.headers.etag).toBe('"2"')
+    expect(renamed).toMatchObject({ title: 'Renamed Session', version: 2 })
+    expect(renamed.lastActivityAt).toBe(created.lastActivityAt)
+
+    const noOpResponse = await app.inject({
+      method: 'PATCH', url, headers: { 'if-match': '"2"' }, payload: { title: 'Renamed Session' },
+    })
+    expect(SessionDtoSchema.parse(noOpResponse.json())).toMatchObject({ title: 'Renamed Session', version: 2 })
+    const staleResponse = await app.inject({
+      method: 'PATCH', url, headers: { 'if-match': '"1"' }, payload: { title: 'Stale write' },
+    })
+    expect(staleResponse.statusCode).toBe(412)
+    expect(ApiErrorSchema.parse(staleResponse.json()).code).toBe('PRECONDITION_FAILED')
+
+    const invalidResponse = await app.inject({
+      method: 'PATCH', url, headers: { 'if-match': '"2"' }, payload: { title: 'Valid', pinned: true },
+    })
+    expect(invalidResponse.statusCode).toBe(400)
+  })
+
+  it('archives and restores a Session idempotently without changing execution state', async () => {
+    const app = testApp()
+    const createdResponse = await app.inject({
+      method: 'POST',
+      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      headers: { 'idempotency-key': 'archive-source' },
+      payload: sessionRequest,
+    })
+    const created = CreateSessionResponseSchema.parse(createdResponse.json()).session
+    const baseUrl = `/api/v1/organizations/relay/spaces/platform/sessions/${created.id}`
+    const archiveRequest = {
+      method: 'POST' as const,
+      url: `${baseUrl}/archive`,
+      headers: { 'idempotency-key': 'archive-1', 'if-match': '"1"' },
+    }
+    const archivedResponse = await app.inject(archiveRequest)
+    const archived = SessionDtoSchema.parse(archivedResponse.json())
+
+    expect(archivedResponse.statusCode).toBe(200)
+    expect(archivedResponse.headers.etag).toBe('"2"')
+    expect(archivedResponse.headers['idempotency-replayed']).toBe('false')
+    expect(archived).toMatchObject({ status: created.status, version: 2 })
+    expect(archived.archivedAt).toEqual(expect.any(String))
+    expect(archived.lastActivityAt).toBe(created.lastActivityAt)
+
+    const replay = await app.inject(archiveRequest)
+    expect(replay.headers['idempotency-replayed']).toBe('true')
+    expect(replay.json()).toEqual(archivedResponse.json())
+    const conflict = await app.inject({
+      ...archiveRequest,
+      headers: { ...archiveRequest.headers, 'if-match': '"2"' },
+    })
+    expect(conflict.statusCode).toBe(409)
+
+    const activeList = SessionListResponseSchema.parse((await app.inject({
+      method: 'GET', url: '/api/v1/organizations/relay/spaces/platform/sessions',
+    })).json())
+    const archivedList = SessionListResponseSchema.parse((await app.inject({
+      method: 'GET', url: '/api/v1/organizations/relay/spaces/platform/sessions?archived=true',
+    })).json())
+    expect(activeList.items).toHaveLength(0)
+    expect(archivedList.items.map((session) => session.id)).toEqual([created.id])
+
+    const restoredResponse = await app.inject({
+      method: 'POST',
+      url: `${baseUrl}/restore`,
+      headers: { 'idempotency-key': 'restore-1', 'if-match': '"2"' },
+    })
+    const restored = SessionDtoSchema.parse(restoredResponse.json())
+    expect(restored).toMatchObject({ archivedAt: null, status: created.status, version: 3 })
+    expect(restored.lastActivityAt).toBe(created.lastActivityAt)
+
+    const noOpRestore = await app.inject({
+      method: 'POST',
+      url: `${baseUrl}/restore`,
+      headers: { 'idempotency-key': 'restore-2', 'if-match': '"3"' },
+    })
+    expect(SessionDtoSchema.parse(noOpRestore.json())).toMatchObject({ archivedAt: null, version: 3 })
+  })
+
   it('returns a contract-shaped error for invalid input', async () => {
     const response = await testApp().inject({
       method: 'POST',

@@ -31,10 +31,13 @@ import { useRemoteSessionTimeline } from './features/session/useRemoteSessionTim
 import { usePreferences } from './preferences'
 import {
   RelayApiError,
+  archiveSession,
   createSession,
   getRuntimeCapabilities,
   getSession,
   listSessions,
+  renameSession as renameSessionRequest,
+  restoreSession,
   sendSessionMessage,
   startSession,
 } from './services/relayApi'
@@ -84,7 +87,7 @@ function sessionDtoToDemoRun(session: SessionDto, locale: 'zh' | 'en'): Run {
     spaceId: session.spaceId,
     title: session.title,
     favorite: false,
-    archived: false,
+    archived: session.archivedAt !== null,
     repo: session.repository,
     branch: `relay/${session.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'session'}`,
     expert: session.expertName,
@@ -129,6 +132,7 @@ function sessionDtoToRun(session: SessionDto): Run {
     serverVersion: session.version,
     spaceId: session.spaceId,
     title: session.title,
+    archived: session.archivedAt !== null,
     repo: session.repository,
     branch: session.baseBranch,
     expert: session.expertName,
@@ -179,6 +183,19 @@ function upsertRemoteRun(current: Run[], run: Run) {
   const existing = current.find((candidate) => candidate.id === run.id)
   const selected = existing ? preferNewestRun(existing, run) : run
   return [selected, ...current.filter((candidate) => candidate.id !== run.id)]
+}
+
+function appendRemoteRuns(current: Run[], incoming: Run[]) {
+  const incomingById = new Map(incoming.map((run) => [run.id, run]))
+  return [
+    ...current.map((run) => {
+      const candidate = incomingById.get(run.id)
+      if (!candidate) return run
+      incomingById.delete(run.id)
+      return preferNewestRun(run, candidate)
+    }),
+    ...incomingById.values(),
+  ]
 }
 
 function mergeDemoSessions(current: Run[], sessions: SessionDto[], locale: 'zh' | 'en') {
@@ -415,19 +432,37 @@ function SessionRoute({
   }, [auth, concealDetail, demoMode, detailConcealed, locale, organizationId, requestKey, sessionId, spaceId])
 
   const currentRequest = request?.key === requestKey ? request : undefined
-  const latestSessionUpdate = timeline.events.filter((event) => event.type === 'session.updated').at(-1)
-  const resolvedSession = useMemo(() => (
-    currentRequest?.session && latestSessionUpdate?.type === 'session.updated'
-      && latestSessionUpdate.payload.version >= currentRequest.session.version
-      ? {
-          ...currentRequest.session,
-          status: latestSessionUpdate.payload.status,
-          version: latestSessionUpdate.payload.version,
-          updatedAt: latestSessionUpdate.occurredAt,
-          lastActivityAt: latestSessionUpdate.occurredAt,
+  const resolvedSession = useMemo(() => {
+    let session = currentRequest?.session
+    if (!session) return undefined
+    for (const event of timeline.events) {
+      if (event.resourceType !== 'session' || event.payload.version < session.version) continue
+      if (event.type === 'session.updated') {
+        session = {
+          ...session,
+          status: event.payload.status,
+          version: event.payload.version,
+          updatedAt: event.occurredAt,
+          lastActivityAt: event.occurredAt,
         }
-      : currentRequest?.session
-  ), [currentRequest, latestSessionUpdate])
+      } else if (event.type === 'session.renamed') {
+        session = {
+          ...session,
+          title: event.payload.title,
+          version: event.payload.version,
+          updatedAt: event.occurredAt,
+        }
+      } else if (event.type === 'session.archived' || event.type === 'session.restored') {
+        session = {
+          ...session,
+          archivedAt: event.payload.archivedAt,
+          version: event.payload.version,
+          updatedAt: event.occurredAt,
+        }
+      }
+    }
+    return session
+  }, [currentRequest, timeline.events])
   const visibleMessages = useMemo(() => {
     const local = acceptedMessages?.key === requestKey ? acceptedMessages.items : []
     const messages = new Map(local.map((message) => [message.id, message]))
@@ -718,6 +753,8 @@ function RelayApp() {
     key: string
     status: 'ready' | 'error'
     error: string
+    nextCursor: string | null
+    loadingMore: boolean
   }>()
   const [sessionsRetryVersion, setSessionsRetryVersion] = useState(0)
   const [runtimeCapabilityRequest, setRuntimeCapabilityRequest] = useState<{
@@ -842,8 +879,8 @@ function RelayApp() {
       accessToken,
       requestIdentity,
       onUnauthorized: handleUnauthorized,
-    })
-      .then(({ items }) => {
+    }, { archived: 'all', limit: 50 })
+      .then(({ items, page }) => {
         if (cancelled) return
         if (demoMode) {
           setRuns((current) => mergeDemoSessions(current, items, locale))
@@ -870,7 +907,13 @@ function RelayApp() {
           }
           setRunsIdentity(requestKey)
         }
-        setSessionsRequest({ key: requestKey, status: 'ready', error: '' })
+        setSessionsRequest({
+          key: requestKey,
+          status: 'ready',
+          error: '',
+          nextCursor: page.nextCursor,
+          loadingMore: false,
+        })
       })
       .catch((error: unknown) => {
         if (cancelled) return
@@ -883,10 +926,48 @@ function RelayApp() {
           key: requestKey,
           status: 'error',
           error: error instanceof Error ? error.message : (locale === 'zh' ? '无法加载会话。' : 'Unable to load Sessions.'),
+          nextCursor: null,
+          loadingMore: false,
         })
       })
     return () => { cancelled = true }
   }, [accessToken, activeSpace.id, demoMode, handleUnauthorized, locale, organizationId, requestIdentity, sessionsRequestKey])
+
+  const loadMoreSessions = useCallback(() => {
+    if (demoMode) return
+    const current = sessionsRequest?.key === sessionsRequestKey ? sessionsRequest : undefined
+    if (!current?.nextCursor || current.loadingMore) return
+    const cursor = current.nextCursor
+    setSessionsRequest({ ...current, loadingMore: true })
+    void listSessions(organizationId, activeSpace.id, {
+      accessToken,
+      requestIdentity,
+      onUnauthorized: handleUnauthorized,
+    }, { archived: 'all', limit: 50, cursor }).then(({ items, page }) => {
+      if (runsIdentityRef.current !== sessionsRequestKey) return
+      setRuns((existing) => appendRemoteRuns(existing, items.map(sessionDtoToRun)))
+      setSessionsRequest((request) => request?.key === sessionsRequestKey
+        ? { ...request, nextCursor: page.nextCursor, loadingMore: false }
+        : request)
+    }, (error: unknown) => {
+      setSessionsRequest((request) => request?.key === sessionsRequestKey
+        ? { ...request, loadingMore: false }
+        : request)
+      setToast(error instanceof Error
+        ? error.message
+        : (locale === 'zh' ? '无法加载更多会话。' : 'Unable to load more Sessions.'))
+    })
+  }, [
+    accessToken,
+    activeSpace.id,
+    demoMode,
+    handleUnauthorized,
+    locale,
+    organizationId,
+    requestIdentity,
+    sessionsRequest,
+    sessionsRequestKey,
+  ])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1389,21 +1470,77 @@ function RelayApp() {
     setRuns((current) => current.filter((run) => run.id !== sessionId))
   }, [demoMode, sessionsRequestKey])
 
-  const renameSession = (runId: string, title: string) => {
-    if (!demoMode) return
-    setRuns((items) => items.map((run) => run.id === runId ? { ...run, title, updatedAt: locale === 'zh' ? '刚刚' : 'Just now' } : run))
-    setToast(locale === 'zh' ? '会话已重命名' : 'Session renamed')
+  const renameSession = async (runId: string, title: string) => {
+    if (demoMode) {
+      setRuns((items) => items.map((run) => run.id === runId ? { ...run, title, updatedAt: locale === 'zh' ? '刚刚' : 'Just now' } : run))
+      setToast(locale === 'zh' ? '会话已重命名' : 'Session renamed')
+      return true
+    }
+    const target = runs.find((run) => run.id === runId)
+    if (!target?.serverVersion) return false
+    try {
+      const session = await renameSessionRequest(
+        organizationId,
+        activeSpace.id,
+        runId,
+        title,
+        target.serverVersion,
+        catalogAuth,
+      )
+      observeRemoteSession(session)
+      setToast(locale === 'zh' ? '会话已重命名' : 'Session renamed')
+      return true
+    } catch (error) {
+      if (error instanceof RelayApiError && error.status === 412) {
+        setSessionsRetryVersion((version) => version + 1)
+      }
+      setToast(error instanceof Error ? error.message : (locale === 'zh' ? '无法重命名会话' : 'Unable to rename Session'))
+      return false
+    }
   }
   const toggleFavorite = (runId: string) => {
     if (!demoMode) return
     setRuns((items) => items.map((run) => run.id === runId ? { ...run, favorite: !run.favorite } : run))
   }
-  const toggleArchive = (runId: string) => {
-    if (!demoMode) return
+  const toggleArchive = async (runId: string) => {
     const target = runs.find((run) => run.id === runId)
-    setRuns((items) => items.map((run) => run.id === runId ? { ...run, archived: !run.archived } : run))
-    if (!target?.archived && location.pathname === `/sessions/${runId}`) navigate('/sessions')
-    setToast(target?.archived ? (locale === 'zh' ? '会话已恢复' : 'Session restored') : (locale === 'zh' ? '会话已归档' : 'Session archived'))
+    if (!target) return false
+    if (demoMode) {
+      setRuns((items) => items.map((run) => run.id === runId ? { ...run, archived: !run.archived } : run))
+      if (!target.archived && location.pathname === `/sessions/${runId}`) navigate('/sessions')
+      setToast(target.archived ? (locale === 'zh' ? '会话已恢复' : 'Session restored') : (locale === 'zh' ? '会话已归档' : 'Session archived'))
+      return true
+    }
+    if (!target.serverVersion) return false
+    const action = target.archived ? 'restore' : 'archive'
+    const keyScope = `lifecycle:${action}:${runId}:${target.serverVersion}`
+    const idempotencyKey = sessionIdempotencyKeys.current.get(keyScope)
+      ?? makeSessionIdempotencyKey(keyScope)
+    sessionIdempotencyKeys.current.set(keyScope, idempotencyKey)
+    try {
+      const session = await (action === 'archive' ? archiveSession : restoreSession)(
+        organizationId,
+        activeSpace.id,
+        runId,
+        target.serverVersion,
+        idempotencyKey,
+        catalogAuth,
+      )
+      sessionIdempotencyKeys.current.delete(keyScope)
+      observeRemoteSession(session)
+      if (action === 'archive' && location.pathname === `/sessions/${runId}`) navigate('/sessions')
+      setToast(action === 'restore'
+        ? (locale === 'zh' ? '会话已恢复' : 'Session restored')
+        : (locale === 'zh' ? '会话已归档' : 'Session archived'))
+      return true
+    } catch (error) {
+      if (error instanceof RelayApiError && error.status === 412) {
+        setSessionsRetryVersion((version) => version + 1)
+      }
+      if (error instanceof RelayApiError && error.status === 404) concealRemoteSession(runId)
+      setToast(error instanceof Error ? error.message : (locale === 'zh' ? '无法更新会话' : 'Unable to update Session'))
+      return false
+    }
   }
   const deleteSession = (runId: string) => {
     if (!demoMode) return
@@ -1489,8 +1626,13 @@ function RelayApp() {
             runs={scopedRuns}
             loadState={sessionsState}
             loadError={sessionsError}
-            managementEnabled={demoMode}
+            managementEnabled={demoMode || sessionCreationEnabled}
+            favoritesEnabled={demoMode}
+            deletionEnabled={demoMode}
             sessionCreationEnabled={sessionCreationEnabled}
+            hasMore={!demoMode && sessionsRequest?.key === sessionsRequestKey && Boolean(sessionsRequest.nextCursor)}
+            loadingMore={!demoMode && sessionsRequest?.key === sessionsRequestKey && sessionsRequest.loadingMore}
+            onLoadMore={loadMoreSessions}
             onRetry={() => setSessionsRetryVersion((version) => version + 1)}
             onOpenNavigation={openNavigation}
             onNewTask={openNewTask}

@@ -9,6 +9,7 @@ import {
   ExpertListResponseSchema,
   MeResponseSchema,
   MessageCreateSchema,
+  RenameSessionRequestSchema,
   RuntimeCapabilitiesSchema,
   SessionDtoSchema,
   SessionEventPageSchema,
@@ -181,6 +182,29 @@ function readIfMatchVersion(request: FastifyRequest) {
   if (!match) return null
   const version = Number(match[1])
   return Number.isSafeInteger(version) ? version : null
+}
+
+function requireIfMatchVersion(request: FastifyRequest, reply: FastifyReply) {
+  const expectedVersion = readIfMatchVersion(request)
+  if (expectedVersion === undefined) {
+    sendApiError(reply, 428, request, {
+      code: 'PRECONDITION_REQUIRED',
+      message: 'An If-Match header containing the current Session ETag is required.',
+      retryable: false,
+      fieldErrors: { 'header.If-Match': ['Use the quoted ETag returned by the Session detail API.'] },
+    })
+    return null
+  }
+  if (expectedVersion === null) {
+    sendApiError(reply, 400, request, {
+      code: 'VALIDATION_FAILED',
+      message: 'The If-Match header is invalid.',
+      retryable: false,
+      fieldErrors: { 'header.If-Match': ['Use a quoted positive integer such as "1".'] },
+    })
+    return null
+  }
+  return expectedVersion
 }
 
 function errorStatusCode(error: unknown) {
@@ -741,6 +765,104 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     return session
   })
 
+  app.patch<{ Params: SessionParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId',
+    async (request, reply) => {
+      const authorization = await authorizeSessionSpace(request, reply, request.params)
+      if (!authorization) return
+      const sessionId = parseSpaceId(request.params.sessionId)
+      if (!sessionId) return sendResourceNotFound(reply, request)
+      if (!canWriteSpace(authorization.access)) {
+        return sendApiError(reply, 403, request, {
+          code: 'PERMISSION_DENIED',
+          message: 'You do not have permission to rename Sessions in this Space.',
+          retryable: false,
+        })
+      }
+      const expectedVersion = requireIfMatchVersion(request, reply)
+      if (expectedVersion === null) return
+      const parsed = RenameSessionRequestSchema.safeParse(request.body)
+      if (!parsed.success) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED',
+          message: 'The Session rename request is invalid.',
+          retryable: false,
+          fieldErrors: validationFieldErrors(parsed.error.issues),
+        })
+      }
+      const candidate = await sessionRepository.rename({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        sessionId,
+        actorId: authorization.actor.id,
+        actorKind: authorization.actor.kind,
+        requestId: request.id,
+        expectedVersion,
+        request: parsed.data,
+      })
+      if (!candidate) return sendResourceNotFound(reply, request)
+      const session = SessionDtoSchema.parse(candidate)
+      reply.header('ETag', sessionEtag(session))
+      return session
+    },
+  )
+
+  for (const action of ['archive', 'restore'] as const) {
+    app.post<{ Params: SessionParams }>(
+      `/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/${action}`,
+      async (request, reply) => {
+        const authorization = await authorizeSessionSpace(request, reply, request.params)
+        if (!authorization) return
+        const sessionId = parseSpaceId(request.params.sessionId)
+        if (!sessionId) return sendResourceNotFound(reply, request)
+        if (!canWriteSpace(authorization.access)) {
+          return sendApiError(reply, 403, request, {
+            code: 'PERMISSION_DENIED',
+            message: `You do not have permission to ${action} Sessions in this Space.`,
+            retryable: false,
+          })
+        }
+        const idempotencyKey = readIdempotencyKey(request)
+        if (!idempotencyKey) {
+          return sendApiError(reply, 400, request, {
+            code: 'IDEMPOTENCY_KEY_REQUIRED',
+            message: 'A valid Idempotency-Key header is required.',
+            retryable: false,
+            fieldErrors: {
+              'Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'],
+            },
+          })
+        }
+        const expectedVersion = requireIfMatchVersion(request, reply)
+        if (expectedVersion === null) return
+        if (request.body !== undefined) {
+          return sendApiError(reply, 400, request, {
+            code: 'VALIDATION_FAILED',
+            message: `The Session ${action} operation does not accept a request body.`,
+            retryable: false,
+            fieldErrors: { body: ['Send the request without a body.'] },
+          })
+        }
+        const result = await sessionRepository.setArchived({
+          organizationId: authorization.organizationId,
+          spaceId: authorization.spaceId,
+          sessionId,
+          actorId: authorization.actor.id,
+          actorKind: authorization.actor.kind,
+          requestId: request.id,
+          expectedVersion,
+          action,
+          idempotencyKey,
+        })
+        if (!result) return sendResourceNotFound(reply, request)
+        const session = SessionDtoSchema.parse(result.session)
+        reply.header('Idempotency-Replayed', String(result.replayed))
+        reply.header('ETag', sessionEtag(session))
+        return session
+      },
+    )
+  }
+
   app.get<{ Params: SessionParams; Querystring: SessionTimelineQuery }>(
     '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/messages',
     async (request, reply) => {
@@ -1103,23 +1225,8 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         })
       }
 
-      const expectedVersion = readIfMatchVersion(request)
-      if (expectedVersion === undefined) {
-        return sendApiError(reply, 428, request, {
-          code: 'PRECONDITION_REQUIRED',
-          message: 'An If-Match header containing the current Session ETag is required.',
-          retryable: false,
-          fieldErrors: { 'header.If-Match': ['Use the quoted ETag returned by the Session detail API.'] },
-        })
-      }
-      if (expectedVersion === null) {
-        return sendApiError(reply, 400, request, {
-          code: 'VALIDATION_FAILED',
-          message: 'The If-Match header is invalid.',
-          retryable: false,
-          fieldErrors: { 'header.If-Match': ['Use a quoted positive integer such as "1".'] },
-        })
-      }
+      const expectedVersion = requireIfMatchVersion(request, reply)
+      if (expectedVersion === null) return
       if (request.body !== undefined) {
         return sendApiError(reply, 400, request, {
           code: 'VALIDATION_FAILED',

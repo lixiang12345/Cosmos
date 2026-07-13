@@ -66,6 +66,8 @@ const zh = {
   'common.stop': '停止',
   'common.confirm': '确认',
   'common.loading': '加载中',
+  'common.loadMore': '加载更多',
+  'common.loadingMore': '正在加载',
   'common.noData': '暂无数据',
 
   'status.draft': '草稿',
@@ -401,6 +403,8 @@ const en: Record<TranslationKey, string> = {
   'common.stop': 'Stop',
   'common.confirm': 'Confirm',
   'common.loading': 'Loading',
+  'common.loadMore': 'Load more',
+  'common.loadingMore': 'Loading more',
   'common.noData': 'No data',
 
   'status.draft': 'Draft',

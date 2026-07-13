@@ -107,11 +107,11 @@ pnpm openapi:bundle
 - protocol-1 Worker 使用 PostgreSQL 并发 claim、数据库权威租约、heartbeat、fencing、有限重试和过期租约恢复；每个进程另写可过期的就绪心跳，API 以此动态关闭新执行入口而不影响只读控制面；每次 Attempt 保留历史，撤销写权限会取消尚未开始或正在运行的链路。
 - 当前 Agent provider 只产出受大小限制的对话 Message；provider endpoint 的 301/302/303/307/308 重定向不会被跟随，并按终止型配置错误处理。SessionEvent 以单调 sequence 持久化，并可通过 cursor 分页或 `Last-Event-ID` 恢复 SSE。SSE 心跳期间会重新认证并重检 membership。
 
-配置 `DATABASE_URL` 后，Expert/Environment identity 与 immutable revision、Repository binding、Session、Attempt、事件和幂等记录写入 PostgreSQL；未配置时仅开发环境使用进程内存 repository。API 已实现 OIDC access token 校验、actor membership discovery、Organization/Space 角色交集写限制、ServiceAccount Session fail-closed、Private creator 隔离、权威配置解析、只读 Catalog、actor/路径级幂等、Session 子表复合 tenant FK、基础对话 Worker 和可恢复 timeline。Expert/Environment 写 API、Private 分享、FORCE RLS/受限 runtime role、拒绝与失败审计、coding sandbox、Tool Broker、附件对象存储和生产运维证据仍未实现，因此当前版本仍不能直接暴露到公网。这些能力按 [软件交付计划](./docs/software-delivery-plan.md) 继续演进。
+配置 `DATABASE_URL` 后，Expert/Environment identity 与 immutable revision、Repository binding、Session、Attempt、事件和幂等记录写入 PostgreSQL；未配置时仅开发环境使用进程内存 repository。API 已实现 OIDC access token 校验、actor membership discovery、Organization/Space 角色交集写限制、ServiceAccount Session fail-closed、Private creator 隔离、权威配置解析、只读 Catalog、actor/路径级幂等、Session 子表复合 tenant FK、Session 重命名/归档/恢复、基础对话 Worker 和可恢复 timeline。Expert/Environment 写 API、Private 分享、FORCE RLS/受限 runtime role、拒绝与失败审计、coding sandbox、Tool Broker、附件对象存储和生产运维证据仍未实现，因此当前版本仍不能直接暴露到公网。这些能力按 [软件交付计划](./docs/software-delivery-plan.md) 继续演进。
 
 ## 原型范围
 
-- Session 管理原型：显式 demo 模式提供活跃、收藏、归档、搜索、重命名、恢复和删除，状态写入隔离的 `relay.demo.sessions`；生产模式不会读取该缓存，也不显示未接 API 的管理动作。
+- Session 管理：显式 demo 模式提供活跃、收藏、归档、搜索、重命名、恢复和删除，状态写入隔离的 `relay.demo.sessions`；生产模式不会读取该缓存，列表使用服务端 cursor 分页，并开放带 CAS/幂等保护的重命名、归档和恢复。收藏与删除仍只在 demo 模式显示。
 - Session 工作台：demo 模式提供阶段轨道、事件时间线、追加指令、终端回放、文件 Diff 和审批决策；生产模式显示 canonical Session metadata、Message、Attempt/Session 事件与真实执行终态，并在执行能力可用时通过幂等 API 发送后续消息。尚未服务化的 Tool、Terminal、Files、Changes 和审批操作不会冒充生产事实。
 - 控制平面：demo 模式包含运行记录、自动化、代码仓库、集成、治理中心和事件日志；生产 capability allowlist 当前仅开放 Sessions、Experts 和 Environments，其他直达路由不渲染模拟操作。
 - 关键交互：新建任务、切换证据视图、批准或退回、失败步骤重试、侧栏折叠和移动端抽屉。

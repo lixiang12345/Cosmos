@@ -19,6 +19,7 @@ import { initialRuns } from './data/mockData'
 import { PREFERENCE_STORAGE_KEYS, PreferencesProvider } from './preferences'
 import {
   RelayApiError,
+  archiveSession,
   createSession,
   getEnvironment,
   getExpert,
@@ -29,13 +30,16 @@ import {
   listSessionEvents,
   listSessionMessages,
   listSessions,
+  renameSession,
   sendSessionMessage,
+  restoreSession,
   startSession,
 } from './services/relayApi'
 import { WorkspaceContext, type WorkspaceContextValue } from './workspace'
 
 vi.mock('./services/relayApi', async (importOriginal) => ({
   ...await importOriginal<typeof import('./services/relayApi')>(),
+  archiveSession: vi.fn(),
   createSession: vi.fn(),
   getEnvironment: vi.fn(),
   getExpert: vi.fn(),
@@ -46,7 +50,9 @@ vi.mock('./services/relayApi', async (importOriginal) => ({
   listSessionEvents: vi.fn(),
   listSessionMessages: vi.fn(),
   listSessions: vi.fn(),
+  renameSession: vi.fn(),
   sendSessionMessage: vi.fn(),
+  restoreSession: vi.fn(),
   startSession: vi.fn(),
 }))
 
@@ -283,6 +289,7 @@ describe('Relay prototype', () => {
     window.localStorage.removeItem('relay.demo.sessions')
     window.localStorage.removeItem('relay.experts')
     window.localStorage.removeItem('relay.controlPlane.v1')
+    vi.mocked(archiveSession).mockReset()
     vi.mocked(createSession).mockReset()
     vi.mocked(getEnvironment).mockReset()
     vi.mocked(getExpert).mockReset()
@@ -293,6 +300,8 @@ describe('Relay prototype', () => {
     vi.mocked(listSessionEvents).mockReset()
     vi.mocked(listSessionMessages).mockReset()
     vi.mocked(listSessions).mockReset()
+    vi.mocked(renameSession).mockReset()
+    vi.mocked(restoreSession).mockReset()
     vi.mocked(sendSessionMessage).mockReset()
     vi.mocked(startSession).mockReset()
     vi.mocked(listSessions).mockResolvedValue({
@@ -445,6 +454,7 @@ describe('Relay prototype', () => {
     expect(listSessions).toHaveBeenCalledWith(
       'relay', 'space-commerce',
       expect.objectContaining({ accessToken: undefined, onUnauthorized: expect.any(Function) }),
+      { archived: 'all', limit: 50 },
     )
     await waitFor(() => {
       const stored = JSON.parse(window.localStorage.getItem('relay.demo.sessions') ?? '[]') as Array<{ id: string }>
@@ -745,13 +755,15 @@ describe('Relay prototype', () => {
         accessToken: 'production-access-token',
         onUnauthorized: expect.any(Function),
       }),
+      { archived: 'all', limit: 50 },
     )
     expect(JSON.parse(window.localStorage.getItem('relay.demo.sessions') ?? '[]')).toHaveLength(initialRuns.length)
-    expect(screen.queryByRole('tab', { name: /收藏|归档/ })).not.toBeInTheDocument()
-    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: /收藏/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /已归档/ })).toBeInTheDocument()
   })
 
-  it('keeps production Session rows free of local mutation controls', async () => {
+  it('shows only authoritative production Session mutation controls', async () => {
+    const user = userEvent.setup()
     const session = makeApiSession('organization-production', 'space-production', {
       title: '只读生产会话', expertId: 'expert-authoritative', message: { content: '服务端事实。' },
     }, { id: 'session-readonly-row', status: 'draft' })
@@ -763,9 +775,91 @@ describe('Relay prototype', () => {
 
     const table = await screen.findByRole('table', { name: '会话' })
     expect(within(table).getByText('草稿')).toBeInTheDocument()
-    expect(within(table).queryByRole('button', { name: /收藏|更多|重命名|归档|删除/ })).not.toBeInTheDocument()
-    expect(within(table).queryByRole('checkbox')).not.toBeInTheDocument()
-    expect(within(table).queryByText(/0\/0/)).not.toBeInTheDocument()
+    expect(within(table).queryByRole('button', { name: /收藏/ })).not.toBeInTheDocument()
+    await user.click(within(table).getByRole('button', { name: /只读生产会话.*会话操作/ }))
+    expect(screen.getByRole('menuitem', { name: '重命名' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: '归档' })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: '删除' })).not.toBeInTheDocument()
+  })
+
+  it('renames and archives a production Session through the authoritative API', async () => {
+    const user = userEvent.setup()
+    const session = makeApiSession('organization-production', 'space-production', {
+      title: '生产元数据会话', expertId: 'expert-authoritative', message: { content: '服务端事实。' },
+    }, { id: 'session-production-metadata', status: 'draft' })
+    const renamed = { ...session, title: '权威重命名', version: 2, updatedAt: '2026-07-12T05:00:00.000Z' }
+    const archived = {
+      ...renamed,
+      archivedAt: '2026-07-12T05:01:00.000Z',
+      version: 3,
+      updatedAt: '2026-07-12T05:01:00.000Z',
+    }
+    vi.mocked(listSessions).mockResolvedValueOnce({
+      items: [session], page: { nextCursor: null, hasMore: false, projectionUpdatedAt: session.updatedAt },
+    })
+    vi.mocked(renameSession).mockResolvedValueOnce(renamed)
+    vi.mocked(archiveSession).mockResolvedValueOnce(archived)
+
+    renderAuthenticatedApp('/sessions')
+    const table = await screen.findByRole('table', { name: '会话' })
+    await user.click(within(table).getByRole('button', { name: /生产元数据会话.*会话操作/ }))
+    await user.click(screen.getByRole('menuitem', { name: '重命名' }))
+    const titleInput = screen.getByRole('textbox', { name: '会话名称' })
+    await user.clear(titleInput)
+    await user.type(titleInput, '权威重命名')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(renameSession).toHaveBeenCalledWith(
+      'organization-production',
+      'space-production',
+      session.id,
+      '权威重命名',
+      1,
+      expect.objectContaining({ accessToken: 'production-access-token' }),
+    ))
+    expect((await screen.findAllByText('权威重命名')).length).toBeGreaterThan(0)
+
+    await user.click(within(table).getByRole('button', { name: /权威重命名.*会话操作/ }))
+    await user.click(screen.getByRole('menuitem', { name: '归档' }))
+    await waitFor(() => expect(archiveSession).toHaveBeenCalledWith(
+      'organization-production',
+      'space-production',
+      session.id,
+      2,
+      expect.any(String),
+      expect.objectContaining({ accessToken: 'production-access-token' }),
+    ))
+    await user.click(screen.getByRole('tab', { name: /已归档/ }))
+    expect((await screen.findAllByText('权威重命名')).length).toBeGreaterThan(0)
+  })
+
+  it('loads the next production Session page without replacing the first page', async () => {
+    const user = userEvent.setup()
+    const first = makeApiSession('organization-production', 'space-production', {
+      title: '第一页会话', expertId: 'expert-authoritative', message: { content: 'First.' },
+    }, { id: 'session-page-first' })
+    const second = makeApiSession('organization-production', 'space-production', {
+      title: '第二页会话', expertId: 'expert-authoritative', message: { content: 'Second.' },
+    }, { id: 'session-page-second' })
+    vi.mocked(listSessions)
+      .mockResolvedValueOnce({
+        items: [first], page: { nextCursor: 'next-page', hasMore: true, projectionUpdatedAt: first.updatedAt },
+      })
+      .mockResolvedValueOnce({
+        items: [second], page: { nextCursor: null, hasMore: false, projectionUpdatedAt: second.updatedAt },
+      })
+
+    renderAuthenticatedApp('/sessions')
+    expect((await screen.findAllByText('第一页会话')).length).toBeGreaterThan(0)
+    await user.click(screen.getByRole('button', { name: '加载更多' }))
+    expect((await screen.findAllByText('第二页会话')).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('第一页会话').length).toBeGreaterThan(0)
+    expect(listSessions).toHaveBeenLastCalledWith(
+      'organization-production',
+      'space-production',
+      expect.any(Object),
+      { archived: 'all', limit: 50, cursor: 'next-page' },
+    )
   })
 
   it('retries a failed production Session list request', async () => {
@@ -798,6 +892,7 @@ describe('Relay prototype', () => {
 
     await waitFor(() => expect(listSessions).toHaveBeenCalledWith(
       'organization-production', 'space-production', expect.any(Object),
+      { archived: 'all', limit: 50 },
     ))
     expect(screen.queryByText(privateExpert)).not.toBeInTheDocument()
     expect(window.localStorage.getItem('relay.controlPlane.v1')).toBe(controlPlaneValue)

@@ -3,6 +3,7 @@ import { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { runMigrations } from './migrations.js'
 import { PostgresSessionRepository } from './postgres-session-repository.js'
+import { PostgresSessionTimelineRepository } from './postgres-session-timeline-repository.js'
 import { seedSessionConfiguration, type SeededSessionConfiguration } from './session-configuration-test-fixture.js'
 import {
   AuthorizationChangedError,
@@ -11,6 +12,7 @@ import {
   IdempotencyConflictError,
   SessionConfigurationNotFoundError,
   SessionConfigurationValidationError,
+  SessionVersionConflictError,
 } from './session-repository.js'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
@@ -79,6 +81,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
       ['relay', 'space-policy'],
       ['relay', 'space-private-expert'],
       ['relay', 'space-list'],
+      ['relay', 'space-metadata'],
       ['relay', 'space-revision-pin'],
       ['relay', 'space-role-cap'],
       ['relay', 'space-role-recheck'],
@@ -102,13 +105,17 @@ describeWithDatabase('PostgresSessionRepository', () => {
         ('relay', 'user-capped', 'viewer'),
         ('relay', 'user-recheck', 'member'),
         ('relay', 'user-expert-owner', 'member'),
-        ('relay', 'user-list-reader', 'member');
+        ('relay', 'user-list-reader', 'member'),
+        ('relay', 'user-metadata-manager', 'member'),
+        ('relay', 'user-metadata-member', 'member');
       INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
       VALUES
         ('relay', 'space-role-cap', 'user-capped', 'space_manager'),
         ('relay', 'space-role-recheck', 'user-recheck', 'member'),
         ('relay', 'space-private-expert', 'user-expert-owner', 'member'),
-        ('relay', 'space-list', 'user-list-reader', 'viewer');
+        ('relay', 'space-list', 'user-list-reader', 'viewer'),
+        ('relay', 'space-metadata', 'user-metadata-manager', 'space_manager'),
+        ('relay', 'space-metadata', 'user-metadata-member', 'member');
     `)
     for (const [organizationId, spaceId] of spaces) {
       const configurationOptions = spaceId === 'space-policy'
@@ -658,6 +665,151 @@ describeWithDatabase('PostgresSessionRepository', () => {
     })
     expect(active.items.map((session) => session.id)).toEqual([first.session.id])
     expect(archived.items).toMatchObject([{ id: second.session.id, archivedAt: now.toISOString() }])
+  })
+
+  it('applies metadata lifecycle CAS, idempotency, concealment, and ledgers atomically', async () => {
+    let now = new Date('2026-07-12T13:00:00.000Z')
+    const repository = new PostgresSessionRepository(pool, { now: () => now })
+    const created = await repository.create({
+      ...auditContext,
+      organizationId: 'relay', spaceId: 'space-metadata', actorId: 'user-local-admin',
+      idempotencyKey: 'metadata-public',
+      request: { ...request, title: 'Metadata lifecycle', visibility: 'space' },
+    })
+    const privateSession = await repository.create({
+      ...auditContext,
+      organizationId: 'relay', spaceId: 'space-metadata', actorId: 'user-local-admin',
+      idempotencyKey: 'metadata-private',
+      request: { ...request, title: 'Private metadata', visibility: 'private' },
+    })
+    const originalActivity = created.session.lastActivityAt
+
+    now = new Date('2026-07-12T13:01:00.000Z')
+    const renamed = await repository.rename({
+      ...auditContext,
+      organizationId: 'relay', spaceId: 'space-metadata', sessionId: created.session.id,
+      actorId: 'user-metadata-manager', expectedVersion: 1,
+      request: { title: 'Manager rename' },
+    })
+    expect(renamed).toMatchObject({ title: 'Manager rename', version: 2, lastActivityAt: originalActivity })
+    await expect(repository.rename({
+      ...auditContext,
+      organizationId: 'relay', spaceId: 'space-metadata', sessionId: created.session.id,
+      actorId: 'user-metadata-member', expectedVersion: 2,
+      request: { title: 'Member rename' },
+    })).rejects.toBeInstanceOf(AuthorizationChangedError)
+    await expect(repository.rename({
+      ...auditContext,
+      organizationId: 'relay', spaceId: 'space-metadata', sessionId: privateSession.session.id,
+      actorId: 'user-metadata-manager', expectedVersion: 1,
+      request: { title: 'Concealed rename' },
+    })).resolves.toBeNull()
+
+    now = new Date('2026-07-12T13:02:00.000Z')
+    const competingRenames = await Promise.allSettled([
+      repository.rename({
+        ...auditContext,
+        organizationId: 'relay', spaceId: 'space-metadata', sessionId: created.session.id,
+        actorId: 'user-local-admin', expectedVersion: 2, request: { title: 'Creator winner' },
+      }),
+      repository.rename({
+        ...auditContext,
+        organizationId: 'relay', spaceId: 'space-metadata', sessionId: created.session.id,
+        actorId: 'user-metadata-manager', expectedVersion: 2, request: { title: 'Manager winner' },
+      }),
+    ])
+    expect(competingRenames.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    const rejectedRename = competingRenames.find((result) => result.status === 'rejected')
+    expect(rejectedRename).toMatchObject({ reason: expect.any(SessionVersionConflictError) })
+    const afterRename = await repository.getById(
+      'relay', 'space-metadata', created.session.id, 'user-local-admin',
+    )
+    if (!afterRename) throw new Error('Expected the metadata Session after rename.')
+    expect(afterRename).toMatchObject({ version: 3, lastActivityAt: originalActivity })
+
+    now = new Date('2026-07-12T13:03:00.000Z')
+    const archiveRecord = {
+      ...auditContext,
+      organizationId: 'relay',
+      spaceId: 'space-metadata',
+      sessionId: created.session.id,
+      actorId: 'user-metadata-manager',
+      expectedVersion: 3,
+      action: 'archive' as const,
+      idempotencyKey: 'metadata-archive',
+    }
+    const archivedResults = await Promise.all([
+      repository.setArchived(archiveRecord),
+      repository.setArchived(archiveRecord),
+    ])
+    expect(archivedResults).toEqual(expect.arrayContaining([
+      expect.objectContaining({ replayed: false }),
+      expect.objectContaining({ replayed: true }),
+    ]))
+    expect(archivedResults[0]?.session).toEqual(archivedResults[1]?.session)
+    const archived = archivedResults[0]?.session
+    if (!archived) throw new Error('Expected an archived Session.')
+    expect(archived).toMatchObject({ status: created.session.status, version: 4, lastActivityAt: originalActivity })
+    expect(archived.archivedAt).toBe(now.toISOString())
+    await expect(repository.listBySpace('relay', 'space-metadata', 'user-local-admin'))
+      .resolves.toMatchObject({ items: [privateSession.session] })
+
+    const noOpArchive = await repository.setArchived({
+      ...archiveRecord,
+      expectedVersion: 4,
+      idempotencyKey: 'metadata-archive-no-op',
+    })
+    expect(noOpArchive?.session).toMatchObject({ version: 4, archivedAt: now.toISOString() })
+    await expect(repository.setArchived({
+      ...archiveRecord,
+      expectedVersion: 4,
+    })).rejects.toBeInstanceOf(IdempotencyConflictError)
+
+    now = new Date('2026-07-12T13:04:00.000Z')
+    const restored = await repository.setArchived({
+      ...auditContext,
+      organizationId: 'relay', spaceId: 'space-metadata', sessionId: created.session.id,
+      actorId: 'user-metadata-manager', expectedVersion: 4,
+      action: 'restore', idempotencyKey: 'metadata-restore',
+    })
+    expect(restored?.session).toMatchObject({ archivedAt: null, version: 5, lastActivityAt: originalActivity })
+
+    const events = await pool.query<{ event_type: string; payload: Record<string, unknown> }>(`
+      SELECT event_type, payload
+      FROM relay_session_events
+      WHERE organization_id = 'relay' AND space_id = 'space-metadata' AND session_id = $1
+        AND event_type IN ('session.renamed', 'session.archived', 'session.restored')
+      ORDER BY sequence
+    `, [created.session.id])
+    expect(events.rows.map((event) => event.event_type)).toEqual([
+      'session.renamed', 'session.renamed', 'session.archived', 'session.restored',
+    ])
+    expect(events.rows.at(-1)?.payload).toEqual({ archivedAt: null, version: 5 })
+    const projectedEvents = await new PostgresSessionTimelineRepository(pool).listEvents(
+      'relay', 'space-metadata', created.session.id, 'user-local-admin', { limit: 20 },
+    )
+    expect(projectedEvents?.items.filter((event) => (
+      event.type === 'session.renamed'
+      || event.type === 'session.archived'
+      || event.type === 'session.restored'
+    ))).toMatchObject([
+      { type: 'session.renamed', payload: { title: 'Manager rename', version: 2 } },
+      { type: 'session.renamed', payload: { version: 3 } },
+      { type: 'session.archived', payload: { archivedAt: '2026-07-12T13:03:00.000Z', version: 4 } },
+      { type: 'session.restored', payload: { archivedAt: null, version: 5 } },
+    ])
+    const audits = await pool.query<{ action: string; idempotency_key_hash: string | null }>(`
+      SELECT action, idempotency_key_hash
+      FROM relay_audit_events
+      WHERE organization_id = 'relay' AND space_id = 'space-metadata' AND session_id = $1
+        AND action IN ('session.rename', 'session.archive', 'session.restore')
+      ORDER BY occurred_at, audit_event_id
+    `, [created.session.id])
+    expect(audits.rows.map((audit) => audit.action)).toEqual([
+      'session.rename', 'session.rename', 'session.archive', 'session.restore',
+    ])
+    expect(audits.rows.slice(0, 2).every((audit) => audit.idempotency_key_hash === null)).toBe(true)
+    expect(audits.rows.slice(2).every((audit) => /^[a-f0-9]{64}$/.test(audit.idempotency_key_hash ?? ''))).toBe(true)
   })
 
   it('rejects a different request that reuses the same idempotency key', async () => {

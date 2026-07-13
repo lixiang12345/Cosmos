@@ -105,6 +105,9 @@ function eventLabel(event: SessionEventDto, locale: Locale) {
     `会话状态已更新为${statusLabel(event.payload.status, locale)}`,
     `Session status updated to ${statusLabel(event.payload.status, locale)}`,
   )
+  if (event.type === 'session.renamed') return text(locale, '会话已重命名', 'Session renamed')
+  if (event.type === 'session.archived') return text(locale, '会话已归档', 'Session archived')
+  if (event.type === 'session.restored') return text(locale, '会话已恢复', 'Session restored')
   if (event.type === 'message.created') return text(locale, '消息已记录', 'Message recorded')
   if (event.type === 'turn.queued') return text(locale, '任务回合已排队', 'Turn queued')
   const attempt = `${text(locale, '第', 'Attempt ')}${event.payload.number}${text(locale, ' 次尝试', '')}`

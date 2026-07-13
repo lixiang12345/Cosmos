@@ -51,6 +51,8 @@ type EventRow = {
   session_status: string | null
   session_visibility: string | null
   session_version: string | null
+  session_title: string | null
+  session_archived_at: string | null
   attempt_number: string | null
   attempt_status: string | null
   attempt_failure_code: string | null
@@ -142,6 +144,36 @@ function mapEvent(row: EventRow): SessionEventDto {
         type: row.event_type,
         payload: {
           status: row.session_status,
+          version: safeInteger(row.session_version, 'Session event version', 1),
+        },
+      }
+      break
+    case 'session.renamed':
+      projected = {
+        ...base,
+        type: row.event_type,
+        payload: {
+          title: row.session_title,
+          version: safeInteger(row.session_version, 'Session event version', 1),
+        },
+      }
+      break
+    case 'session.archived':
+      projected = {
+        ...base,
+        type: row.event_type,
+        payload: {
+          archivedAt: row.session_archived_at,
+          version: safeInteger(row.session_version, 'Session event version', 1),
+        },
+      }
+      break
+    case 'session.restored':
+      projected = {
+        ...base,
+        type: row.event_type,
+        payload: {
+          archivedAt: null,
           version: safeInteger(row.session_version, 'Session event version', 1),
         },
       }
@@ -288,11 +320,21 @@ export class PostgresSessionTimelineRepository implements SessionTimelineReposit
           event.event_id, event.sequence, event.event_type, event.resource_type,
           event.resource_id, event.actor_id, event.command_id, event.request_id,
           event.occurred_at, event.message_id, event.turn_id, event.attempt_id,
-          CASE WHEN event.event_type IN ('session.created', 'session.updated')
+          CASE WHEN event.event_type IN (
+            'session.created', 'session.updated', 'session.renamed',
+            'session.archived', 'session.restored'
+          )
             THEN event.payload->>'status' END AS session_status,
           CASE WHEN event.event_type = 'session.created' THEN event.payload->>'visibility' END AS session_visibility,
-          CASE WHEN event.event_type IN ('session.created', 'session.updated')
+          CASE WHEN event.event_type IN (
+            'session.created', 'session.updated', 'session.renamed',
+            'session.archived', 'session.restored'
+          )
             THEN event.payload->>'version' END AS session_version,
+          CASE WHEN event.event_type = 'session.renamed'
+            THEN event.payload->>'title' END AS session_title,
+          CASE WHEN event.event_type = 'session.archived'
+            THEN event.payload->>'archivedAt' END AS session_archived_at,
           CASE WHEN event.event_type = 'attempt.updated' THEN event.payload->>'number' END AS attempt_number,
           CASE WHEN event.event_type = 'attempt.updated' THEN event.payload->>'status' END AS attempt_status,
           CASE WHEN event.event_type = 'attempt.updated' THEN event.payload->>'failureCode' END AS attempt_failure_code

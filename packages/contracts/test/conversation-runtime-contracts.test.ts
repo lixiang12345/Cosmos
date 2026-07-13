@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   RuntimeCapabilitiesSchema,
   AttemptDtoSchema,
+  RenameSessionRequestSchema,
   SessionEventCursorSchema,
   SessionEventDtoSchema,
   SessionEventPageSchema,
@@ -101,6 +102,49 @@ describe('conversation runtime contracts', () => {
       resourceId: scope.sessionId,
       payload: { status: 'canceled', version: 2 },
     }).payload).toEqual({ status: 'canceled', version: 2 })
+  })
+
+  it('accepts strict Session metadata commands and redacted lifecycle events', () => {
+    expect(RenameSessionRequestSchema.parse({ title: '  Renamed Session  ' })).toEqual({
+      title: 'Renamed Session',
+    })
+    expect(RenameSessionRequestSchema.safeParse({ title: 'Renamed', pinned: true }).success).toBe(false)
+    expect(RenameSessionRequestSchema.safeParse({ title: '   ' }).success).toBe(false)
+
+    const lifecycleEvents = [
+      {
+        type: 'session.renamed',
+        payload: { title: 'Renamed Session', version: 2 },
+      },
+      {
+        type: 'session.archived',
+        payload: { archivedAt: '2026-07-13T08:01:00.000Z', version: 3 },
+      },
+      {
+        type: 'session.restored',
+        payload: { archivedAt: null, version: 4 },
+      },
+    ] as const
+
+    for (const [index, event] of lifecycleEvents.entries()) {
+      expect(SessionEventDtoSchema.parse({
+        ...eventBase,
+        eventId: `event-lifecycle-${index}`,
+        sequence: index + 2,
+        type: event.type,
+        resourceType: 'session',
+        resourceId: scope.sessionId,
+        payload: event.payload,
+      }).payload).toEqual(event.payload)
+    }
+
+    expect(SessionEventDtoSchema.safeParse({
+      ...eventBase,
+      type: 'session.archived',
+      resourceType: 'session',
+      resourceId: scope.sessionId,
+      payload: { archivedAt: null, version: 3 },
+    }).success).toBe(false)
   })
 
   it('validates scoped Message pages with full content in the Messages API only', () => {

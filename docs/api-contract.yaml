@@ -800,8 +800,9 @@ paths:
           $ref: '#/components/responses/RuntimeInternalError'
     patch:
       tags: [Sessions]
-      operationId: updateSession
-      summary: Rename, pin, or change allowed Session metadata
+      operationId: renameSession
+      x-relay-implementation-status: implemented
+      summary: Rename a Session
       parameters:
         - $ref: '#/components/parameters/IfMatch'
       requestBody:
@@ -809,7 +810,7 @@ paths:
         content:
           application/merge-patch+json:
             schema:
-              $ref: '#/components/schemas/SessionPatch'
+              $ref: '#/components/schemas/RuntimeSessionRename'
       responses:
         '200':
           description: Updated Session
@@ -819,11 +820,21 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Session'
+                $ref: '#/components/schemas/RuntimeSession'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
         '412':
-          $ref: '#/components/responses/PreconditionFailed'
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '428':
+          $ref: '#/components/responses/RuntimePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
 
   /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/start:
     parameters:
@@ -1014,12 +1025,13 @@ paths:
 
   /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/archive:
     parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
       - $ref: '#/components/parameters/SessionId'
     post:
       tags: [Sessions]
       operationId: archiveSession
+      x-relay-implementation-status: implemented
       summary: Archive a Session without deleting its content
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1027,21 +1039,41 @@ paths:
       responses:
         '200':
           description: Archived Session
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Idempotency-Replayed:
+              $ref: '#/components/headers/IdempotencyReplayed'
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Session'
+                $ref: '#/components/schemas/RuntimeSession'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/RuntimeConflict'
+        '412':
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '428':
+          $ref: '#/components/responses/RuntimePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
 
   /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/restore:
     parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
       - $ref: '#/components/parameters/SessionId'
     post:
       tags: [Sessions]
       operationId: restoreSession
+      x-relay-implementation-status: implemented
       summary: Restore an archived Session
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1049,12 +1081,31 @@ paths:
       responses:
         '200':
           description: Restored Session
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Idempotency-Replayed:
+              $ref: '#/components/headers/IdempotencyReplayed'
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Session'
+                $ref: '#/components/schemas/RuntimeSession'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/RuntimeConflict'
+        '412':
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '428':
+          $ref: '#/components/responses/RuntimePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
 
   /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/shares:
     parameters:
@@ -2979,6 +3030,15 @@ components:
             minLength: 1
             maxLength: 2048
       additionalProperties: false
+    RuntimeSessionRename:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 240
+      additionalProperties: false
     RuntimeSessionCreate:
       type: object
       required: [expertId, title, message]
@@ -3408,7 +3468,15 @@ components:
           minimum: 1
         type:
           type: string
-          enum: [session.created, session.updated, message.created, turn.queued, attempt.updated]
+          enum:
+            - session.created
+            - session.updated
+            - session.renamed
+            - session.archived
+            - session.restored
+            - message.created
+            - turn.queued
+            - attempt.updated
         resourceType:
           type: string
           enum: [session, message, turn, attempt]
@@ -3443,6 +3511,35 @@ components:
               properties:
                 status:
                   $ref: '#/components/schemas/SessionStatus'
+                version:
+                  type: integer
+                  minimum: 1
+              additionalProperties: false
+            - type: object
+              required: [title, version]
+              properties:
+                title:
+                  type: string
+                  minLength: 1
+                  maxLength: 240
+                version:
+                  type: integer
+                  minimum: 1
+              additionalProperties: false
+            - type: object
+              required: [archivedAt, version]
+              properties:
+                archivedAt:
+                  $ref: '#/components/schemas/Timestamp'
+                version:
+                  type: integer
+                  minimum: 1
+              additionalProperties: false
+            - type: object
+              required: [archivedAt, version]
+              properties:
+                archivedAt:
+                  type: 'null'
                 version:
                   type: integer
                   minimum: 1
@@ -4238,136 +4335,6 @@ components:
     SessionVisibility:
       type: string
       enum: [private, space]
-    Session:
-      allOf:
-        - $ref: '#/components/schemas/ResourceBase'
-        - type: object
-          required:
-            - spaceId
-            - title
-            - expertId
-            - configurationResolutionVersion
-            - status
-            - visibility
-            - source
-            - lastActivityAt
-          properties:
-            spaceId:
-              type: string
-              format: uuid
-            title:
-              type: string
-            summary:
-              type: string
-            expertId:
-              type: string
-              format: uuid
-            expertName:
-              type: string
-              description: Display snapshot resolved by the server; never authoritative create input.
-            expertVersion:
-              type: integer
-              minimum: 1
-            configurationResolutionVersion:
-              type: integer
-              enum: [0, 1]
-              description: Version 0 is migration-only legacy data; every new Session is version 1.
-            expertRevisionId:
-              type: string
-              format: uuid
-            environmentId:
-              type: [string, 'null']
-              format: uuid
-            environmentRevisionId:
-              type: [string, 'null']
-              format: uuid
-            repositoryId:
-              type: string
-              format: uuid
-            repository:
-              type: string
-              maxLength: 512
-              description: Server-resolved display snapshot of the bound repository.
-            baseBranch:
-              type: string
-              maxLength: 255
-              description: Server-resolved branch after applying allowed policy overrides.
-            executionSnapshotId:
-              type: [string, 'null']
-            status:
-              $ref: '#/components/schemas/SessionStatus'
-            waitingReason:
-              type: [string, 'null']
-            visibility:
-              $ref: '#/components/schemas/SessionVisibility'
-            pinnedAt:
-              type: [string, 'null']
-              format: date-time
-            pinFolderId:
-              type: [string, 'null']
-              format: uuid
-            source:
-              type: string
-              enum: [manual, automation, worker_import]
-            sourceEventId:
-              type: [string, 'null']
-              format: uuid
-            automationId:
-              type: [string, 'null']
-              format: uuid
-            activeTurnId:
-              type: [string, 'null']
-              format: uuid
-            startedAt:
-              type: [string, 'null']
-              format: date-time
-            lastActivityAt:
-              $ref: '#/components/schemas/Timestamp'
-            completedAt:
-              type: [string, 'null']
-              format: date-time
-            archivedAt:
-              type: [string, 'null']
-              format: date-time
-            retentionUntil:
-              type: [string, 'null']
-              format: date-time
-            legalHold:
-              type: boolean
-            artifactSummary:
-              type: array
-              items:
-                $ref: '#/components/schemas/Artifact'
-        - if:
-            properties:
-              configurationResolutionVersion:
-                const: 1
-            required: [configurationResolutionVersion]
-          then:
-            properties:
-              expertRevisionId:
-                type: string
-                format: uuid
-              environmentRevisionId:
-                type: string
-                format: uuid
-              repositoryId:
-                type: string
-                format: uuid
-            required: [expertRevisionId, environmentRevisionId, repositoryId]
-    SessionPatch:
-      type: object
-      properties:
-        title:
-          type: string
-          minLength: 1
-          maxLength: 240
-        pinned:
-          type: boolean
-        pinFolderId:
-          type: [string, 'null']
-          format: uuid
-      additionalProperties: false
     ShareGrantCreate:
       type: object
       required: [principalType, principalId, role]

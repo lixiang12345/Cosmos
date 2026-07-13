@@ -21,15 +21,15 @@
 
 | 能力 | Current | Target / 发布门槛 |
 | --- | --- | --- |
-| Session API | 已实现 tenant-scoped list/create/get/draft-start/send、Message/Event cursor 分页和可恢复 SSE；Session 列表没有真实 cursor/filter；单资源 GET、create、start 与 send 返回 ETag | Session 列表完整分页、rename、pause/resume/cancel、archive/restore、share 与显式 Turn retry 命令 |
+| Session API | 已实现 tenant-scoped list/create/get/rename/archive/restore/draft-start/send、Session list cursor/filter、Message/Event cursor 分页和可恢复 SSE；强版本写返回 ETag | pause/resume/cancel、share 与显式 Turn retry 命令 |
 | 创建/启动/发送事务 | `start=true` create 原子写 Session、首条 Message、首个 Turn、`session.start` Command、Outbox、3 条连续 SessionEvent、1 条脱敏 AuditEvent 和完整幂等响应；`start=false` 写 draft Session、Message、2 条 Event 与 1 条 Audit，不创建执行记录；draft start 复用首条 Message；send 在 Session 行锁内原子追加连续 Message/Turn、`session.send` Command、Outbox、3 条 Event、1 条 Audit 和幂等响应；重放不重复账本 | 其余后续命令也统一使用领域事务、SessionEvent、Command、Outbox、幂等响应和必要审计 |
 | 配置固定 | 新 Session 由服务端固定 Published ExpertRevision、Ready EnvironmentRevision 和 Repository binding | 增加不可变 ExecutionSnapshot；legacy `configurationResolutionVersion=0` 在修复前只读 |
 | 可见性 | `private` 仅 creator；`space` 对有效 Organization + Space member 可见；查询中重检 membership | User/Group ShareGrant、实时撤权、合规访问与一致的 404 concealment |
 | ServiceAccount | token 可被认证；Session list/get/create 与 Catalog 均在 repository 访问前显式拒绝 ServiceAccount，不接受 membership 作为替代授权 | 绑定 Organization、Space、Automation/Session、audience 与 operation scope；无通配默认权限 |
-| 并发 | create/start/send 幂等记录按 organization + actor + method + canonical path + key 隔离；draft start 使用 `If-Match`；send 使用 Session 行锁分配连续 Message sequence/Turn ordinal；Worker 只 claim 最早的非终态 Turn；PostgreSQL 并发重放与 FIFO 已测试 | 其余命令统一幂等；跨 Session 调度仍需配额与权重 |
+| 并发 | create/start/send/archive/restore 幂等记录按 organization + actor + method + canonical path + key 隔离；rename/draft start/archive/restore 使用 `If-Match`；send 使用 Session 行锁分配连续 Message sequence/Turn ordinal；Worker 只 claim 最早的非终态 Turn；PostgreSQL 并发 CAS、重放与 FIFO 已测试 | 其余命令统一幂等；跨 Session 调度仍需配额与权重 |
 | 数据隔离 | 已持久化 Session 子表和幂等引用使用复合 tenant FK；在线索引 + `NOT VALID/VALIDATE` 迁移可修复已版本化旧库；repository SQL 在单条查询中重检 membership | FORCE RLS/统一 tenant guard；受限运行角色不可绕过；覆盖后续新增实体 |
-| 生命周期 | draft start 与 protocol-1 create 均进入 queued；send 在 active/waiting/paused 追加 FIFO，在 completed/failed 重新进入 queued；Worker 可驱动 queued -> active -> completed/failed/canceled，当前 Turn 终止后有排队 Turn 则回到 queued；retry 回到 queued 并追加 Attempt，租约过期可恢复 | pause/resume/cancel 等用户命令、归档正交语义和恢复语义 |
-| 实时与审计 | create/start/send/execution 写连续、不可 UPDATE/DELETE 的 allowlist SessionEvent；Message/Event 有分页读 API，Event 支持 `Last-Event-ID` SSE；create/start/send success 写脱敏 AuditEvent | 所有拒绝/失败的可靠 append-only 审计、独立受限数据库角色 |
+| 生命周期 | draft start 与 protocol-1 create 均进入 queued；send 在 active/waiting/paused 追加 FIFO，在 completed/failed 重新进入 queued；archive/restore 与执行状态正交且不伪造 activity；Worker 可驱动 queued -> active -> completed/failed/canceled，当前 Turn 终止后有排队 Turn 则回到 queued；retry 回到 queued 并追加 Attempt，租约过期可恢复 | pause/resume/cancel 等用户命令 |
+| 实时与审计 | create/start/send/rename/archive/restore/execution 写连续、不可 UPDATE/DELETE 的 allowlist SessionEvent；Message/Event 有分页读 API，Event 支持 `Last-Event-ID` SSE；对应成功路径写脱敏 AuditEvent | 所有拒绝/失败的可靠 append-only 审计、独立受限数据库角色 |
 | 保留/删除 | 没有 Session retention job；普通 API 没有删除 Session | legal hold、幂等 retention job、deletion ledger、备份恢复后重放删除 |
 
 当前准确名称是“权威 Session、只读 Catalog 与基础对话执行纵向切片”。上表 Target 未全部通过前不得标记生产可用或 GA。

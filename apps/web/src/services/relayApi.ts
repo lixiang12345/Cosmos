@@ -482,6 +482,76 @@ export function getSession(
   })
 }
 
+export function renameSession(
+  organizationId: string,
+  spaceId: string,
+  sessionId: string,
+  title: string,
+  version: number,
+  auth?: RelayApiAuthContext,
+): Promise<SessionDto> {
+  return request(sessionPath(organizationId, spaceId, sessionId), {
+    method: 'PATCH',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/merge-patch+json',
+      'If-Match': `"${version}"`,
+    },
+    body: JSON.stringify({ title }),
+  }, SessionDtoSchema, auth).then((session) => {
+    assertSessionScope(session, organizationId, spaceId, sessionId)
+    return session
+  })
+}
+
+function setSessionArchived(
+  organizationId: string,
+  spaceId: string,
+  sessionId: string,
+  action: 'archive' | 'restore',
+  version: number,
+  idempotencyKey: string,
+  auth?: RelayApiAuthContext,
+): Promise<SessionDto> {
+  return request(`${sessionPath(organizationId, spaceId, sessionId)}/${action}`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': `"${version}"`,
+    },
+  }, SessionDtoSchema, auth).then((session) => {
+    assertSessionScope(session, organizationId, spaceId, sessionId)
+    return session
+  })
+}
+
+export function archiveSession(
+  organizationId: string,
+  spaceId: string,
+  sessionId: string,
+  version: number,
+  idempotencyKey: string,
+  auth?: RelayApiAuthContext,
+) {
+  return setSessionArchived(
+    organizationId, spaceId, sessionId, 'archive', version, idempotencyKey, auth,
+  )
+}
+
+export function restoreSession(
+  organizationId: string,
+  spaceId: string,
+  sessionId: string,
+  version: number,
+  idempotencyKey: string,
+  auth?: RelayApiAuthContext,
+) {
+  return setSessionArchived(
+    organizationId, spaceId, sessionId, 'restore', version, idempotencyKey, auth,
+  )
+}
+
 export function startSession(
   organizationId: string,
   spaceId: string,
