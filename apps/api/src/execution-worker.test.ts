@@ -6,6 +6,7 @@ import {
   type ConversationAgentExecutionResult,
   type ConversationAgentProvider,
 } from './conversation-agent-provider.js'
+import type { ConversationToolBroker } from './conversation-tool-broker.js'
 import type { ExecutionClaim, ExecutionRepository } from './execution-repository.js'
 import { ExecutionWorker } from './execution-worker.js'
 
@@ -21,6 +22,7 @@ const claim: ExecutionClaim = {
   leaseExpiresAt: '2026-07-13T08:00:30.000Z',
   requestId: 'request-a',
   requestedBy: 'user-a',
+  requestedByKind: 'user',
   model: 'model-a',
   systemPrompt: 'Follow the task.',
   taskContext: 'Implement the requested change.',
@@ -37,7 +39,13 @@ function repository(overrides: Partial<ExecutionRepository> = {}): ExecutionRepo
   }
 }
 
-function worker(repo: ExecutionRepository, provider: ConversationAgentProvider, heartbeatIntervalMs = 5) {
+function worker(
+  repo: ExecutionRepository,
+  provider: ConversationAgentProvider,
+  heartbeatIntervalMs = 5,
+  toolBroker?: ConversationToolBroker,
+  maxToolIterations?: number,
+) {
   return new ExecutionWorker({
     repository: repo,
     provider,
@@ -46,7 +54,22 @@ function worker(repo: ExecutionRepository, provider: ConversationAgentProvider, 
     heartbeatIntervalMs,
     pollIntervalMs: 5,
     recoveryBatchSize: 20,
+    ...(toolBroker ? { toolBroker } : {}),
+    ...(maxToolIterations ? { maxToolIterations } : {}),
   })
+}
+
+function toolBroker(): ConversationToolBroker {
+  return {
+    definitions: [{
+      name: 'workspace_files_list',
+      description: 'List workspace files.',
+      inputSchema: { type: 'object', additionalProperties: false },
+    }],
+    execute: vi.fn().mockResolvedValue({
+      content: '{"ok":true,"files":[],"hasMore":false}',
+    }),
+  }
 }
 
 describe('ExecutionWorker', () => {
@@ -86,6 +109,76 @@ describe('ExecutionWorker', () => {
       claim,
       classification: 'transient',
       code: 'provider_rate_limited',
+    }))
+    expect(repo.complete).not.toHaveBeenCalled()
+  })
+
+  it('executes a governed tool and continues the Provider conversation before completion', async () => {
+    const repo = repository()
+    const broker = toolBroker()
+    const provider = new DeterministicConversationAgentProvider((input, invocation) => (
+      invocation === 1
+        ? {
+            text: '',
+            finishReason: 'tool_calls',
+            toolCall: {
+              providerToolCallId: 'provider-tool-1',
+              name: 'workspace_files_list',
+              input: {},
+            },
+          }
+        : {
+            text: `Found ${input.toolExchanges?.length ?? 0} tool result.`,
+            finishReason: 'stop',
+          }
+    ))
+
+    await worker(repo, provider, 5, broker).runOnce()
+
+    expect(broker.execute).toHaveBeenCalledWith(expect.objectContaining({
+      organizationId: claim.organizationId,
+      sessionId: claim.sessionId,
+      requestedBy: claim.requestedBy,
+      requestedByKind: claim.requestedByKind,
+    }), expect.objectContaining({ name: 'workspace_files_list' }), 1)
+    expect(provider.calls).toHaveLength(2)
+    expect(provider.calls[1]?.toolExchanges).toEqual([{
+      call: {
+        providerToolCallId: 'provider-tool-1',
+        name: 'workspace_files_list',
+        input: {},
+      },
+      assistantText: '',
+      result: '{"ok":true,"files":[],"hasMore":false}',
+    }])
+    expect(repo.complete).toHaveBeenCalledWith({
+      claim,
+      output: 'Found 1 tool result.',
+      providerModel: claim.model,
+    })
+  })
+
+  it('fails the Attempt when the Provider exceeds the bounded tool iteration limit', async () => {
+    const repo = repository()
+    const broker = toolBroker()
+    const provider = new DeterministicConversationAgentProvider((_input, invocation) => ({
+      text: '',
+      finishReason: 'tool_calls',
+      toolCall: {
+        providerToolCallId: `provider-tool-${invocation}`,
+        name: 'workspace_files_list',
+        input: {},
+      },
+    }))
+
+    await worker(repo, provider, 5, broker, 1).runOnce()
+
+    expect(broker.execute).toHaveBeenCalledOnce()
+    expect(provider.calls).toHaveLength(2)
+    expect(repo.fail).toHaveBeenCalledWith(expect.objectContaining({
+      claim,
+      classification: 'terminal',
+      code: 'tool_iteration_limit',
     }))
     expect(repo.complete).not.toHaveBeenCalled()
   })

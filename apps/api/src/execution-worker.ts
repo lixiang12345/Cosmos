@@ -1,7 +1,10 @@
 import {
   AgentProviderError,
+  type ConversationAgentExecutionResult,
   type ConversationAgentProvider,
+  type ConversationAgentToolExchange,
 } from './conversation-agent-provider.js'
+import type { ConversationToolBroker } from './conversation-tool-broker.js'
 import type { ExecutionClaim, ExecutionRepository } from './execution-repository.js'
 
 export type ExecutionWorkerLogger = {
@@ -18,6 +21,8 @@ export type ExecutionWorkerOptions = {
   pollIntervalMs: number
   recoveryBatchSize: number
   retryDelayMs?: number
+  toolBroker?: ConversationToolBroker
+  maxToolIterations?: number
   logger?: ExecutionWorkerLogger
 }
 
@@ -48,6 +53,8 @@ export class ExecutionWorker {
   private readonly pollIntervalMs: number
   private readonly recoveryBatchSize: number
   private readonly retryDelayMs: number
+  private readonly toolBroker?: ConversationToolBroker
+  private readonly maxToolIterations: number
   private readonly logger: ExecutionWorkerLogger
 
   constructor(options: ExecutionWorkerOptions) {
@@ -59,6 +66,11 @@ export class ExecutionWorker {
     this.pollIntervalMs = options.pollIntervalMs
     this.recoveryBatchSize = options.recoveryBatchSize
     this.retryDelayMs = options.retryDelayMs ?? 1_000
+    this.toolBroker = options.toolBroker
+    this.maxToolIterations = options.maxToolIterations ?? 8
+    if (!Number.isSafeInteger(this.maxToolIterations) || this.maxToolIterations < 1 || this.maxToolIterations > 8) {
+      throw new Error('Maximum tool iterations must be an integer between 1 and 8.')
+    }
     this.logger = options.logger ?? noOpLogger
   }
 
@@ -109,13 +121,64 @@ export class ExecutionWorker {
     )
 
     try {
-      const result = await this.provider.execute({
-        model: claim.model,
-        systemPrompt: claim.systemPrompt.trim()
-          || 'You are a software engineering assistant. Complete the requested task accurately.',
-        taskContext: claim.taskContext,
-        signal: providerSignal,
-      })
+      const toolExchanges: ConversationAgentToolExchange[] = []
+      let result: ConversationAgentExecutionResult
+      while (true) {
+        result = await this.provider.execute({
+          model: claim.model,
+          systemPrompt: claim.systemPrompt.trim()
+            || 'You are a software engineering assistant. Complete the requested task accurately.',
+          taskContext: claim.taskContext,
+          ...(this.toolBroker ? {
+            tools: this.toolBroker.definitions,
+            toolExchanges,
+          } : {}),
+          signal: providerSignal,
+        })
+        if (result.finishReason !== 'tool_calls') break
+        if (!this.toolBroker || !result.toolCall) {
+          heartbeatStop.abort()
+          await heartbeat
+          if (shutdownSignal.aborted || leaseLost) return
+          await this.repository.fail({
+            claim,
+            classification: 'terminal',
+            code: 'provider_response_invalid',
+            message: 'Provider returned an invalid tool request.',
+            providerModel: result.providerModel,
+          })
+          return
+        }
+        if (toolExchanges.length >= this.maxToolIterations) {
+          heartbeatStop.abort()
+          await heartbeat
+          if (shutdownSignal.aborted || leaseLost) return
+          await this.repository.fail({
+            claim,
+            classification: 'terminal',
+            code: 'tool_iteration_limit',
+            message: 'Agent exceeded the configured tool-call iteration limit.',
+            providerModel: result.providerModel,
+          })
+          return
+        }
+        const toolResult = await this.toolBroker.execute({
+          organizationId: claim.organizationId,
+          spaceId: claim.spaceId,
+          sessionId: claim.sessionId,
+          turnId: claim.turnId,
+          attemptId: claim.attemptId,
+          workerId: claim.leaseOwner,
+          requestedBy: claim.requestedBy,
+          requestedByKind: claim.requestedByKind,
+          requestId: claim.requestId,
+        }, result.toolCall, toolExchanges.length + 1)
+        toolExchanges.push({
+          call: result.toolCall,
+          assistantText: result.text,
+          result: toolResult.content,
+        })
+      }
       heartbeatStop.abort()
       await heartbeat
       if (shutdownSignal.aborted || leaseLost) return

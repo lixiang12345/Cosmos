@@ -77,9 +77,19 @@ export {
   type ConversationAgentExecutionInput,
   type ConversationAgentExecutionResult,
   type ConversationAgentProvider,
+  type ConversationAgentToolCall,
+  type ConversationAgentToolDefinition,
+  type ConversationAgentToolExchange,
   type DeterministicConversationAgentResponse,
+  type DeterministicConversationAgentResponseValue,
   type OpenAiCompatibleChatCompletionsProviderOptions,
 } from './conversation-agent-provider.js'
+export {
+  GovernedConversationToolBroker,
+  type ConversationToolBroker,
+  type ConversationToolContext,
+  type ConversationToolExecutionResult,
+} from './conversation-tool-broker.js'
 export {
   type ClaimNextExecutionOptions,
   type CompleteExecutionInput,

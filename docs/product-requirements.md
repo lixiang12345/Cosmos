@@ -93,7 +93,7 @@ Relay 是面向研发团队的 Agent 工作系统。用户选择一个可复用 
 | Workers | **Implemented (limited)** | SessionWorker 是 Session-local 子执行而非第二个 Session；Worker runtime 内部 writer 强制父子同租户/同 Session、最大深度、顺序、状态跳转和乐观版本；生产 `/sessions/:sessionId/workers` 只读页按父节点优先分页并重检 Private/ShareGrant 可见性 | provider 委派编排、并发配额/调度、实时事件与取消/恢复控制 |
 | Approval | **Implemented (limited)** | 生产页面使用服务端 pending/assigned/all 查询，展示风险、原因、证据、到期时间和双人进度；决策使用 If-Match、幂等键、assignment/角色与职责分离，批准仅释放精确 ToolCall input hash | 自动过期作业、治理动作审批、通知/SLO 和完整拒绝/失败审计 |
 | Automation | **Prototype** | 界面和本地控制面仅用于确定性演示，没有服务端权威模型 | 实现 API、RBAC、审计、失败恢复并移除生产假操作 |
-| Agent 执行 | **Implemented (limited)** | 独立 Worker 通过 PostgreSQL lease/fencing/FIFO 领取 protocol-1 Turn；对话 provider 只接受固定五模型并按模型族路由凭据；ToolCall coordinator 实现精确审批与外部副作用状态账本；持久化 Attempt、Agent Message 和可恢复 SessionEvent | coordinator 接入对话 provider、coding sandbox、Tool Broker、配额调度、dead-letter 与负载/恢复证据 |
+| Agent 执行 | **Implemented (limited)** | 独立 Worker 通过 PostgreSQL lease/fencing/FIFO 领取 protocol-1 Turn；对话 provider 只接受固定五模型并按模型族路由凭据；受控 Tool Broker 只开放当前 Session Workspace 文件列举/UTF-8 文本读取，并通过 ToolCall coordinator 持久化调用状态、hash 与脱敏事件；coordinator 另实现精确审批与外部副作用状态账本；持久化 Attempt、Agent Message 和可恢复 SessionEvent | coding sandbox、文件/外部写工具、审批后恢复模型回合、SessionWorker 委派、配额调度、dead-letter 与负载/恢复证据 |
 | 安全与合规 | **Partial** | 生产配置强制数据库、OIDC 与 CORS；已有 membership/RBAC、Private ShareGrant、ServiceAccount exact operation policy、FORCE RLS/受限数据库角色、append-only success audit 和跨 tenant 负向测试 | 补齐 Secret 管理、合规访问、拒绝/失败审计、实时撤权与生产安全复核，并完成 [数据模型、权限与 Session 生命周期](./data-model-permissions-session-lifecycle.md) 和 [生产架构基线](./production-architecture.md) 的 P0 门槛 |
 
 结论：当前版本是“可验证的全栈纵向切片 + 完整原型”，不是可公网暴露或承载客户数据的生产版。

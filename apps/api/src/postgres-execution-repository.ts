@@ -20,6 +20,7 @@ type CandidateRow = {
   command_id: string
   request_id: string
   requested_by: string
+  requested_by_kind: 'user' | 'service_account'
   attempts: number
   queued_attempt_id: string | null
   queued_attempt_number: number | null
@@ -157,6 +158,11 @@ export class PostgresExecutionRepository implements ExecutionRepository {
           command_record.id AS command_id,
           command_record.request_id,
           command_record.requested_by,
+          CASE WHEN EXISTS (
+            SELECT 1 FROM relay_service_accounts service_account
+            WHERE service_account.organization_id = command_record.organization_id
+              AND service_account.id = command_record.requested_by
+          ) THEN 'service_account' ELSE 'user' END AS requested_by_kind,
           command_record.attempts,
           queued_attempt.id AS queued_attempt_id,
           queued_attempt.number AS queued_attempt_number,
@@ -391,6 +397,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
         leaseExpiresAt: timestamp(claimed.lease_expires_at),
         requestId: selected.request_id,
         requestedBy: selected.requested_by,
+        requestedByKind: selected.requested_by_kind,
         model: selected.model,
         systemPrompt: selected.instructions,
         taskContext: selected.input_content,

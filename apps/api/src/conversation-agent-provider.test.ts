@@ -14,6 +14,16 @@ const input: ConversationAgentExecutionInput = {
   taskContext: 'Review the pinned task context without using tools.',
 }
 
+const workspaceListTool = {
+  name: 'workspace_files_list',
+  description: 'List current workspace files.',
+  inputSchema: {
+    type: 'object',
+    properties: { limit: { type: 'integer', minimum: 1, maximum: 50 } },
+    additionalProperties: false,
+  },
+} as const
+
 function completionResponse(content = 'The analysis is complete.', overrides: Record<string, unknown> = {}) {
   return new Response(JSON.stringify({
     id: 'chatcmpl-1',
@@ -125,6 +135,100 @@ describe('OpenAI-compatible conversation provider', () => {
     await expect(provider.execute(input)).resolves.toMatchObject({
       providerModel: 'pinned-model-v1-20260701',
       text: 'Alias response.',
+    })
+  })
+
+  it('normalizes one governed tool request and sends its result in continuation history', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(completionResponse('', {
+        choices: [{
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: null,
+            tool_calls: [{
+              id: 'provider-tool-1',
+              type: 'function',
+              function: { name: 'workspace_files_list', arguments: '{"limit":5}' },
+            }],
+          },
+          finish_reason: 'tool_calls',
+        }],
+      }))
+      .mockResolvedValueOnce(completionResponse('There are no files.'))
+    const provider = providerWith(fetchMock as unknown as typeof fetch)
+
+    const first = await provider.execute({ ...input, tools: [workspaceListTool] })
+    expect(first).toEqual({
+      providerResponseId: 'chatcmpl-1',
+      providerModel: 'pinned-model-v1',
+      text: '',
+      finishReason: 'tool_calls',
+      toolCall: {
+        providerToolCallId: 'provider-tool-1',
+        name: 'workspace_files_list',
+        input: { limit: 5 },
+      },
+      usage: { inputTokens: 12, outputTokens: 5, totalTokens: 17 },
+    })
+    await provider.execute({
+      ...input,
+      tools: [workspaceListTool],
+      toolExchanges: [{
+        call: first.toolCall!,
+        assistantText: first.text,
+        result: '{"ok":true,"files":[],"hasMore":false}',
+      }],
+    })
+
+    const firstBody = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))
+    expect(firstBody).toMatchObject({
+      tools: [{ type: 'function', function: { name: 'workspace_files_list' } }],
+      tool_choice: 'auto',
+      parallel_tool_calls: false,
+    })
+    const continuation = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body))
+    expect(continuation.messages.slice(-2)).toEqual([
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [{
+          id: 'provider-tool-1',
+          type: 'function',
+          function: { name: 'workspace_files_list', arguments: '{"limit":5}' },
+        }],
+      },
+      {
+        role: 'tool',
+        tool_call_id: 'provider-tool-1',
+        content: '{"ok":true,"files":[],"hasMore":false}',
+      },
+    ])
+  })
+
+  it.each([
+    ['unknown_tool', '{}'],
+    ['workspace_files_list', '{'],
+    ['workspace_files_list', '[]'],
+  ])('rejects an invalid governed tool request for %s', async (name, argumentsValue) => {
+    const provider = providerWith(vi.fn(async () => completionResponse('', {
+      choices: [{
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: null,
+          tool_calls: [{
+            id: 'provider-tool-invalid',
+            type: 'function',
+            function: { name, arguments: argumentsValue },
+          }],
+        },
+        finish_reason: 'tool_calls',
+      }],
+    })) as unknown as typeof fetch)
+
+    await expect(provider.execute({ ...input, tools: [workspaceListTool] })).rejects.toMatchObject({
+      classification: 'terminal', code: 'provider_response_invalid',
     })
   })
 
@@ -284,7 +388,7 @@ describe('OpenAI-compatible conversation provider', () => {
     expect(error).toMatchObject({ classification: 'terminal', code: 'execution_cancelled' })
   })
 
-  it('rejects malformed JSON, invalid response shapes, and tool calls as terminal', async () => {
+  it('rejects malformed JSON, invalid response shapes, and unsolicited tool calls as terminal', async () => {
     const malformed = providerWith(vi.fn(async () => new Response('{', {
       headers: { 'content-type': 'application/json' },
     })) as unknown as typeof fetch)

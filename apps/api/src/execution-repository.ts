@@ -12,6 +12,7 @@ export type ExecutionLeaseFence = Readonly<{
 export type ExecutionClaim = ExecutionLeaseFence & Readonly<{
   requestId: string
   requestedBy: string
+  requestedByKind: 'user' | 'service_account'
   model: string
   systemPrompt: string
   taskContext: string

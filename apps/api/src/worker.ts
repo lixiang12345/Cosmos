@@ -1,8 +1,11 @@
 import { OpenAiCompatibleChatCompletionsProvider } from './conversation-agent-provider.js'
+import { GovernedConversationToolBroker } from './conversation-tool-broker.js'
 import { ExecutionWorker, type ExecutionWorkerLogger } from './execution-worker.js'
 import { assertMigrationsCurrent } from './migrations.js'
 import { PostgresExecutionRepository } from './postgres-execution-repository.js'
+import { PostgresFileRepository } from './postgres-file-repository.js'
 import { assertRuntimeDatabaseRole, createRuntimePool } from './postgres-runtime-database.js'
+import { PostgresToolCoordinatorRepository } from './postgres-tool-coordinator-repository.js'
 import { PostgresWorkerReadinessRepository } from './postgres-worker-readiness-repository.js'
 import { loadWorkerConfig } from './worker-config.js'
 import { maintainWorkerReadiness } from './worker-readiness-heartbeat.js'
@@ -32,6 +35,10 @@ try {
   await assertMigrationsCurrent(pool)
   const provider = new OpenAiCompatibleChatCompletionsProvider(config.provider)
   const repository = new PostgresExecutionRepository(pool)
+  const toolBroker = new GovernedConversationToolBroker(
+    new PostgresToolCoordinatorRepository(pool),
+    new PostgresFileRepository(pool),
+  )
   const readinessRepository = new PostgresWorkerReadinessRepository(pool)
   const worker = new ExecutionWorker({
     repository,
@@ -41,6 +48,7 @@ try {
     heartbeatIntervalMs: config.heartbeatIntervalMs,
     pollIntervalMs: config.pollIntervalMs,
     recoveryBatchSize: config.recoveryBatchSize,
+    toolBroker,
     logger,
   })
   const readinessHeartbeat = maintainWorkerReadiness({

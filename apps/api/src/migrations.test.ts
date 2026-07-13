@@ -59,6 +59,8 @@ const migrationVersions = [
   '054_harden_tool_approval_runtime_policies.sql',
   '055_session_workers.sql',
   '056_validate_session_workers.sql',
+  '057_worker_workspace_file_reads.sql',
+  '058_validate_worker_workspace_file_reads.sql',
 ]
 
 function poolWithVersions(versions: string[]) {

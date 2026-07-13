@@ -2,14 +2,35 @@ export type ConversationAgentExecutionInput = Readonly<{
   model: string
   systemPrompt: string
   taskContext: string
+  tools?: readonly ConversationAgentToolDefinition[]
+  toolExchanges?: readonly ConversationAgentToolExchange[]
   signal?: AbortSignal
+}>
+
+export type ConversationAgentToolDefinition = Readonly<{
+  name: string
+  description: string
+  inputSchema: Readonly<Record<string, unknown>>
+}>
+
+export type ConversationAgentToolCall = Readonly<{
+  providerToolCallId: string
+  name: string
+  input: Readonly<Record<string, unknown>>
+}>
+
+export type ConversationAgentToolExchange = Readonly<{
+  call: ConversationAgentToolCall
+  assistantText: string
+  result: string
 }>
 
 export type ConversationAgentExecutionResult = Readonly<{
   providerResponseId: string
   providerModel: string
   text: string
-  finishReason: 'stop' | 'length' | 'content_filter'
+  finishReason: 'stop' | 'length' | 'content_filter' | 'tool_calls'
+  toolCall?: ConversationAgentToolCall
   usage?: Readonly<{
     inputTokens: number
     outputTokens: number
@@ -76,6 +97,10 @@ const DEFAULT_MAX_RESPONSE_BYTES = 1_048_576
 const MAX_MODEL_LENGTH = 256
 const MAX_SYSTEM_PROMPT_LENGTH = 200_000
 const MAX_TASK_CONTEXT_LENGTH = 1_000_000
+const MAX_TOOL_DESCRIPTION_LENGTH = 4_000
+const MAX_TOOL_ARGUMENTS_LENGTH = 100_000
+const MAX_TOOL_RESULT_LENGTH = 100_000
+const MAX_TOOL_EXCHANGES = 8
 const PROVIDER_REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
 
 type ResolvedProviderOptions = {
@@ -140,6 +165,13 @@ function validateApiKey(value: string, name: string) {
 function validateModelIdentifier(value: string, name: string) {
   if (!value || value !== value.trim() || value.length > MAX_MODEL_LENGTH) {
     throw terminalError('provider_validation_error', `${name} must be a valid model identifier.`)
+  }
+  return value
+}
+
+function validateToolName(value: string, name: string) {
+  if (!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(value)) {
+    throw terminalError('provider_validation_error', `${name} must be a safe tool identifier.`)
   }
   return value
 }
@@ -247,6 +279,48 @@ function validateInput(input: ConversationAgentExecutionInput) {
   ) {
     throw terminalError('provider_validation_error', 'Pinned task context is invalid or too large.')
   }
+  const tools = input.tools ?? []
+  if (tools.length > 20) {
+    throw terminalError('provider_validation_error', 'At most 20 tools can be enabled for one execution.')
+  }
+  const names = new Set<string>()
+  for (const tool of tools) {
+    const name = validateToolName(tool.name, 'Tool name')
+    if (names.has(name)) {
+      throw terminalError('provider_validation_error', 'Enabled tool names must be unique.')
+    }
+    names.add(name)
+    if (
+      typeof tool.description !== 'string'
+      || !tool.description.trim()
+      || tool.description !== tool.description.trim()
+      || tool.description.length > MAX_TOOL_DESCRIPTION_LENGTH
+      || !isRecord(tool.inputSchema)
+    ) {
+      throw terminalError('provider_validation_error', 'Enabled tool metadata is invalid.')
+    }
+  }
+  const toolExchanges = input.toolExchanges ?? []
+  if (toolExchanges.length > MAX_TOOL_EXCHANGES || (toolExchanges.length > 0 && tools.length === 0)) {
+    throw terminalError('provider_validation_error', 'Tool exchange history is invalid.')
+  }
+  for (const exchange of toolExchanges) {
+    if (
+      !exchange
+      || !isRecord(exchange.call.input)
+      || typeof exchange.call.providerToolCallId !== 'string'
+      || !exchange.call.providerToolCallId.trim()
+      || exchange.call.providerToolCallId.length > 512
+      || !names.has(exchange.call.name)
+      || typeof exchange.assistantText !== 'string'
+      || exchange.assistantText.length > MAX_SYSTEM_PROMPT_LENGTH
+      || typeof exchange.result !== 'string'
+      || !exchange.result
+      || exchange.result.length > MAX_TOOL_RESULT_LENGTH
+    ) {
+      throw terminalError('provider_validation_error', 'Tool exchange history is invalid.')
+    }
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -258,7 +332,32 @@ function readSafeInteger(record: Record<string, unknown>, key: string) {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined
 }
 
-function parseProviderResponse(value: unknown, maxOutputCharacters: number): ConversationAgentExecutionResult {
+function hasBoundedJsonComplexity(value: unknown) {
+  const pending: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }]
+  let nodes = 0
+  while (pending.length > 0) {
+    const current = pending.pop()
+    if (!current || current.depth > 10 || ++nodes > 1_000) return false
+    if (typeof current.value === 'string' && current.value.length > 20_000) return false
+    if (Array.isArray(current.value)) {
+      for (const entry of current.value) pending.push({ value: entry, depth: current.depth + 1 })
+    } else if (isRecord(current.value)) {
+      const entries = Object.entries(current.value)
+      if (entries.length > 100) return false
+      for (const [key, entry] of entries) {
+        if (key.length > 256) return false
+        pending.push({ value: entry, depth: current.depth + 1 })
+      }
+    }
+  }
+  return true
+}
+
+function parseProviderResponse(
+  value: unknown,
+  maxOutputCharacters: number,
+  allowedToolNames: ReadonlySet<string>,
+): ConversationAgentExecutionResult {
   if (!isRecord(value) || value.object !== 'chat.completion') {
     throw terminalError('provider_response_invalid', 'Provider returned an invalid chat completion response.')
   }
@@ -286,18 +385,62 @@ function parseProviderResponse(value: unknown, maxOutputCharacters: number): Con
   const message = choice.message
   if (
     message.role !== 'assistant'
-    || typeof message.content !== 'string'
-    || Object.hasOwn(message, 'tool_calls')
+    || (typeof message.content !== 'string' && message.content !== null)
     || Object.hasOwn(message, 'function_call')
   ) {
-    throw terminalError('provider_response_invalid', 'Provider returned a non-conversational response.')
+    throw terminalError('provider_response_invalid', 'Provider returned an invalid assistant response.')
   }
-  if (message.content.length > maxOutputCharacters) {
+  const content = message.content ?? ''
+  if (content.length > maxOutputCharacters) {
     throw terminalError('provider_response_too_large', 'Provider output exceeded the configured size limit.')
   }
   const finishReason = choice.finish_reason
-  if (finishReason !== 'stop' && finishReason !== 'length' && finishReason !== 'content_filter') {
+  if (
+    finishReason !== 'stop'
+    && finishReason !== 'length'
+    && finishReason !== 'content_filter'
+    && finishReason !== 'tool_calls'
+  ) {
     throw terminalError('provider_response_invalid', 'Provider returned an unsupported finish reason.')
+  }
+  let toolCall: ConversationAgentToolCall | undefined
+  const toolCalls = message.tool_calls
+  if (finishReason === 'tool_calls') {
+    if (!Array.isArray(toolCalls) || toolCalls.length !== 1 || allowedToolNames.size === 0) {
+      throw terminalError('provider_response_invalid', 'Provider returned an invalid tool request.')
+    }
+    const candidate = toolCalls[0]
+    if (
+      !isRecord(candidate)
+      || candidate.type !== 'function'
+      || typeof candidate.id !== 'string'
+      || !candidate.id.trim()
+      || candidate.id !== candidate.id.trim()
+      || candidate.id.length > 512
+      || !isRecord(candidate.function)
+      || typeof candidate.function.name !== 'string'
+      || !allowedToolNames.has(candidate.function.name)
+      || typeof candidate.function.arguments !== 'string'
+      || candidate.function.arguments.length > MAX_TOOL_ARGUMENTS_LENGTH
+    ) {
+      throw terminalError('provider_response_invalid', 'Provider returned an invalid tool request.')
+    }
+    let parsedInput: unknown
+    try {
+      parsedInput = JSON.parse(candidate.function.arguments)
+    } catch {
+      throw terminalError('provider_response_invalid', 'Provider returned malformed tool arguments.')
+    }
+    if (!isRecord(parsedInput) || !hasBoundedJsonComplexity(parsedInput)) {
+      throw terminalError('provider_response_invalid', 'Provider tool arguments must be a bounded JSON object.')
+    }
+    toolCall = {
+      providerToolCallId: candidate.id,
+      name: candidate.function.name,
+      input: parsedInput,
+    }
+  } else if (toolCalls !== undefined) {
+    throw terminalError('provider_response_invalid', 'Provider returned tool calls without a tool finish reason.')
   }
   let usage: ConversationAgentExecutionResult['usage']
   if (value.usage !== undefined) {
@@ -315,8 +458,9 @@ function parseProviderResponse(value: unknown, maxOutputCharacters: number): Con
   return {
     providerResponseId: id,
     providerModel: model,
-    text: message.content,
+    text: content,
     finishReason,
+    ...(toolCall ? { toolCall } : {}),
     ...(usage ? { usage } : {}),
   }
 }
@@ -417,6 +561,8 @@ export class OpenAiCompatibleChatCompletionsProvider implements ConversationAgen
   async execute(input: ConversationAgentExecutionInput): Promise<ConversationAgentExecutionResult> {
     validateInput(input)
     const apiKey = apiKeyForModel(this.#options, input.model)
+    const tools = input.tools ?? []
+    const allowedToolNames = new Set(tools.map((tool) => tool.name))
     if (input.signal?.aborted) {
       throw terminalError('execution_cancelled', 'Agent execution was cancelled.')
     }
@@ -446,7 +592,38 @@ export class OpenAiCompatibleChatCompletionsProvider implements ConversationAgen
             messages: [
               { role: 'system', content: input.systemPrompt },
               { role: 'user', content: input.taskContext },
+              ...(input.toolExchanges ?? []).flatMap((exchange) => [
+                {
+                  role: 'assistant',
+                  content: exchange.assistantText || null,
+                  tool_calls: [{
+                    id: exchange.call.providerToolCallId,
+                    type: 'function',
+                    function: {
+                      name: exchange.call.name,
+                      arguments: JSON.stringify(exchange.call.input),
+                    },
+                  }],
+                },
+                {
+                  role: 'tool',
+                  tool_call_id: exchange.call.providerToolCallId,
+                  content: exchange.result,
+                },
+              ]),
             ],
+            ...(tools.length > 0 ? {
+              tools: tools.map((tool) => ({
+                type: 'function',
+                function: {
+                  name: tool.name,
+                  description: tool.description,
+                  parameters: tool.inputSchema,
+                },
+              })),
+              tool_choice: 'auto',
+              parallel_tool_calls: false,
+            } : {}),
             max_tokens: this.#options.maxOutputTokens,
             stream: false,
           }),
@@ -489,7 +666,7 @@ export class OpenAiCompatibleChatCompletionsProvider implements ConversationAgen
         throw httpError(response.status)
       }
       const value = await readBoundedJson(response, this.#options.maxResponseBytes)
-      return parseProviderResponse(value, this.#options.maxOutputCharacters)
+      return parseProviderResponse(value, this.#options.maxOutputCharacters, allowedToolNames)
     } catch (error) {
       if (error instanceof AgentProviderError) throw error
       if (input.signal?.aborted) {
@@ -531,10 +708,16 @@ export function createConversationAgentProvider(
     : new UnavailableConversationAgentProvider()
 }
 
-export type DeterministicConversationAgentResponse = string | ((
+export type DeterministicConversationAgentResponseValue = string | Readonly<{
+  text: string
+  finishReason: ConversationAgentExecutionResult['finishReason']
+  toolCall?: ConversationAgentToolCall
+}>
+
+export type DeterministicConversationAgentResponse = DeterministicConversationAgentResponseValue | ((
   input: ConversationAgentExecutionInput,
   invocation: number,
-) => string)
+) => DeterministicConversationAgentResponseValue)
 
 export class DeterministicConversationAgentProvider implements ConversationAgentProvider {
   private readonly executedInputs: ConversationAgentExecutionInput[] = []
@@ -556,14 +739,16 @@ export class DeterministicConversationAgentProvider implements ConversationAgent
     const invocation = this.executedInputs.length + 1
     const capturedInput = { ...input }
     this.executedInputs.push(capturedInput)
-    const text = typeof this.response === 'function'
+    const response = typeof this.response === 'function'
       ? this.response(capturedInput, invocation)
       : this.response
+    const normalized = typeof response === 'string'
+      ? { text: response, finishReason: 'stop' as const }
+      : response
     return {
       providerResponseId: `deterministic-${invocation}`,
       providerModel: input.model,
-      text,
-      finishReason: 'stop',
+      ...normalized,
     }
   }
 }
