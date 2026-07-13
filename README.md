@@ -89,6 +89,7 @@ pnpm openapi:bundle
 - `GET /api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/events`
 - `GET /api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/events/stream`
 - `POST /api/v1/organizations/:organizationId/spaces/:spaceId/sessions`
+- `POST /api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/start`
 - `GET /api/v1/organizations/:organizationId/spaces/:spaceId/experts`
 - `GET /api/v1/organizations/:organizationId/spaces/:spaceId/experts/:expertId`
 - `GET /api/v1/organizations/:organizationId/spaces/:spaceId/environments`
@@ -100,6 +101,7 @@ pnpm openapi:bundle
 - API 成功响应与结构化错误均由 `@relay/contracts` 校验。
 - Expert/Environment Catalog 使用 keyset cursor 分页；详情返回资源版本 `ETag`。生产 Web 只使用服务端 Published Expert 启动或保存 Session；当部署未显式开启基础执行时仅保存 draft，不提供本地假编辑或伪执行。
 - `start=false` 会原子持久化 draft Session、首条 Message、2 条连续 SessionEvent 与 1 条脱敏成功审计，但不会创建 Turn、Command 或 Outbox；用户输入不会被静默丢弃，也不会误入执行队列。
+- draft start 要求 `If-Match` 和 `Idempotency-Key`，复用已保存的首条 Message，并在单一事务中把 Session 更新为 `queued`、创建首个 Turn/Command/Outbox、追加连续 SessionEvent 与脱敏 AuditEvent；不会重复 Message 或执行事实。
 - protocol-1 Worker 使用 PostgreSQL 并发 claim、数据库权威租约、heartbeat、fencing、有限重试和过期租约恢复；每个进程另写可过期的就绪心跳，API 以此动态关闭新执行入口而不影响只读控制面；每次 Attempt 保留历史，撤销写权限会取消尚未开始或正在运行的链路。
 - 当前 Agent provider 只产出受大小限制的对话 Message；provider endpoint 的 301/302/303/307/308 重定向不会被跟随，并按终止型配置错误处理。SessionEvent 以单调 sequence 持久化，并可通过 cursor 分页或 `Last-Event-ID` 恢复 SSE。SSE 心跳期间会重新认证并重检 membership。
 

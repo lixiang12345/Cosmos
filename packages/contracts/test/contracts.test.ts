@@ -8,6 +8,7 @@ import {
   SessionDtoSchema,
   SessionListResponseSchema,
   SessionStatusSchema,
+  StartSessionResponseSchema,
   SessionVisibilitySchema,
 } from '../src/index.js'
 
@@ -131,6 +132,10 @@ describe('session contracts', () => {
     expect(CreateSessionResponseSchema.parse({ session, message, turn, command })).toEqual({
       session, message, turn, command,
     })
+    expect(StartSessionResponseSchema.parse({ session, turn, command })).toEqual({
+      session, turn, command,
+    })
+    expect(StartSessionResponseSchema.safeParse({ session, message, turn, command }).success).toBe(false)
     expect(SessionListResponseSchema.parse({
       items: [session],
       page: { nextCursor: null, hasMore: false, projectionUpdatedAt: session.updatedAt },

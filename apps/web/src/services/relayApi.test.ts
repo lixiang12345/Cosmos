@@ -26,6 +26,7 @@ import {
   listSessions,
   resolveRelayApiBaseUrl,
   resolveRelayApiRequestUrl,
+  startSession,
   streamSessionEvents,
 } from './relayApi'
 
@@ -350,6 +351,47 @@ describe('Relay API client', () => {
       '/api/v1/organizations/relay/spaces/space-platform/sessions/session-1',
       expect.objectContaining({ method: 'GET' }),
     )
+  })
+
+  it('starts a draft without resending its Message and validates the linked result', async () => {
+    const queuedSession = { ...session, status: 'queued' as const, version: 2 }
+    const turn = {
+      id: 'turn-1', sessionId: session.id, ordinal: 1, initiatorType: 'user' as const,
+      initiatorId: 'user-1', inputMessageId: 'message-1', status: 'queued' as const,
+      queuedAt: session.updatedAt, version: 1,
+    }
+    const command = {
+      id: 'command-1', type: 'session.start' as const, status: 'accepted' as const,
+      resourceType: 'turn' as const, resourceId: turn.id, acceptedAt: session.updatedAt,
+    }
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+      session: queuedSession, turn, command,
+    }, 202))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(startSession(
+      'relay', 'space-platform', session.id, 1, 'start-session-1',
+      { accessToken: 'access-token' },
+    )).resolves.toEqual({ session: queuedSession, turn, command })
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/organizations/relay/spaces/space-platform/sessions/session-1/start',
+      expect.objectContaining({ method: 'POST', headers: expect.any(Headers) }),
+    )
+    expect(fetchMock.mock.calls[0][1]?.body).toBeUndefined()
+    const headers = new Headers(fetchMock.mock.calls[0][1]?.headers)
+    expect(headers.get('Idempotency-Key')).toBe('start-session-1')
+    expect(headers.get('If-Match')).toBe('"1"')
+    expect(headers.get('Content-Type')).toBeNull()
+    expect(headers.get('Authorization')).toBe('Bearer access-token')
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      session: queuedSession,
+      turn: { ...turn, sessionId: 'another-session' },
+      command,
+    }, 202))
+    await expect(startSession(
+      'relay', 'space-platform', session.id, 1, 'start-session-2',
+    )).rejects.toMatchObject({ code: 'INVALID_RESPONSE', status: 202 })
   })
 
   it('discovers execution capability only from a strict authenticated response', async () => {

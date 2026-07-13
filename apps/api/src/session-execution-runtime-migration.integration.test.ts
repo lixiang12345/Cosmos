@@ -109,7 +109,7 @@ async function seedLegacyExecutionRows(pool: Pool) {
   `)
 }
 
-describeWithDatabase('016-029 Session execution runtime migrations', () => {
+describeWithDatabase('016-033 Session execution runtime migrations', () => {
   const adminPool = new Pool({ connectionString: databaseUrl })
 
   beforeAll(async () => {

@@ -35,6 +35,7 @@ import {
   getRuntimeCapabilities,
   getSession,
   listSessions,
+  startSession,
 } from './services/relayApi'
 import type { NewTaskInput, Run, RunAttempt, TaskCreateMode } from './types'
 import { canCreateSessionInWorkspace, useActiveWorkspace } from './workspace'
@@ -68,8 +69,8 @@ function mapSessionStatus(status: SessionDto['status']): Run['status'] {
   return status === 'active' ? 'running' : status
 }
 
-function makeSessionIdempotencyKey() {
-  return `session-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+function makeSessionIdempotencyKey(scope = String(Date.now())) {
+  return `session-${scope}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }
 
 function sessionDtoToDemoRun(session: SessionDto, locale: 'zh' | 'en'): Run {
@@ -289,6 +290,7 @@ function SessionRoute({
   credentialVersion,
   requestIdentity,
   timelineTransport,
+  executionEnabled,
   handleUnauthorized,
   demoMode,
   locale,
@@ -307,6 +309,7 @@ function SessionRoute({
   credentialVersion: number
   requestIdentity: string
   timelineTransport?: 'polling' | 'sse'
+  executionEnabled: boolean
   handleUnauthorized: (failedAccessToken: string | undefined) => Promise<void>
   demoMode: boolean
   locale: 'zh' | 'en'
@@ -329,6 +332,16 @@ function SessionRoute({
     notFound?: boolean
     concealed?: boolean
   }>()
+  const [startMutation, setStartMutation] = useState<{
+    key: string
+    status: 'idle' | 'submitting' | 'error'
+    error?: string
+  }>()
+  const startRequest: { status: 'idle' | 'submitting' | 'error'; error?: string } = startMutation
+    && startMutation.key === sessionId
+    ? startMutation
+    : { status: 'idle' as const }
+  const startIdempotencyKey = useMemo(() => makeSessionIdempotencyKey(sessionId), [sessionId])
   const run = runs.find((item) => item.id === sessionId)
   const auth = useMemo(
     () => ({ accessToken, requestIdentity, onUnauthorized: handleUnauthorized }),
@@ -401,6 +414,37 @@ function SessionRoute({
       : currentRequest?.session
   ), [currentRequest, latestSessionUpdate])
 
+  const startDraft = useCallback(() => {
+    if (!resolvedSession || resolvedSession.status !== 'draft' || !executionEnabled) return
+    setStartMutation({ key: resolvedSession.id, status: 'submitting' })
+    void startSession(
+      organizationId,
+      spaceId,
+      resolvedSession.id,
+      resolvedSession.version,
+      startIdempotencyKey,
+      auth,
+    ).then((response) => {
+      setRequest((current) => current?.key === requestKey
+        ? { key: requestKey, status: 'ready', session: response.session }
+        : current)
+      onSessionObserved(response.session)
+      setStartMutation({ key: response.session.id, status: 'idle' })
+    }, (cause: unknown) => {
+      const message = cause instanceof Error
+        ? cause.message
+        : (locale === 'zh' ? '无法启动会话。' : 'Unable to start the Session.')
+      if (cause instanceof RelayApiError && cause.status === 412) {
+        setRetryVersion((version) => version + 1)
+      }
+      if (cause instanceof RelayApiError && cause.status !== undefined && [401, 403, 404].includes(cause.status)) {
+        concealDetail(message)
+        return
+      }
+      setStartMutation({ key: resolvedSession.id, status: 'error', error: message })
+    })
+  }, [auth, concealDetail, executionEnabled, locale, onSessionObserved, organizationId, requestKey, resolvedSession, spaceId, startIdempotencyKey])
+
   useEffect(() => {
     if (!resolvedSession || resolvedSession === currentRequest?.session) return
     onSessionObserved(resolvedSession)
@@ -447,6 +491,10 @@ function SessionRoute({
         events={timeline.events}
         timelineStatus={timeline.status}
         timelineError={timeline.error}
+        executionEnabled={executionEnabled}
+        startStatus={startRequest.status}
+        startError={startRequest.error}
+        onStart={startDraft}
         onOpenNavigation={onOpenNavigation}
         onBack={() => navigate('/sessions')}
       />
@@ -1379,6 +1427,7 @@ function RelayApp() {
             credentialVersion={credentialVersion}
             requestIdentity={requestIdentity}
             timelineTransport={currentRuntimeCapability?.events ?? 'polling'}
+            executionEnabled={demoMode || productionExecutionEnabled}
             handleUnauthorized={handleUnauthorized}
             demoMode={demoMode}
             locale={locale}

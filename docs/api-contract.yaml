@@ -801,33 +801,51 @@ paths:
 
   /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/start:
     parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
       - $ref: '#/components/parameters/SessionId'
     post:
       tags: [Sessions]
       operationId: startSession
+      x-relay-implementation-status: implemented
       summary: Start a draft Session with its first message
+      description: |
+        Atomically transitions a draft Session to queued and creates the first Turn,
+        Command, execution Outbox event, timeline events, and audit record. The saved
+        first user Message is reused; this operation does not accept a request body.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/IfMatch'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/MessageCreate'
       responses:
         '202':
           description: First Turn queued
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Idempotency-Replayed:
+              $ref: '#/components/headers/IdempotencyReplayed'
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TurnCommandResult'
+                $ref: '#/components/schemas/RuntimeSessionStartResult'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/RuntimeConflict'
         '412':
-          $ref: '#/components/responses/PreconditionFailed'
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '428':
+          $ref: '#/components/responses/RuntimePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+        '503':
+          $ref: '#/components/responses/RuntimeServiceUnavailable'
 
   /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/messages:
     parameters:
@@ -2290,7 +2308,29 @@ components:
           schema:
             $ref: '#/components/schemas/RuntimeApiError'
     RuntimeConflict:
-      description: The idempotency key was reused with a different request
+      description: The idempotency key was reused with a different request or the Session state cannot transition
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/PrivateNoStore'
+        Vary:
+          $ref: '#/components/headers/VaryAuthorization'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RuntimeApiError'
+    RuntimePreconditionFailed:
+      description: If-Match does not equal the current Session version
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/PrivateNoStore'
+        Vary:
+          $ref: '#/components/headers/VaryAuthorization'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RuntimeApiError'
+    RuntimePreconditionRequired:
+      description: The required If-Match header was not supplied
       headers:
         Cache-Control:
           $ref: '#/components/headers/PrivateNoStore'
@@ -3155,6 +3195,17 @@ components:
           $ref: '#/components/schemas/RuntimeSession'
         message:
           $ref: '#/components/schemas/RuntimeSessionMessage'
+        turn:
+          $ref: '#/components/schemas/RuntimeSessionTurn'
+        command:
+          $ref: '#/components/schemas/RuntimeSessionCommand'
+      additionalProperties: false
+    RuntimeSessionStartResult:
+      type: object
+      required: [session, turn, command]
+      properties:
+        session:
+          $ref: '#/components/schemas/RuntimeSession'
         turn:
           $ref: '#/components/schemas/RuntimeSessionTurn'
         command:

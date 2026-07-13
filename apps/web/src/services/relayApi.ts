@@ -12,6 +12,7 @@ import {
   SessionEventPageSchema,
   SessionListResponseSchema,
   SessionMessagePageSchema,
+  StartSessionResponseSchema,
   type ApiError,
   type CreateSessionRequestInput,
   type CreateSessionResponse,
@@ -27,6 +28,7 @@ import {
   type SessionEventPage,
   type SessionListResponse,
   type SessionMessagePage,
+  type StartSessionResponse,
 } from '@relay/contracts'
 
 const DEFAULT_RELAY_API_BASE_URL = '/api'
@@ -456,6 +458,35 @@ export function getSession(
   }, SessionDtoSchema, auth).then((session) => {
     assertSessionScope(session, organizationId, spaceId, sessionId)
     return session
+  })
+}
+
+export function startSession(
+  organizationId: string,
+  spaceId: string,
+  sessionId: string,
+  version: number,
+  idempotencyKey: string,
+  auth?: RelayApiAuthContext,
+): Promise<StartSessionResponse> {
+  return request(`${sessionPath(organizationId, spaceId, sessionId)}/start`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': `"${version}"`,
+    },
+  }, StartSessionResponseSchema, auth).then((response) => {
+    assertSessionScope(response.session, organizationId, spaceId, sessionId)
+    if (
+      response.turn.sessionId !== sessionId
+      || response.command.resourceId !== response.turn.id
+    ) {
+      throw new RelayApiError('Relay API returned a start result outside the requested Session.', {
+        code: 'INVALID_RESPONSE', status: 202,
+      })
+    }
+    return response
   })
 }
 

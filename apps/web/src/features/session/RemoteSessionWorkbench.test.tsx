@@ -71,6 +71,12 @@ const message: SessionMessageDto = {
 function renderWorkbench(
   overrides: Partial<SessionDto> = {},
   timeline: { messages?: SessionMessageDto[]; events?: SessionEventDto[]; timelineStatus?: 'loading' | 'ready' | 'error'; timelineError?: string } = {},
+  controls: {
+    executionEnabled?: boolean
+    startStatus?: 'idle' | 'submitting' | 'error'
+    startError?: string
+    onStart?: () => void
+  } = {},
 ) {
   const onBack = vi.fn()
   const onOpenNavigation = vi.fn()
@@ -79,6 +85,7 @@ function renderWorkbench(
       <RemoteSessionWorkbench
         session={{ ...session, ...overrides }}
         {...timeline}
+        {...controls}
         onBack={onBack}
         onOpenNavigation={onOpenNavigation}
       />
@@ -134,6 +141,32 @@ describe('RemoteSessionWorkbench', () => {
 
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
     expect(screen.queryByRole('tab')).not.toBeInTheDocument()
+  })
+
+  it('offers the real draft start action only when execution is available', async () => {
+    const user = userEvent.setup()
+    const onStart = vi.fn()
+    const view = renderWorkbench({ status: 'draft', version: 1 }, {}, {
+      executionEnabled: true,
+      onStart,
+    })
+
+    await user.click(screen.getByRole('button', { name: '开始执行' }))
+    expect(onStart).toHaveBeenCalledOnce()
+
+    view.rerender(
+      <PreferencesProvider>
+        <RemoteSessionWorkbench
+          session={{ ...session, status: 'draft', version: 1 }}
+          executionEnabled={false}
+          onStart={onStart}
+          onBack={() => undefined}
+        />
+      </PreferencesProvider>,
+    )
+    expect(screen.getByRole('button', { name: '开始执行' })).toBeDisabled()
+    expect(screen.getByText('当前部署未开放执行。')).toBeInTheDocument()
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
   })
 
   it('supports navigation, copying, language switching, and both themes', async () => {

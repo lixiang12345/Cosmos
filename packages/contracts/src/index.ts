@@ -21,6 +21,7 @@ export {
   SessionMessagePageSchema,
   SessionMessageSchema,
   SessionStatusSchema,
+  StartSessionResponseSchema,
   SessionTurnSchema,
   SessionVisibilitySchema,
   type AttemptDto,
@@ -44,6 +45,7 @@ export {
   type SessionMessagePage,
   type SessionMessage,
   type SessionStatus,
+  type StartSessionResponse,
   type SessionTurn,
   type SessionVisibility,
 } from './session.js'

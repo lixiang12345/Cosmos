@@ -13,6 +13,7 @@ import {
   SessionEventPageSchema,
   SessionListResponseSchema,
   SessionMessagePageSchema,
+  StartSessionResponseSchema,
   type ApiError,
   type SessionEventDto,
   type SessionEventPage,
@@ -48,6 +49,8 @@ import {
   InMemorySessionRepository,
   SessionConfigurationNotFoundError,
   SessionConfigurationValidationError,
+  SessionStateConflictError,
+  SessionVersionConflictError,
   canWriteSpace,
   type SessionRepository,
 } from './session-repository.js'
@@ -160,6 +163,16 @@ function readIdempotencyKey(request: FastifyRequest) {
   const value = request.headers['idempotency-key']
   if (typeof value !== 'string' || !IDEMPOTENCY_KEY_PATTERN.test(value)) return null
   return value
+}
+
+function readIfMatchVersion(request: FastifyRequest) {
+  const value = request.headers['if-match']
+  if (value === undefined) return undefined
+  if (typeof value !== 'string') return null
+  const match = /^"([1-9][0-9]*)"$/.exec(value)
+  if (!match) return null
+  const version = Number(match[1])
+  return Number.isSafeInteger(version) ? version : null
 }
 
 function errorStatusCode(error: unknown) {
@@ -339,6 +352,27 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         code: 'PERMISSION_DENIED',
         message: error.message,
         retryable: false,
+      })
+    }
+
+    if (error instanceof SessionVersionConflictError) {
+      return sendApiError(reply, 412, request, {
+        code: 'PRECONDITION_FAILED',
+        message: error.message,
+        retryable: false,
+        details: {
+          expectedVersion: error.expectedVersion,
+          currentVersion: error.currentVersion,
+        },
+      })
+    }
+
+    if (error instanceof SessionStateConflictError) {
+      return sendApiError(reply, 409, request, {
+        code: 'SESSION_STATE_CONFLICT',
+        message: error.message,
+        retryable: false,
+        details: { status: error.status },
       })
     }
 
@@ -938,6 +972,90 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       command: result.command,
     }))
   })
+
+  app.post<{ Params: SessionParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/start',
+    async (request, reply) => {
+      const authorization = await authorizeSessionSpace(request, reply, request.params)
+      if (!authorization) return
+      const sessionId = parseSpaceId(request.params.sessionId)
+      if (!sessionId) return sendResourceNotFound(reply, request)
+
+      if (!canWriteSpace(authorization.access)) {
+        return sendApiError(reply, 403, request, {
+          code: 'PERMISSION_DENIED',
+          message: 'You do not have permission to start Sessions in this Space.',
+          retryable: false,
+        })
+      }
+
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED',
+          message: 'A valid Idempotency-Key header is required.',
+          retryable: false,
+          fieldErrors: {
+            'Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'],
+          },
+        })
+      }
+
+      const expectedVersion = readIfMatchVersion(request)
+      if (expectedVersion === undefined) {
+        return sendApiError(reply, 428, request, {
+          code: 'PRECONDITION_REQUIRED',
+          message: 'An If-Match header containing the current Session ETag is required.',
+          retryable: false,
+          fieldErrors: { 'header.If-Match': ['Use the quoted ETag returned by the Session detail API.'] },
+        })
+      }
+      if (expectedVersion === null) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED',
+          message: 'The If-Match header is invalid.',
+          retryable: false,
+          fieldErrors: { 'header.If-Match': ['Use a quoted positive integer such as "1".'] },
+        })
+      }
+      if (request.body !== undefined) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED',
+          message: 'Starting a draft Session does not accept a request body.',
+          retryable: false,
+          fieldErrors: { body: ['The saved first Message is reused when the Session starts.'] },
+        })
+      }
+
+      let executionAvailability: 'available' | 'disabled' | 'worker_unavailable' = 'available'
+      if (!executionEnabled) {
+        executionAvailability = 'disabled'
+      } else if (!await executionAvailable(request)) {
+        executionAvailability = 'worker_unavailable'
+      }
+      const result = await sessionRepository.start({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        sessionId,
+        actorId: authorization.actor.id,
+        actorKind: authorization.actor.kind,
+        requestId: request.id,
+        idempotencyKey,
+        expectedVersion,
+        executionAvailability,
+      })
+      if (!result) return sendResourceNotFound(reply, request)
+
+      const response = StartSessionResponseSchema.parse({
+        session: result.session,
+        turn: result.turn,
+        command: result.command,
+      })
+      reply.header('Idempotency-Replayed', String(result.replayed))
+      reply.header('ETag', sessionEtag(response.session))
+      return reply.code(202).send(response)
+    },
+  )
 
   return app
 }

@@ -802,9 +802,51 @@
   color: var(--warning);
 }
 
+.remote-session-execution-state__action {
+  display: flex;
+  min-width: 150px;
+  margin-left: auto;
+  align-items: flex-end;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.remote-session-execution-state__action .cosmos-button {
+  min-width: 120px;
+  justify-content: center;
+}
+
+.remote-session-execution-state__action > span {
+  max-width: 240px;
+  color: var(--text-secondary);
+  font-size: 9px;
+  line-height: 1.4;
+  text-align: right;
+}
+
+.remote-session-execution-state__action > span[role='alert'] {
+  color: var(--danger);
+}
+
 .remote-session-execution-state h2,
 .remote-session-execution-state p {
   margin: 0;
+}
+
+@media (max-width: 640px) {
+  .remote-session-execution-state {
+    flex-wrap: wrap;
+  }
+
+  .remote-session-execution-state__action {
+    width: 100%;
+    margin-left: 27px;
+    align-items: flex-start;
+  }
+
+  .remote-session-execution-state__action > span {
+    text-align: left;
+  }
 }
 
 .remote-session-execution-state--running,

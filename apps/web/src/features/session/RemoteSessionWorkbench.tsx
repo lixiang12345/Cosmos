@@ -19,6 +19,7 @@ import {
   LoaderCircle,
   Menu,
   MessageSquare,
+  Play,
   RotateCcw,
   ShieldCheck,
   XCircle,
@@ -34,6 +35,10 @@ export type RemoteSessionWorkbenchProps = {
   events?: SessionEventDto[]
   timelineStatus?: 'loading' | 'ready' | 'error'
   timelineError?: string
+  executionEnabled?: boolean
+  startStatus?: 'idle' | 'submitting' | 'error'
+  startError?: string
+  onStart?: () => void
   onBack: () => void
   onOpenNavigation?: () => void
 }
@@ -218,6 +223,10 @@ export function RemoteSessionWorkbench({
   events = [],
   timelineStatus = 'loading',
   timelineError,
+  executionEnabled = false,
+  startStatus = 'idle',
+  startError,
+  onStart,
   onBack,
   onOpenNavigation,
 }: RemoteSessionWorkbenchProps) {
@@ -305,6 +314,29 @@ export function RemoteSessionWorkbench({
             </h2>
             <p>{execution.description}</p>
           </div>
+          {session.status === 'draft' && onStart ? (
+            <div className="remote-session-execution-state__action">
+              <button
+                type="button"
+                className="cosmos-button cosmos-button--primary"
+                disabled={!executionEnabled || startStatus === 'submitting'}
+                onClick={onStart}
+              >
+                {startStatus === 'submitting'
+                  ? <LoaderCircle className="cosmos-spin" aria-hidden="true" />
+                  : <Play aria-hidden="true" />}
+                {startStatus === 'submitting'
+                  ? text(locale, '正在启动', 'Starting')
+                  : text(locale, '开始执行', 'Start execution')}
+              </button>
+              {!executionEnabled ? (
+                <span>{text(locale, '当前部署未开放执行。', 'Execution is unavailable in this deployment.')}</span>
+              ) : null}
+              {startStatus === 'error' && startError ? (
+                <span role="alert">{startError}</span>
+              ) : null}
+            </div>
+          ) : null}
         </section>
 
         {timelineStatus === 'error' ? (

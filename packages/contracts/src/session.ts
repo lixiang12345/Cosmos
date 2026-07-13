@@ -482,6 +482,14 @@ export const CreateSessionResponseSchema = z.object({
 
 export type CreateSessionResponse = z.infer<typeof CreateSessionResponseSchema>
 
+export const StartSessionResponseSchema = z.object({
+  session: SessionDtoSchema,
+  turn: SessionTurnSchema,
+  command: SessionCommandSchema,
+}).strict()
+
+export type StartSessionResponse = z.infer<typeof StartSessionResponseSchema>
+
 export const SessionListResponseSchema = z.object({
   items: z.array(SessionDtoSchema),
   page: z.object({

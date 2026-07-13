@@ -21,15 +21,15 @@
 
 | 能力 | Current | Target / 发布门槛 |
 | --- | --- | --- |
-| Session API | 已实现 tenant-scoped list/create/get、Message/Event cursor 分页和可恢复 SSE；Session 列表没有真实 cursor/filter；单资源 GET 与 create 返回 ETag | Session 列表完整分页、rename、send、pause/resume/cancel、archive/restore、share 与显式 Turn retry 命令 |
-| 创建事务 | `start=true` 原子写 Session、首条 Message、首个 Turn、`session.start` Command、Outbox、3 条连续 SessionEvent、1 条脱敏 AuditEvent 和完整幂等响应；`start=false` 写 draft Session、Message、2 条 Event 与 1 条 Audit，不创建执行记录；重放不重复账本 | 所有后续命令也统一使用领域事务、SessionEvent、Command、Outbox、幂等响应和必要审计 |
+| Session API | 已实现 tenant-scoped list/create/get/draft-start、Message/Event cursor 分页和可恢复 SSE；Session 列表没有真实 cursor/filter；单资源 GET、create 与 start 返回 ETag | Session 列表完整分页、rename、send、pause/resume/cancel、archive/restore、share 与显式 Turn retry 命令 |
+| 创建/启动事务 | `start=true` create 原子写 Session、首条 Message、首个 Turn、`session.start` Command、Outbox、3 条连续 SessionEvent、1 条脱敏 AuditEvent 和完整幂等响应；`start=false` 写 draft Session、Message、2 条 Event 与 1 条 Audit，不创建执行记录；draft start 用 `If-Match` 校验版本、复用首条 Message，并原子追加 Turn/Command/Outbox、2 条 Event、1 条 Audit 和幂等响应；重放不重复账本 | 其余后续命令也统一使用领域事务、SessionEvent、Command、Outbox、幂等响应和必要审计 |
 | 配置固定 | 新 Session 由服务端固定 Published ExpertRevision、Ready EnvironmentRevision 和 Repository binding | 增加不可变 ExecutionSnapshot；legacy `configurationResolutionVersion=0` 在修复前只读 |
 | 可见性 | `private` 仅 creator；`space` 对有效 Organization + Space member 可见；查询中重检 membership | User/Group ShareGrant、实时撤权、合规访问与一致的 404 concealment |
 | ServiceAccount | token 可被认证；Session list/get/create 与 Catalog 均在 repository 访问前显式拒绝 ServiceAccount，不接受 membership 作为替代授权 | 绑定 Organization、Space、Automation/Session、audience 与 operation scope；无通配默认权限 |
-| 并发 | create 幂等记录按 organization + actor + method + canonical path + key 隔离，PostgreSQL 并发重放已测试 | 创建/命令统一幂等；替换共享状态使用 If-Match/CAS；追加消息在 Session 锁内排序 |
+| 并发 | create/start 幂等记录按 organization + actor + method + canonical path + key 隔离；draft start 使用 `If-Match`、Session 行锁和原子 version 增量；PostgreSQL 重放已测试 | send 等其余命令统一幂等；追加消息在 Session 锁内排序 |
 | 数据隔离 | 已持久化 Session 子表和幂等引用使用复合 tenant FK；在线索引 + `NOT VALID/VALIDATE` 迁移可修复已版本化旧库；repository SQL 在单条查询中重检 membership | FORCE RLS/统一 tenant guard；受限运行角色不可绕过；覆盖后续新增实体 |
-| 生命周期 | protocol-1 create 后可由 Worker 驱动 queued -> active -> completed/failed/canceled；retry 回到 queued 并追加 Attempt，租约过期可恢复；version 与 SessionEvent 连续更新 | 用户命令与本文其余合法转换、非法转换、归档正交语义和恢复语义 |
-| 实时与审计 | create/execution 写连续、不可 UPDATE/DELETE 的 allowlist SessionEvent；Message/Event 有分页读 API，Event 支持 `Last-Event-ID` SSE；create success 写脱敏 AuditEvent | 所有 mutation/拒绝/失败的可靠 append-only 审计、独立受限数据库角色 |
+| 生命周期 | draft start 与 protocol-1 create 均进入 queued；Worker 可驱动 queued -> active -> completed/failed/canceled，retry 回到 queued 并追加 Attempt，租约过期可恢复；version 与 SessionEvent 连续更新 | send/pause/resume/cancel 等用户命令、归档正交语义和恢复语义 |
+| 实时与审计 | create/start/execution 写连续、不可 UPDATE/DELETE 的 allowlist SessionEvent；Message/Event 有分页读 API，Event 支持 `Last-Event-ID` SSE；create/start success 写脱敏 AuditEvent | 所有拒绝/失败的可靠 append-only 审计、独立受限数据库角色 |
 | 保留/删除 | 没有 Session retention job；普通 API 没有删除 Session | legal hold、幂等 retention job、deletion ledger、备份恢复后重放删除 |
 
 当前准确名称是“权威 Session、只读 Catalog 与基础对话执行纵向切片”。上表 Target 未全部通过前不得标记生产可用或 GA。

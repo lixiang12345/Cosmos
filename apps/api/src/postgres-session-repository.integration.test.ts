@@ -667,7 +667,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
     await expect(repository.listBySpace('relay', 'space-expiry', 'user-local-admin')).resolves.toHaveLength(2)
   })
 
-  it('persists the draft message while keeping drafts out of the execution queue', async () => {
+  it('starts a draft from its persisted first Message without duplicating queue records', async () => {
     const repository = new PostgresSessionRepository(pool)
     const result = await repository.create({
       ...auditContext,
@@ -697,6 +697,57 @@ describeWithDatabase('PostgresSessionRepository', () => {
         (SELECT count(*) FROM relay_outbox_events WHERE session_id = $1) AS outbox_events
     `, [result.session.id])
     expect(counts.rows[0]).toEqual({ messages: '1', turns: '0', commands: '0', outbox_events: '0' })
+
+    const startRecord = {
+      ...auditContext,
+      organizationId: 'relay',
+      spaceId: 'space-draft',
+      sessionId: result.session.id,
+      actorId: 'user-local-admin',
+      idempotencyKey: 'start-draft-only',
+      expectedVersion: 1,
+      executionAvailability: 'available' as const,
+    }
+    const started = await repository.start(startRecord)
+    const replay = await repository.start(startRecord)
+
+    expect(started).toMatchObject({
+      session: { id: result.session.id, status: 'queued', version: 2 },
+      turn: { inputMessageId: result.message?.id, ordinal: 1, status: 'queued' },
+      command: { type: 'session.start', status: 'accepted' },
+      replayed: false,
+    })
+    expect(replay).toEqual({ ...started, replayed: true })
+    const startedCounts = await pool.query<{
+      messages: string
+      turns: string
+      commands: string
+      outbox_events: string
+      session_events: string
+      audit_events: string
+    }>(`
+      SELECT
+        (SELECT count(*) FROM relay_messages WHERE session_id = $1) AS messages,
+        (SELECT count(*) FROM relay_turns WHERE session_id = $1) AS turns,
+        (SELECT count(*) FROM relay_commands WHERE session_id = $1) AS commands,
+        (SELECT count(*) FROM relay_outbox_events WHERE session_id = $1) AS outbox_events,
+        (SELECT count(*) FROM relay_session_events WHERE session_id = $1) AS session_events,
+        (SELECT count(*) FROM relay_audit_events WHERE session_id = $1) AS audit_events
+    `, [result.session.id])
+    expect(startedCounts.rows[0]).toEqual({
+      messages: '1', turns: '1', commands: '1', outbox_events: '1',
+      session_events: '4', audit_events: '2',
+    })
+    const ledger = await pool.query<{ action: string; before_state: unknown }>(`
+      SELECT action, before_state
+      FROM relay_audit_events
+      WHERE session_id = $1
+      ORDER BY action
+    `, [result.session.id])
+    expect(ledger.rows).toEqual([
+      { action: 'session.create', before_state: null },
+      { action: 'session.start', before_state: { status: 'draft', version: 1 } },
+    ])
   })
 
   it('rolls back every domain and idempotency row when command creation fails', async () => {

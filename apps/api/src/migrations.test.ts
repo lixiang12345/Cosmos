@@ -33,6 +33,9 @@ const migrationVersions = [
   '028_attempt_provider_model.sql',
   '029_validate_attempt_provider_model.sql',
   '030_worker_heartbeats.sql',
+  '031_session_start_audit.sql',
+  '032_validate_session_start_audit.sql',
+  '033_remove_legacy_session_event_shape.sql',
 ]
 
 function poolWithVersions(versions: string[]) {

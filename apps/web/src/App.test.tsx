@@ -29,6 +29,7 @@ import {
   listSessionEvents,
   listSessionMessages,
   listSessions,
+  startSession,
 } from './services/relayApi'
 import { WorkspaceContext, type WorkspaceContextValue } from './workspace'
 
@@ -44,6 +45,7 @@ vi.mock('./services/relayApi', async (importOriginal) => ({
   listSessionEvents: vi.fn(),
   listSessionMessages: vi.fn(),
   listSessions: vi.fn(),
+  startSession: vi.fn(),
 }))
 
 const API_TIMESTAMP = '2026-07-12T04:30:00.000Z'
@@ -288,6 +290,7 @@ describe('Relay prototype', () => {
     vi.mocked(listSessionEvents).mockReset()
     vi.mocked(listSessionMessages).mockReset()
     vi.mocked(listSessions).mockReset()
+    vi.mocked(startSession).mockReset()
     vi.mocked(listSessions).mockResolvedValue({
       items: [], page: { nextCursor: null, hasMore: false, projectionUpdatedAt: null },
     })
@@ -474,6 +477,57 @@ describe('Relay prototype', () => {
       }),
       expect.any(AbortSignal),
     )
+  })
+
+  it('starts a canonical draft with its current version when execution is available', async () => {
+    const user = userEvent.setup()
+    const draft = makeApiSession('organization-production', 'space-production', {
+      title: '待启动的生产草稿',
+      expertId: 'expert-authoritative',
+      start: false,
+      message: { content: '复用已保存的首条消息。' },
+    }, { id: 'session-draft-start', status: 'draft', version: 1 })
+    const queued = {
+      ...draft,
+      status: 'queued' as const,
+      version: 2,
+      updatedAt: '2026-07-12T04:31:00.000Z',
+      lastActivityAt: '2026-07-12T04:31:00.000Z',
+    }
+    const turn = {
+      id: 'turn-draft-start', sessionId: draft.id, ordinal: 1, initiatorType: 'user' as const,
+      initiatorId: 'user-production', inputMessageId: 'message-draft-start', status: 'queued' as const,
+      queuedAt: queued.updatedAt, version: 1,
+    }
+    const command = {
+      id: 'command-draft-start', type: 'session.start' as const, status: 'accepted' as const,
+      resourceType: 'turn' as const, resourceId: turn.id, acceptedAt: queued.updatedAt,
+    }
+    vi.mocked(getRuntimeCapabilities).mockResolvedValueOnce({
+      execution: { enabled: true, events: 'polling' },
+    })
+    vi.mocked(getSession).mockResolvedValue(draft)
+    vi.mocked(startSession).mockResolvedValue({ session: queued, turn, command })
+
+    renderAuthenticatedApp('/sessions/session-draft-start')
+
+    const startButton = await screen.findByRole('button', { name: '开始执行' })
+    await waitFor(() => expect(startButton).toBeEnabled())
+    await user.click(startButton)
+    await waitFor(() => expect(startSession).toHaveBeenCalledOnce())
+    expect(startSession).toHaveBeenCalledWith(
+      'organization-production',
+      'space-production',
+      draft.id,
+      1,
+      expect.stringMatching(/^session-/),
+      expect.objectContaining({
+        accessToken: 'production-access-token',
+        onUnauthorized: expect.any(Function),
+      }),
+    )
+    expect(await screen.findByRole('heading', { name: '已排队，等待执行' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '开始执行' })).not.toBeInTheDocument()
   })
 
   it('does not render or retain a stale list projection as canonical Session detail', async () => {

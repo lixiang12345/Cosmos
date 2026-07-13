@@ -10,6 +10,7 @@ import {
   type SessionCommand,
   type SessionDto,
   type SessionMessage,
+  type StartSessionResponse,
   type SessionTurn,
   type SpaceRole,
 } from '@relay/contracts'
@@ -32,6 +33,22 @@ export type CreateSessionResult = {
   message?: SessionMessage
   turn?: SessionTurn
   command?: SessionCommand
+  replayed: boolean
+}
+
+export type StartSessionRecord = {
+  organizationId: string
+  spaceId: string
+  sessionId: string
+  actorId: string
+  actorKind: 'user' | 'service_account'
+  requestId: string
+  idempotencyKey: string
+  expectedVersion: number
+  executionAvailability?: 'available' | 'disabled' | 'worker_unavailable'
+}
+
+export type StartSessionResult = StartSessionResponse & {
   replayed: boolean
 }
 
@@ -105,6 +122,23 @@ export class AuthorizationChangedError extends Error {
   }
 }
 
+export class SessionVersionConflictError extends Error {
+  constructor(
+    readonly expectedVersion: number,
+    readonly currentVersion: number,
+  ) {
+    super('The Session changed after it was loaded. Refresh it and retry the operation.')
+    this.name = 'SessionVersionConflictError'
+  }
+}
+
+export class SessionStateConflictError extends Error {
+  constructor(readonly status: SessionDto['status']) {
+    super(`A Session in the ${status} state cannot be started.`)
+    this.name = 'SessionStateConflictError'
+  }
+}
+
 export class SessionConfigurationNotFoundError extends Error {
   constructor() {
     super('The selected Session configuration was not found.')
@@ -154,6 +188,7 @@ export interface SessionRepository {
   listBySpace(organizationId: string, spaceId: string, actorId: string): Promise<SessionDto[]>
   getById(organizationId: string, spaceId: string, sessionId: string, actorId: string): Promise<SessionDto | null>
   create(record: CreateSessionRecord): Promise<CreateSessionResult>
+  start(record: StartSessionRecord): Promise<StartSessionResult | null>
 }
 
 export type InMemorySessionRepositoryOptions = {
@@ -242,6 +277,39 @@ export function createSessionRecords(
     acceptedAt: session.createdAt,
   }
   return { message, turn, command }
+}
+
+export function createSessionStartRecords(
+  session: SessionDto,
+  message: Pick<SessionMessage, 'id'>,
+  actorId: string,
+  options: {
+    createId?: () => string
+    timestamp?: string
+  } = {},
+): Pick<StartSessionResponse, 'turn' | 'command'> {
+  const createId = options.createId ?? randomUUID
+  const timestamp = options.timestamp ?? new Date().toISOString()
+  const turn: SessionTurn = {
+    id: createId(),
+    sessionId: session.id,
+    ordinal: 1,
+    initiatorType: 'user',
+    initiatorId: actorId,
+    inputMessageId: message.id,
+    status: 'queued',
+    queuedAt: timestamp,
+    version: 1,
+  }
+  const command: SessionCommand = {
+    id: createId(),
+    type: 'session.start',
+    status: 'accepted',
+    resourceType: 'turn',
+    resourceId: turn.id,
+    acceptedAt: timestamp,
+  }
+  return { turn, command }
 }
 
 function cloneSession(session: SessionDto): SessionDto {
@@ -386,6 +454,11 @@ export class InMemorySessionRepository implements SessionRepository {
     requestFingerprint: string
     result: CreateSessionResult
   }>()
+  private readonly startsByIdempotencyKey = new Map<string, {
+    expectedVersion: number
+    result: StartSessionResult
+  }>()
+  private readonly initialMessagesBySessionId = new Map<string, SessionMessage>()
   private readonly createId: () => string
   private readonly now: () => Date
   private readonly authoritativeCatalog: readonly InMemoryExpertCatalogEntry[]
@@ -489,8 +562,71 @@ export class InMemorySessionRepository implements SessionRepository {
     this.sessionsBySpace.set(key, sessions)
     this.sessionCreators.set(session.id, record.actorId)
     const result = { session: cloneSession(session), ...startRecords, replayed: false }
+    if (startRecords.message) {
+      this.initialMessagesBySessionId.set(session.id, {
+        ...startRecords.message,
+        attachments: [...startRecords.message.attachments],
+      })
+    }
     this.sessionsByIdempotencyKey.set(idempotencyScope, { requestFingerprint, result })
 
+    return result
+  }
+
+  async start(record: StartSessionRecord): Promise<StartSessionResult | null> {
+    const access = await this.getSpaceAccess(record.organizationId, record.spaceId, record.actorId)
+    if (!access || !canWriteSpace(access)) throw new AuthorizationChangedError()
+    const key = spaceKey(record.organizationId, record.spaceId)
+    const sessions = this.sessionsBySpace.get(key) ?? []
+    const sessionIndex = sessions.findIndex((candidate) => candidate.id === record.sessionId)
+    const current = sessions[sessionIndex]
+    if (!current || (current.visibility === 'private' && this.sessionCreators.get(current.id) !== record.actorId)) {
+      return null
+    }
+
+    const idempotencyScope = `${key}\u0000${record.actorId}\u0000${record.sessionId}\u0000${record.idempotencyKey}`
+    const existing = this.startsByIdempotencyKey.get(idempotencyScope)
+    if (existing) {
+      if (existing.expectedVersion !== record.expectedVersion) throw new IdempotencyConflictError()
+      return {
+        ...existing.result,
+        session: cloneSession(existing.result.session),
+        turn: { ...existing.result.turn },
+        command: { ...existing.result.command },
+        replayed: true,
+      }
+    }
+
+    if (current.version !== record.expectedVersion) {
+      throw new SessionVersionConflictError(record.expectedVersion, current.version)
+    }
+    if (current.status !== 'draft') throw new SessionStateConflictError(current.status)
+    if (record.executionAvailability && record.executionAvailability !== 'available') {
+      throw new ExecutionUnavailableError(record.executionAvailability)
+    }
+    const message = this.initialMessagesBySessionId.get(current.id)
+    if (!message) throw new Error('The draft Session does not have an initial Message.')
+
+    const timestamp = this.now().toISOString()
+    const session = SessionDtoSchema.parse({
+      ...current,
+      status: 'queued',
+      updatedAt: timestamp,
+      lastActivityAt: timestamp,
+      version: current.version + 1,
+    })
+    const records = createSessionStartRecords(session, message, record.actorId, {
+      createId: this.createId,
+      timestamp,
+    })
+    sessions[sessionIndex] = session
+    const result: StartSessionResult = {
+      session: cloneSession(session),
+      turn: records.turn,
+      command: records.command,
+      replayed: false,
+    }
+    this.startsByIdempotencyKey.set(idempotencyScope, { expectedVersion: record.expectedVersion, result })
     return result
   }
 }

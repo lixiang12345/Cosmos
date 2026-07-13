@@ -9,6 +9,7 @@ import {
   MeResponseSchema,
   SessionDtoSchema,
   SessionListResponseSchema,
+  StartSessionResponseSchema,
   type CreateSessionRequestInput,
   type EnvironmentDetailDto,
   type ExpertDetailDto,
@@ -584,8 +585,21 @@ describe('Relay API', () => {
       payload: { ...sessionRequest, start: false },
     })
     expect(draft.statusCode).toBe(201)
-    expect(CreateSessionResponseSchema.parse(draft.json()).session.status).toBe('draft')
+    const savedDraft = CreateSessionResponseSchema.parse(draft.json()).session
+    expect(savedDraft.status).toBe('draft')
     expect(create).toHaveBeenCalledTimes(2)
+
+    const rejectedDraftStart = await app.inject({
+      method: 'POST',
+      url: `${url}/${savedDraft.id}/start`,
+      headers: { 'idempotency-key': 'execution-disabled-existing-draft', 'if-match': '"1"' },
+    })
+    expect(rejectedDraftStart.statusCode).toBe(503)
+    expect(ApiErrorSchema.parse(rejectedDraftStart.json())).toMatchObject({
+      code: 'EXECUTION_UNAVAILABLE', retryable: false,
+    })
+    await expect(repository.getById('relay', 'platform', savedDraft.id, 'user-local-admin'))
+      .resolves.toMatchObject({ status: 'draft', version: 1 })
   })
 
   it('gates execution on a recent Worker without disabling read-only API readiness', async () => {
@@ -750,6 +764,95 @@ describe('Relay API', () => {
     })
     expect(body.turn).toBeUndefined()
     expect(body.command).toBeUndefined()
+  })
+
+  it('starts a draft with its saved first Message and replays the accepted command', async () => {
+    const ids = ['session-draft-start', 'message-draft-start', 'turn-draft-start', 'command-draft-start']
+    const repository = testRepository({
+      createId: () => ids.shift() ?? crypto.randomUUID(),
+      now: () => new Date('2026-07-12T08:00:00.000Z'),
+    })
+    const app = testApp(repository)
+    const collectionUrl = '/api/v1/organizations/relay/spaces/platform/sessions'
+    const created = await app.inject({
+      method: 'POST',
+      url: collectionUrl,
+      headers: { 'idempotency-key': 'create-draft-to-start' },
+      payload: { ...sessionRequest, start: false },
+    })
+    const draft = CreateSessionResponseSchema.parse(created.json())
+    const request = {
+      method: 'POST' as const,
+      url: `${collectionUrl}/${draft.session.id}/start`,
+      headers: { 'idempotency-key': 'start-draft-1', 'if-match': '"1"' },
+    }
+
+    const started = await app.inject(request)
+    const replay = await app.inject(request)
+    const body = StartSessionResponseSchema.parse(started.json())
+
+    expect(started.statusCode).toBe(202)
+    expect(started.headers.etag).toBe('"2"')
+    expect(started.headers['idempotency-replayed']).toBe('false')
+    expect(body.session).toMatchObject({ id: draft.session.id, status: 'queued', version: 2 })
+    expect(body.turn).toMatchObject({
+      id: 'turn-draft-start', inputMessageId: draft.message?.id, status: 'queued', ordinal: 1,
+    })
+    expect(body.command).toMatchObject({
+      id: 'command-draft-start', type: 'session.start', resourceId: body.turn.id,
+    })
+    expect(replay.statusCode).toBe(202)
+    expect(replay.headers['idempotency-replayed']).toBe('true')
+    expect(replay.json()).toEqual(started.json())
+  })
+
+  it('enforces start preconditions, an empty body, and draft-only transitions', async () => {
+    const repository = testRepository()
+    const app = testApp(repository)
+    const collectionUrl = '/api/v1/organizations/relay/spaces/platform/sessions'
+    const created = await app.inject({
+      method: 'POST', url: collectionUrl,
+      headers: { 'idempotency-key': 'create-draft-preconditions' },
+      payload: { ...sessionRequest, start: false },
+    })
+    const draft = CreateSessionResponseSchema.parse(created.json()).session
+    const url = `${collectionUrl}/${draft.id}/start`
+    const missing = await app.inject({
+      method: 'POST', url, headers: { 'idempotency-key': 'start-missing-precondition' },
+    })
+    const malformed = await app.inject({
+      method: 'POST', url,
+      headers: { 'idempotency-key': 'start-malformed-precondition', 'if-match': '*' },
+    })
+    const withBody = await app.inject({
+      method: 'POST', url,
+      headers: { 'idempotency-key': 'start-with-body', 'if-match': '"1"' },
+      payload: {},
+    })
+    const stale = await app.inject({
+      method: 'POST', url,
+      headers: { 'idempotency-key': 'start-stale', 'if-match': '"2"' },
+    })
+    const started = await app.inject({
+      method: 'POST', url,
+      headers: { 'idempotency-key': 'start-current', 'if-match': '"1"' },
+    })
+    const repeatedTransition = await app.inject({
+      method: 'POST', url,
+      headers: { 'idempotency-key': 'start-again', 'if-match': '"2"' },
+    })
+
+    expect(ApiErrorSchema.parse(missing.json()).code).toBe('PRECONDITION_REQUIRED')
+    expect(missing.statusCode).toBe(428)
+    expect(ApiErrorSchema.parse(malformed.json()).code).toBe('VALIDATION_FAILED')
+    expect(malformed.statusCode).toBe(400)
+    expect(ApiErrorSchema.parse(withBody.json()).code).toBe('VALIDATION_FAILED')
+    expect(withBody.statusCode).toBe(400)
+    expect(ApiErrorSchema.parse(stale.json()).code).toBe('PRECONDITION_FAILED')
+    expect(stale.statusCode).toBe(412)
+    expect(started.statusCode).toBe(202)
+    expect(ApiErrorSchema.parse(repeatedTransition.json()).code).toBe('SESSION_STATE_CONFLICT')
+    expect(repeatedTransition.statusCode).toBe(409)
   })
 
   it('creates a Session for an actor at the OIDC subject length boundary', async () => {
