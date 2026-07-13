@@ -1,14 +1,27 @@
-import type { SessionDto, SessionStatus, SessionVisibility } from '@relay/contracts'
+import type {
+  SessionDto,
+  SessionEventDto,
+  SessionMessageDto,
+  SessionStatus,
+  SessionVisibility,
+} from '@relay/contracts'
 import {
+  Activity,
   ArrowLeft,
   Bot,
   CalendarClock,
+  CheckCircle2,
   CircleAlert,
+  Clock3,
   FileText,
   GitBranch,
   Link2,
+  LoaderCircle,
   Menu,
+  MessageSquare,
+  RotateCcw,
   ShieldCheck,
+  XCircle,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { GlobalControls } from '../../components/GlobalControls'
@@ -17,6 +30,10 @@ import { usePreferences, type Locale } from '../../preferences'
 
 export type RemoteSessionWorkbenchProps = {
   session: SessionDto
+  messages?: SessionMessageDto[]
+  events?: SessionEventDto[]
+  timelineStatus?: 'loading' | 'ready' | 'error'
+  timelineError?: string
   onBack: () => void
   onOpenNavigation?: () => void
 }
@@ -61,6 +78,120 @@ function revisionValue(value: string | undefined, locale: Locale) {
   return value ?? text(locale, '未解析（旧版会话记录）', 'Not resolved (legacy session record)')
 }
 
+function messageRoleLabel(role: SessionMessageDto['role'], locale: Locale) {
+  const labels: Record<SessionMessageDto['role'], [string, string]> = {
+    user: ['用户', 'User'],
+    agent: ['Expert', 'Expert'],
+    tool: ['工具', 'Tool'],
+    system: ['系统', 'System'],
+    event: ['事件', 'Event'],
+  }
+  return text(locale, ...labels[role])
+}
+
+function eventLabel(event: SessionEventDto, locale: Locale) {
+  if (event.type === 'session.created') return text(locale, '会话已创建', 'Session created')
+  if (event.type === 'session.updated') return text(
+    locale,
+    `会话状态已更新为${statusLabel(event.payload.status, locale)}`,
+    `Session status updated to ${statusLabel(event.payload.status, locale)}`,
+  )
+  if (event.type === 'message.created') return text(locale, '消息已记录', 'Message recorded')
+  if (event.type === 'turn.queued') return text(locale, '任务回合已排队', 'Turn queued')
+  const attempt = `${text(locale, '第', 'Attempt ')}${event.payload.number}${text(locale, ' 次尝试', '')}`
+  const statuses = {
+    queued: ['已排队', 'queued'],
+    starting: ['正在启动', 'starting'],
+    running: ['正在执行', 'running'],
+    waiting: ['等待中', 'waiting'],
+    paused: ['已暂停', 'paused'],
+    succeeded: ['已完成', 'succeeded'],
+    failed: ['失败', 'failed'],
+    canceled: ['已取消', 'canceled'],
+  } as const
+  const status = statuses[event.payload.status]
+  return `${attempt} · ${text(locale, status[0], status[1])}`
+}
+
+type ExecutionView = {
+  tone: 'neutral' | 'running' | 'retrying' | 'completed' | 'failed' | 'waiting'
+  title: string
+  description: string
+}
+
+function executionView(session: SessionDto, events: SessionEventDto[], locale: Locale): ExecutionView {
+  const latestAttempt = events.filter((event) => event.type === 'attempt.updated').at(-1)
+  if (latestAttempt?.type === 'attempt.updated') {
+    const { number, status, failureCode } = latestAttempt.payload
+    if (session.status === 'queued' && status === 'failed') return {
+      tone: 'retrying',
+      title: text(locale, '正在等待重试', 'Waiting to retry'),
+      description: text(
+        locale,
+        `第 ${number} 次尝试失败${failureCode ? `，错误代码：${failureCode}` : ''}；下一次尝试已排队。`,
+        `Attempt ${number} failed${failureCode ? ` with code ${failureCode}` : ''}; the next attempt is queued.`,
+      ),
+    }
+    if (session.status === 'canceled' && status !== 'canceled') {
+      return {
+        tone: 'failed',
+        title: text(locale, '执行已取消', 'Execution canceled'),
+        description: text(locale, '服务端会话已取消。', 'The server Session was canceled.'),
+      }
+    }
+    if (status === 'succeeded') return {
+      tone: 'completed',
+      title: text(locale, '执行已完成', 'Execution completed'),
+      description: text(locale, `第 ${number} 次尝试已成功完成。`, `Attempt ${number} completed successfully.`),
+    }
+    if (status === 'failed') return {
+      tone: 'failed',
+      title: text(locale, '执行失败', 'Execution failed'),
+      description: text(
+        locale,
+        `第 ${number} 次尝试失败${failureCode ? `，错误代码：${failureCode}` : ''}。`,
+        `Attempt ${number} failed${failureCode ? ` with code ${failureCode}` : ''}.`,
+      ),
+    }
+    if (status === 'canceled') return {
+      tone: 'failed',
+      title: text(locale, '执行已取消', 'Execution canceled'),
+      description: text(locale, `第 ${number} 次尝试已取消。`, `Attempt ${number} was canceled.`),
+    }
+    if (status === 'waiting' || status === 'paused') return {
+      tone: 'waiting',
+      title: status === 'waiting'
+        ? text(locale, '执行正在等待', 'Execution is waiting')
+        : text(locale, '执行已暂停', 'Execution paused'),
+      description: text(locale, `第 ${number} 次尝试当前为${status === 'waiting' ? '等待' : '暂停'}状态。`, `Attempt ${number} is ${status}.`),
+    }
+    if (number > 1) return {
+      tone: 'retrying',
+      title: text(locale, '正在重试', 'Retry in progress'),
+      description: text(locale, `第 ${number} 次尝试${status === 'queued' ? '正在等待执行' : '正在执行'}。`, `Attempt ${number} is ${status}.`),
+    }
+    return {
+      tone: status === 'queued' ? 'neutral' : 'running',
+      title: status === 'queued'
+        ? text(locale, '执行已排队', 'Execution queued')
+        : text(locale, '正在执行', 'Execution in progress'),
+      description: text(locale, `第 1 次尝试${status === 'queued' ? '正在等待 Worker' : '正在执行'}。`, `Attempt 1 is ${status}.`),
+    }
+  }
+
+  const fallback: Record<SessionStatus, ExecutionView> = {
+    draft: { tone: 'neutral', title: text(locale, '会话草稿已保存', 'Session draft saved'), description: text(locale, '草稿尚未提交执行。', 'This draft has not been submitted for execution.') },
+    queued: { tone: 'neutral', title: text(locale, '已排队，等待执行', 'Queued for execution'), description: text(locale, '命令已被服务端接受，正在等待 Worker 领取。', 'The server accepted the command and it is waiting for a Worker.') },
+    active: { tone: 'running', title: text(locale, '正在执行', 'Execution in progress'), description: text(locale, '服务端会话处于进行中；正在等待最新 Attempt 事件。', 'The server Session is active; waiting for the latest Attempt event.') },
+    waiting: { tone: 'waiting', title: text(locale, '执行正在等待', 'Execution is waiting'), description: text(locale, '服务端会话处于等待状态。', 'The server Session is waiting.') },
+    paused: { tone: 'waiting', title: text(locale, '执行已暂停', 'Execution paused'), description: text(locale, '服务端会话处于暂停状态。', 'The server Session is paused.') },
+    completed: { tone: 'completed', title: text(locale, '执行已完成', 'Execution completed'), description: text(locale, '服务端会话已完成。', 'The server Session completed.') },
+    failed: { tone: 'failed', title: text(locale, '执行失败', 'Execution failed'), description: text(locale, '服务端会话已标记为失败。', 'The server Session is marked as failed.') },
+    canceled: { tone: 'failed', title: text(locale, '执行已取消', 'Execution canceled'), description: text(locale, '服务端会话已取消。', 'The server Session was canceled.') },
+  }
+  return fallback[session.status]
+}
+
 function SessionStatusBadge({ status }: { status: SessionStatus }) {
   const { locale } = usePreferences()
   const tone = status === 'active'
@@ -83,17 +214,28 @@ function SessionStatusBadge({ status }: { status: SessionStatus }) {
 
 export function RemoteSessionWorkbench({
   session,
+  messages = [],
+  events = [],
+  timelineStatus = 'loading',
+  timelineError,
   onBack,
   onOpenNavigation,
 }: RemoteSessionWorkbenchProps) {
   const { locale } = usePreferences()
   const [copyNotice, setCopyNotice] = useState('')
   const copyTimer = useRef<number | undefined>(undefined)
-  const executionTitle = session.status === 'draft'
-    ? text(locale, '会话草稿已保存', 'Session draft saved')
-    : session.status === 'queued'
-      ? text(locale, '命令已接受，但执行面未接通', 'Command accepted, but the execution plane is not connected')
-      : text(locale, '执行详情尚未接通', 'Execution details are not connected')
+  const execution = executionView(session, events, locale)
+  const ExecutionIcon = execution.tone === 'completed'
+    ? CheckCircle2
+    : execution.tone === 'failed'
+      ? XCircle
+      : execution.tone === 'retrying'
+        ? RotateCcw
+        : execution.tone === 'running'
+          ? LoaderCircle
+          : execution.tone === 'waiting'
+            ? Clock3
+            : CircleAlert
 
   useEffect(() => () => {
     if (copyTimer.current) window.clearTimeout(copyTimer.current)
@@ -155,18 +297,77 @@ export function RemoteSessionWorkbench({
       ) : null}
 
       <div className="remote-session-content">
-        <section className="remote-session-execution-state" aria-labelledby="remote-session-execution-title">
-          <CircleAlert aria-hidden="true" />
+        <section className={`remote-session-execution-state remote-session-execution-state--${execution.tone}`} aria-labelledby="remote-session-execution-title">
+          <ExecutionIcon className={execution.tone === 'running' || execution.tone === 'retrying' ? 'cosmos-spin' : undefined} aria-hidden="true" />
           <div>
             <h2 id="remote-session-execution-title">
-              {executionTitle}
+              {execution.title}
             </h2>
-            <p>{text(
-              locale,
-              '当前仅显示服务端权威会话记录；此页面不表示代码正在执行。',
-              'Only the authoritative server session record is available. This page does not indicate that code is executing.',
-            )}</p>
+            <p>{execution.description}</p>
           </div>
+        </section>
+
+        {timelineStatus === 'error' ? (
+          <div className="remote-session-timeline-error" role="alert">
+            <CircleAlert aria-hidden="true" />
+            <span>{text(locale, '实时更新暂时中断，正在自动重试。', 'Live updates are interrupted; retrying automatically.')}</span>
+            {timelineError ? <code>{timelineError}</code> : null}
+          </div>
+        ) : null}
+
+        <section className="remote-session-section" aria-labelledby="remote-session-messages-title">
+          <header>
+            <MessageSquare aria-hidden="true" />
+            <h2 id="remote-session-messages-title">{text(locale, '会话消息', 'Session messages')}</h2>
+            <span className="remote-session-section__count">{messages.length}</span>
+          </header>
+          {messages.length ? (
+            <ol className="remote-session-messages">
+              {messages.map((message) => (
+                <li key={message.id} className={`remote-session-message remote-session-message--${message.role}`}>
+                  <header>
+                    <strong>{messageRoleLabel(message.role, locale)}</strong>
+                    <span>#{message.sequence}</span>
+                    <time dateTime={message.createdAt}>{formatDate(message.createdAt, locale)}</time>
+                  </header>
+                  <p>{message.content}</p>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="remote-session-empty">{timelineStatus === 'loading'
+              ? text(locale, '正在加载消息...', 'Loading messages...')
+              : text(locale, '当前没有消息。', 'No messages yet.')}</p>
+          )}
+        </section>
+
+        <section className="remote-session-section" aria-labelledby="remote-session-events-title">
+          <header>
+            <Activity aria-hidden="true" />
+            <h2 id="remote-session-events-title">{text(locale, '执行动态', 'Execution activity')}</h2>
+            <span className="remote-session-section__count">{events.length}</span>
+          </header>
+          {events.length ? (
+            <ol className="remote-session-events">
+              {events.map((event) => (
+                <li key={event.eventId}>
+                  <i aria-hidden="true" />
+                  <div>
+                    <strong>{eventLabel(event, locale)}</strong>
+                    {event.type === 'attempt.updated' && event.payload.failureCode
+                      ? <code>{event.payload.failureCode}</code>
+                      : null}
+                  </div>
+                  <span>#{event.sequence}</span>
+                  <time dateTime={event.occurredAt}>{formatDate(event.occurredAt, locale)}</time>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="remote-session-empty">{timelineStatus === 'loading'
+              ? text(locale, '正在加载执行动态...', 'Loading execution activity...')
+              : text(locale, '当前没有执行动态。', 'No execution activity yet.')}</p>
+          )}
         </section>
 
         <section className="remote-session-section" aria-labelledby="remote-session-summary-title">

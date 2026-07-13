@@ -9,6 +9,15 @@ describe('API configuration', () => {
       databaseQueryTimeoutMs: 20_000,
       databaseStatementTimeoutMs: 15_000,
       migrateOnStart: true,
+      executionEnabled: true,
+      executionMaxAttempts: 5,
+      workerReadinessMaxAgeMs: 30_000,
+      sessionEventStream: {
+        maxConnections: 1_000,
+        maxConnectionsPerActor: 10,
+        maxConnectionsPerSession: 50,
+        retryAfterSeconds: 5,
+      },
       authentication: { mode: 'development', actorId: 'user-local-admin' },
     })
   })
@@ -66,8 +75,62 @@ describe('API configuration', () => {
       OIDC_JWKS_URI: 'https://identity.test/.well-known/jwks.json',
     }
     expect(loadConfig(production).migrateOnStart).toBe(false)
+    expect(loadConfig(production).executionEnabled).toBe(false)
     expect(() => loadConfig({ ...production, MIGRATE_ON_START: 'true' })).toThrow('migration job')
     expect(() => loadConfig({ AUTH_MODE: 'development', MIGRATE_ON_START: 'sometimes' })).toThrow('true or false')
+  })
+
+  it('requires an explicit, bounded production execution policy', () => {
+    expect(loadConfig({
+      AUTH_MODE: 'development',
+      EXECUTION_ENABLED: 'false',
+      EXECUTION_MAX_ATTEMPTS: '8',
+    })).toMatchObject({ executionEnabled: false, executionMaxAttempts: 8 })
+    expect(() => loadConfig({
+      AUTH_MODE: 'development', EXECUTION_ENABLED: 'sometimes',
+    })).toThrow('EXECUTION_ENABLED')
+    expect(() => loadConfig({
+      AUTH_MODE: 'development', EXECUTION_MAX_ATTEMPTS: '0',
+    })).toThrow('EXECUTION_MAX_ATTEMPTS')
+    expect(() => loadConfig({
+      AUTH_MODE: 'development', EXECUTION_MAX_ATTEMPTS: '21',
+    })).toThrow('EXECUTION_MAX_ATTEMPTS')
+    expect(loadConfig({
+      AUTH_MODE: 'development', WORKER_READINESS_MAX_AGE_MS: '45000',
+    }).workerReadinessMaxAgeMs).toBe(45_000)
+    expect(() => loadConfig({
+      AUTH_MODE: 'development', WORKER_READINESS_MAX_AGE_MS: '99',
+    })).toThrow('WORKER_READINESS_MAX_AGE_MS')
+  })
+
+  it('loads strictly bounded Session event stream connection limits', () => {
+    expect(loadConfig({
+      AUTH_MODE: 'development',
+      SESSION_EVENT_STREAM_MAX_CONNECTIONS: '2000',
+      SESSION_EVENT_STREAM_MAX_CONNECTIONS_PER_ACTOR: '20',
+      SESSION_EVENT_STREAM_MAX_CONNECTIONS_PER_SESSION: '80',
+      SESSION_EVENT_STREAM_RETRY_AFTER_SECONDS: '15',
+    }).sessionEventStream).toEqual({
+      maxConnections: 2_000,
+      maxConnectionsPerActor: 20,
+      maxConnectionsPerSession: 80,
+      retryAfterSeconds: 15,
+    })
+
+    const invalidValues = [
+      ['SESSION_EVENT_STREAM_MAX_CONNECTIONS', '0'],
+      ['SESSION_EVENT_STREAM_MAX_CONNECTIONS', '100001'],
+      ['SESSION_EVENT_STREAM_MAX_CONNECTIONS_PER_ACTOR', '0'],
+      ['SESSION_EVENT_STREAM_MAX_CONNECTIONS_PER_ACTOR', '1001'],
+      ['SESSION_EVENT_STREAM_MAX_CONNECTIONS_PER_SESSION', '0'],
+      ['SESSION_EVENT_STREAM_MAX_CONNECTIONS_PER_SESSION', '1001'],
+      ['SESSION_EVENT_STREAM_RETRY_AFTER_SECONDS', '0'],
+      ['SESSION_EVENT_STREAM_RETRY_AFTER_SECONDS', '3601'],
+      ['SESSION_EVENT_STREAM_MAX_CONNECTIONS', '1.5'],
+    ] as const
+    for (const [name, value] of invalidValues) {
+      expect(() => loadConfig({ AUTH_MODE: 'development', [name]: value })).toThrow(name)
+    }
   })
 
   it('rejects invalid ports', () => {

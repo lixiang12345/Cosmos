@@ -24,6 +24,7 @@ export type CreateSessionRecord = {
   requestId: string
   idempotencyKey: string
   request: CreateSessionRequest
+  executionAvailability?: 'available' | 'disabled' | 'worker_unavailable'
 }
 
 export type CreateSessionResult = {
@@ -122,6 +123,18 @@ export class EnvironmentNotReadyError extends Error {
   constructor() {
     super('The selected Expert environment is not ready.')
     this.name = 'EnvironmentNotReadyError'
+  }
+}
+
+export class ExecutionUnavailableError extends Error {
+  readonly retryable: boolean
+
+  constructor(reason: 'disabled' | 'worker_unavailable') {
+    super(reason === 'disabled'
+      ? 'Session execution is not enabled for this deployment.'
+      : 'No execution Worker has reported a recent heartbeat.')
+    this.name = 'ExecutionUnavailableError'
+    this.retryable = reason === 'worker_unavailable'
   }
 }
 
@@ -449,6 +462,10 @@ export class InMemorySessionRepository implements SessionRepository {
           : undefined,
         replayed: true,
       }
+    }
+
+    if (record.request.start && record.executionAvailability && record.executionAvailability !== 'available') {
+      throw new ExecutionUnavailableError(record.executionAvailability)
     }
 
     let configuration: ResolvedSessionConfiguration

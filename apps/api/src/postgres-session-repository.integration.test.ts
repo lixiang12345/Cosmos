@@ -57,6 +57,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
     await pool.query(`
       ALTER TABLE relay_session_events DISABLE TRIGGER relay_session_events_reject_truncate;
       ALTER TABLE relay_audit_events DISABLE TRIGGER relay_audit_events_reject_truncate;
+      ALTER TABLE relay_attempts DISABLE TRIGGER relay_attempts_reject_truncate;
     `)
     try {
       await pool.query(`
@@ -67,6 +68,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
       await pool.query(`
         ALTER TABLE relay_session_events ENABLE TRIGGER relay_session_events_reject_truncate;
         ALTER TABLE relay_audit_events ENABLE TRIGGER relay_audit_events_reject_truncate;
+        ALTER TABLE relay_attempts ENABLE TRIGGER relay_attempts_reject_truncate;
       `)
     }
     const spaces = [
@@ -206,8 +208,17 @@ describeWithDatabase('PostgresSessionRepository', () => {
       repositoryId: 'repository-default',
     })
 
-    const payloads = await pool.query<{ command_payload: unknown; outbox_payload: unknown }>(`
-      SELECT command.payload AS command_payload, outbox.payload AS outbox_payload
+    const payloads = await pool.query<{
+      command_payload: unknown
+      outbox_payload: unknown
+      protocol_version: number
+      requested_by: string
+      request_id: string
+      max_attempts: number
+    }>(`
+      SELECT command.payload AS command_payload, outbox.payload AS outbox_payload,
+        command.protocol_version, command.requested_by, command.request_id,
+        command.max_attempts
       FROM relay_commands command
       JOIN relay_outbox_events outbox ON outbox.session_id = command.session_id
       WHERE command.session_id = $1
@@ -223,6 +234,12 @@ describeWithDatabase('PostgresSessionRepository', () => {
       expertRevisionId: 'expert-revision-1',
       environmentRevisionId: 'environment-revision-1',
       repositoryId: 'repository-default',
+    })
+    expect(payloads.rows[0]).toMatchObject({
+      protocol_version: 1,
+      requested_by: 'user-local-admin',
+      request_id: auditContext.requestId,
+      max_attempts: 5,
     })
   })
 

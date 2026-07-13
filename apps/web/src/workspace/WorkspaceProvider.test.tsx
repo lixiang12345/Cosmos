@@ -191,7 +191,7 @@ describe('WorkspaceProvider', () => {
     await waitFor(() => expect(screen.getByTestId('gated-selection')).toHaveTextContent('organization-alpha:space-alpha'))
     await user.type(screen.getByRole('textbox', { name: 'Draft' }), 'unsaved task')
 
-    view.rerender(gatedWorkspace(auth({ accessToken: 'token-b' })))
+    view.rerender(gatedWorkspace(auth({ accessToken: 'token-b', credentialVersion: 2 })))
 
     await waitFor(() => expect(getMe).toHaveBeenCalledTimes(2))
     expect(screen.getByRole('textbox', { name: 'Draft' })).toHaveValue('unsaved task')
@@ -209,7 +209,7 @@ describe('WorkspaceProvider', () => {
 
     view.rerender(
       <StrictMode>
-        <AuthContext.Provider value={auth({ accessToken: 'token-b' })}>
+        <AuthContext.Provider value={auth({ accessToken: 'token-b', credentialVersion: 2 })}>
           <WorkspaceProvider><Probe /></WorkspaceProvider>
         </AuthContext.Provider>
       </StrictMode>,

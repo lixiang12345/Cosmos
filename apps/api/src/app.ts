@@ -8,9 +8,14 @@ import {
   ExpertDetailDtoSchema,
   ExpertListResponseSchema,
   MeResponseSchema,
+  RuntimeCapabilitiesSchema,
   SessionDtoSchema,
+  SessionEventPageSchema,
   SessionListResponseSchema,
+  SessionMessagePageSchema,
   type ApiError,
+  type SessionEventDto,
+  type SessionEventPage,
 } from '@relay/contracts'
 import Fastify, {
   type FastifyInstance,
@@ -37,6 +42,7 @@ import {
 import {
   AuthorizationChangedError,
   EnvironmentNotReadyError,
+  ExecutionUnavailableError,
   ExpertNotPublishedError,
   IdempotencyConflictError,
   InMemorySessionRepository,
@@ -45,6 +51,17 @@ import {
   canWriteSpace,
   type SessionRepository,
 } from './session-repository.js'
+import {
+  InvalidSessionTimelinePaginationError,
+  encodeSessionTimelineCursor,
+  parseSessionTimelineCursor,
+  parseSessionTimelinePagination,
+  type SessionTimelineQuery,
+} from './session-timeline-pagination.js'
+import {
+  SessionTimelineCursorAheadError,
+  type SessionTimelineRepository,
+} from './session-timeline-repository.js'
 
 const IDEMPOTENCY_KEY_PATTERN = /^[\x21-\x7e]{1,128}$/
 const SPACE_ID_PATTERN = /^.{1,128}$/u
@@ -56,6 +73,17 @@ type SpaceParams = {
 
 type SessionParams = SpaceParams & {
   sessionId: string
+}
+
+type SessionEventStreamOptions = {
+  heartbeatMs?: number
+  pollMs?: number
+  maxDurationMs?: number
+  batchSize?: number
+  maxConnections?: number
+  maxConnectionsPerActor?: number
+  maxConnectionsPerSession?: number
+  retryAfterSeconds?: number
 }
 
 type ExpertParams = SpaceParams & {
@@ -78,12 +106,16 @@ type ValidationIssue = {
 
 export type CreateAppOptions = {
   sessionRepository?: SessionRepository
+  sessionTimelineRepository?: SessionTimelineRepository
   configurationCatalogRepository?: ConfigurationCatalogRepository
   readinessCheck?: () => Promise<void>
   logger?: FastifyServerOptions['logger']
   corsOrigin?: boolean | string
   bodyLimit?: number
   authenticate?: AuthenticateRequest
+  executionEnabled?: boolean
+  executionReadinessCheck?: () => Promise<boolean>
+  sessionEventStream?: SessionEventStreamOptions
 }
 
 function validationFieldErrors(issues: readonly ValidationIssue[]): Record<string, string[]> {
@@ -143,15 +175,126 @@ function resourceEtag(resource: { version: number }) {
   return `"${resource.version}"`
 }
 
+function positiveInteger(value: number | undefined, fallback: number, maximum: number) {
+  const candidate = value ?? fallback
+  if (!Number.isSafeInteger(candidate) || candidate < 1 || candidate > maximum) {
+    throw new Error(`Session event stream option must be an integer between 1 and ${maximum}.`)
+  }
+  return candidate
+}
+
+function createSessionEventStreamLimiter(options: {
+  maxConnections: number
+  maxConnectionsPerActor: number
+  maxConnectionsPerSession: number
+}) {
+  let connections = 0
+  const connectionsByActor = new Map<string, number>()
+  const connectionsBySession = new Map<string, number>()
+
+  function decrement(counter: Map<string, number>, key: string) {
+    const next = (counter.get(key) ?? 1) - 1
+    if (next === 0) counter.delete(key)
+    else counter.set(key, next)
+  }
+
+  return {
+    acquire(actorId: string, sessionKey: string) {
+      const actorConnections = connectionsByActor.get(actorId) ?? 0
+      const sessionConnections = connectionsBySession.get(sessionKey) ?? 0
+      if (
+        connections >= options.maxConnections
+        || actorConnections >= options.maxConnectionsPerActor
+        || sessionConnections >= options.maxConnectionsPerSession
+      ) {
+        return null
+      }
+
+      connections += 1
+      connectionsByActor.set(actorId, actorConnections + 1)
+      connectionsBySession.set(sessionKey, sessionConnections + 1)
+      let released = false
+      return () => {
+        if (released) return
+        released = true
+        connections -= 1
+        decrement(connectionsByActor, actorId)
+        decrement(connectionsBySession, sessionKey)
+      }
+    },
+  }
+}
+
+function writeSse(response: FastifyReply['raw'], value: string) {
+  if (response.destroyed || response.writableEnded) return Promise.resolve(false)
+  if (response.write(value)) return Promise.resolve(true)
+  return new Promise<boolean>((resolve) => {
+    const onDrain = () => done(true)
+    const onClose = () => done(false)
+    function done(writable: boolean) {
+      response.off('drain', onDrain)
+      response.off('close', onClose)
+      resolve(writable)
+    }
+    response.once('drain', onDrain)
+    response.once('close', onClose)
+  })
+}
+
+function eventFrame(event: SessionEventDto) {
+  const cursor = encodeSessionTimelineCursor({
+    organizationId: event.organizationId,
+    spaceId: event.spaceId,
+    sessionId: event.sessionId,
+    sequence: event.sequence,
+  })
+  return `id: ${cursor}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`
+}
+
+function abortableDelay(durationMs: number, signal: AbortSignal) {
+  if (signal.aborted) return Promise.resolve()
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(done, durationMs)
+    function done() {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', done)
+      resolve()
+    }
+    signal.addEventListener('abort', done, { once: true })
+  })
+}
+
 export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   const app = Fastify({
     logger: options.logger ?? false,
     bodyLimit: options.bodyLimit ?? 1_048_576,
   })
   const sessionRepository = options.sessionRepository ?? new InMemorySessionRepository()
+  const sessionTimelineRepository = options.sessionTimelineRepository
   const configurationCatalogRepository = options.configurationCatalogRepository
     ?? new EmptyConfigurationCatalogRepository()
   const authenticate = options.authenticate ?? rejectAuthentication
+  const executionEnabled = options.executionEnabled ?? true
+  async function executionAvailable(request: FastifyRequest) {
+    if (!executionEnabled || !options.executionReadinessCheck) return false
+    try {
+      return await options.executionReadinessCheck()
+    } catch (error) {
+      request.log.error({ err: error }, 'Execution readiness check failed')
+      return false
+    }
+  }
+  const eventStream = {
+    heartbeatMs: positiveInteger(options.sessionEventStream?.heartbeatMs, 15_000, 60_000),
+    pollMs: positiveInteger(options.sessionEventStream?.pollMs, 1_000, 60_000),
+    maxDurationMs: positiveInteger(options.sessionEventStream?.maxDurationMs, 55_000, 300_000),
+    batchSize: positiveInteger(options.sessionEventStream?.batchSize, 100, 500),
+    maxConnections: positiveInteger(options.sessionEventStream?.maxConnections, 1_000, 100_000),
+    maxConnectionsPerActor: positiveInteger(options.sessionEventStream?.maxConnectionsPerActor, 10, 1_000),
+    maxConnectionsPerSession: positiveInteger(options.sessionEventStream?.maxConnectionsPerSession, 50, 1_000),
+    retryAfterSeconds: positiveInteger(options.sessionEventStream?.retryAfterSeconds, 5, 3_600),
+  }
+  const eventStreamLimiter = createSessionEventStreamLimiter(eventStream)
   const actorsByRequest = new WeakMap<FastifyRequest, AuthenticatedActor>()
 
   void app.register(cors, {
@@ -219,6 +362,14 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       })
     }
 
+    if (error instanceof ExecutionUnavailableError) {
+      return sendApiError(reply, 503, request, {
+        code: 'EXECUTION_UNAVAILABLE',
+        message: error.message,
+        retryable: error.retryable,
+      })
+    }
+
     if (error instanceof SessionConfigurationValidationError) {
       return sendApiError(reply, 422, request, {
         code: 'VALIDATION_FAILED',
@@ -235,6 +386,19 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         retryable: false,
         fieldErrors: {
           [`query.${error.field}`]: [`Use a valid ${error.field} for this Workspace and resource.`],
+        },
+      })
+    }
+
+    if (error instanceof InvalidSessionTimelinePaginationError) {
+      return sendApiError(reply, 400, request, {
+        code: 'VALIDATION_FAILED',
+        message: 'The Session timeline pagination parameters are invalid.',
+        retryable: false,
+        fieldErrors: {
+          [error.field === 'last-event-id' ? 'header.Last-Event-ID' : `query.${error.field}`]: [
+            'Use a valid cursor and limit for this Session.',
+          ],
         },
       })
     }
@@ -290,6 +454,13 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       organizations: await sessionRepository.listActorOrganizations(actor.id),
     })
   })
+
+  app.get('/api/v1/capabilities', async (request) => RuntimeCapabilitiesSchema.parse({
+    execution: {
+      enabled: await executionAvailable(request),
+      events: sessionTimelineRepository ? 'sse' : 'polling',
+    },
+  }))
 
   async function authorizeSpace(request: FastifyRequest, reply: FastifyReply, params: SpaceParams) {
     const actor = actorsByRequest.get(request)
@@ -501,6 +672,207 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     return session
   })
 
+  app.get<{ Params: SessionParams; Querystring: SessionTimelineQuery }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/messages',
+    async (request, reply) => {
+      const authorization = await authorizeSessionSpace(request, reply, request.params)
+      if (!authorization) return
+      const sessionId = parseSpaceId(request.params.sessionId)
+      if (!sessionId || !sessionTimelineRepository) return sendResourceNotFound(reply, request)
+      const scope = {
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        sessionId,
+      }
+      const pagination = parseSessionTimelinePagination(request.query, scope, 100)
+      const page = await sessionTimelineRepository.listMessages(
+        scope.organizationId,
+        scope.spaceId,
+        scope.sessionId,
+        authorization.actor.id,
+        pagination,
+      )
+      if (!page) return sendResourceNotFound(reply, request)
+      const last = page.items.at(-1)
+      return SessionMessagePageSchema.parse({
+        ...page,
+        page: {
+          hasMore: page.page.hasMore,
+          nextCursor: page.page.hasMore && last
+            ? encodeSessionTimelineCursor({ ...scope, sequence: last.sequence })
+            : null,
+        },
+      })
+    },
+  )
+
+  app.get<{ Params: SessionParams; Querystring: SessionTimelineQuery }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/events',
+    async (request, reply) => {
+      const authorization = await authorizeSessionSpace(request, reply, request.params)
+      if (!authorization) return
+      const sessionId = parseSpaceId(request.params.sessionId)
+      if (!sessionId || !sessionTimelineRepository) return sendResourceNotFound(reply, request)
+      const scope = {
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        sessionId,
+      }
+      const pagination = parseSessionTimelinePagination(request.query, scope, 500)
+      let page: SessionEventPage | null
+      try {
+        page = await sessionTimelineRepository.listEvents(
+          scope.organizationId,
+          scope.spaceId,
+          scope.sessionId,
+          authorization.actor.id,
+          pagination,
+        )
+      } catch (error) {
+        if (error instanceof SessionTimelineCursorAheadError) {
+          throw new InvalidSessionTimelinePaginationError('cursor', { cause: error })
+        }
+        throw error
+      }
+      if (!page) return sendResourceNotFound(reply, request)
+      return SessionEventPageSchema.parse(page)
+    },
+  )
+
+  app.get<{ Params: SessionParams; Querystring: SessionTimelineQuery }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/events/stream',
+    async (request, reply) => {
+      const authorization = await authorizeSessionSpace(request, reply, request.params)
+      if (!authorization) return
+      const sessionId = parseSpaceId(request.params.sessionId)
+      if (!sessionId || !sessionTimelineRepository) return sendResourceNotFound(reply, request)
+      const scope = {
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        sessionId,
+      }
+      const querySequence = parseSessionTimelineCursor(request.query.cursor, scope)
+      const lastEventId = request.headers['last-event-id']
+      if (Array.isArray(lastEventId)) throw new InvalidSessionTimelinePaginationError('last-event-id')
+      const headerSequence = parseSessionTimelineCursor(lastEventId, scope, 'last-event-id')
+      if (request.query.cursor !== undefined && lastEventId !== undefined && querySequence !== headerSequence) {
+        throw new InvalidSessionTimelinePaginationError('last-event-id')
+      }
+      let afterSequence = lastEventId === undefined ? querySequence : headerSequence
+      const closed = new AbortController()
+      const abortStream = () => {
+        closed.abort()
+        releaseConnection?.()
+      }
+      request.raw.once('aborted', abortStream)
+      reply.raw.once('close', abortStream)
+      const releaseConnection = eventStreamLimiter.acquire(
+        authorization.actor.id,
+        JSON.stringify(scope),
+      ) ?? undefined
+      if (!releaseConnection) {
+        request.raw.off('aborted', abortStream)
+        reply.raw.off('close', abortStream)
+        reply.header('Retry-After', eventStream.retryAfterSeconds)
+        return sendApiError(reply, 429, request, {
+          code: 'SSE_CONNECTION_LIMIT_EXCEEDED',
+          message: 'The concurrent Session event stream limit was exceeded.',
+          retryable: true,
+        })
+      }
+
+      let hijacked = false
+
+      try {
+        let page: SessionEventPage | null
+        try {
+          page = await sessionTimelineRepository.listEvents(
+            scope.organizationId,
+            scope.spaceId,
+            scope.sessionId,
+            authorization.actor.id,
+            { afterSequence, limit: eventStream.batchSize },
+          )
+        } catch (error) {
+          if (error instanceof SessionTimelineCursorAheadError) {
+            throw new InvalidSessionTimelinePaginationError(
+              lastEventId === undefined ? 'cursor' : 'last-event-id',
+              { cause: error },
+            )
+          }
+          throw error
+        }
+        if (closed.signal.aborted || reply.raw.destroyed || reply.raw.writableEnded) return
+        if (!page) return sendResourceNotFound(reply, request)
+
+        reply.hijack()
+        hijacked = true
+        reply.raw.writeHead(200, {
+          'Cache-Control': 'private, no-cache, no-store, no-transform',
+          Connection: 'keep-alive',
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'X-Accel-Buffering': 'no',
+          Vary: 'Authorization',
+        })
+        const startedAt = Date.now()
+        let lastAuthorizationAt = startedAt
+        const authorizationHeader = request.headers.authorization
+
+        while (!closed.signal.aborted && Date.now() - startedAt < eventStream.maxDurationMs) {
+          if (Date.now() - lastAuthorizationAt >= eventStream.heartbeatMs) {
+            let currentActor: AuthenticatedActor
+            try {
+              currentActor = await authenticate(authorizationHeader)
+            } catch {
+              break
+            }
+            if (currentActor.id !== authorization.actor.id || currentActor.kind !== authorization.actor.kind) break
+            lastAuthorizationAt = Date.now()
+            if (page.items.length === 0 && !await writeSse(reply.raw, ': heartbeat\n\n')) return
+          }
+          for (const event of page.items) {
+            if (!await writeSse(reply.raw, eventFrame(event))) return
+            afterSequence = event.sequence
+          }
+          if (page.page.hasMore) {
+            page = await sessionTimelineRepository.listEvents(
+              scope.organizationId,
+              scope.spaceId,
+              scope.sessionId,
+              authorization.actor.id,
+              { afterSequence, limit: eventStream.batchSize },
+            )
+            if (!page) break
+            continue
+          }
+
+          await abortableDelay(eventStream.pollMs, closed.signal)
+          if (closed.signal.aborted) break
+          page = await sessionTimelineRepository.listEvents(
+            scope.organizationId,
+            scope.spaceId,
+            scope.sessionId,
+            authorization.actor.id,
+            { afterSequence, limit: eventStream.batchSize },
+          )
+          if (!page) break
+        }
+
+        if (!reply.raw.destroyed && !reply.raw.writableEnded) {
+          await writeSse(reply.raw, 'event: reconnect\ndata: {}\n\n')
+        }
+      } catch (error) {
+        if (!hijacked) throw error
+        request.log.error({ err: error }, 'Session event stream failed')
+      } finally {
+        request.raw.off('aborted', abortStream)
+        reply.raw.off('close', abortStream)
+        releaseConnection()
+        if (hijacked && !reply.raw.destroyed && !reply.raw.writableEnded) reply.raw.end()
+      }
+    },
+  )
+
   app.post<{ Params: SpaceParams }>('/api/v1/organizations/:organizationId/spaces/:spaceId/sessions', async (request, reply) => {
     const authorization = await authorizeSessionSpace(request, reply, request.params)
     if (!authorization) return
@@ -535,6 +907,15 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       })
     }
 
+    let executionAvailability: 'available' | 'disabled' | 'worker_unavailable' = 'available'
+    if (parsed.data.start) {
+      if (!executionEnabled) {
+        executionAvailability = 'disabled'
+      } else if (!await executionAvailable(request)) {
+        executionAvailability = 'worker_unavailable'
+      }
+    }
+
     const result = await sessionRepository.create({
       organizationId: authorization.organizationId,
       spaceId: authorization.spaceId,
@@ -543,6 +924,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       requestId: request.id,
       idempotencyKey,
       request: parsed.data,
+      executionAvailability,
     })
     const session = SessionDtoSchema.parse(result.session)
 

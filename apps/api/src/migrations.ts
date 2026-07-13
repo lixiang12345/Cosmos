@@ -5,6 +5,7 @@ import type { Pool } from 'pg'
 
 const migrationsDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '../migrations')
 const nonTransactionalMarker = '-- relay-migration: non-transactional'
+const concurrentIndexMarker = /^-- relay-migration: concurrent-index ([a-z][a-z0-9_]*)$/m
 
 async function migrationFiles() {
   return (await readdir(migrationsDirectory)).filter((file) => file.endsWith('.sql')).sort()
@@ -43,11 +44,26 @@ export async function runMigrations(pool: Pool) {
           [version],
         )
         if (applied.rowCount === 0) {
-          await client.query(sql)
-          await client.query(
-            'INSERT INTO relay_schema_migrations (version) VALUES ($1) ON CONFLICT DO NOTHING',
-            [version],
-          )
+          const concurrentIndex = sql.match(concurrentIndexMarker)?.[1]
+          if (!concurrentIndex) {
+            await client.query(sql)
+            await client.query(
+              'INSERT INTO relay_schema_migrations (version) VALUES ($1) ON CONFLICT DO NOTHING',
+              [version],
+            )
+            continue
+          }
+          await client.query("SET lock_timeout = '5s'")
+          try {
+            await client.query(`DROP INDEX CONCURRENTLY IF EXISTS "${concurrentIndex}"`)
+            await client.query(sql)
+            await client.query(
+              'INSERT INTO relay_schema_migrations (version) VALUES ($1) ON CONFLICT DO NOTHING',
+              [version],
+            )
+          } finally {
+            await client.query('RESET lock_timeout')
+          }
         }
         continue
       }

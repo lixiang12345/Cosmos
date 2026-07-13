@@ -21,18 +21,18 @@
 
 | 能力 | Current | Target / 发布门槛 |
 | --- | --- | --- |
-| Session API | 已实现 tenant-scoped list/create/get；列表没有真实 cursor/filter；单资源 GET 与 create 返回 ETag | 完整分页、rename、send、pause/resume/cancel、archive/restore、share、Turn retry 与 SSE |
+| Session API | 已实现 tenant-scoped list/create/get、Message/Event cursor 分页和可恢复 SSE；Session 列表没有真实 cursor/filter；单资源 GET 与 create 返回 ETag | Session 列表完整分页、rename、send、pause/resume/cancel、archive/restore、share 与显式 Turn retry 命令 |
 | 创建事务 | `start=true` 原子写 Session、首条 Message、首个 Turn、`session.start` Command、Outbox、3 条连续 SessionEvent、1 条脱敏 AuditEvent 和完整幂等响应；`start=false` 写 draft Session、Message、2 条 Event 与 1 条 Audit，不创建执行记录；重放不重复账本 | 所有后续命令也统一使用领域事务、SessionEvent、Command、Outbox、幂等响应和必要审计 |
 | 配置固定 | 新 Session 由服务端固定 Published ExpertRevision、Ready EnvironmentRevision 和 Repository binding | 增加不可变 ExecutionSnapshot；legacy `configurationResolutionVersion=0` 在修复前只读 |
 | 可见性 | `private` 仅 creator；`space` 对有效 Organization + Space member 可见；查询中重检 membership | User/Group ShareGrant、实时撤权、合规访问与一致的 404 concealment |
 | ServiceAccount | token 可被认证；Session list/get/create 与 Catalog 均在 repository 访问前显式拒绝 ServiceAccount，不接受 membership 作为替代授权 | 绑定 Organization、Space、Automation/Session、audience 与 operation scope；无通配默认权限 |
 | 并发 | create 幂等记录按 organization + actor + method + canonical path + key 隔离，PostgreSQL 并发重放已测试 | 创建/命令统一幂等；替换共享状态使用 If-Match/CAS；追加消息在 Session 锁内排序 |
 | 数据隔离 | 已持久化 Session 子表和幂等引用使用复合 tenant FK；在线索引 + `NOT VALID/VALIDATE` 迁移可修复已版本化旧库；repository SQL 在单条查询中重检 membership | FORCE RLS/统一 tenant guard；受限运行角色不可绕过；覆盖后续新增实体 |
-| 生命周期 | 数据库可保存 Session/Turn/Command 状态，但只有 create 会产生状态；version 没有通用更新路径 | 本文全部合法转换、非法转换、归档正交语义和恢复语义 |
-| 实时与审计 | create success 已写连续、不可 UPDATE/DELETE 的 SessionEvent 与脱敏 AuditEvent；没有事件读 API、SSE、consumer，也不伪造尚不可靠的失败/拒绝审计 | 可恢复 SSE、所有 mutation/拒绝/失败的可靠 append-only 审计、独立受限数据库角色 |
+| 生命周期 | protocol-1 create 后可由 Worker 驱动 queued -> active -> completed/failed/canceled；retry 回到 queued 并追加 Attempt，租约过期可恢复；version 与 SessionEvent 连续更新 | 用户命令与本文其余合法转换、非法转换、归档正交语义和恢复语义 |
+| 实时与审计 | create/execution 写连续、不可 UPDATE/DELETE 的 allowlist SessionEvent；Message/Event 有分页读 API，Event 支持 `Last-Event-ID` SSE；create success 写脱敏 AuditEvent | 所有 mutation/拒绝/失败的可靠 append-only 审计、独立受限数据库角色 |
 | 保留/删除 | 没有 Session retention job；普通 API 没有删除 Session | legal hold、幂等 retention job、deletion ledger、备份恢复后重放删除 |
 
-当前准确名称仍是“权威 Session metadata、create success ledger 与只读 Catalog 纵向切片”。上表 Target 未全部通过前不得标记生产可用或 GA。
+当前准确名称是“权威 Session、只读 Catalog 与基础对话执行纵向切片”。上表 Target 未全部通过前不得标记生产可用或 GA。
 
 ## 3. Session 聚合与不可变边界
 
@@ -317,6 +317,8 @@ Target ServiceAccount credential 必须绑定 `organizationId`、`spaceId`、`au
 ## 11. SSE 恢复与实时撤权
 
 Target endpoint 为 `GET /v1/organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/events`，媒介类型 `text/event-stream`。
+
+Current runtime 的流式路径是 `.../events/stream`，未来游标在建流前返回 `400 VALIDATION_FAILED`；分页 Event endpoint 也使用同一当前错误语义。下列 `409 INVALID_EVENT_CURSOR` 与 `410 EVENT_CURSOR_EXPIRED` 是保留窗口和目标 problem contract 落地后的 Target，客户端在 OpenAPI 切换前不得按 Target 错误码推断当前行为。
 
 ### 11.1 恢复规则
 

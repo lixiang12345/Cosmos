@@ -5,6 +5,8 @@ import { loadConfig } from './config.js'
 import { assertMigrationsCurrent, runMigrations } from './migrations.js'
 import { PostgresConfigurationCatalogRepository } from './postgres-configuration-catalog-repository.js'
 import { PostgresSessionRepository } from './postgres-session-repository.js'
+import { PostgresSessionTimelineRepository } from './postgres-session-timeline-repository.js'
+import { PostgresWorkerReadinessRepository } from './postgres-worker-readiness-repository.js'
 import { InMemorySessionRepository } from './session-repository.js'
 
 const config = loadConfig()
@@ -29,15 +31,19 @@ const developmentOrganizations = config.authentication.mode === 'development' ? 
     ],
   }],
 } : undefined
+const workerReadinessRepository = pool ? new PostgresWorkerReadinessRepository(pool) : undefined
 const app = createApp({
   logger: true,
   corsOrigin: config.corsOrigin,
   sessionRepository: pool
-    ? new PostgresSessionRepository(pool)
+    ? new PostgresSessionRepository(pool, {
+      executionMaxAttempts: config.executionMaxAttempts,
+    })
     : new InMemorySessionRepository({
       actorOrganizations: developmentOrganizations,
       allowLegacyDevelopmentConfigurationFallback: config.authentication.mode === 'development',
     }),
+  sessionTimelineRepository: pool ? new PostgresSessionTimelineRepository(pool) : undefined,
   configurationCatalogRepository: pool
     ? new PostgresConfigurationCatalogRepository(pool)
     : undefined,
@@ -46,6 +52,11 @@ const app = createApp({
     await assertMigrationsCurrent(pool)
   } : undefined,
   authenticate,
+  executionEnabled: config.executionEnabled,
+  executionReadinessCheck: workerReadinessRepository ? () => (
+    workerReadinessRepository.hasRecentHeartbeat({ maxAgeMs: config.workerReadinessMaxAgeMs })
+  ) : undefined,
+  sessionEventStream: config.sessionEventStream,
 })
 
 const close = async () => {

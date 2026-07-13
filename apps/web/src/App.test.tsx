@@ -18,12 +18,16 @@ import { AuthContext, type AuthContextValue } from './auth/context'
 import { initialRuns } from './data/mockData'
 import { PREFERENCE_STORAGE_KEYS, PreferencesProvider } from './preferences'
 import {
+  RelayApiError,
   createSession,
   getEnvironment,
   getExpert,
+  getRuntimeCapabilities,
   getSession,
   listEnvironments,
   listExperts,
+  listSessionEvents,
+  listSessionMessages,
   listSessions,
 } from './services/relayApi'
 import { WorkspaceContext, type WorkspaceContextValue } from './workspace'
@@ -33,9 +37,12 @@ vi.mock('./services/relayApi', async (importOriginal) => ({
   createSession: vi.fn(),
   getEnvironment: vi.fn(),
   getExpert: vi.fn(),
+  getRuntimeCapabilities: vi.fn(),
   getSession: vi.fn(),
   listEnvironments: vi.fn(),
   listExperts: vi.fn(),
+  listSessionEvents: vi.fn(),
+  listSessionMessages: vi.fn(),
   listSessions: vi.fn(),
 }))
 
@@ -260,6 +267,8 @@ async function forkTemplate(user: ReturnType<typeof userEvent.setup>, templateNa
   await screen.findByRole('textbox', { name: '显示名称' })
 }
 
+afterEach(() => vi.useRealTimers())
+
 describe('Relay prototype', () => {
   beforeEach(() => {
     window.localStorage.setItem(PREFERENCE_STORAGE_KEYS.locale, 'zh')
@@ -272,15 +281,35 @@ describe('Relay prototype', () => {
     vi.mocked(createSession).mockReset()
     vi.mocked(getEnvironment).mockReset()
     vi.mocked(getExpert).mockReset()
+    vi.mocked(getRuntimeCapabilities).mockReset()
     vi.mocked(getSession).mockReset()
     vi.mocked(listEnvironments).mockReset()
     vi.mocked(listExperts).mockReset()
+    vi.mocked(listSessionEvents).mockReset()
+    vi.mocked(listSessionMessages).mockReset()
     vi.mocked(listSessions).mockReset()
     vi.mocked(listSessions).mockResolvedValue({
       items: [], page: { nextCursor: null, hasMore: false, projectionUpdatedAt: null },
     })
     vi.mocked(createSession).mockImplementation(async (organizationId, spaceId, input) => ({
       session: makeApiSession(organizationId, spaceId, input),
+    }))
+    vi.mocked(getRuntimeCapabilities).mockResolvedValue({
+      execution: { enabled: false, events: 'polling' },
+    })
+    vi.mocked(listSessionMessages).mockImplementation(async (organizationId, spaceId, sessionId) => ({
+      organizationId,
+      spaceId,
+      sessionId,
+      items: [],
+      page: { nextCursor: null, hasMore: false },
+    }))
+    vi.mocked(listSessionEvents).mockImplementation(async (organizationId, spaceId, sessionId) => ({
+      organizationId,
+      spaceId,
+      sessionId,
+      items: [],
+      page: { nextCursor: null, hasMore: false },
     }))
     vi.mocked(listExperts).mockResolvedValue({
       items: [productionExpert],
@@ -427,7 +456,7 @@ describe('Relay prototype', () => {
     renderAuthenticatedApp('/sessions/session-direct')
 
     expect(await screen.findByRole('heading', { level: 1, name: '直接恢复的生产会话' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '命令已接受，但执行面未接通' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '已排队，等待执行' })).toBeInTheDocument()
     expect(screen.queryByText('GPT-5.4')).not.toBeInTheDocument()
     expect(screen.queryByText('38.2k')).not.toBeInTheDocument()
     expect(screen.queryByText('￥4.82')).not.toBeInTheDocument()
@@ -443,6 +472,7 @@ describe('Relay prototype', () => {
         accessToken: 'production-access-token',
         onUnauthorized: expect.any(Function),
       }),
+      expect.any(AbortSignal),
     )
   })
 
@@ -478,6 +508,61 @@ describe('Relay prototype', () => {
     expect(screen.getAllByRole('heading', { level: 1, name: '详情接口的新标题' })).toHaveLength(1)
     expect(screen.queryByRole('heading', { level: 1, name: '列表中的旧标题' })).not.toBeInTheDocument()
     secondView.unmount()
+  })
+
+  it('conceals the sidebar and aborts a hanging timeline when Session detail returns 404 first', async () => {
+    const stale = makeApiSession('organization-production', 'space-production', {
+      title: '详情撤权前的侧栏标题', expertId: 'expert-authoritative',
+      message: { content: '不可保留。' },
+    }, { id: 'session-detail-revoked' })
+    vi.mocked(listSessions).mockResolvedValueOnce({
+      items: [stale], page: { nextCursor: null, hasMore: false, projectionUpdatedAt: stale.updatedAt },
+    })
+    const delayedDetail = deferred<SessionDto>()
+    vi.mocked(getSession).mockReturnValueOnce(delayedDetail.promise)
+    vi.mocked(listSessionMessages).mockImplementationOnce(() => new Promise(() => undefined))
+    vi.mocked(listSessionEvents).mockImplementationOnce(() => new Promise(() => undefined))
+
+    renderAuthenticatedApp('/sessions/session-detail-revoked')
+
+    await waitFor(() => {
+      expect(listSessionMessages).toHaveBeenCalledOnce()
+      expect(listSessionEvents).toHaveBeenCalledOnce()
+    })
+    await act(async () => { delayedDetail.reject(new RelayApiError('Session unavailable.', {
+      code: 'RESOURCE_NOT_FOUND', status: 404,
+    })) })
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('会话不存在或无权访问')
+    expect(screen.queryByText(stale.title)).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(vi.mocked(listSessionMessages).mock.calls[0][4]?.aborted).toBe(true)
+      expect(vi.mocked(listSessionEvents).mock.calls[0][4]?.aborted).toBe(true)
+    })
+  })
+
+  it('does not restore a concealed Session when a stale detail response resolves late', async () => {
+    const detail = makeApiSession('organization-production', 'space-production', {
+      title: '迟到且不可恢复的标题', expertId: 'expert-authoritative',
+      message: { content: '迟到且不可恢复的摘要。' },
+    }, { id: 'session-late-detail' })
+    const delayedDetail = deferred<SessionDto>()
+    vi.mocked(getSession).mockReturnValueOnce(delayedDetail.promise)
+    vi.mocked(listSessionMessages).mockRejectedValueOnce(new RelayApiError('Session unavailable.', {
+      code: 'RESOURCE_NOT_FOUND', status: 404,
+    }))
+    vi.mocked(listSessionEvents).mockImplementationOnce(() => new Promise(() => undefined))
+
+    renderAuthenticatedApp('/sessions/session-late-detail')
+    expect(await screen.findByRole('alert')).toHaveTextContent('会话不存在或无权访问')
+    const detailSignal = vi.mocked(getSession).mock.calls[0][4]!
+    await waitFor(() => expect(detailSignal.aborted).toBe(true))
+
+    await act(async () => { delayedDetail.resolve(detail) })
+
+    expect(screen.queryByText(detail.title)).not.toBeInTheDocument()
+    expect(screen.queryByText(detail.summary)).not.toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('会话不存在或无权访问')
   })
 
   it('hides a verified Session when credentials rotate until the new credential is authorized', async () => {
@@ -651,9 +736,10 @@ describe('Relay prototype', () => {
       return { session: makeApiSession(organizationId, spaceId, input, { id: 'session-production-create' }) }
     })
     renderAuthenticatedApp('/experts')
-    await screen.findByText('Production Expert')
+    const expertRow = (await screen.findByText('Production Expert')).closest('article')
+    if (!expertRow) throw new Error('Expected the production Expert row.')
 
-    await user.click(screen.getByRole('button', { name: '新建会话草稿' }))
+    await user.click(within(expertRow).getByRole('button', { name: '新建会话' }))
     expect(screen.queryByText('Cosmos Advisor')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '添加文件或图片' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '增强提示词' })).not.toBeInTheDocument()
@@ -675,6 +761,256 @@ describe('Relay prototype', () => {
     expect(within(table).getByText('草稿')).toBeInTheDocument()
   })
 
+  it('starts a production Session only after the backend explicitly enables execution', async () => {
+    const user = userEvent.setup()
+    const created = makeApiSession('organization-production', 'space-production', {
+      expertId: 'expert-production',
+      title: '验证生产执行能力发现',
+      visibility: 'private',
+      start: true,
+      message: { content: '验证生产执行能力发现', attachments: [] },
+    })
+    vi.mocked(getRuntimeCapabilities).mockResolvedValueOnce({
+      execution: { enabled: true, events: 'polling' },
+    })
+    vi.mocked(createSession).mockResolvedValueOnce({ session: created })
+    vi.mocked(getSession).mockResolvedValueOnce(created)
+    renderAuthenticatedApp('/home')
+
+    expect(await screen.findByRole('heading', { name: '选择 Expert，开始一个会话' })).toBeInTheDocument()
+    await user.type(screen.getByLabelText('会话任务'), '验证生产执行能力发现')
+    await user.click(screen.getByRole('button', { name: '开始会话' }))
+
+    await waitFor(() => expect(createSession).toHaveBeenCalled())
+    expect(vi.mocked(createSession).mock.calls[0][2]).toEqual({
+      expertId: 'expert-production',
+      title: '验证生产执行能力发现',
+      visibility: 'private',
+      start: true,
+      message: { content: '验证生产执行能力发现', attachments: [] },
+    })
+  })
+
+  it('saves a Home draft when the backend explicitly disables execution', async () => {
+    const user = userEvent.setup()
+    renderAuthenticatedApp('/home')
+
+    expect(await screen.findByRole('heading', { name: '选择 Expert，保存会话草稿' })).toBeInTheDocument()
+    await user.type(screen.getByLabelText('会话任务'), '记录一个稍后执行的任务')
+    await user.click(screen.getByRole('button', { name: '保存草稿' }))
+
+    await waitFor(() => expect(createSession).toHaveBeenCalled())
+    expect(vi.mocked(createSession).mock.calls[0][2]).toEqual(expect.objectContaining({ start: false }))
+  })
+
+  it('blocks creation while execution capability discovery is unresolved', async () => {
+    const capability = deferred<Awaited<ReturnType<typeof getRuntimeCapabilities>>>()
+    vi.mocked(getRuntimeCapabilities).mockReturnValueOnce(capability.promise)
+    renderAuthenticatedApp('/home')
+
+    expect(await screen.findByRole('heading', { name: '选择 Expert，保存会话草稿' })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('正在加载可用 Expert 与运行环境')
+    expect(screen.queryByRole('textbox', { name: '会话任务' })).not.toBeInTheDocument()
+    expect(createSession).not.toHaveBeenCalled()
+  })
+
+  it('shows a retryable error instead of silently saving a draft when capability discovery fails', async () => {
+    vi.mocked(getRuntimeCapabilities).mockRejectedValueOnce(new Error('Capability service unavailable.'))
+    renderAuthenticatedApp('/home')
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Capability service unavailable.')
+    expect(screen.queryByRole('textbox', { name: '会话任务' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
+    expect(createSession).not.toHaveBeenCalled()
+  })
+
+  it('keeps the canonical Session timeline on polling when capability discovery fails', async () => {
+    const detail = makeApiSession('organization-production', 'space-production', {
+      title: '能力降级会话', expertId: 'expert-production', start: true,
+      message: { content: '继续读取权威时间线。' },
+    }, { id: 'session-capability-fallback', status: 'active' })
+    vi.mocked(getRuntimeCapabilities).mockRejectedValueOnce(new Error('Capability service unavailable.'))
+    vi.mocked(getSession).mockResolvedValue(detail)
+    vi.mocked(listSessionMessages).mockResolvedValue({
+      organizationId: detail.organizationId,
+      spaceId: detail.spaceId,
+      sessionId: detail.id,
+      items: [],
+      page: { nextCursor: null, hasMore: false },
+    })
+    vi.mocked(listSessionEvents).mockResolvedValue({
+      organizationId: detail.organizationId,
+      spaceId: detail.spaceId,
+      sessionId: detail.id,
+      items: [],
+      page: { nextCursor: null, hasMore: false },
+    })
+
+    renderAuthenticatedApp('/sessions/session-capability-fallback')
+
+    await waitFor(() => expect(listSessionMessages).toHaveBeenCalled())
+    expect(listSessionEvents).toHaveBeenCalled()
+    expect(await screen.findByText('能力降级会话')).toBeInTheDocument()
+  })
+
+  it('aborts stale capability discovery when the access token rotates', async () => {
+    vi.mocked(getRuntimeCapabilities).mockImplementation(() => new Promise(() => undefined))
+    const view = renderAuthenticatedApp('/home', { accessToken: 'token-a', credentialVersion: 1 })
+    await waitFor(() => expect(getRuntimeCapabilities).toHaveBeenCalledTimes(1))
+    const tokenASignal = vi.mocked(getRuntimeCapabilities).mock.calls[0][1]!
+
+    view.rerenderAuth({ accessToken: 'token-b', credentialVersion: 2 })
+
+    expect(tokenASignal.aborted).toBe(true)
+    await waitFor(() => expect(getRuntimeCapabilities).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(getRuntimeCapabilities).mock.calls[1][0]).toEqual(expect.objectContaining({ accessToken: 'token-b' }))
+  })
+
+  it('renders production messages and Attempt events from the canonical timeline', async () => {
+    const detail = makeApiSession('organization-production', 'space-production', {
+      title: '真实执行时间线', expertId: 'expert-production', start: true,
+      message: { content: '检查订单服务。' },
+    }, { id: 'session-timeline', status: 'active' })
+    vi.mocked(getSession).mockResolvedValue(detail)
+    vi.mocked(listSessionMessages).mockResolvedValue({
+      organizationId: detail.organizationId,
+      spaceId: detail.spaceId,
+      sessionId: detail.id,
+      items: [{
+        id: 'message-timeline-1', organizationId: detail.organizationId, spaceId: detail.spaceId,
+        sessionId: detail.id, sequence: 1, role: 'user', actorId: 'user-production',
+        content: '检查订单服务。', attachments: [], createdAt: detail.createdAt,
+      }],
+      page: { nextCursor: null, hasMore: false },
+    })
+    vi.mocked(listSessionEvents).mockResolvedValue({
+      organizationId: detail.organizationId,
+      spaceId: detail.spaceId,
+      sessionId: detail.id,
+      items: [{
+        eventId: 'event-attempt-2', organizationId: detail.organizationId, spaceId: detail.spaceId,
+        sessionId: detail.id, sequence: 4, type: 'attempt.updated', resourceType: 'attempt',
+        resourceId: 'attempt-2', actorId: 'worker-1', commandId: 'command-1', requestId: 'request-2',
+        occurredAt: detail.updatedAt,
+        payload: { attemptId: 'attempt-2', turnId: 'turn-1', number: 2, status: 'running', failureCode: null },
+      }],
+      page: { nextCursor: null, hasMore: false },
+    })
+
+    renderAuthenticatedApp('/sessions/session-timeline')
+
+    expect(await screen.findByRole('heading', { name: '正在重试' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '会话消息' })).toHaveTextContent('检查订单服务。')
+    expect(screen.getByRole('region', { name: '执行动态' })).toHaveTextContent('第2 次尝试 · 正在执行')
+  })
+
+  it('applies a canonical session.updated event to detail and the Session list', async () => {
+    const user = userEvent.setup()
+    const detail = makeApiSession('organization-production', 'space-production', {
+      title: '状态事件驱动会话', expertId: 'expert-production', start: true,
+      message: { content: '等待服务端完成。' },
+    }, { id: 'session-status-event', status: 'active', version: 1 })
+    vi.mocked(getSession).mockResolvedValue(detail)
+    vi.mocked(listSessionEvents).mockResolvedValue({
+      organizationId: detail.organizationId,
+      spaceId: detail.spaceId,
+      sessionId: detail.id,
+      items: [{
+        eventId: 'event-session-completed', organizationId: detail.organizationId, spaceId: detail.spaceId,
+        sessionId: detail.id, sequence: 5, type: 'session.updated', resourceType: 'session',
+        resourceId: detail.id, actorId: 'worker-1', commandId: 'command-1', requestId: 'request-completed',
+        occurredAt: '2026-07-12T04:31:00.000Z', payload: { status: 'completed', version: 2 },
+      }],
+      page: { nextCursor: null, hasMore: false },
+    })
+
+    renderAuthenticatedApp('/sessions/session-status-event')
+
+    expect(await screen.findByRole('heading', { name: '执行已完成' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '返回会话' }))
+    const table = await screen.findByRole('table', { name: '会话' })
+    expect(within(table).getByText('状态事件驱动会话')).toBeInTheDocument()
+    expect(within(table).getByText('已完成')).toBeInTheDocument()
+  })
+
+  it('removes all Session metadata when timeline access is revoked after initial load', async () => {
+    vi.useFakeTimers()
+    const detail = makeApiSession('organization-production', 'space-production', {
+      title: '撤权前可见标题', expertId: 'expert-production', start: true,
+      message: { content: '撤权后不可保留的私有摘要。' },
+    }, { id: 'session-revoked', status: 'active' })
+    vi.mocked(getSession).mockResolvedValue(detail)
+    vi.mocked(listSessionMessages)
+      .mockResolvedValueOnce({
+        organizationId: detail.organizationId,
+        spaceId: detail.spaceId,
+        sessionId: detail.id,
+        items: [{
+          id: 'message-revoked', organizationId: detail.organizationId, spaceId: detail.spaceId,
+          sessionId: detail.id, sequence: 1, role: 'user', actorId: 'user-production',
+          content: '撤权后不可保留的私有正文。', attachments: [], createdAt: detail.createdAt,
+        }],
+        page: { nextCursor: null, hasMore: false },
+      })
+      .mockRejectedValueOnce(new RelayApiError('Session unavailable.', {
+        code: 'RESOURCE_NOT_FOUND', status: 404,
+      }))
+    vi.mocked(listSessionEvents).mockImplementation(async (organizationId, spaceId, sessionId) => ({
+      organizationId, spaceId, sessionId, items: [], page: { nextCursor: null, hasMore: false },
+    }))
+
+    renderAuthenticatedApp('/sessions/session-revoked')
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(screen.getByRole('heading', { name: detail.title })).toBeInTheDocument()
+    expect(screen.getByText('撤权后不可保留的私有正文。')).toBeInTheDocument()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000)
+    })
+    expect(screen.getByRole('alert')).toHaveTextContent('会话不存在或无权访问')
+    expect(screen.queryByText(detail.title)).not.toBeInTheDocument()
+    expect(screen.queryByText(detail.summary)).not.toBeInTheDocument()
+    expect(screen.queryByText('撤权后不可保留的私有正文。')).not.toBeInTheDocument()
+  })
+
+  it('aborts stale Session detail and timeline requests when credentials rotate', async () => {
+    const detail = makeApiSession('organization-production', 'space-production', {
+      title: '令牌轮换执行', expertId: 'expert-production', start: true,
+      message: { content: '仅当前凭证可见。' },
+    }, { id: 'session-runtime-rotation' })
+    vi.mocked(getSession).mockResolvedValue(detail)
+    vi.mocked(listSessionMessages)
+      .mockImplementationOnce(() => new Promise(() => undefined))
+      .mockImplementation(async (organizationId, spaceId, sessionId) => ({
+        organizationId, spaceId, sessionId, items: [], page: { nextCursor: null, hasMore: false },
+      }))
+    vi.mocked(listSessionEvents)
+      .mockImplementationOnce(() => new Promise(() => undefined))
+      .mockImplementation(async (organizationId, spaceId, sessionId) => ({
+        organizationId, spaceId, sessionId, items: [], page: { nextCursor: null, hasMore: false },
+      }))
+    const view = renderAuthenticatedApp('/sessions/session-runtime-rotation', {
+      accessToken: 'token-a', credentialVersion: 1,
+    })
+    await screen.findByRole('heading', { name: detail.title })
+    const detailSignal = vi.mocked(getSession).mock.calls[0][4]!
+    const messageSignal = vi.mocked(listSessionMessages).mock.calls[0][4]!
+    const eventSignal = vi.mocked(listSessionEvents).mock.calls[0][4]!
+
+    view.rerenderAuth({ accessToken: 'token-b', credentialVersion: 2 })
+
+    expect(detailSignal.aborted).toBe(true)
+    expect(messageSignal.aborted).toBe(true)
+    expect(eventSignal.aborted).toBe(true)
+    await waitFor(() => expect(vi.mocked(getSession).mock.calls.at(-1)?.[3]).toEqual(
+      expect.objectContaining({ accessToken: 'token-b' }),
+    ))
+  })
+
   it('keeps a newly created Session when an older list response arrives later', async () => {
     const user = userEvent.setup()
     const delayedList = deferred<Awaited<ReturnType<typeof listSessions>>>()
@@ -692,8 +1028,9 @@ describe('Relay prototype', () => {
     vi.mocked(createSession).mockResolvedValueOnce({ session: created })
 
     renderAuthenticatedApp('/experts')
-    await screen.findByText('Production Expert')
-    await user.click(screen.getByRole('button', { name: '新建会话草稿' }))
+    const expertRow = (await screen.findByText('Production Expert')).closest('article')
+    if (!expertRow) throw new Error('Expected the production Expert row.')
+    await user.click(within(expertRow).getByRole('button', { name: '新建会话' }))
     await user.type(screen.getByLabelText('会话任务'), createInput.message.content)
     await user.click(screen.getByRole('button', { name: '保存草稿' }))
     await waitFor(() => expect(createSession).toHaveBeenCalled())
@@ -718,7 +1055,7 @@ describe('Relay prototype', () => {
 
     expect(await screen.findByText('Production Expert')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '新建会话' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '新建会话草稿' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '新建会话' })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('link', { name: 'Relay' }))
     expect(await screen.findByRole('heading', { name: '选择 Expert，保存会话草稿' })).toBeInTheDocument()

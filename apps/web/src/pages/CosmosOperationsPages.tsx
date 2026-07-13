@@ -188,7 +188,13 @@ export type CosmosHomePageProps = CosmosPageBaseProps & {
   sessionCreationEnabled?: boolean
   executionEnabled?: boolean
   onRetryCatalog?: () => void
-  onCreateSession?: (draft: { expertId: string; prompt: string; visibility: 'private' | 'space'; attachments: string[] }) => Promise<void>
+  onCreateSession?: (draft: {
+    expertId: string
+    prompt: string
+    visibility: 'private' | 'space'
+    attachments: string[]
+    mode: 'run' | 'draft'
+  }) => Promise<void>
 }
 
 export function CosmosHomePage({
@@ -231,6 +237,7 @@ export function CosmosHomePage({
           prompt: value,
           visibility,
           attachments: prototypeTools ? attachments : [],
+          mode: executionEnabled ? 'run' : 'draft',
         })
       } catch (error) {
         setSubmitError(getSubmissionErrorMessage(error, locale))

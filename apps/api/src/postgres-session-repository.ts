@@ -11,6 +11,7 @@ import type { Pool, PoolClient } from 'pg'
 import {
   AuthorizationChangedError,
   EnvironmentNotReadyError,
+  ExecutionUnavailableError,
   ExpertNotPublishedError,
   IdempotencyConflictError,
   SessionConfigurationNotFoundError,
@@ -132,17 +133,25 @@ export type PostgresSessionRepositoryOptions = {
   createId?: () => string
   now?: () => Date
   idempotencyTtlMs?: number
+  executionMaxAttempts?: number
 }
 
 export class PostgresSessionRepository implements SessionRepository {
   private readonly createId: () => string
   private readonly now: () => Date
   private readonly idempotencyTtlMs: number
+  private readonly executionMaxAttempts: number
 
   constructor(private readonly pool: Pool, options: PostgresSessionRepositoryOptions = {}) {
     this.createId = options.createId ?? randomUUID
     this.now = options.now ?? (() => new Date())
     this.idempotencyTtlMs = options.idempotencyTtlMs ?? 24 * 60 * 60 * 1_000
+    this.executionMaxAttempts = options.executionMaxAttempts ?? 5
+    if (!Number.isSafeInteger(this.executionMaxAttempts)
+      || this.executionMaxAttempts < 1
+      || this.executionMaxAttempts > 20) {
+      throw new Error('executionMaxAttempts must be an integer between 1 and 20.')
+    }
   }
 
   async listActorOrganizations(actorId: string): Promise<MeOrganization[]> {
@@ -326,6 +335,10 @@ export class PostgresSessionRepository implements SessionRepository {
       return responseToResult(response, true)
     }
 
+    if (record.request.start && record.executionAvailability && record.executionAvailability !== 'available') {
+      throw new ExecutionUnavailableError(record.executionAvailability)
+    }
+
     await client.query(`
       DELETE FROM relay_idempotency_responses
       WHERE organization_id = $1 AND actor_id = $2 AND method = 'POST'
@@ -389,8 +402,12 @@ export class PostgresSessionRepository implements SessionRepository {
       await client.query(`
         INSERT INTO relay_commands (
           id, organization_id, space_id, session_id, type, status,
-          resource_type, resource_id, payload, accepted_at, available_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $10)
+          resource_type, resource_id, payload, accepted_at, available_at,
+          protocol_version, requested_by, request_id, max_attempts
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $10,
+          1, $11, $12, $13
+        )
       `, [
         startRecords.command.id, session.organizationId, session.spaceId, session.id,
         startRecords.command.type, startRecords.command.status, startRecords.command.resourceType,
@@ -402,6 +419,9 @@ export class PostgresSessionRepository implements SessionRepository {
           repositoryId: session.repositoryId,
         }),
         startRecords.command.acceptedAt,
+        record.actorId,
+        record.requestId,
+        this.executionMaxAttempts,
       ])
       await client.query(`
         INSERT INTO relay_outbox_events (

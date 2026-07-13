@@ -70,7 +70,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const verifiedActorRef = useRef<string | undefined>(undefined)
   const requestRef = useRef<{
     actorId: string
-    accessToken?: string
+    credentialVersion: number
     refreshVersion: number
     promise: Promise<MeResponse>
   } | undefined>(undefined)
@@ -87,13 +87,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const current = requestRef.current
     const promise = current
       && current.actorId === auth.actorId
-      && current.accessToken === auth.accessToken
+      && current.credentialVersion === auth.credentialVersion
       && current.refreshVersion === refreshVersion
       ? current.promise
       : getMe({ accessToken: auth.accessToken, onUnauthorized: auth.handleUnauthorized })
     requestRef.current = {
       actorId: auth.actorId,
-      accessToken: auth.accessToken,
+      credentialVersion: auth.credentialVersion,
       refreshVersion,
       promise,
     }
@@ -142,7 +142,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setStatus('error')
     })
     return () => { cancelled = true }
-  }, [auth.accessToken, auth.actorId, auth.handleUnauthorized, auth.status, refreshVersion])
+  }, [auth.accessToken, auth.actorId, auth.credentialVersion, auth.handleUnauthorized, auth.status, refreshVersion])
 
   const selectSpace = useCallback((organizationId: string, spaceId: string) => {
     if (!me) return

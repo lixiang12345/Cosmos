@@ -4,7 +4,9 @@ import type {
   EnvironmentSummaryDto,
   ExpertDetailDto,
   ExpertSummaryDto,
+  SessionEventPage,
   SessionDto,
+  SessionMessagePage,
 } from '@relay/contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -14,13 +16,17 @@ import {
   getEnvironment,
   getExpert,
   getMe,
+  getRuntimeCapabilities,
   getSession,
   getRelayApiBaseUrl,
   listEnvironments,
   listExperts,
+  listSessionEvents,
+  listSessionMessages,
   listSessions,
   resolveRelayApiBaseUrl,
   resolveRelayApiRequestUrl,
+  streamSessionEvents,
 } from './relayApi'
 
 const createInput = {
@@ -43,6 +49,53 @@ const session: SessionDto = {
   baseBranch: createInput.baseBranch, visibility: 'private', status: 'active', attachments: [], source: 'manual',
   createdAt: '2026-07-12T08:00:00.000Z', updatedAt: '2026-07-12T08:00:00.000Z',
   lastActivityAt: '2026-07-12T08:00:00.000Z', version: 1,
+}
+
+const messagePage: SessionMessagePage = {
+  organizationId: 'relay',
+  spaceId: 'space-platform',
+  sessionId: session.id,
+  items: [{
+    id: 'message-1',
+    organizationId: 'relay',
+    spaceId: 'space-platform',
+    sessionId: session.id,
+    sequence: 1,
+    role: 'user',
+    actorId: 'user-1',
+    content: 'Inspect the checkout path.',
+    attachments: [],
+    createdAt: session.createdAt,
+  }],
+  page: { nextCursor: null, hasMore: false },
+}
+
+const eventPage: SessionEventPage = {
+  organizationId: 'relay',
+  spaceId: 'space-platform',
+  sessionId: session.id,
+  items: [{
+    eventId: 'event-2',
+    organizationId: 'relay',
+    spaceId: 'space-platform',
+    sessionId: session.id,
+    sequence: 2,
+    type: 'attempt.updated',
+    resourceType: 'attempt',
+    resourceId: 'attempt-1',
+    actorId: 'worker-1',
+    commandId: 'command-1',
+    requestId: 'request-1',
+    occurredAt: session.createdAt,
+    payload: {
+      attemptId: 'attempt-1',
+      turnId: 'turn-1',
+      number: 1,
+      status: 'running',
+      failureCode: null,
+    },
+  }],
+  page: { nextCursor: null, hasMore: false },
 }
 
 const expertRevisionSummary = {
@@ -288,14 +341,90 @@ describe('Relay API client', () => {
       ETag: '"1"',
     }))
     vi.stubGlobal('fetch', fetchMock)
+    const controller = new AbortController()
 
     await expect(getSession('relay', 'space-platform', 'session-1', {
       accessToken: 'access-token',
-    })).resolves.toEqual(session)
+    }, controller.signal)).resolves.toEqual(session)
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/v1/organizations/relay/spaces/space-platform/sessions/session-1',
       expect.objectContaining({ method: 'GET' }),
     )
+  })
+
+  it('discovers execution capability only from a strict authenticated response', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+      execution: { enabled: true, events: 'polling' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const controller = new AbortController()
+
+    await expect(getRuntimeCapabilities(
+      { accessToken: 'access-token' }, controller.signal,
+    )).resolves.toEqual({ execution: { enabled: true, events: 'polling' } })
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/capabilities', expect.objectContaining({
+      method: 'GET', signal: expect.any(AbortSignal),
+    }))
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('Authorization')).toBe('Bearer access-token')
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({ execution: { enabled: 'yes', events: 'polling' } }))
+    await expect(getRuntimeCapabilities()).rejects.toMatchObject({ code: 'INVALID_RESPONSE' })
+  })
+
+  it('loads scoped Session messages and base64url-scoped events with recoverable cursors', async () => {
+    const eventCursor = {
+      organizationId: 'relay', spaceId: 'space-platform', sessionId: session.id, sequence: 2,
+    }
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(messagePage))
+      .mockResolvedValueOnce(jsonResponse(eventPage))
+    vi.stubGlobal('fetch', fetchMock)
+    const controller = new AbortController()
+
+    await expect(listSessionMessages(
+      'relay', 'space-platform', session.id, { accessToken: 'access-token' }, controller.signal,
+      { cursor: eventCursor, limit: 100 },
+    )).resolves.toEqual(messagePage)
+    await expect(listSessionEvents(
+      'relay', 'space-platform', session.id, { accessToken: 'access-token' }, controller.signal,
+      { cursor: eventCursor, limit: 500 },
+    )).resolves.toEqual(eventPage)
+
+    const messageUrl = new URL(String(fetchMock.mock.calls[0][0]), window.location.origin)
+    expect(messageUrl.pathname).toBe('/api/v1/organizations/relay/spaces/space-platform/sessions/session-1/messages')
+    expect(messageUrl.searchParams.get('limit')).toBe('100')
+    const encodedMessageCursor = messageUrl.searchParams.get('cursor')!
+    const messageBase64 = encodedMessageCursor.replaceAll('-', '+').replaceAll('_', '/')
+    expect(JSON.parse(atob(messageBase64.padEnd(Math.ceil(messageBase64.length / 4) * 4, '='))))
+      .toEqual(eventCursor)
+    const eventUrl = new URL(String(fetchMock.mock.calls[1][0]), window.location.origin)
+    expect(eventUrl.pathname).toBe('/api/v1/organizations/relay/spaces/space-platform/sessions/session-1/events')
+    expect(eventUrl.searchParams.get('limit')).toBe('500')
+    const encodedCursor = eventUrl.searchParams.get('cursor')!
+    const base64 = encodedCursor.replaceAll('-', '+').replaceAll('_', '/')
+    const decodedCursor = JSON.parse(atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, '=')))
+    expect(decodedCursor).toEqual(eventCursor)
+  })
+
+  it('rejects a valid timeline page outside the requested scope and routes timeline 401 to auth', async () => {
+    const onUnauthorized = vi.fn()
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({
+        ...messagePage,
+        organizationId: 'other-organization',
+        items: messagePage.items.map((message) => ({ ...message, organizationId: 'other-organization' })),
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        code: 'AUTHENTICATION_REQUIRED', message: 'Sign in again.', retryable: false,
+      }, 401)))
+
+    await expect(listSessionMessages('relay', 'space-platform', session.id)).rejects.toMatchObject({
+      code: 'INVALID_RESPONSE', status: 200,
+    })
+    await expect(listSessionEvents('relay', 'space-platform', session.id, {
+      accessToken: 'expired-token', onUnauthorized,
+    })).rejects.toMatchObject({ status: 401 })
+    expect(onUnauthorized).toHaveBeenCalledWith('expired-token')
   })
 
   it('rejects a detail response outside the requested tenant scope', async () => {
@@ -308,18 +437,99 @@ describe('Relay API client', () => {
     })
   })
 
-  it('shares an in-flight Session list request for the same token and scope', async () => {
+  it('shares an in-flight Session list request by non-secret credential identity', async () => {
     const response = { items: [session], page: { nextCursor: null, hasMore: false, projectionUpdatedAt: session.updatedAt } }
     let resolveResponse!: (response: Response) => void
     const pending = new Promise<Response>((resolve) => { resolveResponse = resolve })
     const fetchMock = vi.fn<typeof fetch>().mockReturnValue(pending)
     vi.stubGlobal('fetch', fetchMock)
 
-    const first = listSessions('relay', 'space-platform', { accessToken: 'same-token' })
-    const second = listSessions('relay', 'space-platform', { accessToken: 'same-token' })
+    const first = listSessions('relay', 'space-platform', {
+      accessToken: 'token-a', requestIdentity: 'credential-7',
+    })
+    const second = listSessions('relay', 'space-platform', {
+      accessToken: 'token-b', requestIdentity: 'credential-7',
+    })
     expect(fetchMock).toHaveBeenCalledTimes(1)
     resolveResponse(jsonResponse(response))
     await expect(Promise.all([first, second])).resolves.toEqual([response, response])
+  })
+
+  it('does not share an in-flight Session list request across actor identities', async () => {
+    const response = { items: [session], page: { nextCursor: null, hasMore: false, projectionUpdatedAt: session.updatedAt } }
+    let resolveFirst!: (response: Response) => void
+    const firstResponse = new Promise<Response>((resolve) => { resolveFirst = resolve })
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockReturnValueOnce(firstResponse)
+      .mockResolvedValueOnce(jsonResponse(response))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const first = listSessions('relay', 'space-platform', {
+      accessToken: 'token-a', requestIdentity: 'actor-a\u00007',
+    })
+    const second = listSessions('relay', 'space-platform', {
+      accessToken: 'token-b', requestIdentity: 'actor-b\u00007',
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    resolveFirst(jsonResponse(response))
+    await expect(Promise.all([first, second])).resolves.toEqual([response, response])
+  })
+
+  it('streams scoped Session events with Bearer auth and Last-Event-ID recovery', async () => {
+    const event = eventPage.items[0]
+    const stream = `id: cursor-42\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\nevent: reconnect\ndata: {}\n\n`
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(stream, {
+      headers: { 'Content-Type': 'text/event-stream' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const onEvent = vi.fn()
+
+    await expect(streamSessionEvents(
+      'relay', 'space-platform', session.id,
+      { accessToken: 'access-token' },
+      new AbortController().signal,
+      { lastEventId: 'cursor-41', onEvent },
+    )).resolves.toEqual({ lastEventId: 'cursor-42', reconnect: true })
+
+    const headers = new Headers(fetchMock.mock.calls[0][1]?.headers)
+    expect(headers.get('Authorization')).toBe('Bearer access-token')
+    expect(headers.get('Last-Event-ID')).toBe('cursor-41')
+    expect(onEvent).toHaveBeenCalledWith(event)
+  })
+
+  it('rejects an SSE event outside the requested Session scope', async () => {
+    const event = { ...eventPage.items[0], sessionId: 'session-other' }
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response(
+      `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
+      { headers: { 'Content-Type': 'text/event-stream' } },
+    )))
+
+    await expect(streamSessionEvents(
+      'relay', 'space-platform', session.id, {}, new AbortController().signal,
+      { onEvent: vi.fn() },
+    )).rejects.toMatchObject({ code: 'INVALID_RESPONSE', status: 200 })
+  })
+
+  it('parses CRLF event boundaries split across stream chunks', async () => {
+    const event = eventPage.items[0]
+    const encoder = new TextEncoder()
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(`id: cursor-42\r\nevent: ${event.type}\r\ndata: ${JSON.stringify(event)}\r`))
+        controller.enqueue(encoder.encode('\n\r\nevent: reconnect\r\ndata: {}\r\n\r\n'))
+        controller.close()
+      },
+    })
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response(body, {
+      headers: { 'Content-Type': 'text/event-stream' },
+    })))
+    const onEvent = vi.fn()
+
+    await expect(streamSessionEvents(
+      'relay', 'space-platform', session.id, {}, new AbortController().signal, { onEvent },
+    )).resolves.toEqual({ lastEventId: 'cursor-42', reconnect: true })
+    expect(onEvent).toHaveBeenCalledWith(event)
   })
 
   it('lists Experts with auth and AbortSignal on the tenant-scoped path', async () => {

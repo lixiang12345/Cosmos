@@ -23,9 +23,9 @@ info:
     name: Proprietary
     identifier: LicenseRef-Proprietary
 servers:
-  - url: https://api.relay.example/v1
+  - url: https://api.relay.example/api/v1
     description: Production
-  - url: http://127.0.0.1:8787/v1
+  - url: http://127.0.0.1:8787/api/v1
     description: Local development
 security:
   - bearerAuth: []
@@ -62,10 +62,33 @@ tags:
     description: Human decisions that gate an exact high-risk ToolCall input.
 
 paths:
+  /capabilities:
+    get:
+      tags: [Identity]
+      operationId: getRuntimeCapabilities
+      x-relay-implementation-status: implemented
+      summary: Discover deployment runtime capabilities
+      description: |
+        `execution.enabled` is true only when execution is configured and the database
+        contains a sufficiently recent Worker heartbeat. API control-plane reads remain
+        available when execution is unavailable.
+      responses:
+        '200':
+          description: Authenticated deployment capabilities
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeCapabilities'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+
   /me:
     get:
       tags: [Identity]
       operationId: getCurrentActor
+      x-relay-implementation-status: implemented
       summary: Discover the authenticated actor and accessible workspaces
       description: |
         Returns the authenticated actor and only the Organization and Space memberships
@@ -87,7 +110,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/MeResponse'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
 
   /organizations/{organizationId}:
     parameters:
@@ -628,66 +653,33 @@ paths:
 
   /organizations/{organizationId}/spaces/{spaceId}/sessions:
     parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
     get:
       tags: [Sessions]
       operationId: listSessions
       x-relay-implementation-status: partial
-      summary: List current or archived Sessions visible to the caller
-      parameters:
-        - $ref: '#/components/parameters/Cursor'
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Search'
-        - name: archived
-          in: query
-          schema:
-            type: boolean
-            default: false
-        - name: status
-          in: query
-          schema:
-            type: array
-            items:
-              $ref: '#/components/schemas/SessionStatus'
-          style: form
-          explode: false
-        - name: expertId
-          in: query
-          schema:
-            type: string
-            format: uuid
-        - name: source
-          in: query
-          schema:
-            type: string
-            enum: [manual, automation, worker_import]
-        - name: visibility
-          in: query
-          schema:
-            $ref: '#/components/schemas/SessionVisibility'
-        - name: updatedAfter
-          in: query
-          schema:
-            type: string
-            format: date-time
+      summary: List Sessions visible to the caller
+      description: |
+        The current runtime slice returns one unfiltered, non-paginated page. The
+        `partial` marker remains until cursor pagination and filters are implemented.
       responses:
         '200':
           description: Session page
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: '#/components/schemas/Page'
-                  - type: object
-                    required: [items]
-                    properties:
-                      items:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/Session'
+                $ref: '#/components/schemas/RuntimeSessionListResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
     post:
       tags: [Sessions]
       operationId: createSession
@@ -697,7 +689,8 @@ paths:
         `start=true` atomically creates the Session, first user Message and first Turn.
         The server resolves and fixes the published Expert and Environment revisions.
         `start=false` persists the draft Session and first user Message, but creates no
-        Turn, Command, or execution Outbox event.
+        Turn, Command, or execution Outbox event. A `start=true` request returns 503 with
+        `EXECUTION_UNAVAILABLE` when execution is disabled or no Worker heartbeat is fresh.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -705,7 +698,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/SessionCreate'
+              $ref: '#/components/schemas/RuntimeSessionCreate'
       responses:
         '201':
           description: Session created
@@ -719,18 +712,30 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SessionCreateResult'
+                $ref: '#/components/schemas/RuntimeSessionCreateResult'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/RuntimeConflict'
+        '413':
+          $ref: '#/components/responses/RuntimePayloadTooLarge'
         '422':
-          $ref: '#/components/responses/Unprocessable'
+          $ref: '#/components/responses/RuntimeUnprocessable'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+        '503':
+          $ref: '#/components/responses/RuntimeServiceUnavailable'
 
   /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}:
     parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
       - $ref: '#/components/parameters/SessionId'
     get:
       tags: [Sessions]
@@ -756,9 +761,17 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Session'
+                $ref: '#/components/schemas/RuntimeSession'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
     patch:
       tags: [Sessions]
       operationId: updateSession
@@ -818,33 +831,34 @@ paths:
 
   /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/messages:
     parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
       - $ref: '#/components/parameters/SessionId'
     get:
       tags: [Sessions]
       operationId: listSessionMessages
+      x-relay-implementation-status: implemented
       summary: List Session messages in timeline order
       parameters:
-        - $ref: '#/components/parameters/Cursor'
-        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/SessionTimelineCursor'
+        - $ref: '#/components/parameters/SessionMessageLimit'
       responses:
         '200':
           description: Message page
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: '#/components/schemas/Page'
-                  - type: object
-                    required: [items]
-                    properties:
-                      items:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/Message'
+                $ref: '#/components/schemas/SessionMessagePage'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
     post:
       tags: [Sessions]
       operationId: sendSessionMessage
@@ -1057,24 +1071,61 @@ paths:
 
   /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/events:
     parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
+      - $ref: '#/components/parameters/SessionId'
+    get:
+      tags: [Sessions]
+      operationId: listSessionEvents
+      x-relay-implementation-status: implemented
+      summary: List ordered, redacted Session events
+      parameters:
+        - $ref: '#/components/parameters/SessionTimelineCursor'
+        - $ref: '#/components/parameters/SessionEventLimit'
+      responses:
+        '200':
+          description: Session event page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionEventPage'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+
+  /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/events/stream:
+    parameters:
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
       - $ref: '#/components/parameters/SessionId'
     get:
       tags: [Sessions]
       operationId: streamSessionEvents
+      x-relay-implementation-status: implemented
       summary: Stream ordered Session events
       description: |
         Server-Sent Events. Reconnect with `Last-Event-ID`. Delivery is at least once;
         clients deduplicate by eventId and apply by monotonically increasing sequence.
+        Event IDs are opaque, scope-bound cursors and must only be replayed to this URL.
+        Each API instance enforces concurrent connection budgets globally, per actor, and
+        per Session. A request that cannot acquire all three budgets receives 429 before
+        the response is upgraded to an event stream.
       parameters:
+        - $ref: '#/components/parameters/SessionTimelineCursor'
         - name: Last-Event-ID
           in: header
           required: false
           schema:
-            type: integer
-            format: int64
-            minimum: 0
+            type: string
+            minLength: 1
+            maxLength: 2048
       responses:
         '200':
           description: SSE event stream
@@ -1082,7 +1133,7 @@ paths:
             Cache-Control:
               schema:
                 type: string
-                const: no-cache
+                const: private, no-cache, no-store, no-transform
           content:
             text/event-stream:
               schema:
@@ -1090,15 +1141,21 @@ paths:
               examples:
                 event:
                   value: |-
-                    id: 42
-                    event: turn.started
-                    data: {"eventId":"019...","sequence":42,"occurredAt":"2026-07-12T08:00:00Z","resourceType":"turn","resourceId":"019...","payload":{}}
+                    id: eyJvcmdhbml6YXRpb25JZCI6InJlbGF5Iiwic3BhY2VJZCI6InBsYXRmb3JtIiwic2Vzc2lvbklkIjoic2Vzc2lvbi0xIiwic2VxdWVuY2UiOjQyfQ
+                    event: session.updated
+                    data: {"organizationId":"relay","spaceId":"platform","sessionId":"session-1","eventId":"event-42","sequence":42,"type":"session.updated","resourceType":"session","resourceId":"session-1","actorId":"worker-1","commandId":"command-1","requestId":"request-1","occurredAt":"2026-07-12T08:00:00Z","payload":{"status":"active","version":2}}
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/RuntimeUnauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/RuntimeForbidden'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/RuntimeNotFound'
+        '429':
+          $ref: '#/components/responses/RuntimeTooManyRequests'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
 
   /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/turns:
     parameters:
@@ -1953,8 +2010,7 @@ components:
       in: path
       required: true
       schema:
-        type: string
-        format: uuid
+        $ref: '#/components/schemas/RuntimeIdentifier'
     TurnId:
       name: turnId
       in: path
@@ -2014,6 +2070,33 @@ components:
         minimum: 1
         maximum: 100
         default: 25
+    SessionTimelineCursor:
+      name: cursor
+      in: query
+      required: false
+      description: Scope-bound base64url JSON cursor returned by or derived from this Session timeline.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 2048
+    SessionMessageLimit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 100
+    SessionEventLimit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 100
     Search:
       name: search
       in: query
@@ -2082,6 +2165,12 @@ components:
       schema:
         type: string
         const: 'Bearer realm="relay-api"'
+    RetryAfter:
+      description: Minimum number of seconds the client should wait before reconnecting.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 3600
     Location:
       description: Canonical URL of the created resource.
       schema:
@@ -2154,6 +2243,127 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/RuntimeApiError'
+    RuntimeBadRequest:
+      description: Request parameters are invalid
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/PrivateNoStore'
+        Vary:
+          $ref: '#/components/headers/VaryAuthorization'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RuntimeApiError'
+    RuntimeUnauthorized:
+      description: Authentication is required or the bearer token is invalid
+      headers:
+        WWW-Authenticate:
+          $ref: '#/components/headers/BearerChallenge'
+        Cache-Control:
+          $ref: '#/components/headers/PrivateNoStore'
+        Vary:
+          $ref: '#/components/headers/VaryAuthorization'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RuntimeApiError'
+    RuntimeForbidden:
+      description: The authenticated actor is not permitted to perform this operation
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/PrivateNoStore'
+        Vary:
+          $ref: '#/components/headers/VaryAuthorization'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RuntimeApiError'
+    RuntimeNotFound:
+      description: Resource, membership, or authorized representation was not found
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/PrivateNoStore'
+        Vary:
+          $ref: '#/components/headers/VaryAuthorization'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RuntimeApiError'
+    RuntimeConflict:
+      description: The idempotency key was reused with a different request
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/PrivateNoStore'
+        Vary:
+          $ref: '#/components/headers/VaryAuthorization'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RuntimeApiError'
+    RuntimePayloadTooLarge:
+      description: The request body exceeds the configured limit
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/PrivateNoStore'
+        Vary:
+          $ref: '#/components/headers/VaryAuthorization'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RuntimeApiError'
+    RuntimeUnprocessable:
+      description: The selected Expert or Environment cannot create an executable Session
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/PrivateNoStore'
+        Vary:
+          $ref: '#/components/headers/VaryAuthorization'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RuntimeApiError'
+    RuntimeTooManyRequests:
+      description: This API instance has no available Session event stream capacity
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+        Cache-Control:
+          $ref: '#/components/headers/PrivateNoStore'
+        Vary:
+          $ref: '#/components/headers/VaryAuthorization'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RuntimeApiError'
+    RuntimeInternalError:
+      description: An unexpected server error occurred
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/PrivateNoStore'
+        Vary:
+          $ref: '#/components/headers/VaryAuthorization'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RuntimeApiError'
+    RuntimeServiceUnavailable:
+      description: Session execution is disabled or no Worker heartbeat is fresh enough to accept work
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/PrivateNoStore'
+        Vary:
+          $ref: '#/components/headers/VaryAuthorization'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RuntimeApiError'
+          examples:
+            executionUnavailable:
+              value:
+                code: EXECUTION_UNAVAILABLE
+                message: Session execution is not currently available for this deployment.
+                retryable: true
+                correlationId: req-01JZEXAMPLE
     BadRequest:
       description: Validation failed
       headers:
@@ -2193,12 +2403,6 @@ components:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
-    Unprocessable:
-      description: Semantic precondition such as unpublished Expert or unready Environment failed
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/Problem'
     PayloadTooLarge:
       description: Request or attachment exceeds the configured limit
       content:
@@ -2229,6 +2433,11 @@ components:
       description: Opaque runtime identifier; UUID format is not required.
       minLength: 1
       maxLength: 128
+    RuntimeActorIdentifier:
+      type: string
+      description: Opaque user, service-account, worker, or system actor identifier.
+      minLength: 1
+      maxLength: 256
     RuntimeApiError:
       type: object
       required: [code, message, retryable]
@@ -2657,6 +2866,535 @@ components:
             $ref: '#/components/schemas/RuntimeEnvironmentSummary'
         page:
           $ref: '#/components/schemas/RuntimeCatalogPageMetadata'
+      additionalProperties: false
+    RuntimeCapabilities:
+      type: object
+      required: [execution]
+      properties:
+        execution:
+          type: object
+          required: [enabled, events]
+          properties:
+            enabled:
+              type: boolean
+              description: True only when execution is configured and a Worker heartbeat is fresh.
+            events:
+              type: string
+              enum: [polling, sse]
+          additionalProperties: false
+      additionalProperties: false
+    RuntimeSessionMessageCreate:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+          minLength: 1
+          maxLength: 100000
+        attachments:
+          type: array
+          maxItems: 10
+          default: []
+          items:
+            type: string
+            minLength: 1
+            maxLength: 2048
+      additionalProperties: false
+    RuntimeSessionCreate:
+      type: object
+      required: [expertId, title, message]
+      properties:
+        expertId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        expertName:
+          type: string
+          minLength: 1
+          maxLength: 160
+          description: Legacy client claim validated against the authoritative published Expert.
+        expertVersion:
+          type: integer
+          minimum: 1
+          description: Legacy client claim validated against the authoritative published Expert.
+        environmentId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        title:
+          type: string
+          minLength: 1
+          maxLength: 240
+        visibility:
+          $ref: '#/components/schemas/SessionVisibility'
+          default: private
+        start:
+          type: boolean
+          default: true
+        message:
+          $ref: '#/components/schemas/RuntimeSessionMessageCreate'
+        repository:
+          type: string
+          minLength: 1
+          maxLength: 512
+          description: Legacy client claim validated against the authoritative Environment binding.
+        baseBranch:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: Legacy client claim validated against the authoritative Environment binding.
+        advancedOverrides:
+          type: object
+          properties:
+            repositoryId:
+              $ref: '#/components/schemas/RuntimeIdentifier'
+            baseBranch:
+              type: string
+              minLength: 1
+              maxLength: 255
+          additionalProperties: false
+      additionalProperties: false
+    RuntimeSession:
+      type: object
+      required:
+        - id
+        - organizationId
+        - spaceId
+        - title
+        - summary
+        - expertId
+        - expertName
+        - configurationResolutionVersion
+        - repository
+        - baseBranch
+        - visibility
+        - status
+        - attachments
+        - source
+        - createdAt
+        - updatedAt
+        - lastActivityAt
+        - version
+      properties:
+        id:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        spaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        title:
+          type: string
+          minLength: 1
+          maxLength: 240
+        summary:
+          type: string
+          maxLength: 100000
+        expertId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        expertName:
+          type: string
+          minLength: 1
+          maxLength: 160
+        expertVersion:
+          type: integer
+          minimum: 1
+        environmentId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        configurationResolutionVersion:
+          type: integer
+          enum: [0, 1]
+          description: Version 0 is migration-only legacy data; every new Session is version 1.
+        expertRevisionId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        environmentRevisionId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        repositoryId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        repository:
+          type: string
+          minLength: 1
+          maxLength: 512
+        baseBranch:
+          type: string
+          minLength: 1
+          maxLength: 255
+        visibility:
+          $ref: '#/components/schemas/SessionVisibility'
+        status:
+          $ref: '#/components/schemas/SessionStatus'
+        attachments:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            minLength: 1
+            maxLength: 2048
+        source:
+          type: string
+          const: manual
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        updatedAt:
+          $ref: '#/components/schemas/Timestamp'
+        lastActivityAt:
+          $ref: '#/components/schemas/Timestamp'
+        version:
+          type: integer
+          minimum: 1
+      additionalProperties: false
+      allOf:
+        - if:
+            properties:
+              configurationResolutionVersion:
+                const: 1
+            required: [configurationResolutionVersion]
+          then:
+            properties:
+              expertRevisionId: {}
+              environmentRevisionId: {}
+              repositoryId: {}
+            required: [expertRevisionId, environmentRevisionId, repositoryId]
+        - if:
+            properties:
+              configurationResolutionVersion:
+                const: 0
+            required: [configurationResolutionVersion]
+          then:
+            not:
+              anyOf:
+                - properties:
+                    expertRevisionId: {}
+                  required: [expertRevisionId]
+                - properties:
+                    environmentRevisionId: {}
+                  required: [environmentRevisionId]
+                - properties:
+                    repositoryId: {}
+                  required: [repositoryId]
+    RuntimeSessionMessage:
+      type: object
+      required: [id, sessionId, sequence, role, actorId, content, attachments, createdAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        sessionId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        sequence:
+          type: integer
+          minimum: 1
+        role:
+          type: string
+          enum: [user, agent, tool, system, event]
+        actorId:
+          oneOf:
+            - $ref: '#/components/schemas/RuntimeActorIdentifier'
+            - type: 'null'
+        content:
+          type: string
+          maxLength: 100000
+        attachments:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            minLength: 1
+            maxLength: 2048
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+      additionalProperties: false
+    RuntimeSessionTurn:
+      type: object
+      required: [id, sessionId, ordinal, initiatorType, initiatorId, inputMessageId, status, queuedAt, version]
+      properties:
+        id:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        sessionId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        ordinal:
+          type: integer
+          minimum: 1
+        initiatorType:
+          type: string
+          enum: [user, event, system]
+        initiatorId:
+          oneOf:
+            - $ref: '#/components/schemas/RuntimeActorIdentifier'
+            - type: 'null'
+        inputMessageId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        status:
+          type: string
+          enum: [queued, running, waiting_tool, waiting_approval, completed, failed, canceled]
+        queuedAt:
+          $ref: '#/components/schemas/Timestamp'
+        version:
+          type: integer
+          minimum: 1
+      additionalProperties: false
+    RuntimeSessionCommand:
+      type: object
+      required: [id, type, status, resourceType, resourceId, acceptedAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        type:
+          type: string
+          const: session.start
+        status:
+          type: string
+          enum: [accepted, queued, running, succeeded, failed, canceled]
+        resourceType:
+          type: string
+          const: turn
+        resourceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        acceptedAt:
+          $ref: '#/components/schemas/Timestamp'
+      additionalProperties: false
+    RuntimeSessionCreateResult:
+      type: object
+      required: [session]
+      properties:
+        session:
+          $ref: '#/components/schemas/RuntimeSession'
+        message:
+          $ref: '#/components/schemas/RuntimeSessionMessage'
+        turn:
+          $ref: '#/components/schemas/RuntimeSessionTurn'
+        command:
+          $ref: '#/components/schemas/RuntimeSessionCommand'
+      additionalProperties: false
+    RuntimeSessionListResponse:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RuntimeSession'
+        page:
+          type: object
+          required: [nextCursor, hasMore, projectionUpdatedAt]
+          properties:
+            nextCursor:
+              type: 'null'
+            hasMore:
+              type: boolean
+              const: false
+            projectionUpdatedAt:
+              oneOf:
+                - $ref: '#/components/schemas/Timestamp'
+                - type: 'null'
+          additionalProperties: false
+      additionalProperties: false
+    SessionTimelineMessage:
+      type: object
+      required:
+        - id
+        - organizationId
+        - spaceId
+        - sessionId
+        - sequence
+        - role
+        - actorId
+        - content
+        - attachments
+        - createdAt
+      properties:
+        id:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        spaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        sessionId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        sequence:
+          type: integer
+          minimum: 1
+        role:
+          type: string
+          enum: [user, agent, tool, system, event]
+        actorId:
+          oneOf:
+            - $ref: '#/components/schemas/RuntimeActorIdentifier'
+            - type: 'null'
+        content:
+          type: string
+          maxLength: 100000
+        attachments:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            minLength: 1
+            maxLength: 2048
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+      additionalProperties: false
+    SessionMessagePage:
+      type: object
+      required: [organizationId, spaceId, sessionId, items, page]
+      properties:
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        spaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        sessionId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/SessionTimelineMessage'
+        page:
+          type: object
+          required: [nextCursor, hasMore]
+          properties:
+            nextCursor:
+              type: [string, 'null']
+              maxLength: 2048
+            hasMore:
+              type: boolean
+          additionalProperties: false
+      additionalProperties: false
+    SessionEventCursor:
+      type: object
+      required: [organizationId, spaceId, sessionId, sequence]
+      properties:
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        spaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        sessionId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        sequence:
+          type: integer
+          minimum: 0
+      additionalProperties: false
+    SessionEvent:
+      type: object
+      required:
+        - organizationId
+        - spaceId
+        - sessionId
+        - eventId
+        - sequence
+        - type
+        - resourceType
+        - resourceId
+        - actorId
+        - commandId
+        - requestId
+        - occurredAt
+        - payload
+      properties:
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        spaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        sessionId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        eventId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        sequence:
+          type: integer
+          minimum: 1
+        type:
+          type: string
+          enum: [session.created, session.updated, message.created, turn.queued, attempt.updated]
+        resourceType:
+          type: string
+          enum: [session, message, turn, attempt]
+        resourceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        actorId:
+          $ref: '#/components/schemas/RuntimeActorIdentifier'
+        commandId:
+          oneOf:
+            - $ref: '#/components/schemas/RuntimeIdentifier'
+            - type: 'null'
+        requestId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        occurredAt:
+          $ref: '#/components/schemas/Timestamp'
+        payload:
+          oneOf:
+            - type: object
+              required: [status, visibility, version]
+              properties:
+                status:
+                  type: string
+                  enum: [draft, queued]
+                visibility:
+                  $ref: '#/components/schemas/SessionVisibility'
+                version:
+                  type: integer
+                  minimum: 1
+              additionalProperties: false
+            - type: object
+              required: [status, version]
+              properties:
+                status:
+                  $ref: '#/components/schemas/SessionStatus'
+                version:
+                  type: integer
+                  minimum: 1
+              additionalProperties: false
+            - type: object
+              required: [messageId]
+              properties:
+                messageId:
+                  $ref: '#/components/schemas/RuntimeIdentifier'
+              additionalProperties: false
+            - type: object
+              required: [turnId, status]
+              properties:
+                turnId:
+                  $ref: '#/components/schemas/RuntimeIdentifier'
+                status:
+                  type: string
+                  const: queued
+              additionalProperties: false
+            - type: object
+              required: [attemptId, turnId, number, status, failureCode]
+              properties:
+                attemptId:
+                  $ref: '#/components/schemas/RuntimeIdentifier'
+                turnId:
+                  $ref: '#/components/schemas/RuntimeIdentifier'
+                number:
+                  type: integer
+                  minimum: 1
+                status:
+                  $ref: '#/components/schemas/AttemptStatus'
+                failureCode:
+                  type: [string, 'null']
+                  maxLength: 128
+              additionalProperties: false
+      additionalProperties: false
+    SessionEventPage:
+      type: object
+      required: [organizationId, spaceId, sessionId, items, page]
+      properties:
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        spaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        sessionId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        items:
+          type: array
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/SessionEvent'
+        page:
+          type: object
+          required: [nextCursor, hasMore]
+          properties:
+            nextCursor:
+              oneOf:
+                - $ref: '#/components/schemas/SessionEventCursor'
+                - type: 'null'
+            hasMore:
+              type: boolean
+          additionalProperties: false
       additionalProperties: false
     ResourceBase:
       type: object
@@ -3507,37 +4245,6 @@ components:
                 type: string
                 format: uuid
             required: [expertRevisionId, environmentRevisionId, repositoryId]
-    SessionCreate:
-      type: object
-      required: [expertId, title, message]
-      properties:
-        expertId:
-          type: string
-          format: uuid
-        title:
-          type: string
-          minLength: 1
-          maxLength: 240
-        visibility:
-          $ref: '#/components/schemas/SessionVisibility'
-        start:
-          type: boolean
-          default: true
-        message:
-          $ref: '#/components/schemas/MessageCreate'
-        advancedOverrides:
-          type: object
-          description: Relay extension; accepted only when the Expert policy allows overrides.
-          properties:
-            repositoryId:
-              type: string
-              format: uuid
-            baseBranch:
-              type: string
-              minLength: 1
-              maxLength: 255
-          additionalProperties: false
-      additionalProperties: false
     SessionPatch:
       type: object
       properties:
@@ -3551,18 +4258,6 @@ components:
           type: [string, 'null']
           format: uuid
       additionalProperties: false
-    SessionCreateResult:
-      type: object
-      required: [session]
-      properties:
-        session:
-          $ref: '#/components/schemas/Session'
-        message:
-          $ref: '#/components/schemas/Message'
-        turn:
-          $ref: '#/components/schemas/Turn'
-        command:
-          $ref: '#/components/schemas/Command'
     AttachmentReference:
       type: object
       required: [id, kind, name, size]
@@ -3722,7 +4417,7 @@ components:
       enum: [queued, starting, running, waiting, paused, succeeded, failed, canceled]
     Attempt:
       type: object
-      required: [id, turnId, number, status, model, createdAt]
+      required: [id, turnId, number, status, model, providerModel, createdAt]
       properties:
         id:
           type: string
@@ -3737,6 +4432,11 @@ components:
           $ref: '#/components/schemas/AttemptStatus'
         model:
           type: string
+          description: Model requested from the pinned Expert revision.
+        providerModel:
+          type: [string, 'null']
+          maxLength: 256
+          description: Model identifier reported by the provider after a response was received.
         runtimeId:
           type: [string, 'null']
         failureCode:

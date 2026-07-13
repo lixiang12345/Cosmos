@@ -18,6 +18,7 @@ export const SessionVisibilitySchema = z.enum(['private', 'space'])
 export type SessionVisibility = z.infer<typeof SessionVisibilitySchema>
 
 const IdentifierSchema = z.string().trim().min(1).max(128)
+const ActorIdentifierSchema = z.string().trim().min(1).max(256)
 const TimestampSchema = z.string().datetime({ offset: true })
 
 export const MessageCreateSchema = z.object({
@@ -119,7 +120,7 @@ export const SessionMessageSchema = z.object({
   sessionId: IdentifierSchema,
   sequence: z.number().int().positive(),
   role: z.enum(['user', 'agent', 'tool', 'system', 'event']),
-  actorId: IdentifierSchema.nullable(),
+  actorId: ActorIdentifierSchema.nullable(),
   content: z.string().max(100_000),
   attachments: z.array(z.string().trim().min(1).max(2_048)).max(10),
   createdAt: TimestampSchema,
@@ -127,12 +128,332 @@ export const SessionMessageSchema = z.object({
 
 export type SessionMessage = z.infer<typeof SessionMessageSchema>
 
+const SessionScopeShape = {
+  organizationId: IdentifierSchema,
+  spaceId: IdentifierSchema,
+  sessionId: IdentifierSchema,
+}
+
+const PageMetadataSchema = z.object({
+  nextCursor: z.string().trim().min(1).max(2_048).nullable(),
+  hasMore: z.boolean(),
+}).strict().superRefine((page, context) => {
+  if (page.hasMore !== (page.nextCursor !== null)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['nextCursor'],
+      message: 'nextCursor must be present exactly when hasMore is true',
+    })
+  }
+})
+
+export const SessionMessageDtoSchema = SessionMessageSchema.extend({
+  organizationId: IdentifierSchema,
+  spaceId: IdentifierSchema,
+}).strict()
+
+export type SessionMessageDto = z.infer<typeof SessionMessageDtoSchema>
+
+export const SessionMessagePageSchema = z.object({
+  ...SessionScopeShape,
+  items: z.array(SessionMessageDtoSchema).max(100),
+  page: PageMetadataSchema,
+}).strict().superRefine((response, context) => {
+  let previousSequence = 0
+  for (const [index, message] of response.items.entries()) {
+    if (
+      message.organizationId !== response.organizationId
+      || message.spaceId !== response.spaceId
+      || message.sessionId !== response.sessionId
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['items', index],
+        message: 'Message scope must match the page scope',
+      })
+    }
+    if (message.sequence <= previousSequence) {
+      context.addIssue({
+        code: 'custom',
+        path: ['items', index, 'sequence'],
+        message: 'Message sequence must be strictly increasing',
+      })
+    }
+    previousSequence = message.sequence
+  }
+})
+
+export type SessionMessagePage = z.infer<typeof SessionMessagePageSchema>
+
+export const AttemptStatusSchema = z.enum([
+  'queued',
+  'starting',
+  'running',
+  'waiting',
+  'paused',
+  'succeeded',
+  'failed',
+  'canceled',
+])
+
+export type AttemptStatus = z.infer<typeof AttemptStatusSchema>
+
+const FailureCodeSchema = z.string().trim().min(1).max(128)
+
+export const AttemptDtoSchema = z.object({
+  ...SessionScopeShape,
+  id: IdentifierSchema,
+  turnId: IdentifierSchema,
+  number: z.number().int().positive(),
+  status: AttemptStatusSchema,
+  model: z.string().trim().min(1).max(256),
+  providerModel: z.string().trim().min(1).max(256).nullable(),
+  runtimeId: IdentifierSchema.nullable(),
+  failureCode: FailureCodeSchema.nullable(),
+  createdAt: TimestampSchema,
+  startedAt: TimestampSchema.nullable(),
+  finishedAt: TimestampSchema.nullable(),
+}).strict().superRefine((attempt, context) => {
+  const terminal = attempt.status === 'succeeded'
+    || attempt.status === 'failed'
+    || attempt.status === 'canceled'
+
+  if (terminal !== (attempt.finishedAt !== null)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['finishedAt'],
+      message: 'finishedAt must be present exactly for terminal Attempts',
+    })
+  }
+  if ((attempt.status === 'failed') !== (attempt.failureCode !== null)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['failureCode'],
+      message: 'failureCode must be present exactly for failed Attempts',
+    })
+  }
+  if (attempt.status === 'queued' && attempt.startedAt !== null) {
+    context.addIssue({
+      code: 'custom',
+      path: ['startedAt'],
+      message: 'A queued Attempt cannot have startedAt',
+    })
+  }
+
+  const createdAt = Date.parse(attempt.createdAt)
+  const startedAt = attempt.startedAt === null ? null : Date.parse(attempt.startedAt)
+  const finishedAt = attempt.finishedAt === null ? null : Date.parse(attempt.finishedAt)
+  if (startedAt !== null && startedAt < createdAt) {
+    context.addIssue({
+      code: 'custom',
+      path: ['startedAt'],
+      message: 'startedAt cannot precede createdAt',
+    })
+  }
+  if (finishedAt !== null && finishedAt < (startedAt ?? createdAt)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['finishedAt'],
+      message: 'finishedAt cannot precede the Attempt start',
+    })
+  }
+})
+
+export type AttemptDto = z.infer<typeof AttemptDtoSchema>
+
+export const SessionEventTypeSchema = z.enum([
+  'session.created',
+  'session.updated',
+  'message.created',
+  'turn.queued',
+  'attempt.updated',
+])
+
+export type SessionEventType = z.infer<typeof SessionEventTypeSchema>
+
+const SessionEventBaseShape = {
+  ...SessionScopeShape,
+  eventId: IdentifierSchema,
+  sequence: z.number().int().positive(),
+  actorId: ActorIdentifierSchema,
+  commandId: IdentifierSchema.nullable(),
+  requestId: IdentifierSchema,
+  occurredAt: TimestampSchema,
+}
+
+export const SessionEventDtoSchema = z.discriminatedUnion('type', [
+  z.object({
+    ...SessionEventBaseShape,
+    type: z.literal('session.created'),
+    resourceType: z.literal('session'),
+    resourceId: IdentifierSchema,
+    payload: z.object({
+      status: z.enum(['draft', 'queued']),
+      visibility: SessionVisibilitySchema,
+      version: z.number().int().positive(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    ...SessionEventBaseShape,
+    type: z.literal('session.updated'),
+    resourceType: z.literal('session'),
+    resourceId: IdentifierSchema,
+    payload: z.object({
+      status: SessionStatusSchema,
+      version: z.number().int().positive(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    ...SessionEventBaseShape,
+    type: z.literal('message.created'),
+    resourceType: z.literal('message'),
+    resourceId: IdentifierSchema,
+    payload: z.object({ messageId: IdentifierSchema }).strict(),
+  }).strict(),
+  z.object({
+    ...SessionEventBaseShape,
+    type: z.literal('turn.queued'),
+    resourceType: z.literal('turn'),
+    resourceId: IdentifierSchema,
+    payload: z.object({
+      turnId: IdentifierSchema,
+      status: z.literal('queued'),
+    }).strict(),
+  }).strict(),
+  z.object({
+    ...SessionEventBaseShape,
+    type: z.literal('attempt.updated'),
+    resourceType: z.literal('attempt'),
+    resourceId: IdentifierSchema,
+    payload: z.object({
+      attemptId: IdentifierSchema,
+      turnId: IdentifierSchema,
+      number: z.number().int().positive(),
+      status: AttemptStatusSchema,
+      failureCode: FailureCodeSchema.nullable(),
+    }).strict(),
+  }).strict(),
+]).superRefine((event, context) => {
+  if ((event.type === 'session.created' || event.type === 'session.updated')
+    && event.resourceId !== event.sessionId) {
+    context.addIssue({
+      code: 'custom',
+      path: ['resourceId'],
+      message: 'A session.created resource must match sessionId',
+    })
+  }
+  if (event.type === 'message.created' && event.resourceId !== event.payload.messageId) {
+    context.addIssue({
+      code: 'custom',
+      path: ['payload', 'messageId'],
+      message: 'messageId must match resourceId',
+    })
+  }
+  if (event.type === 'turn.queued' && event.resourceId !== event.payload.turnId) {
+    context.addIssue({
+      code: 'custom',
+      path: ['payload', 'turnId'],
+      message: 'turnId must match resourceId',
+    })
+  }
+  if (event.type === 'attempt.updated') {
+    if (event.resourceId !== event.payload.attemptId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['payload', 'attemptId'],
+        message: 'attemptId must match resourceId',
+      })
+    }
+    if ((event.payload.status === 'failed') !== (event.payload.failureCode !== null)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['payload', 'failureCode'],
+        message: 'failureCode must be present exactly for failed Attempt events',
+      })
+    }
+  }
+})
+
+export type SessionEventDto = z.infer<typeof SessionEventDtoSchema>
+
+export const SessionEventCursorSchema = z.object({
+  ...SessionScopeShape,
+  sequence: z.number().int().nonnegative(),
+}).strict()
+
+export type SessionEventCursor = z.infer<typeof SessionEventCursorSchema>
+
+export const SessionEventPageSchema = z.object({
+  ...SessionScopeShape,
+  items: z.array(SessionEventDtoSchema).max(500),
+  page: z.object({
+    nextCursor: SessionEventCursorSchema.nullable(),
+    hasMore: z.boolean(),
+  }).strict(),
+}).strict().superRefine((response, context) => {
+  if (response.page.hasMore !== (response.page.nextCursor !== null)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['page', 'nextCursor'],
+      message: 'nextCursor must be present exactly when hasMore is true',
+    })
+  }
+
+  let previousSequence = 0
+  for (const [index, event] of response.items.entries()) {
+    if (
+      event.organizationId !== response.organizationId
+      || event.spaceId !== response.spaceId
+      || event.sessionId !== response.sessionId
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['items', index],
+        message: 'Event scope must match the page scope',
+      })
+    }
+    if (event.sequence <= previousSequence) {
+      context.addIssue({
+        code: 'custom',
+        path: ['items', index, 'sequence'],
+        message: 'Event sequence must be strictly increasing',
+      })
+    }
+    previousSequence = event.sequence
+  }
+
+  const cursor = response.page.nextCursor
+  if (cursor !== null) {
+    if (
+      cursor.organizationId !== response.organizationId
+      || cursor.spaceId !== response.spaceId
+      || cursor.sessionId !== response.sessionId
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['page', 'nextCursor'],
+        message: 'Event cursor scope must match the page scope',
+      })
+    }
+    const lastEvent = response.items.at(-1)
+    if (!lastEvent || cursor.sequence !== lastEvent.sequence) {
+      context.addIssue({
+        code: 'custom',
+        path: ['page', 'nextCursor', 'sequence'],
+        message: 'Event cursor sequence must match the last event',
+      })
+    }
+  }
+})
+
+export type SessionEventPage = z.infer<typeof SessionEventPageSchema>
+
 export const SessionTurnSchema = z.object({
   id: IdentifierSchema,
   sessionId: IdentifierSchema,
   ordinal: z.number().int().positive(),
   initiatorType: z.enum(['user', 'event', 'system']),
-  initiatorId: IdentifierSchema.nullable(),
+  initiatorId: ActorIdentifierSchema.nullable(),
   inputMessageId: IdentifierSchema,
   status: z.enum(['queued', 'running', 'waiting_tool', 'waiting_approval', 'completed', 'failed', 'canceled']),
   queuedAt: TimestampSchema,

@@ -1,6 +1,6 @@
 import type { Pool } from 'pg'
 import { describe, expect, it, vi } from 'vitest'
-import { assertMigrationsCurrent } from './migrations.js'
+import { assertMigrationsCurrent, runMigrations } from './migrations.js'
 
 const migrationVersions = [
   '001_sessions.sql',
@@ -18,6 +18,21 @@ const migrationVersions = [
   '013_validate_tenant_references.sql',
   '014_session_audit_ledgers.sql',
   '015_validate_session_audit_ledgers.sql',
+  '016_session_execution_runtime.sql',
+  '017_attempt_tenant_identity.sql',
+  '018_attempt_turn_number.sql',
+  '019_attempt_one_nonterminal.sql',
+  '020_command_protocol1_claim.sql',
+  '021_session_execution_constraints.sql',
+  '022_validate_session_execution_state.sql',
+  '023_validate_session_execution_references.sql',
+  '024_execution_lifecycle_forward_repair.sql',
+  '025_validate_execution_lifecycle_forward_repair.sql',
+  '026_session_updated_events.sql',
+  '027_validate_session_updated_events.sql',
+  '028_attempt_provider_model.sql',
+  '029_validate_attempt_provider_model.sql',
+  '030_worker_heartbeats.sql',
 ]
 
 function poolWithVersions(versions: string[]) {
@@ -41,5 +56,40 @@ describe('migration readiness', () => {
       query: vi.fn().mockRejectedValue(new Error('relay_schema_migrations does not exist')),
     } as unknown as Pool
     await expect(assertMigrationsCurrent(pool)).rejects.toThrow('does not exist')
+  })
+
+  it('bounds and resets lock waits while rebuilding an orphaned concurrent index', async () => {
+    const applied = new Set(migrationVersions)
+    applied.delete('017_attempt_tenant_identity.sql')
+    const client = {
+      query: vi.fn(async (sql: string, parameters?: unknown[]) => {
+        if (sql === 'SELECT version FROM relay_schema_migrations WHERE version = $1') {
+          return { rowCount: applied.has(String(parameters?.[0])) ? 1 : 0, rows: [] }
+        }
+        return { rowCount: 1, rows: [] }
+      }),
+      release: vi.fn(),
+    }
+    const pool = {
+      query: vi.fn().mockResolvedValue({ rowCount: 0, rows: [] }),
+      connect: vi.fn().mockResolvedValue(client),
+    } as unknown as Pool
+
+    await runMigrations(pool)
+
+    const statements = client.query.mock.calls.map(([sql]) => sql)
+    const lockIndex = statements.indexOf("SET lock_timeout = '5s'")
+    const dropIndex = statements.indexOf(
+      'DROP INDEX CONCURRENTLY IF EXISTS "relay_attempts_tenant_identity_unique"',
+    )
+    const createIndex = statements.findIndex((sql) => (
+      typeof sql === 'string' && sql.includes('CREATE UNIQUE INDEX CONCURRENTLY relay_attempts_tenant_identity_unique')
+    ))
+    const resetIndex = statements.indexOf('RESET lock_timeout')
+    expect(lockIndex).toBeGreaterThan(-1)
+    expect(dropIndex).toBeGreaterThan(lockIndex)
+    expect(createIndex).toBeGreaterThan(dropIndex)
+    expect(resetIndex).toBeGreaterThan(createIndex)
+    expect(client.release).toHaveBeenCalledOnce()
   })
 })

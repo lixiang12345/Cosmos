@@ -247,6 +247,7 @@ function testApp(
     sessionRepository: repository,
     configurationCatalogRepository,
     authenticate: createDevelopmentAuthenticator('user-local-admin'),
+    executionReadinessCheck: async () => true,
   })
   openApps.push(app)
   return app
@@ -550,6 +551,133 @@ describe('Relay API', () => {
     expect(create).not.toHaveBeenCalled()
   })
 
+  it('fails closed for execution while still allowing Session drafts', async () => {
+    const repository = testRepository({ createId: () => crypto.randomUUID() })
+    const create = vi.spyOn(repository, 'create')
+    const app = createApp({
+      sessionRepository: repository,
+      authenticate: createDevelopmentAuthenticator('user-local-admin'),
+      executionEnabled: false,
+    })
+    openApps.push(app)
+    const url = '/api/v1/organizations/relay/spaces/platform/sessions'
+    const start = await app.inject({
+      method: 'POST',
+      url,
+      headers: { 'idempotency-key': 'execution-disabled-start' },
+      payload: sessionRequest,
+    })
+
+    expect(start.statusCode).toBe(503)
+    expect(ApiErrorSchema.parse(start.json())).toMatchObject({
+      code: 'EXECUTION_UNAVAILABLE', retryable: false,
+    })
+    expect(create).toHaveBeenCalledOnce()
+    expect(create).toHaveBeenLastCalledWith(expect.objectContaining({
+      executionAvailability: 'disabled',
+    }))
+
+    const draft = await app.inject({
+      method: 'POST',
+      url,
+      headers: { 'idempotency-key': 'execution-disabled-draft' },
+      payload: { ...sessionRequest, start: false },
+    })
+    expect(draft.statusCode).toBe(201)
+    expect(CreateSessionResponseSchema.parse(draft.json()).session.status).toBe('draft')
+    expect(create).toHaveBeenCalledTimes(2)
+  })
+
+  it('gates execution on a recent Worker without disabling read-only API readiness', async () => {
+    const repository = testRepository({ createId: () => crypto.randomUUID() })
+    const create = vi.spyOn(repository, 'create')
+    const executionReadinessCheck = vi.fn().mockResolvedValue(false)
+    const app = createApp({
+      sessionRepository: repository,
+      authenticate: createDevelopmentAuthenticator('user-local-admin'),
+      readinessCheck: async () => {},
+      executionEnabled: true,
+      executionReadinessCheck,
+    })
+    openApps.push(app)
+    const url = '/api/v1/organizations/relay/spaces/platform/sessions'
+
+    const [readiness, capabilities, start] = await Promise.all([
+      app.inject({ method: 'GET', url: '/api/ready' }),
+      app.inject({ method: 'GET', url: '/api/v1/capabilities' }),
+      app.inject({
+        method: 'POST',
+        url,
+        headers: { 'idempotency-key': 'worker-unavailable-start' },
+        payload: sessionRequest,
+      }),
+    ])
+
+    expect(readiness.statusCode).toBe(200)
+    expect(readiness.json()).toEqual({ status: 'ready' })
+    expect(capabilities.json()).toEqual({ execution: { enabled: false, events: 'polling' } })
+    expect(start.statusCode).toBe(503)
+    expect(ApiErrorSchema.parse(start.json())).toMatchObject({
+      code: 'EXECUTION_UNAVAILABLE', retryable: true,
+    })
+    expect(create).toHaveBeenCalledOnce()
+    expect(create).toHaveBeenLastCalledWith(expect.objectContaining({
+      executionAvailability: 'worker_unavailable',
+    }))
+    expect(executionReadinessCheck).toHaveBeenCalledTimes(2)
+  })
+
+  it('replays accepted execution requests after Worker or deployment availability changes', async () => {
+    const repository = testRepository({ createId: () => crypto.randomUUID() })
+    let workerReady = true
+    const enabledApp = createApp({
+      sessionRepository: repository,
+      authenticate: createDevelopmentAuthenticator('user-local-admin'),
+      executionEnabled: true,
+      executionReadinessCheck: async () => workerReady,
+    })
+    const disabledApp = createApp({
+      sessionRepository: repository,
+      authenticate: createDevelopmentAuthenticator('user-local-admin'),
+      executionEnabled: false,
+    })
+    openApps.push(enabledApp, disabledApp)
+    const url = '/api/v1/organizations/relay/spaces/platform/sessions'
+    const request = {
+      method: 'POST' as const,
+      url,
+      headers: { 'idempotency-key': 'accepted-before-worker-loss' },
+      payload: sessionRequest,
+    }
+
+    const accepted = await enabledApp.inject(request)
+    workerReady = false
+    const replayWithoutWorker = await enabledApp.inject(request)
+    const replayWhileDisabled = await disabledApp.inject(request)
+    const rejectedWithoutWorker = await enabledApp.inject({
+      ...request,
+      headers: { 'idempotency-key': 'new-after-worker-loss' },
+    })
+    const rejectedWhileDisabled = await disabledApp.inject({
+      ...request,
+      headers: { 'idempotency-key': 'new-while-disabled' },
+    })
+
+    expect(accepted.statusCode).toBe(201)
+    expect(replayWithoutWorker.statusCode).toBe(201)
+    expect(replayWithoutWorker.headers['idempotency-replayed']).toBe('true')
+    expect(replayWhileDisabled.statusCode).toBe(201)
+    expect(replayWhileDisabled.headers['idempotency-replayed']).toBe('true')
+    expect(replayWithoutWorker.json()).toEqual(accepted.json())
+    expect(replayWhileDisabled.json()).toEqual(accepted.json())
+    expect(ApiErrorSchema.parse(rejectedWithoutWorker.json())).toMatchObject({
+      code: 'EXECUTION_UNAVAILABLE', retryable: true,
+    })
+    expect(ApiErrorSchema.parse(rejectedWhileDisabled.json())).toMatchObject({
+      code: 'EXECUTION_UNAVAILABLE', retryable: false,
+    })
+  })
+
   it('creates a Session with defaults from the shared contract', async () => {
     const repository = testRepository({
       createId: () => 'session-1',
@@ -622,6 +750,27 @@ describe('Relay API', () => {
     })
     expect(body.turn).toBeUndefined()
     expect(body.command).toBeUndefined()
+  })
+
+  it('creates a Session for an actor at the OIDC subject length boundary', async () => {
+    const actorId = `user-${'a'.repeat(251)}`
+    const repository = testRepository({
+      actorOrganizations: { [actorId]: testActorOrganizations['user-local-admin'] },
+    })
+    const app = createApp({
+      sessionRepository: repository,
+      authenticate: createDevelopmentAuthenticator(actorId),
+    })
+    openApps.push(app)
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      headers: { 'idempotency-key': 'long-actor-subject' },
+      payload: { ...sessionRequest, start: false },
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(CreateSessionResponseSchema.parse(response.json()).message?.actorId).toBe(actorId)
   })
 
   it('fails closed without an authoritative catalog and ignores forged compatibility metadata', async () => {

@@ -7,6 +7,15 @@ export type ApiConfig = {
   databaseQueryTimeoutMs: number
   databaseStatementTimeoutMs: number
   migrateOnStart: boolean
+  executionEnabled: boolean
+  executionMaxAttempts: number
+  workerReadinessMaxAgeMs: number
+  sessionEventStream: {
+    maxConnections: number
+    maxConnectionsPerActor: number
+    maxConnectionsPerSession: number
+    retryAfterSeconds: number
+  }
   authentication:
     | { mode: 'development'; actorId: string }
     | { mode: 'oidc'; issuer: string; audience: string; jwksUri: string }
@@ -29,6 +38,29 @@ function parseDuration(value: string | undefined, name: string, defaultValue: nu
     throw new Error(`${name} must be an integer between 100 and 300000 milliseconds.`)
   }
   return duration
+}
+
+function parseBoolean(value: string | undefined, name: string, defaultValue: boolean) {
+  if (value === undefined) return defaultValue
+  if (value !== 'true' && value !== 'false') {
+    throw new Error(`${name} must be true or false when configured.`)
+  }
+  return value === 'true'
+}
+
+function parseInteger(
+  value: string | undefined,
+  name: string,
+  defaultValue: number,
+  minimum: number,
+  maximum: number,
+) {
+  if (value === undefined) return defaultValue
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+    throw new Error(`${name} must be an integer between ${minimum} and ${maximum}.`)
+  }
+  return parsed
 }
 
 function parseCorsOrigin(value: string | undefined, environment: string | undefined) {
@@ -58,13 +90,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     throw new Error('DATABASE_URL is required when AUTH_MODE is oidc and in staging and production.')
   }
   const corsOrigin = parseCorsOrigin(env.CORS_ORIGIN, environment)
-  const migrateOnStartValue = env.MIGRATE_ON_START?.trim()
-  if (migrateOnStartValue && migrateOnStartValue !== 'true' && migrateOnStartValue !== 'false') {
-    throw new Error('MIGRATE_ON_START must be true or false when configured.')
-  }
-  const migrateOnStart = migrateOnStartValue
-    ? migrateOnStartValue === 'true'
-    : environment === 'development'
+  const migrateOnStartValue = env.MIGRATE_ON_START?.trim() || undefined
+  const migrateOnStart = parseBoolean(
+    migrateOnStartValue,
+    'MIGRATE_ON_START',
+    environment === 'development',
+  )
   if (migrateOnStart && (environment === 'staging' || environment === 'production')) {
     throw new Error('MIGRATE_ON_START cannot be enabled in staging or production; use the migration job.')
   }
@@ -115,6 +146,55 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       15_000,
     ),
     migrateOnStart,
+    executionEnabled: parseBoolean(
+      env.EXECUTION_ENABLED?.trim() || undefined,
+      'EXECUTION_ENABLED',
+      environment === 'development',
+    ),
+    executionMaxAttempts: parseInteger(
+      env.EXECUTION_MAX_ATTEMPTS?.trim() || undefined,
+      'EXECUTION_MAX_ATTEMPTS',
+      5,
+      1,
+      20,
+    ),
+    workerReadinessMaxAgeMs: parseInteger(
+      env.WORKER_READINESS_MAX_AGE_MS?.trim() || undefined,
+      'WORKER_READINESS_MAX_AGE_MS',
+      30_000,
+      100,
+      300_000,
+    ),
+    sessionEventStream: {
+      maxConnections: parseInteger(
+        env.SESSION_EVENT_STREAM_MAX_CONNECTIONS?.trim() || undefined,
+        'SESSION_EVENT_STREAM_MAX_CONNECTIONS',
+        1_000,
+        1,
+        100_000,
+      ),
+      maxConnectionsPerActor: parseInteger(
+        env.SESSION_EVENT_STREAM_MAX_CONNECTIONS_PER_ACTOR?.trim() || undefined,
+        'SESSION_EVENT_STREAM_MAX_CONNECTIONS_PER_ACTOR',
+        10,
+        1,
+        1_000,
+      ),
+      maxConnectionsPerSession: parseInteger(
+        env.SESSION_EVENT_STREAM_MAX_CONNECTIONS_PER_SESSION?.trim() || undefined,
+        'SESSION_EVENT_STREAM_MAX_CONNECTIONS_PER_SESSION',
+        50,
+        1,
+        1_000,
+      ),
+      retryAfterSeconds: parseInteger(
+        env.SESSION_EVENT_STREAM_RETRY_AFTER_SECONDS?.trim() || undefined,
+        'SESSION_EVENT_STREAM_RETRY_AFTER_SECONDS',
+        5,
+        1,
+        3_600,
+      ),
+    },
     authentication: authMode === 'oidc' && issuer && audience && jwksUri
       ? { mode: 'oidc', issuer, audience, jwksUri }
       : { mode: 'development', actorId: env.DEVELOPMENT_ACTOR_ID?.trim() || 'user-local-admin' },

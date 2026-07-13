@@ -807,6 +807,62 @@
   margin: 0;
 }
 
+.remote-session-execution-state--running,
+.remote-session-execution-state--completed {
+  border-color: color-mix(in srgb, var(--brand) 34%, var(--border));
+  background: var(--brand-soft);
+}
+
+.remote-session-execution-state--running > svg,
+.remote-session-execution-state--completed > svg {
+  color: var(--brand);
+}
+
+.remote-session-execution-state--failed {
+  border-color: color-mix(in srgb, var(--danger) 34%, var(--border));
+  background: var(--danger-soft);
+}
+
+.remote-session-execution-state--failed > svg {
+  color: var(--danger);
+}
+
+.remote-session-execution-state--retrying,
+.remote-session-execution-state--waiting {
+  border-color: color-mix(in srgb, var(--warning) 34%, var(--border));
+  background: var(--warning-soft);
+}
+
+.remote-session-timeline-error {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--border));
+  border-radius: 5px;
+  background: var(--danger-soft);
+  color: var(--text-secondary);
+  font-size: 9px;
+}
+
+.remote-session-timeline-error svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  color: var(--danger);
+}
+
+.remote-session-timeline-error code {
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .remote-session-execution-state h2 {
   color: var(--text);
   font-size: 11px;
@@ -849,6 +905,113 @@
   color: var(--text);
   font-size: 10px;
   font-weight: 660;
+}
+
+.remote-session-section__count {
+  display: inline-grid;
+  min-width: 18px;
+  height: 18px;
+  margin-left: auto;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 8px;
+}
+
+.remote-session-empty {
+  margin: 0;
+  padding: 18px 14px;
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.remote-session-messages,
+.remote-session-events {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.remote-session-message {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.remote-session-message:last-child,
+.remote-session-events li:last-child {
+  border-bottom: 0;
+}
+
+.remote-session-message > header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-muted);
+  font-size: 8px;
+}
+
+.remote-session-message > header strong {
+  color: var(--text-secondary);
+  font-size: 9px;
+}
+
+.remote-session-message > header time {
+  margin-left: auto;
+}
+
+.remote-session-message > p {
+  margin: 7px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.remote-session-message--agent {
+  box-shadow: inset 2px 0 var(--brand);
+  background: color-mix(in srgb, var(--brand-soft) 45%, var(--surface));
+}
+
+.remote-session-events li {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 7px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--text-muted);
+  font-size: 8px;
+}
+
+.remote-session-events li > i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--brand);
+}
+
+.remote-session-events li > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
+.remote-session-events strong {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 9px;
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-session-events code {
+  color: var(--danger);
+  font-size: 8px;
 }
 
 .remote-session-summary {
@@ -994,6 +1157,24 @@
 
   .remote-session-revisions {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .remote-session-timeline-error {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .remote-session-timeline-error code {
+    width: 100%;
+    margin-left: 22px;
+  }
+
+  .remote-session-events li {
+    grid-template-columns: 7px minmax(0, 1fr) auto;
+  }
+
+  .remote-session-events time {
+    display: none;
   }
 
   .remote-session-revisions > div {

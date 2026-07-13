@@ -1,4 +1,4 @@
-FROM node:22.13.0-bookworm-slim AS build
+FROM node:22.22.0-bookworm-slim AS build
 
 WORKDIR /workspace
 RUN npm install --global pnpm@11.7.0 && test "$(pnpm --version)" = "11.7.0"
@@ -33,7 +33,11 @@ RUN VITE_AUTH_MODE=oidc \
   VITE_API_ALLOWED_ORIGINS=$VITE_API_ALLOWED_ORIGINS \
   sh -c 'pnpm --filter @relay/contracts build && pnpm --filter @relay/web build'
 
-FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
+FROM nginxinc/nginx-unprivileged:1.29.5-alpine-slim AS runtime
+
+USER root
+RUN apk upgrade --no-cache
+USER nginx
 
 ENV RELAY_API_UPSTREAM=http://api:8787 \
   RELAY_CSP_CONNECT_SRC="'self'" \

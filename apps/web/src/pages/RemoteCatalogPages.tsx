@@ -283,8 +283,8 @@ export function RemoteExpertsPage({
       <div className="cosmos-page__scroll">
         <ReadOnlyNote>{text(
           locale,
-          '当前仅开放查询和会话草稿；执行、创建、编辑与发布尚未接入生产 API。',
-          'Query and Session drafts are available. Execution, create, edit, and publish are not connected to the production API.',
+          '当前开放查询和会话创建；是否立即执行由部署能力决定。Expert 的创建、编辑与发布尚未接入生产 API。',
+          'Query and Session creation are available; deployment capabilities decide whether execution starts immediately. Expert create, edit, and publish are not connected to the production API.',
         )}</ReadOnlyNote>
         <section className="cosmos-panel remote-catalog-panel" aria-label={text(locale, '专家列表', 'Expert list')}>
           <header className="cosmos-section-heading">
@@ -324,7 +324,7 @@ export function RemoteExpertsPage({
                       title={startable ? undefined : text(locale, '仅已发布且具有版本的 Expert 可发起会话', 'Only a published Expert revision can start a Session')}
                       onClick={() => onStartSession(expert.id)}
                     >
-                      <FilePlus2 aria-hidden="true" />{text(locale, '新建会话草稿', 'New Session draft')}
+                      <FilePlus2 aria-hidden="true" />{text(locale, '新建会话', 'New Session')}
                     </button> : null}
                   </article>
                 )
@@ -351,15 +351,16 @@ export function RemoteExpertDetailPage({
   const { locale } = usePreferences()
   const requestAuth = useMemo<RelayApiAuthContext>(() => ({
     accessToken: auth.accessToken,
+    requestIdentity: auth.requestIdentity,
     onUnauthorized: auth.onUnauthorized,
-  }), [auth.accessToken, auth.onUnauthorized])
+  }), [auth.accessToken, auth.onUnauthorized, auth.requestIdentity])
   const identity = useMemo(() => ({
     organizationId,
     spaceId,
     expertId,
-    accessToken: requestAuth.accessToken,
+    requestIdentity: requestAuth.requestIdentity,
     credentialVersion,
-  }), [credentialVersion, expertId, organizationId, requestAuth.accessToken, spaceId])
+  }), [credentialVersion, expertId, organizationId, requestAuth.requestIdentity, spaceId])
   const load = useCallback(
     (signal: AbortSignal) => getExpert(organizationId, spaceId, expertId, requestAuth, signal),
     [expertId, organizationId, requestAuth, spaceId],
@@ -378,7 +379,7 @@ export function RemoteExpertDetailPage({
         onOpenNavigation={onOpenNavigation}
         actions={startable && sessionCreationEnabled ? (
           <button type="button" className="cosmos-button cosmos-button--primary" onClick={() => onStartSession(expertId)}>
-            <FilePlus2 aria-hidden="true" />{text(locale, '新建会话草稿', 'New Session draft')}
+            <FilePlus2 aria-hidden="true" />{text(locale, '新建会话', 'New Session')}
           </button>
         ) : null}
       />
@@ -449,15 +450,16 @@ export function RemoteEnvironmentsPage({
   const selectedEnvironmentId = state === 'ready' ? selectedSummary?.id : undefined
   const requestAuth = useMemo<RelayApiAuthContext>(() => ({
     accessToken: auth.accessToken,
+    requestIdentity: auth.requestIdentity,
     onUnauthorized: auth.onUnauthorized,
-  }), [auth.accessToken, auth.onUnauthorized])
+  }), [auth.accessToken, auth.onUnauthorized, auth.requestIdentity])
   const identity = useMemo(() => selectedEnvironmentId ? ({
     organizationId,
     spaceId,
     environmentId: selectedEnvironmentId,
-    accessToken: requestAuth.accessToken,
+    requestIdentity: requestAuth.requestIdentity,
     credentialVersion,
-  }) : undefined, [credentialVersion, organizationId, requestAuth.accessToken, selectedEnvironmentId, spaceId])
+  }) : undefined, [credentialVersion, organizationId, requestAuth.requestIdentity, selectedEnvironmentId, spaceId])
   const load = useCallback(
     (signal: AbortSignal) => {
       if (!selectedEnvironmentId) throw new Error('No Environment selected.')

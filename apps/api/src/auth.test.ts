@@ -8,7 +8,13 @@ import {
 
 describe('JWT authentication', () => {
   let authenticate: ReturnType<typeof createJwtAuthenticator>
-  let sign: (overrides?: { audience?: string; issuer?: string; subject?: string; expiresIn?: string }) => Promise<string>
+  let sign: (overrides?: {
+    audience?: string
+    issuer?: string
+    subject?: string
+    issuedAt?: number
+    expiresIn?: string | number
+  }) => Promise<string>
 
   beforeAll(async () => {
     const { privateKey, publicKey } = await generateKeyPair('RS256')
@@ -24,7 +30,7 @@ describe('JWT authentication', () => {
       .setIssuer(overrides.issuer ?? 'https://identity.relay.test/')
       .setAudience(overrides.audience ?? 'relay-api')
       .setSubject(overrides.subject ?? 'user-1')
-      .setIssuedAt()
+      .setIssuedAt(overrides.issuedAt)
       .setExpirationTime(overrides.expiresIn ?? '5m')
       .sign(privateKey)
   })
@@ -51,9 +57,25 @@ describe('JWT authentication', () => {
 
   it('rejects missing, expired, wrong-issuer, and wrong-audience tokens', async () => {
     await expect(authenticate(undefined)).rejects.toBeInstanceOf(AuthenticationError)
+    await expect(authenticate(`Bearer ${await sign({ expiresIn: '-1s' })}`)).rejects.toBeInstanceOf(AuthenticationError)
     await expect(authenticate(`Bearer ${await sign({ expiresIn: '-10s' })}`)).rejects.toBeInstanceOf(AuthenticationError)
     await expect(authenticate(`Bearer ${await sign({ issuer: 'https://attacker.test/' })}`)).rejects.toBeInstanceOf(AuthenticationError)
     await expect(authenticate(`Bearer ${await sign({ audience: 'another-api' })}`)).rejects.toBeInstanceOf(AuthenticationError)
+  })
+
+  it('bounds revocation exposure by rejecting access tokens longer than five minutes', async () => {
+    await expect(authenticate(`Bearer ${await sign({ expiresIn: '6m' })}`))
+      .rejects.toBeInstanceOf(AuthenticationError)
+    await expect(authenticate(`Bearer ${await sign({ expiresIn: '5m' })}`))
+      .resolves.toEqual({ id: 'user-1', kind: 'user' })
+  })
+
+  it('rejects a short-lived token whose issued-at time is in the future', async () => {
+    const futureIssuedAt = Math.floor(Date.now() / 1_000) + 365 * 24 * 60 * 60
+    await expect(authenticate(`Bearer ${await sign({
+      issuedAt: futureIssuedAt,
+      expiresIn: futureIssuedAt + 300,
+    })}`)).rejects.toBeInstanceOf(AuthenticationError)
   })
 
   it('rejects tokens without required access-token claims or with an unknown actor type', async () => {

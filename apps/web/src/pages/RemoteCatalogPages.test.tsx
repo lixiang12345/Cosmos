@@ -204,7 +204,7 @@ describe('remote Catalog pages', () => {
     expect(screen.queryByRole('button', { name: '创建专家' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '发布' })).not.toBeInTheDocument()
-    const startButtons = screen.getAllByRole('button', { name: '新建会话草稿' })
+    const startButtons = screen.getAllByRole('button', { name: '新建会话' })
     expect(startButtons[0]).toBeEnabled()
     expect(startButtons[1]).toBeDisabled()
 
@@ -250,7 +250,7 @@ describe('remote Catalog pages', () => {
     }
     await act(async () => { next.resolve(updatedDetail) })
     expect(await screen.findByText('Use the rotated credential context.')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '新建会话草稿' }))
+    await user.click(screen.getByRole('button', { name: '新建会话' }))
     expect(initialProps.onStartSession).toHaveBeenCalledWith(publishedExpert.id)
   })
 
@@ -264,7 +264,7 @@ describe('remote Catalog pages', () => {
     expect(await screen.findByText('未找到专家')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '重试' }))
     expect(await screen.findByRole('heading', { level: 2, name: draftExpertDetail.name })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '新建会话草稿' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '新建会话' })).not.toBeInTheDocument()
     expect(getExpert).toHaveBeenCalledTimes(2)
   })
 

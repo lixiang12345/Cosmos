@@ -1,4 +1,4 @@
-import type { SessionDto } from '@relay/contracts'
+import type { AttemptStatus, SessionDto, SessionEventDto, SessionMessageDto } from '@relay/contracts'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -31,13 +31,54 @@ const session: SessionDto = {
   version: 2,
 }
 
-function renderWorkbench(overrides: Partial<SessionDto> = {}) {
+function attemptEvent(number: number, status: AttemptStatus, failureCode: string | null = null): SessionEventDto {
+  return {
+    eventId: `event-attempt-${number}-${status}`,
+    organizationId: session.organizationId,
+    spaceId: session.spaceId,
+    sessionId: session.id,
+    sequence: number + 3,
+    type: 'attempt.updated',
+    resourceType: 'attempt',
+    resourceId: `attempt-${number}`,
+    actorId: 'worker-1',
+    commandId: 'command-1',
+    requestId: `request-${number}`,
+    occurredAt: session.updatedAt,
+    payload: {
+      attemptId: `attempt-${number}`,
+      turnId: 'turn-1',
+      number,
+      status,
+      failureCode,
+    },
+  }
+}
+
+const message: SessionMessageDto = {
+  id: 'message-user-1',
+  organizationId: session.organizationId,
+  spaceId: session.spaceId,
+  sessionId: session.id,
+  sequence: 1,
+  role: 'user',
+  actorId: 'user-1',
+  content: '请检查结算竞态并补充回归测试。',
+  attachments: [],
+  createdAt: session.createdAt,
+}
+
+function renderWorkbench(
+  overrides: Partial<SessionDto> = {},
+  timeline: { messages?: SessionMessageDto[]; events?: SessionEventDto[]; timelineStatus?: 'loading' | 'ready' | 'error'; timelineError?: string } = {},
+) {
   const onBack = vi.fn()
   const onOpenNavigation = vi.fn()
   const view = render(
     <PreferencesProvider>
       <RemoteSessionWorkbench
         session={{ ...session, ...overrides }}
+        {...timeline}
         onBack={onBack}
         onOpenNavigation={onOpenNavigation}
       />
@@ -56,7 +97,8 @@ describe('RemoteSessionWorkbench', () => {
     renderWorkbench()
 
     expect(screen.getByRole('heading', { name: session.title })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '命令已接受，但执行面未接通' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '已排队，等待执行' })).toBeInTheDocument()
+    expect(screen.getByText('命令已被服务端接受，正在等待 Worker 领取。')).toBeInTheDocument()
     expect(screen.getByText(session.summary)).toBeInTheDocument()
     expect(screen.getByText(session.expertName)).toBeInTheDocument()
     expect(screen.getByText(session.expertId)).toBeInTheDocument()
@@ -114,7 +156,7 @@ describe('RemoteSessionWorkbench', () => {
 
     await user.click(screen.getByRole('button', { name: '切换到英文' }))
     const workbench = screen.getByRole('main')
-    expect(within(workbench).getByRole('heading', { name: 'Command accepted, but the execution plane is not connected' })).toBeInTheDocument()
+    expect(within(workbench).getByRole('heading', { name: 'Queued for execution' })).toBeInTheDocument()
     expect(within(workbench).getByRole('button', { name: 'Back to Sessions' })).toBeInTheDocument()
     expect(within(workbench).getByRole('button', { name: 'Copy link' })).toBeInTheDocument()
     expect(within(workbench).queryByRole('button', { name: /share/i })).not.toBeInTheDocument()
@@ -129,5 +171,59 @@ describe('RemoteSessionWorkbench', () => {
     })
 
     expect(screen.getAllByText('未解析（旧版会话记录）')).toHaveLength(3)
+  })
+
+  it.each([
+    ['running', 'active', [attemptEvent(1, 'running')], '正在执行'],
+    ['retrying', 'active', [attemptEvent(1, 'failed', 'PROVIDER_TIMEOUT'), attemptEvent(2, 'running')], '正在重试'],
+    ['failed', 'failed', [attemptEvent(1, 'failed', 'PROVIDER_REJECTED')], '执行失败'],
+    ['completed', 'completed', [attemptEvent(1, 'succeeded')], '执行已完成'],
+  ] as const)('renders the authoritative %s Attempt state', (_name, status, events, title) => {
+    renderWorkbench({ status }, { events: [...events], timelineStatus: 'ready' })
+
+    expect(screen.getByRole('heading', { name: title })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '执行动态' })).toHaveTextContent(`#${events.at(-1)!.sequence}`)
+  })
+
+  it('keeps retry and failure detail when session.updated follows attempt.updated', () => {
+    const sessionQueuedEvent: SessionEventDto = {
+      organizationId: session.organizationId,
+      spaceId: session.spaceId,
+      sessionId: session.id,
+      eventId: 'event-session-queued',
+      sequence: 5,
+      type: 'session.updated',
+      resourceType: 'session',
+      resourceId: session.id,
+      actorId: 'worker-1',
+      commandId: 'command-1',
+      requestId: 'request-session-queued',
+      occurredAt: session.updatedAt,
+      payload: { status: 'queued', version: 3 },
+    }
+    renderWorkbench({ status: 'queued', version: 3 }, {
+      events: [
+        attemptEvent(2, 'failed', 'PROVIDER_TIMEOUT'),
+        sessionQueuedEvent,
+      ],
+      timelineStatus: 'ready',
+    })
+
+    expect(screen.getByRole('heading', { name: '正在等待重试' })).toBeInTheDocument()
+    expect(screen.getByText(/第 2 次尝试失败，错误代码：PROVIDER_TIMEOUT；下一次尝试已排队/)).toBeInTheDocument()
+  })
+
+  it('renders canonical messages and preserves timeline data while automatic retry is visible', () => {
+    renderWorkbench({}, {
+      messages: [message],
+      events: [attemptEvent(1, 'running')],
+      timelineStatus: 'error',
+      timelineError: 'Timeline temporarily unavailable.',
+    })
+
+    expect(screen.getByRole('region', { name: '会话消息' })).toHaveTextContent(message.content)
+    expect(screen.getByRole('region', { name: '会话消息' })).toHaveTextContent('用户')
+    expect(screen.getByRole('alert')).toHaveTextContent('实时更新暂时中断，正在自动重试。')
+    expect(screen.getByRole('alert')).toHaveTextContent('Timeline temporarily unavailable.')
   })
 })

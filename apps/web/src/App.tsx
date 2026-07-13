@@ -1,6 +1,6 @@
 import type { SessionDto } from '@relay/contracts'
 import { AlertTriangle, CheckCircle2, Home, LoaderCircle, Menu, RefreshCw, X } from 'lucide-react'
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from './auth/context'
 import { CommandPalette } from './components/CommandPalette'
@@ -27,8 +27,15 @@ import {
   type ExpertStore,
 } from './features/experts'
 import { deriveSessionTitle, detectTaskContextItems } from './features/run/sessionDraft'
+import { useRemoteSessionTimeline } from './features/session/useRemoteSessionTimeline'
 import { usePreferences } from './preferences'
-import { RelayApiError, createSession, getSession, listSessions } from './services/relayApi'
+import {
+  RelayApiError,
+  createSession,
+  getRuntimeCapabilities,
+  getSession,
+  listSessions,
+} from './services/relayApi'
 import type { NewTaskInput, Run, RunAttempt, TaskCreateMode } from './types'
 import { canCreateSessionInWorkspace, useActiveWorkspace } from './workspace'
 
@@ -280,10 +287,14 @@ function SessionRoute({
   spaceId,
   accessToken,
   credentialVersion,
+  requestIdentity,
+  timelineTransport,
   handleUnauthorized,
   demoMode,
   locale,
   onOpenNavigation,
+  onSessionObserved,
+  onSessionConcealed,
   onDecision,
   onRetry,
   onPause,
@@ -294,10 +305,14 @@ function SessionRoute({
   spaceId: string
   accessToken?: string
   credentialVersion: number
+  requestIdentity: string
+  timelineTransport?: 'polling' | 'sse'
   handleUnauthorized: (failedAccessToken: string | undefined) => Promise<void>
   demoMode: boolean
   locale: 'zh' | 'en'
   onOpenNavigation: () => void
+  onSessionObserved: (session: SessionDto) => void
+  onSessionConcealed: (sessionId: string) => void
   onDecision: (runId: string, decision: 'approved' | 'changes') => void
   onRetry: (runId: string) => void
   onPause: (runId: string) => void
@@ -312,28 +327,84 @@ function SessionRoute({
     session?: SessionDto
     error?: string
     notFound?: boolean
+    concealed?: boolean
   }>()
   const run = runs.find((item) => item.id === sessionId)
+  const auth = useMemo(
+    () => ({ accessToken, requestIdentity, onUnauthorized: handleUnauthorized }),
+    [accessToken, handleUnauthorized, requestIdentity],
+  )
   const requestKey = `${organizationId}\u0000${spaceId}\u0000${sessionId ?? ''}\u0000${credentialVersion}\u0000${locale}\u0000${retryVersion}`
+  const detailConcealed = request?.key === requestKey && request.concealed === true
+  const concealDetail = useCallback((error: string) => {
+    if (!sessionId) return
+    setRequest({
+      key: requestKey,
+      status: 'error',
+      error,
+      notFound: true,
+      concealed: true,
+    })
+    onSessionConcealed(sessionId)
+  }, [onSessionConcealed, requestKey, sessionId])
+  const timeline = useRemoteSessionTimeline({
+    organizationId,
+    spaceId,
+    sessionId,
+    credentialVersion,
+    auth,
+    enabled: !demoMode && !detailConcealed && timelineTransport !== undefined,
+    transport: timelineTransport ?? 'polling',
+    onConcealed: concealDetail,
+  })
 
   useEffect(() => {
-    if (!sessionId || demoMode) return
+    if (!sessionId || demoMode || detailConcealed) return
+    const controller = new AbortController()
     let cancelled = false
-    void getSession(organizationId, spaceId, sessionId, { accessToken, onUnauthorized: handleUnauthorized })
+    void getSession(organizationId, spaceId, sessionId, auth, controller.signal)
       .then((session) => {
         if (cancelled) return
         setRequest({ key: requestKey, status: 'ready', session })
       }, (cause: unknown) => {
         if (cancelled) return
+        const concealed = cause instanceof RelayApiError
+          && cause.status !== undefined
+          && [401, 403, 404].includes(cause.status)
         setRequest({
           key: requestKey,
           status: 'error',
           error: cause instanceof Error ? cause.message : (locale === 'zh' ? '无法加载会话。' : 'Unable to load the Session.'),
-          notFound: cause instanceof RelayApiError && cause.status === 404,
+          notFound: concealed,
+          concealed,
         })
+        if (concealed) concealDetail(cause instanceof Error ? cause.message : 'Session unavailable.')
       })
-    return () => { cancelled = true }
-  }, [accessToken, demoMode, handleUnauthorized, locale, organizationId, requestKey, sessionId, spaceId])
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
+  }, [auth, concealDetail, demoMode, detailConcealed, locale, organizationId, requestKey, sessionId, spaceId])
+
+  const currentRequest = request?.key === requestKey ? request : undefined
+  const latestSessionUpdate = timeline.events.filter((event) => event.type === 'session.updated').at(-1)
+  const resolvedSession = useMemo(() => (
+    currentRequest?.session && latestSessionUpdate?.type === 'session.updated'
+      && latestSessionUpdate.payload.version >= currentRequest.session.version
+      ? {
+          ...currentRequest.session,
+          status: latestSessionUpdate.payload.status,
+          version: latestSessionUpdate.payload.version,
+          updatedAt: latestSessionUpdate.occurredAt,
+          lastActivityAt: latestSessionUpdate.occurredAt,
+        }
+      : currentRequest?.session
+  ), [currentRequest, latestSessionUpdate])
+
+  useEffect(() => {
+    if (!resolvedSession || resolvedSession === currentRequest?.session) return
+    onSessionObserved(resolvedSession)
+  }, [currentRequest?.session, onSessionObserved, resolvedSession])
 
   if (!sessionId) return <Navigate to="/sessions" replace />
   const resolvedRun = demoMode
@@ -354,11 +425,28 @@ function SessionRoute({
   }
   if (demoMode) return <Navigate to="/sessions" replace />
 
-  const currentRequest = request?.key === requestKey ? request : undefined
-  if (currentRequest?.status === 'ready' && currentRequest.session) {
+  if (detailConcealed || timeline.concealed) {
+    return (
+      <main className="module-page session-detail-state">
+        <section role="alert">
+          <AlertTriangle aria-hidden="true" />
+          <h1>{locale === 'zh' ? '会话不存在或无权访问' : 'Session not found or unavailable'}</h1>
+          <p>{locale === 'zh'
+            ? '当前凭证无法继续访问此会话。'
+            : 'The current credentials can no longer access this Session.'}</p>
+        </section>
+      </main>
+    )
+  }
+
+  if (currentRequest?.status === 'ready' && resolvedSession) {
     return (
       <RemoteSessionWorkbench
-        session={currentRequest.session}
+        session={resolvedSession}
+        messages={timeline.messages}
+        events={timeline.events}
+        timelineStatus={timeline.status}
+        timelineError={timeline.error}
         onOpenNavigation={onOpenNavigation}
         onBack={() => navigate('/sessions')}
       />
@@ -435,6 +523,7 @@ function RemoteExpertRoute({
   spaceId,
   accessToken,
   credentialVersion,
+  requestIdentity,
   handleUnauthorized,
   onOpenNavigation,
   onBack,
@@ -445,6 +534,7 @@ function RemoteExpertRoute({
   spaceId: string
   accessToken?: string
   credentialVersion: number
+  requestIdentity: string
   handleUnauthorized: (failedAccessToken: string | undefined) => Promise<void>
   onOpenNavigation: () => void
   onBack: () => void
@@ -453,8 +543,8 @@ function RemoteExpertRoute({
 }) {
   const { expertId } = useParams()
   const auth = useMemo(
-    () => ({ accessToken, onUnauthorized: handleUnauthorized }),
-    [accessToken, handleUnauthorized],
+    () => ({ accessToken, requestIdentity, onUnauthorized: handleUnauthorized }),
+    [accessToken, handleUnauthorized, requestIdentity],
   )
   if (!expertId) return <Navigate to="/experts" replace />
   return (
@@ -482,18 +572,30 @@ function RelayApp() {
   const workspace = useActiveWorkspace()
   const { organization } = workspace
   const organizationId = organization.id
+  const requestIdentity = `${workspace.me.actor.id}\u0000${credentialVersion}`
   const sessionCreationEnabled = canCreateSessionInWorkspace(workspace)
   const [runs, setRuns] = useState<Run[]>(() => demoMode ? getDemoRuns() : [])
   const [runsIdentity, setRunsIdentity] = useState(() => demoMode ? 'demo' : '')
   const runsIdentityRef = useRef(runsIdentity)
   const remoteMutationVersionRef = useRef(0)
   const remoteRunMutationVersionsRef = useRef(new Map<string, number>())
+  const concealedRemoteSessionsRef = useRef<{ identity: string; ids: Set<string> }>({
+    identity: '', ids: new Set(),
+  })
   const [sessionsRequest, setSessionsRequest] = useState<{
     key: string
     status: 'ready' | 'error'
     error: string
   }>()
   const [sessionsRetryVersion, setSessionsRetryVersion] = useState(0)
+  const [runtimeCapabilityRequest, setRuntimeCapabilityRequest] = useState<{
+    key: string
+    status: 'ready' | 'error'
+    executionEnabled: boolean
+    events?: 'polling' | 'sse'
+    error?: string
+  }>()
+  const [runtimeCapabilityRetryVersion, setRuntimeCapabilityRetryVersion] = useState(0)
   const [expertStore, setExpertStore] = useState<ExpertStore>(() => (
     demoMode ? loadExpertStore() : createEmptyExpertStore()
   ))
@@ -516,8 +618,8 @@ function RelayApp() {
   const { locale, t } = usePreferences()
   const { activeSpace, scope } = useControlPlane()
   const catalogAuth = useMemo(
-    () => ({ accessToken, onUnauthorized: handleUnauthorized }),
-    [accessToken, handleUnauthorized],
+    () => ({ accessToken, requestIdentity, onUnauthorized: handleUnauthorized }),
+    [accessToken, handleUnauthorized, requestIdentity],
   )
   const catalog = useCatalog({
     organizationId,
@@ -527,7 +629,14 @@ function RelayApp() {
     onUnauthorized: handleUnauthorized,
     enabled: !demoMode,
   })
-  const sessionsRequestKey = `${organizationId}\u0000${activeSpace.id}\u0000${credentialVersion}\u0000${accessToken ? 'authenticated' : 'anonymous'}\u0000${locale}\u0000${sessionsRetryVersion}`
+  const runtimeCapabilityKey = `${credentialVersion}\u0000${runtimeCapabilityRetryVersion}`
+  const currentRuntimeCapability = runtimeCapabilityRequest?.key === runtimeCapabilityKey
+    ? runtimeCapabilityRequest
+    : undefined
+  const productionExecutionEnabled = !demoMode
+    && currentRuntimeCapability?.status === 'ready'
+    && currentRuntimeCapability.executionEnabled
+  const sessionsRequestKey = `${organizationId}\u0000${activeSpace.id}\u0000${requestIdentity}\u0000${locale}\u0000${sessionsRetryVersion}`
   const sessionsState = sessionsRequest?.key === sessionsRequestKey ? sessionsRequest.status : 'loading'
   const sessionsError = sessionsRequest?.key === sessionsRequestKey ? sessionsRequest.error : ''
 
@@ -541,6 +650,30 @@ function RelayApp() {
     const ids = new Set(experts.map((expert) => expert.id))
     return { ...expertStore, experts, versions: expertStore.versions.filter((version) => ids.has(version.expertId)) }
   }, [activeSpace.id, expertStore])
+
+  useEffect(() => {
+    if (demoMode) return
+    const controller = new AbortController()
+    const requestKey = runtimeCapabilityKey
+    void getRuntimeCapabilities(catalogAuth, controller.signal).then((capabilities) => {
+      if (controller.signal.aborted) return
+      setRuntimeCapabilityRequest({
+        key: requestKey,
+        status: 'ready',
+        executionEnabled: capabilities.execution.enabled,
+        events: capabilities.execution.events,
+      })
+    }, (cause: unknown) => {
+      if (controller.signal.aborted) return
+      setRuntimeCapabilityRequest({
+        key: requestKey,
+        status: 'error',
+        executionEnabled: false,
+        error: cause instanceof Error ? cause.message : 'Unable to discover runtime capabilities.',
+      })
+    })
+    return () => controller.abort()
+  }, [catalogAuth, demoMode, runtimeCapabilityKey])
 
   useEffect(() => {
     if (!toast) return
@@ -573,7 +706,11 @@ function RelayApp() {
     let cancelled = false
     const requestKey = sessionsRequestKey
     const requestMutationVersion = remoteMutationVersionRef.current
-    void listSessions(organizationId, activeSpace.id, { accessToken, onUnauthorized: handleUnauthorized })
+    void listSessions(organizationId, activeSpace.id, {
+      accessToken,
+      requestIdentity,
+      onUnauthorized: handleUnauthorized,
+    })
       .then(({ items }) => {
         if (cancelled) return
         if (demoMode) {
@@ -586,9 +723,12 @@ function RelayApp() {
               .map(([sessionId]) => sessionId),
           )
           runsIdentityRef.current = requestKey
+          const concealedIds = concealedRemoteSessionsRef.current.identity === requestKey
+            ? concealedRemoteSessionsRef.current.ids
+            : new Set<string>()
           setRuns((current) => mergeRemoteRuns(
             sameIdentity ? current : [],
-            items.map(sessionDtoToRun),
+            items.filter((session) => !concealedIds.has(session.id)).map(sessionDtoToRun),
             sameIdentity ? preserveCurrentIds : new Set(),
           ))
           for (const [sessionId, mutationVersion] of remoteRunMutationVersionsRef.current) {
@@ -614,7 +754,7 @@ function RelayApp() {
         })
       })
     return () => { cancelled = true }
-  }, [accessToken, activeSpace.id, demoMode, handleUnauthorized, locale, organizationId, sessionsRequestKey])
+  }, [accessToken, activeSpace.id, demoMode, handleUnauthorized, locale, organizationId, requestIdentity, sessionsRequestKey])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -652,7 +792,12 @@ function RelayApp() {
     if (!input.expertId) {
       throw new Error(locale === 'zh' ? '请选择一个可用的 Expert。' : 'Choose an available Expert.')
     }
-    const isDraft = mode === 'draft' || !demoMode
+    if (!demoMode && mode === 'run' && !productionExecutionEnabled) {
+      throw new Error(locale === 'zh'
+        ? '执行能力尚未确认，请刷新能力状态后重试。'
+        : 'Execution capability is not confirmed. Refresh capability status and retry.')
+    }
+    const isDraft = mode === 'draft'
     const expert = input.expertId ? scopedExpertStore.experts.find((item) => item.id === input.expertId) : undefined
     const version = expert?.publishedVersionId ? getExpertVersion(scopedExpertStore, expert.publishedVersionId) : undefined
     const model = version?.configSnapshot.model ?? expert?.draftConfig.model ?? 'GPT-5.4'
@@ -685,7 +830,7 @@ function RelayApp() {
         },
       } : authoritativeRequest,
       idempotencyKey,
-      { accessToken, onUnauthorized: handleUnauthorized },
+      { accessToken, requestIdentity, onUnauthorized: handleUnauthorized },
     )
     sessionIdempotencyKeys.current.delete(requestFingerprint)
     const id = session.id
@@ -757,9 +902,7 @@ function RelayApp() {
     setPresetExpertId(undefined)
     setToast(isDraft
       ? (locale === 'zh' ? '会话草稿已保存' : 'Session draft saved')
-      : demoMode
-        ? (locale === 'zh' ? '会话已创建，等待 Worker 接收命令' : 'Session created and waiting for a Worker.')
-        : (locale === 'zh' ? '会话已创建；执行面尚未接通' : 'Session created; execution is not connected yet.'))
+      : (locale === 'zh' ? '会话已创建，等待 Worker 接收命令' : 'Session created and waiting for a Worker.'))
     navigate(isDraft ? '/sessions' : `/sessions/${id}`)
   }
 
@@ -1007,16 +1150,24 @@ function RelayApp() {
     }]
   })
   const sessionExpertOptions = demoMode ? demoSessionExpertOptions : remoteSessionExpertOptions
+  const runtimeCapabilityError = !demoMode && currentRuntimeCapability?.status === 'error'
+    ? currentRuntimeCapability.error ?? (locale === 'zh' ? '无法确认执行能力。' : 'Unable to confirm execution capability.')
+    : ''
   const sessionCatalogErrors = [catalog.experts.error, catalog.environments.error]
     .filter((error): error is Error => error !== null)
-  const sessionCatalogError = sessionCatalogErrors
-    .map((error) => error.message)
+  const sessionCatalogError = [
+    ...sessionCatalogErrors.map((error) => error.message),
+    runtimeCapabilityError,
+  ]
+    .filter(Boolean)
     .join(' ')
   const sessionCatalogStatus: SessionCatalogStatus = demoMode
     ? 'ready'
-    : sessionCatalogErrors.length
+    : runtimeCapabilityError || sessionCatalogErrors.length
       ? 'error'
-      : catalog.experts.ready && catalog.environments.ready
+      : currentRuntimeCapability?.status !== 'ready'
+        ? 'loading'
+        : catalog.experts.ready && catalog.environments.ready
         ? remoteSessionExpertOptions.length
           ? 'ready'
           : 'empty'
@@ -1024,6 +1175,9 @@ function RelayApp() {
   const retrySessionCatalog = () => {
     if (catalog.experts.error) catalog.experts.retry()
     if (catalog.environments.error) catalog.environments.retry()
+    if (currentRuntimeCapability?.status === 'error') {
+      setRuntimeCapabilityRetryVersion((version) => version + 1)
+    }
   }
   const sessionRepositories = demoMode
     ? scope.repositories.map((repository) => ({
@@ -1046,11 +1200,13 @@ function RelayApp() {
     prompt,
     visibility,
     attachments,
+    mode,
   }: {
     expertId: string
     prompt: string
     visibility: 'private' | 'space'
     attachments: string[]
+    mode: TaskCreateMode
   }) => {
     const expert = sessionExpertOptions.find((item) => item.id === expertId)
     const repository = sessionRepositories.find((item) => item.fullName === expert?.repository) ?? sessionRepositories[0]
@@ -1074,8 +1230,32 @@ function RelayApp() {
       acceptanceCriteria: [],
       contextItems: detectTaskContextItems(prompt),
       attachments,
-    }, 'run')
+    }, mode)
   }
+
+  const observeRemoteSession = useCallback((session: SessionDto) => {
+    if (demoMode) return
+    const sameIdentity = runsIdentityRef.current === sessionsRequestKey
+    const mutationVersion = remoteMutationVersionRef.current + 1
+    remoteMutationVersionRef.current = mutationVersion
+    remoteRunMutationVersionsRef.current.set(session.id, mutationVersion)
+    runsIdentityRef.current = sessionsRequestKey
+    setRuns((current) => upsertRemoteRun(
+      sameIdentity ? current : [],
+      sessionDtoToRun(session),
+    ))
+    setRunsIdentity(sessionsRequestKey)
+  }, [demoMode, sessionsRequestKey])
+
+  const concealRemoteSession = useCallback((sessionId: string) => {
+    if (demoMode) return
+    if (concealedRemoteSessionsRef.current.identity !== sessionsRequestKey) {
+      concealedRemoteSessionsRef.current = { identity: sessionsRequestKey, ids: new Set() }
+    }
+    concealedRemoteSessionsRef.current.ids.add(sessionId)
+    remoteRunMutationVersionsRef.current.delete(sessionId)
+    setRuns((current) => current.filter((run) => run.id !== sessionId))
+  }, [demoMode, sessionsRequestKey])
 
   const renameSession = (runId: string, title: string) => {
     if (!demoMode) return
@@ -1171,7 +1351,7 @@ function RelayApp() {
       <Suspense fallback={<RouteFallback />}>
         <Routes>
         <Route path="/" element={<Navigate to="/home" replace />} />
-        <Route path="/home" element={<CosmosHomePage {...pageProps} experts={sessionExpertOptions} catalogStatus={sessionCatalogStatus} catalogError={sessionCatalogError} prototypeTools={demoMode} sessionCreationEnabled={sessionCreationEnabled} executionEnabled={demoMode} onRetryCatalog={retrySessionCatalog} onOpenSession={openSession} onCreateSession={createHomeSession} />} />
+        <Route path="/home" element={<CosmosHomePage {...pageProps} experts={sessionExpertOptions} catalogStatus={sessionCatalogStatus} catalogError={sessionCatalogError} prototypeTools={demoMode} sessionCreationEnabled={sessionCreationEnabled} executionEnabled={demoMode || productionExecutionEnabled} onRetryCatalog={retrySessionCatalog} onOpenSession={openSession} onCreateSession={createHomeSession} />} />
         <Route path="/sessions" element={
           <SessionsPage
             runs={scopedRuns}
@@ -1197,10 +1377,14 @@ function RelayApp() {
             spaceId={activeSpace.id}
             accessToken={accessToken}
             credentialVersion={credentialVersion}
+            requestIdentity={requestIdentity}
+            timelineTransport={currentRuntimeCapability?.events ?? 'polling'}
             handleUnauthorized={handleUnauthorized}
             demoMode={demoMode}
             locale={locale}
             onOpenNavigation={openNavigation}
+            onSessionObserved={observeRemoteSession}
+            onSessionConcealed={concealRemoteSession}
             onDecision={decide}
             onRetry={retry}
             onPause={pauseRun}
@@ -1243,7 +1427,7 @@ function RelayApp() {
         } />
         <Route path="/experts/:expertId" element={demoMode
           ? <ExpertEditorRoute store={scopedExpertStore} onStoreChange={mergeScopedExpertStore} onOpenNavigation={openNavigation} onBack={() => navigate('/experts')} onStartSession={openNewTask} onNotify={setToast} />
-          : <RemoteExpertRoute organizationId={organizationId} spaceId={activeSpace.id} accessToken={accessToken} credentialVersion={credentialVersion} handleUnauthorized={handleUnauthorized} onOpenNavigation={openNavigation} onBack={() => navigate('/experts')} onStartSession={openNewTask} sessionCreationEnabled={sessionCreationEnabled} />} />
+          : <RemoteExpertRoute organizationId={organizationId} spaceId={activeSpace.id} accessToken={accessToken} credentialVersion={credentialVersion} requestIdentity={requestIdentity} handleUnauthorized={handleUnauthorized} onOpenNavigation={openNavigation} onBack={() => navigate('/experts')} onStartSession={openNewTask} sessionCreationEnabled={sessionCreationEnabled} />} />
         <Route path="/experts/:expertId/edit" element={demoMode
           ? <ExpertEditorRoute store={scopedExpertStore} onStoreChange={mergeScopedExpertStore} onOpenNavigation={openNavigation} onBack={() => navigate('/experts')} onStartSession={openNewTask} onNotify={setToast} />
           : <ExpertEditRedirect />} />
@@ -1287,7 +1471,7 @@ function RelayApp() {
           catalogStatus={sessionCatalogStatus}
           catalogError={sessionCatalogError}
           prototypeTools={demoMode}
-          executionEnabled={demoMode}
+          executionEnabled={demoMode || productionExecutionEnabled}
           onRetryCatalog={retrySessionCatalog}
           onClose={() => { setNewTaskOpen(false); setPresetExpertId(undefined); setPresetPrompt('') }}
           onCreate={createTask}
