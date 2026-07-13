@@ -1,5 +1,5 @@
 import type { AttemptStatus, SessionDto, SessionEventDto, SessionMessageDto } from '@relay/contracts'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PREFERENCE_STORAGE_KEYS, PreferencesProvider } from '../../preferences'
@@ -76,6 +76,9 @@ function renderWorkbench(
     startStatus?: 'idle' | 'submitting' | 'error'
     startError?: string
     onStart?: () => void
+    sendStatus?: 'idle' | 'submitting' | 'error'
+    sendError?: string
+    onSend?: (content: string) => Promise<void>
   } = {},
 ) {
   const onBack = vi.fn()
@@ -167,6 +170,50 @@ describe('RemoteSessionWorkbench', () => {
     expect(screen.getByRole('button', { name: '开始执行' })).toBeDisabled()
     expect(screen.getByText('当前部署未开放执行。')).toBeInTheDocument()
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+  })
+
+  it('submits follow-up Messages for runnable states and clears only after acceptance', async () => {
+    const user = userEvent.setup()
+    const onSend = vi.fn().mockResolvedValue(undefined)
+    renderWorkbench({}, {}, { executionEnabled: true, onSend })
+
+    const input = screen.getByRole('textbox', { name: '后续消息' })
+    const send = screen.getByRole('button', { name: '发送' })
+    expect(send).toBeDisabled()
+    await user.type(input, '  请继续检查取消路径。  ')
+    await user.click(send)
+
+    expect(onSend).toHaveBeenCalledWith('请继续检查取消路径。')
+    await waitFor(() => expect(input).toHaveValue(''))
+  })
+
+  it('retains a failed follow-up draft and hides the composer for canceled Sessions', async () => {
+    const user = userEvent.setup()
+    const onSend = vi.fn().mockRejectedValue(new Error('发送失败'))
+    const view = renderWorkbench({}, {}, {
+      executionEnabled: true,
+      sendStatus: 'error',
+      sendError: '发送失败',
+      onSend,
+    })
+
+    const input = screen.getByRole('textbox', { name: '后续消息' })
+    await user.type(input, '保留这条消息')
+    await user.click(screen.getByRole('button', { name: '发送' }))
+    expect(input).toHaveValue('保留这条消息')
+    expect(screen.getByRole('alert')).toHaveTextContent('发送失败')
+
+    view.rerender(
+      <PreferencesProvider>
+        <RemoteSessionWorkbench
+          session={{ ...session, status: 'canceled' }}
+          executionEnabled
+          onSend={onSend}
+          onBack={() => undefined}
+        />
+      </PreferencesProvider>,
+    )
+    expect(screen.queryByRole('textbox', { name: '后续消息' })).not.toBeInTheDocument()
   })
 
   it('supports navigation, copying, language switching, and both themes', async () => {

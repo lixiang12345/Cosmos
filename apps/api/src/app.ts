@@ -8,11 +8,13 @@ import {
   ExpertDetailDtoSchema,
   ExpertListResponseSchema,
   MeResponseSchema,
+  MessageCreateSchema,
   RuntimeCapabilitiesSchema,
   SessionDtoSchema,
   SessionEventPageSchema,
   SessionListResponseSchema,
   SessionMessagePageSchema,
+  SendSessionMessageResponseSchema,
   StartSessionResponseSchema,
   type ApiError,
   type SessionEventDto,
@@ -737,6 +739,73 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
             : null,
         },
       })
+    },
+  )
+
+  app.post<{ Params: SessionParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/messages',
+    async (request, reply) => {
+      const authorization = await authorizeSessionSpace(request, reply, request.params)
+      if (!authorization) return
+      const sessionId = parseSpaceId(request.params.sessionId)
+      if (!sessionId) return sendResourceNotFound(reply, request)
+      if (!canWriteSpace(authorization.access)) {
+        return sendApiError(reply, 403, request, {
+          code: 'PERMISSION_DENIED',
+          message: 'You do not have permission to send Session messages in this Space.',
+          retryable: false,
+        })
+      }
+
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED',
+          message: 'A valid Idempotency-Key header is required.',
+          retryable: false,
+          fieldErrors: {
+            'Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'],
+          },
+        })
+      }
+      const parsed = MessageCreateSchema.safeParse(request.body)
+      if (!parsed.success) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED',
+          message: 'The Session message is invalid.',
+          retryable: false,
+          fieldErrors: validationFieldErrors(parsed.error.issues),
+        })
+      }
+
+      let executionAvailability: 'available' | 'disabled' | 'worker_unavailable' = 'available'
+      if (!executionEnabled) {
+        executionAvailability = 'disabled'
+      } else if (!await executionAvailable(request)) {
+        executionAvailability = 'worker_unavailable'
+      }
+      const result = await sessionRepository.send({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        sessionId,
+        actorId: authorization.actor.id,
+        actorKind: authorization.actor.kind,
+        requestId: request.id,
+        idempotencyKey,
+        request: parsed.data,
+        executionAvailability,
+      })
+      if (!result) return sendResourceNotFound(reply, request)
+
+      const response = SendSessionMessageResponseSchema.parse({
+        session: result.session,
+        message: result.message,
+        turn: result.turn,
+        command: result.command,
+      })
+      reply.header('Idempotency-Replayed', String(result.replayed))
+      reply.header('ETag', sessionEtag(response.session))
+      return reply.code(202).send(response)
     },
   )
 

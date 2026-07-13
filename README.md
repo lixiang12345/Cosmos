@@ -50,7 +50,7 @@ pnpm --filter @relay/api build
 pnpm --filter @relay/api start:worker
 ```
 
-生产必须为每个 Worker 设置唯一且稳定的 `WORKER_ID`，并从 Secret Manager 注入 `AGENT_PROVIDER_API_KEY`，不能使用 `.env.example` 的本地占位值。Worker 会周期性写 PostgreSQL 心跳，容器 `HEALTHCHECK` 通过 `dist/worker-health.js` 核验当前 `WORKER_ID` 的新鲜心跳。API 只有在 `EXECUTION_ENABLED=true` 且至少一个 Worker 的心跳未超过 `WORKER_READINESS_MAX_AGE_MS` 时才向 Web 宣告执行能力并接受新的 `start=true`；既有成功请求仍可按相同 `Idempotency-Key` 重放。Worker 下线时 Web 仍可读取控制面并保存 draft，不把未运行的 Session 表示成执行成功。
+生产必须为每个 Worker 设置唯一且稳定的 `WORKER_ID`，并从 Secret Manager 注入 `AGENT_PROVIDER_API_KEY`，不能使用 `.env.example` 的本地占位值。Worker 会周期性写 PostgreSQL 心跳，容器 `HEALTHCHECK` 通过 `dist/worker-health.js` 核验当前 `WORKER_ID` 的新鲜心跳。API 只有在 `EXECUTION_ENABLED=true` 且至少一个 Worker 的心跳未超过 `WORKER_READINESS_MAX_AGE_MS` 时才向 Web 宣告执行能力并接受新的 `start=true` 或后续消息；既有成功请求仍可按相同 `Idempotency-Key` 重放。Worker 下线时 Web 仍可读取控制面并保存 draft，不把未运行的 Session 表示成执行成功。
 
 生产容器从仓库根目录构建：
 
@@ -90,11 +90,12 @@ pnpm openapi:bundle
 - `GET /api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/events/stream`
 - `POST /api/v1/organizations/:organizationId/spaces/:spaceId/sessions`
 - `POST /api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/start`
+- `POST /api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/messages`
 - `GET /api/v1/organizations/:organizationId/spaces/:spaceId/experts`
 - `GET /api/v1/organizations/:organizationId/spaces/:spaceId/experts/:expertId`
 - `GET /api/v1/organizations/:organizationId/spaces/:spaceId/environments`
 - `GET /api/v1/organizations/:organizationId/spaces/:spaceId/environments/:environmentId`
-- 创建 Session 使用 `Idempotency-Key`；相同请求可安全重放，不同请求复用同一 key 返回 `409`。
+- 创建、draft start 和后续消息使用 `Idempotency-Key`；相同请求可安全重放，不同请求复用同一 key 返回 `409`。
 - 创建时只把 `expertId` 和允许的 `advancedOverrides` 作为选择输入；服务端解析当前 Published ExpertRevision、Active/Ready EnvironmentRevision 和 Repository binding，并把不可变 ID 与展示快照固定到 Session。
 - `start=true` 在同一 PostgreSQL 事务中写入 Session、首条 Message、Turn、Command、Outbox、连续 SessionEvent、脱敏 create success AuditEvent 和完整幂等响应；返回状态为 `queued`，不冒充 Agent 已执行。相同 key 重放不重复领域或审计事实。
 - 单 Session 响应和创建响应返回版本 `ETag`；Web 规范详情路由为 `/sessions/:sessionId`，旧 `/runs/:id` 只做兼容重定向。
@@ -102,6 +103,7 @@ pnpm openapi:bundle
 - Expert/Environment Catalog 使用 keyset cursor 分页；详情返回资源版本 `ETag`。生产 Web 只使用服务端 Published Expert 启动或保存 Session；当部署未显式开启基础执行时仅保存 draft，不提供本地假编辑或伪执行。
 - `start=false` 会原子持久化 draft Session、首条 Message、2 条连续 SessionEvent 与 1 条脱敏成功审计，但不会创建 Turn、Command 或 Outbox；用户输入不会被静默丢弃，也不会误入执行队列。
 - draft start 要求 `If-Match` 和 `Idempotency-Key`，复用已保存的首条 Message，并在单一事务中把 Session 更新为 `queued`、创建首个 Turn/Command/Outbox、追加连续 SessionEvent 与脱敏 AuditEvent；不会重复 Message 或执行事实。
+- 后续消息在 Session 行锁内分配连续 Message sequence 与 Turn ordinal，并原子写 `session.send` Command、Outbox、连续 SessionEvent、脱敏 AuditEvent 和幂等响应。`active|waiting` 保持当前状态，`paused` 保持暂停，`completed|failed` 重新进入 `queued`；draft 必须先 start，canceled 不可继续。Worker 在前一 Turn 终止前不会领取后续 Turn，当前 Turn 结束且仍有队列时 Session 回到 `queued`。
 - protocol-1 Worker 使用 PostgreSQL 并发 claim、数据库权威租约、heartbeat、fencing、有限重试和过期租约恢复；每个进程另写可过期的就绪心跳，API 以此动态关闭新执行入口而不影响只读控制面；每次 Attempt 保留历史，撤销写权限会取消尚未开始或正在运行的链路。
 - 当前 Agent provider 只产出受大小限制的对话 Message；provider endpoint 的 301/302/303/307/308 重定向不会被跟随，并按终止型配置错误处理。SessionEvent 以单调 sequence 持久化，并可通过 cursor 分页或 `Last-Event-ID` 恢复 SSE。SSE 心跳期间会重新认证并重检 membership。
 
@@ -110,7 +112,7 @@ pnpm openapi:bundle
 ## 原型范围
 
 - Session 管理原型：显式 demo 模式提供活跃、收藏、归档、搜索、重命名、恢复和删除，状态写入隔离的 `relay.demo.sessions`；生产模式不会读取该缓存，也不显示未接 API 的管理动作。
-- Session 工作台：demo 模式提供阶段轨道、事件时间线、追加指令、终端回放、文件 Diff 和审批决策；生产模式显示 canonical Session metadata、Message、Attempt/Session 事件与真实执行终态。尚未服务化的 Tool、Terminal、Files、Changes 和审批操作不会冒充生产事实。
+- Session 工作台：demo 模式提供阶段轨道、事件时间线、追加指令、终端回放、文件 Diff 和审批决策；生产模式显示 canonical Session metadata、Message、Attempt/Session 事件与真实执行终态，并在执行能力可用时通过幂等 API 发送后续消息。尚未服务化的 Tool、Terminal、Files、Changes 和审批操作不会冒充生产事实。
 - 控制平面：demo 模式包含运行记录、自动化、代码仓库、集成、治理中心和事件日志；生产 capability allowlist 当前仅开放 Sessions、Experts 和 Environments，其他直达路由不渲染模拟操作。
 - 关键交互：新建任务、切换证据视图、批准或退回、失败步骤重试、侧栏折叠和移动端抽屉。
 - 全局偏好：浅色/深色主题与中文/英文切换，偏好跨页面、跨刷新保持一致。

@@ -197,6 +197,15 @@ export class PostgresExecutionRepository implements ExecutionRepository {
           AND session_record.status = 'queued'
           AND turn_record.status = 'queued'
           AND input_message.role = 'user'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM relay_turns earlier_turn
+            WHERE earlier_turn.organization_id = turn_record.organization_id
+              AND earlier_turn.space_id = turn_record.space_id
+              AND earlier_turn.session_id = turn_record.session_id
+              AND earlier_turn.ordinal < turn_record.ordinal
+              AND earlier_turn.status IN ('queued', 'running', 'waiting_tool', 'waiting_approval')
+          )
           AND expert_revision.status = 'published'
           AND organization_membership.role <> 'viewer'
           AND space_membership.role <> 'viewer'
@@ -647,16 +656,26 @@ export class PostgresExecutionRepository implements ExecutionRepository {
           AND status = 'running'
       `, [execution.organization_id, execution.space_id, execution.session_id, execution.turn_id, completedAt])
       if (turn.rowCount !== 1) throw new Error('Locked execution Turn could not be completed.')
-      const session = await client.query<{ first_sequence: string; version: number }>(`
+      const session = await client.query<{
+        first_sequence: string
+        status: 'queued' | 'completed'
+        version: number
+      }>(`
         UPDATE relay_sessions
-        SET status = 'completed',
+        SET status = CASE WHEN EXISTS (
+              SELECT 1 FROM relay_turns queued_turn
+              WHERE queued_turn.organization_id = relay_sessions.organization_id
+                AND queued_turn.space_id = relay_sessions.space_id
+                AND queued_turn.session_id = relay_sessions.id
+                AND queued_turn.status = 'queued'
+            ) THEN 'queued' ELSE 'completed' END,
             updated_at = $4,
             last_activity_at = $4,
             version = version + 1,
             last_event_sequence = last_event_sequence + 3
         WHERE organization_id = $1 AND space_id = $2 AND id = $3
           AND status = 'active'
-        RETURNING last_event_sequence - 2 AS first_sequence, version
+        RETURNING last_event_sequence - 2 AS first_sequence, status, version
       `, [execution.organization_id, execution.space_id, execution.session_id, completedAt])
       const firstSequence = Number(session.rows[0]?.first_sequence)
       if (!Number.isSafeInteger(firstSequence)) throw new Error('Execution event sequence could not be reserved.')
@@ -697,7 +716,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
         actorKind: 'worker',
         requestId: execution.request_id,
         sequence: firstSequence + 2,
-        status: 'completed',
+        status: session.rows[0].status,
         version: session.rows[0].version,
         occurredAt: completedAt,
       })
@@ -1312,21 +1331,35 @@ export class PostgresExecutionRepository implements ExecutionRepository {
       if (turn.rowCount !== 1) throw new Error('Locked execution Turn could not be failed.')
     }
 
-    const session = await client.query<{ first_sequence: string; version: number }>(`
+    const session = await client.query<{
+      first_sequence: string
+      status: 'queued' | 'failed'
+      version: number
+    }>(`
       UPDATE relay_sessions
-      SET status = $4,
+      SET status = CASE
+            WHEN $4::boolean THEN 'queued'
+            WHEN EXISTS (
+              SELECT 1 FROM relay_turns queued_turn
+              WHERE queued_turn.organization_id = relay_sessions.organization_id
+                AND queued_turn.space_id = relay_sessions.space_id
+                AND queued_turn.session_id = relay_sessions.id
+                AND queued_turn.status = 'queued'
+            ) THEN 'queued'
+            ELSE 'failed'
+          END,
           updated_at = $5,
           last_activity_at = $5,
           version = version + 1,
           last_event_sequence = last_event_sequence + 2
       WHERE organization_id = $1 AND space_id = $2 AND id = $3
         AND status = 'active'
-      RETURNING last_event_sequence - 1 AS first_sequence, version
+      RETURNING last_event_sequence - 1 AS first_sequence, status, version
     `, [
       execution.organization_id,
       execution.space_id,
       execution.session_id,
-      failure.retry ? 'queued' : 'failed',
+      failure.retry,
       failedAt,
     ])
     const transitionedSession = session.rows[0]
@@ -1359,7 +1392,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
       actorKind: failure.actorKind,
       requestId: execution.request_id,
       sequence: firstSequence + 1,
-      status: failure.retry ? 'queued' : 'failed',
+      status: transitionedSession.status,
       version: transitionedSession.version,
       occurredAt: failedAt,
     })

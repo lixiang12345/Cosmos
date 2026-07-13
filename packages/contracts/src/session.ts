@@ -464,7 +464,7 @@ export type SessionTurn = z.infer<typeof SessionTurnSchema>
 
 export const SessionCommandSchema = z.object({
   id: IdentifierSchema,
-  type: z.literal('session.start'),
+  type: z.enum(['session.start', 'session.send']),
   status: z.enum(['accepted', 'queued', 'running', 'succeeded', 'failed', 'canceled']),
   resourceType: z.literal('turn'),
   resourceId: IdentifierSchema,
@@ -489,6 +489,15 @@ export const StartSessionResponseSchema = z.object({
 }).strict()
 
 export type StartSessionResponse = z.infer<typeof StartSessionResponseSchema>
+
+export const SendSessionMessageResponseSchema = z.object({
+  session: SessionDtoSchema,
+  message: SessionMessageSchema,
+  turn: SessionTurnSchema,
+  command: SessionCommandSchema,
+}).strict()
+
+export type SendSessionMessageResponse = z.infer<typeof SendSessionMessageResponseSchema>
 
 export const SessionListResponseSchema = z.object({
   items: z.array(SessionDtoSchema),

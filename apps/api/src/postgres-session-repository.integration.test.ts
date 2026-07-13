@@ -750,6 +750,90 @@ describeWithDatabase('PostgresSessionRepository', () => {
     ])
   })
 
+  it('persists idempotent follow-up Messages with contiguous FIFO and ledger order', async () => {
+    const repository = new PostgresSessionRepository(pool)
+    const created = await repository.create({
+      ...auditContext,
+      organizationId: 'relay', spaceId: 'space-ordering', actorId: 'user-local-admin',
+      idempotencyKey: 'follow-up-create', request,
+    })
+    const firstRecord = {
+      ...auditContext,
+      organizationId: 'relay',
+      spaceId: 'space-ordering',
+      sessionId: created.session.id,
+      actorId: 'user-local-admin',
+      idempotencyKey: 'follow-up-send-1',
+      request: { content: 'First persisted follow-up.', attachments: [] },
+      executionAvailability: 'available' as const,
+    }
+    const first = await repository.send(firstRecord)
+    const replays = await Promise.all(Array.from({ length: 4 }, () => repository.send(firstRecord)))
+    const second = await repository.send({
+      ...firstRecord,
+      idempotencyKey: 'follow-up-send-2',
+      request: { content: 'Second persisted follow-up.', attachments: [] },
+    })
+
+    expect(first).not.toBeNull()
+    expect(second).not.toBeNull()
+    if (!first || !second) throw new Error('Expected both follow-up Messages to be accepted.')
+
+    expect(first).toMatchObject({
+      session: { status: 'queued', version: 2 },
+      message: { sequence: 2, content: 'First persisted follow-up.' },
+      turn: { ordinal: 2, status: 'queued' },
+      command: { type: 'session.send', status: 'accepted' },
+      replayed: false,
+    })
+    expect(replays).toEqual(replays.map(() => ({ ...first, replayed: true })))
+    expect(second).toMatchObject({
+      session: { status: 'queued', version: 3 },
+      message: { sequence: 3, content: 'Second persisted follow-up.' },
+      turn: { ordinal: 3, status: 'queued' },
+      command: { type: 'session.send', status: 'accepted' },
+      replayed: false,
+    })
+    const facts = await pool.query<{
+      message_sequences: number[]
+      turn_ordinals: number[]
+      command_types: string[]
+      event_types: string[]
+      audit_actions: string[]
+      outbox_events: string
+      idempotency_records: string
+    }>(`
+      SELECT
+        (SELECT array_agg(sequence::integer ORDER BY sequence) FROM relay_messages
+          WHERE session_id = $1) AS message_sequences,
+        (SELECT array_agg(ordinal ORDER BY ordinal) FROM relay_turns
+          WHERE session_id = $1) AS turn_ordinals,
+        (SELECT array_agg(command.type ORDER BY turn.ordinal)
+          FROM relay_commands command
+          JOIN relay_turns turn ON turn.id = command.resource_id
+          WHERE command.session_id = $1) AS command_types,
+        (SELECT array_agg(event_type ORDER BY sequence) FROM relay_session_events
+          WHERE session_id = $1) AS event_types,
+        (SELECT array_agg(action ORDER BY action) FROM relay_audit_events
+          WHERE session_id = $1) AS audit_actions,
+        (SELECT count(*) FROM relay_outbox_events WHERE session_id = $1) AS outbox_events,
+        (SELECT count(*) FROM relay_idempotency_records WHERE session_id = $1) AS idempotency_records
+    `, [created.session.id])
+    expect(facts.rows[0]).toEqual({
+      message_sequences: [1, 2, 3],
+      turn_ordinals: [1, 2, 3],
+      command_types: ['session.start', 'session.send', 'session.send'],
+      event_types: [
+        'session.created', 'message.created', 'turn.queued',
+        'message.created', 'turn.queued', 'session.updated',
+        'message.created', 'turn.queued', 'session.updated',
+      ],
+      audit_actions: ['session.create', 'session.send', 'session.send'],
+      outbox_events: '3',
+      idempotency_records: '3',
+    })
+  })
+
   it('rolls back every domain and idempotency row when command creation fails', async () => {
     await pool.query(`
       CREATE FUNCTION relay_test_reject_command() RETURNS trigger

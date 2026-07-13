@@ -880,8 +880,12 @@ paths:
     post:
       tags: [Sessions]
       operationId: sendSessionMessage
+      x-relay-implementation-status: implemented
       summary: Send or queue a message and create the next Turn
-      description: If an Agent Turn is active, the new Turn is appended to the Session FIFO queue.
+      description: |
+        If an Agent Turn is active, the new Turn is appended to the Session FIFO queue.
+        Completed and failed Sessions reopen as queued. Draft Sessions must use start;
+        canceled Sessions reject new messages.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -889,20 +893,35 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/MessageCreate'
+              $ref: '#/components/schemas/RuntimeSessionMessageCreate'
       responses:
         '202':
           description: Message accepted and Turn queued
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Idempotency-Replayed:
+              $ref: '#/components/headers/IdempotencyReplayed'
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TurnCommandResult'
+                $ref: '#/components/schemas/RuntimeSessionSendResult'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/RuntimeConflict'
         '413':
-          $ref: '#/components/responses/PayloadTooLarge'
+          $ref: '#/components/responses/RuntimePayloadTooLarge'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+        '503':
+          $ref: '#/components/responses/RuntimeServiceUnavailable'
 
   /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/pause:
     parameters:
@@ -2443,12 +2462,6 @@ components:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
-    PayloadTooLarge:
-      description: Request or attachment exceeds the configured limit
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/Problem'
     CommandAccepted:
       description: Durable asynchronous command accepted
       headers:
@@ -3175,7 +3188,7 @@ components:
           $ref: '#/components/schemas/RuntimeIdentifier'
         type:
           type: string
-          const: session.start
+          enum: [session.start, session.send]
         status:
           type: string
           enum: [accepted, queued, running, succeeded, failed, canceled]
@@ -3206,6 +3219,19 @@ components:
       properties:
         session:
           $ref: '#/components/schemas/RuntimeSession'
+        turn:
+          $ref: '#/components/schemas/RuntimeSessionTurn'
+        command:
+          $ref: '#/components/schemas/RuntimeSessionCommand'
+      additionalProperties: false
+    RuntimeSessionSendResult:
+      type: object
+      required: [session, message, turn, command]
+      properties:
+        session:
+          $ref: '#/components/schemas/RuntimeSession'
+        message:
+          $ref: '#/components/schemas/RuntimeSessionMessage'
         turn:
           $ref: '#/components/schemas/RuntimeSessionTurn'
         command:
@@ -4309,74 +4335,6 @@ components:
           type: [string, 'null']
           format: uuid
       additionalProperties: false
-    AttachmentReference:
-      type: object
-      required: [id, kind, name, size]
-      properties:
-        id:
-          type: string
-          format: uuid
-        kind:
-          type: string
-          enum: [upload, file, artifact, external_link]
-        name:
-          type: string
-        size:
-          type: integer
-          minimum: 0
-        mimeType:
-          type: string
-        url:
-          type: string
-          format: uri
-    MessageCreate:
-      type: object
-      required: [content]
-      properties:
-        content:
-          type: string
-          minLength: 1
-          maxLength: 100000
-        attachments:
-          type: array
-          maxItems: 20
-          items:
-            $ref: '#/components/schemas/AttachmentReference'
-        enhance:
-          type: boolean
-          default: false
-      additionalProperties: false
-    Message:
-      type: object
-      required: [id, sessionId, sequence, role, content, createdAt]
-      properties:
-        id:
-          type: string
-          format: uuid
-        sessionId:
-          type: string
-          format: uuid
-        turnId:
-          type: [string, 'null']
-          format: uuid
-        sequence:
-          type: integer
-          format: int64
-          minimum: 1
-        role:
-          type: string
-          enum: [user, agent, tool, system, event]
-        actorId:
-          type: [string, 'null']
-          format: uuid
-        content:
-          type: string
-        attachments:
-          type: array
-          items:
-            $ref: '#/components/schemas/AttachmentReference'
-        createdAt:
-          $ref: '#/components/schemas/Timestamp'
     ShareGrantCreate:
       type: object
       required: [principalType, principalId, role]
@@ -4505,17 +4463,6 @@ components:
         finishedAt:
           type: [string, 'null']
           format: date-time
-    TurnCommandResult:
-      type: object
-      required: [message, turn, command]
-      properties:
-        message:
-          $ref: '#/components/schemas/Message'
-        turn:
-          $ref: '#/components/schemas/Turn'
-        command:
-          $ref: '#/components/schemas/Command'
-
     WorkerStatus:
       type: string
       enum: [queued, running, waiting, completed, failed, canceled]

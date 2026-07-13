@@ -25,12 +25,12 @@
 | --- | --- | --- |
 | 进程与配置 | Fastify API；`/api/health` 公开存活检查；受鉴权的 `/api/ready` 检查 PostgreSQL/migration 且不依赖 Worker；独立 Worker 以 PostgreSQL 新鲜心跳控制动态 execution capability，并由实例级数据库健康命令探测；生产模式强制 OIDC、`DATABASE_URL` 和 `CORS_ORIGIN` | 无信任代理、安全 header、优雅排空验收和多区部署；SSE 连接仅有单实例预算，尚无全局分布式配额 |
 | 身份发现与授权 | `GET /api/v1/me` 返回 authenticated actor 及其真实 Organization/Space membership；Session 读写在 repository 查询中重检 membership；写权限取 Organization/Space 角色交集 | 无 operation policy、Private share、合规访问、RLS 或实时撤权通知 |
-| Session API | tenant-scoped list/create/get/draft-start；Message/Event cursor 分页；可恢复 SSE；单资源、create 与 start 返回版本 `ETag`；共享 Zod 请求/响应/错误验证；Private 资源按 creator conceal | 无 patch/archive/send/pause/resume/cancel/retry/share 命令；Session 列表无 cursor 和 filter |
+| Session API | tenant-scoped list/create/get/draft-start/send；Message/Event cursor 分页；可恢复 SSE；单资源、create、start 与 send 返回版本 `ETag`；共享 Zod 请求/响应/错误验证；Private 资源按 creator conceal | 无 patch/archive/pause/resume/cancel/retry/share 命令；Session 列表无 cursor 和 filter |
 | Catalog API | tenant-scoped Expert/Environment list/get；单条 SQL 重检 Organization/Space membership；Private Expert、未发布 Expert 和未就绪 Environment 按角色隐藏；keyset cursor、资源 version 与 detail ETag 已实现 | 无 create/update/publish/reprovision；service account 暂时拒绝；无 operation policy、Audit 或 RLS |
 | 权威配置与持久化 | PostgreSQL migration 已建立 Expert/Environment identity、immutable revision、Repository binding 和复合 tenant FK；create 在事务中固定 authoritative IDs 并原子写 Session/Message/Turn/Command/Outbox/账本；Worker 写 Attempt、Agent Message 与有序事件 | 无 Expert/Environment CRUD/publish API、ExecutionSnapshot、ShareGrant、完整 Audit 或 RLS；大表 migration 仍需分阶段上线方案 |
 | 基础执行 | 独立 Worker 以数据库权威租约 claim protocol-1 Command；heartbeat/fencing、有限重试、过期恢复、撤权取消与 immutable Attempt history 已有 PostgreSQL 并发测试；进程心跳过期会关闭 capabilities 与新的 start，但不影响 API 只读 readiness；OpenAI-compatible provider 只接受/返回有界对话内容 | 无 workspace/coding sandbox、ToolCall/Approval、Artifact/File、外部副作用幂等、dead-letter 与负载/soak 证据 |
-| 创建幂等 | Organization + authenticated actor + method + canonical path + key 作用域；同 key/同 body 重放，不同 body 返回 409；PostgreSQL 使用事务级 advisory lock 处理并发 | 未运行过期记录清理作业；尚未统一所有写 endpoint 的幂等中间件 |
-| 测试 | API/repository/config/JWT 单元测试；配置 `TEST_DATABASE_URL` 时运行 PostgreSQL 并发幂等、权威配置、Catalog 分页/可见性、跨 tenant/Private 隔离、Worker 就绪边界和 `001 -> 030` 新库/升级测试 | 数据库测试会在无环境变量时 skip；无 RLS、在线大表迁移、备份恢复或负载测试 |
+| 写入幂等 | Organization + authenticated actor + method + canonical path + key 作用域；create/start/send 同 key/同 body 重放，不同 body 返回 409；PostgreSQL 使用事务级 advisory lock 处理并发 | 未运行过期记录清理作业；尚未统一所有写 endpoint 的幂等中间件 |
+| 测试 | API/repository/config/JWT 单元测试；配置 `TEST_DATABASE_URL` 时运行 PostgreSQL 并发幂等、权威配置、Catalog 分页/可见性、跨 tenant/Private 隔离、Session FIFO、Worker 就绪边界和 `001 -> 035` 新库/升级测试 | 数据库测试会在无环境变量时 skip；无 RLS、在线大表迁移、备份恢复或负载测试 |
 
 这是“PostgreSQL 权威数据与基础对话执行纵向切片”，不是本文 Phase 1 已完成，也不具备处理客户私密数据的完整生产安全边界。
 
@@ -42,7 +42,7 @@
 | --- | --- | --- |
 | Base path | 代码为 `/api/v1`，OpenAPI server 为 `/v1` | 生产边缘对外使用 `/v1`；同源 Web 可经 `/api/v1` 代理。在合同测试中明确两者的 rewrite，不保留两套业务路由 |
 | Create body | `expertId/title/message` 是最小输入；`visibility/start` 有默认值；`advancedOverrides.repositoryId/baseBranch` 严格校验。旧名称/版本/环境/仓库字段仅是迁移提示，不作为事实持久化 | 移除迁移提示前先完成所有 Web/Automation caller 升级；附件仍需迁移为预上传引用 |
-| Create/start transaction | `start=true` create 同事务解析并锁定 Published ExpertRevision、Ready EnvironmentRevision 与 Repository binding，再写 Session + first Message + Turn + Command + Outbox + 完整幂等响应；draft start 以 `If-Match` 锁定版本、复用 first Message，并原子追加 Turn/Command/Outbox/SessionEvent/AuditEvent；protocol-1 consumer、lease/heartbeat/fencing 已实现 | 无 ExecutionSnapshot、Tool runtime 或外部副作用 ledger；其余生命周期命令尚未接入统一事务 |
+| Create/start/send transaction | `start=true` create 同事务解析并锁定 Published ExpertRevision、Ready EnvironmentRevision 与 Repository binding，再写 Session + first Message + Turn + Command + Outbox + 完整幂等响应；draft start 以 `If-Match` 锁定版本并复用 first Message；send 在 Session 行锁内分配 Message sequence/Turn ordinal 并原子追加 Command/Outbox/SessionEvent/AuditEvent；protocol-1 consumer、lease/heartbeat/fencing 与单 Session FIFO 已实现 | 无 ExecutionSnapshot、Tool runtime 或外部副作用 ledger；其余生命周期命令尚未接入统一事务 |
 | Response | `SessionDto` 返回 `configurationResolutionVersion` 和三个 authoritative ID；create 返回 message/turn/command、`ETag`、`Location` 与 replay header；get 返回 `ETag` 和 no-store | 仍需与目标 `Session` resource 的完整字段、统一 problem details 和生成契约收敛 |
 | Error | 运行时为 `{code,message,retryable,fieldErrors,correlationId}` | 统一到 `application/problem+json`；迁移期前端适配必须有合同测试，不允许第三套错误格式 |
 | Identifier | 当前接受 1-128 字符串并生成 UUIDv4 | 持久实体改为服务端 UUIDv7；不在 URL 中使用可猜业务标识 |

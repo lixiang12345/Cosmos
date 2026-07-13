@@ -660,7 +660,7 @@
   display: grid;
   min-width: 0;
   height: 100dvh;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
   background: var(--canvas);
 }
@@ -782,6 +782,85 @@
 
 .remote-session-content > * + * {
   margin-top: 14px;
+}
+
+.remote-session-composer {
+  min-width: 0;
+  padding: 10px 24px 11px;
+  border-top: 1px solid var(--line);
+  background: var(--chrome);
+}
+
+.remote-session-composer > form,
+.remote-session-composer > p {
+  width: 100%;
+  max-width: 912px;
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.remote-session-composer > form {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  align-items: end;
+  gap: 8px;
+}
+
+.remote-session-composer textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  max-height: 112px;
+  resize: vertical;
+  padding: 9px 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  outline: none;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.remote-session-composer textarea:focus {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 2px var(--brand-soft);
+}
+
+.remote-session-composer textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.remote-session-composer .icon-button {
+  width: 36px;
+  height: 36px;
+  border-color: var(--brand);
+  background: var(--brand);
+  color: var(--on-brand);
+}
+
+.remote-session-composer .icon-button:hover:not(:disabled) {
+  border-color: var(--brand-strong);
+  background: var(--brand-strong);
+}
+
+.remote-session-composer .icon-button:disabled,
+.remote-session-composer textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.remote-session-composer > p {
+  margin-top: 6px;
+  margin-bottom: 0;
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.remote-session-composer > p[role='alert'] {
+  color: var(--danger);
 }
 
 .remote-session-execution-state {
@@ -1195,6 +1274,10 @@
 
   .remote-session-content {
     padding: 14px 12px 30px;
+  }
+
+  .remote-session-composer {
+    padding: 9px 12px 10px;
   }
 
   .remote-session-revisions {

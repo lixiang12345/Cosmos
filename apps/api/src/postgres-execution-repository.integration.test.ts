@@ -149,6 +149,101 @@ describeWithDatabase('PostgresExecutionRepository', () => {
     })).resolves.toBe(true)
   })
 
+  it('keeps active follow-up Turns in FIFO through success and terminal failure', async () => {
+    const created = await createSession({ maxAttempts: 1 })
+    const executionRepository = new PostgresExecutionRepository(pool)
+    const startedAt = new Date(Date.now() + 10)
+    const sessionRepository = new PostgresSessionRepository(pool, {
+      executionMaxAttempts: 1,
+      now: () => new Date(startedAt.getTime() + 2),
+    })
+    const firstClaim = await executionRepository.claimNext({
+      leaseOwner: 'fifo-worker-1', leaseDurationMs: 30_000, now: startedAt,
+    })
+    if (!firstClaim) throw new Error('Expected the first FIFO claim.')
+
+    const firstFollowUp = await sessionRepository.send({
+      organizationId: created.session.organizationId,
+      spaceId: created.session.spaceId,
+      sessionId: created.session.id,
+      actorId: 'execution-user',
+      actorKind: 'user',
+      requestId: 'fifo-follow-up-1',
+      idempotencyKey: 'fifo-follow-up-1',
+      request: { content: 'First queued follow-up.', attachments: [] },
+      executionAvailability: 'available',
+    })
+    const secondFollowUp = await sessionRepository.send({
+      organizationId: created.session.organizationId,
+      spaceId: created.session.spaceId,
+      sessionId: created.session.id,
+      actorId: 'execution-user',
+      actorKind: 'user',
+      requestId: 'fifo-follow-up-2',
+      idempotencyKey: 'fifo-follow-up-2',
+      request: { content: 'Second queued follow-up.', attachments: [] },
+      executionAvailability: 'available',
+    })
+    expect(firstFollowUp?.session.status).toBe('active')
+    expect(secondFollowUp?.session.status).toBe('active')
+    await expect(executionRepository.claimNext({
+      leaseOwner: 'fifo-premature-worker', leaseDurationMs: 30_000,
+      now: new Date(startedAt.getTime() + 5),
+    })).resolves.toBeNull()
+
+    await expect(executionRepository.complete({
+      claim: firstClaim,
+      output: 'Initial Turn completed before queued follow-ups.',
+      providerModel: 'provider-model-fifo-1',
+      now: new Date(startedAt.getTime() + 10),
+    })).resolves.toBe(true)
+    await expect(sessionRepository.getById(
+      created.session.organizationId,
+      created.session.spaceId,
+      created.session.id,
+      'execution-user',
+    )).resolves.toMatchObject({ status: 'queued' })
+
+    const secondClaim = await executionRepository.claimNext({
+      leaseOwner: 'fifo-worker-2', leaseDurationMs: 30_000,
+      now: new Date(startedAt.getTime() + 20),
+    })
+    expect(secondClaim?.turnId).toBe(firstFollowUp?.turn.id)
+    if (!secondClaim) throw new Error('Expected the second FIFO claim.')
+    await expect(executionRepository.fail({
+      claim: secondClaim,
+      classification: 'terminal',
+      code: 'fifo_terminal_failure',
+      message: 'Continue with the next queued Turn.',
+      now: new Date(startedAt.getTime() + 30),
+    })).resolves.toBe('failed')
+    await expect(sessionRepository.getById(
+      created.session.organizationId,
+      created.session.spaceId,
+      created.session.id,
+      'execution-user',
+    )).resolves.toMatchObject({ status: 'queued' })
+
+    const thirdClaim = await executionRepository.claimNext({
+      leaseOwner: 'fifo-worker-3', leaseDurationMs: 30_000,
+      now: new Date(startedAt.getTime() + 40),
+    })
+    expect(thirdClaim?.turnId).toBe(secondFollowUp?.turn.id)
+    if (!thirdClaim) throw new Error('Expected the third FIFO claim.')
+    await expect(executionRepository.complete({
+      claim: thirdClaim,
+      output: 'Final queued follow-up completed.',
+      providerModel: 'provider-model-fifo-3',
+      now: new Date(startedAt.getTime() + 50),
+    })).resolves.toBe(true)
+    await expect(sessionRepository.getById(
+      created.session.organizationId,
+      created.session.spaceId,
+      created.session.id,
+      'execution-user',
+    )).resolves.toMatchObject({ status: 'completed' })
+  })
+
   it('starts the claim lease from database time after a membership lock wait', async () => {
     await createSession({ maxAttempts: 1 })
     const applicationName = `relay_claim_clock_${crypto.randomUUID()}`

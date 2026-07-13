@@ -111,6 +111,7 @@ describe('OpenAPI runtime route coverage', () => {
     const collection = document.paths['/organizations/{organizationId}/spaces/{spaceId}/sessions']
     const detail = document.paths['/organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}']
     const start = document.paths['/organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/start']
+    const messages = document.paths['/organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/messages']
     expect(collection?.get?.responses?.['200']?.content?.['application/json']?.schema?.$ref)
       .toBe('#/components/schemas/RuntimeSessionListResponse')
     expect(collection?.post?.requestBody?.content?.['application/json']?.schema?.$ref)
@@ -122,5 +123,9 @@ describe('OpenAPI runtime route coverage', () => {
     expect(start?.post?.requestBody).toBeUndefined()
     expect(start?.post?.responses?.['202']?.content?.['application/json']?.schema?.$ref)
       .toBe('#/components/schemas/RuntimeSessionStartResult')
+    expect(messages?.post?.requestBody?.content?.['application/json']?.schema?.$ref)
+      .toBe('#/components/schemas/RuntimeSessionMessageCreate')
+    expect(messages?.post?.responses?.['202']?.content?.['application/json']?.schema?.$ref)
+      .toBe('#/components/schemas/RuntimeSessionSendResult')
   })
 })

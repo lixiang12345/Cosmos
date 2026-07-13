@@ -26,6 +26,7 @@ import {
   listSessions,
   resolveRelayApiBaseUrl,
   resolveRelayApiRequestUrl,
+  sendSessionMessage,
   startSession,
   streamSessionEvents,
 } from './relayApi'
@@ -391,6 +392,50 @@ describe('Relay API client', () => {
     }, 202))
     await expect(startSession(
       'relay', 'space-platform', session.id, 1, 'start-session-2',
+    )).rejects.toMatchObject({ code: 'INVALID_RESPONSE', status: 202 })
+  })
+
+  it('sends a follow-up Message and validates every linked runtime record', async () => {
+    const updatedSession = { ...session, status: 'queued' as const, version: 2 }
+    const message = {
+      id: 'message-2', sessionId: session.id, sequence: 2, role: 'user' as const,
+      actorId: 'user-1', content: 'Also verify the cancellation path.', attachments: [],
+      createdAt: session.updatedAt,
+    }
+    const turn = {
+      id: 'turn-2', sessionId: session.id, ordinal: 2, initiatorType: 'user' as const,
+      initiatorId: 'user-1', inputMessageId: message.id, status: 'queued' as const,
+      queuedAt: session.updatedAt, version: 1,
+    }
+    const command = {
+      id: 'command-2', type: 'session.send' as const, status: 'accepted' as const,
+      resourceType: 'turn' as const, resourceId: turn.id, acceptedAt: session.updatedAt,
+    }
+    const result = { session: updatedSession, message, turn, command }
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(result, 202))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(sendSessionMessage(
+      'relay', 'space-platform', session.id,
+      { content: message.content }, 'send-message-2', { accessToken: 'access-token' },
+    )).resolves.toEqual(result)
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/organizations/relay/spaces/space-platform/sessions/session-1/messages',
+      expect.objectContaining({ method: 'POST', headers: expect.any(Headers) }),
+    )
+    expect(fetchMock.mock.calls[0][1]?.body).toBe(JSON.stringify({ content: message.content }))
+    const headers = new Headers(fetchMock.mock.calls[0][1]?.headers)
+    expect(headers.get('Idempotency-Key')).toBe('send-message-2')
+    expect(headers.get('Content-Type')).toBe('application/json')
+    expect(headers.get('Authorization')).toBe('Bearer access-token')
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      ...result,
+      turn: { ...turn, inputMessageId: 'another-message' },
+    }, 202))
+    await expect(sendSessionMessage(
+      'relay', 'space-platform', session.id,
+      { content: message.content }, 'send-message-invalid',
     )).rejects.toMatchObject({ code: 'INVALID_RESPONSE', status: 202 })
   })
 

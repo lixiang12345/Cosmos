@@ -36,12 +36,12 @@
 
 | 范围 | 当前事实 | 状态 | 生产缺口 |
 | --- | --- | --- | --- |
-| Session 列表、创建与详情 | `getMe` 发现 actor 的 Organization/Space membership；list/create/get 使用当前合法 scope；详情规范路由为 `/sessions/:sessionId`，直刷读取单资源 API，旧 `/runs/:id` 重定向；Web 已接 OIDC Code + PKCE、Bearer、401 失效和生产 fail-closed | **Partial** | 列表尚无服务端分页/过滤；消息、Artifact、Worker 和生命周期命令未接 API；真实 IdP E2E 待配置 |
+| Session 列表、创建与详情 | `getMe` 发现 actor 的 Organization/Space membership；list/create/get/start/send 使用当前合法 scope；详情规范路由为 `/sessions/:sessionId`，直刷读取单资源 API，旧 `/runs/:id` 重定向；Web 已接 OIDC Code + PKCE、Bearer、401 失效和生产 fail-closed | **Partial** | 列表尚无服务端分页/过滤；Artifact、Worker 和其余生命周期命令未接 API；真实 IdP E2E 待配置 |
 | 创建失败恢复 | Home 和 Dialog 等待 API 确认，失败保留输入，同一草稿重试复用幂等 key | **Implemented** | 幂等 key 仅存在内存；页面刷新后的安全恢复尚未实现 |
-| Session 视图模型 | 生产列表仍使用无执行推测的最小 `Run` 兼容投影；生产详情直接渲染 canonical `SessionDto`，凭据轮换立即隔离旧详情；demo 数据使用独立 `relay.demo.sessions` key | **Partial** | 列表仍需迁移为原生 Session read model；消息、归档、Pin、重命名等必须接入服务端 API 后才可开放 |
+| Session 视图模型 | 生产列表仍使用无执行推测的最小 `Run` 兼容投影；生产详情直接渲染 canonical `SessionDto` 和 Message/Event timeline，凭据轮换立即隔离旧详情；demo 数据使用独立 `relay.demo.sessions` key | **Partial** | 列表仍需迁移为原生 Session read model；归档、Pin、重命名等必须接入服务端 API 后才可开放 |
 | Experts/Environments 查询 | 生产模式使用 tenant-scoped Catalog list/detail API，支持分页聚合、身份切换清屏、401 闭锁、只读详情和 Expert 启动入口；demo 模式保留本地编辑原型 | **Implemented (limited)** | 无创建、编辑、发布、重新配置、审计或 service-account policy |
 | 其他控制面 | Daemon、Repository、Integration、MCP、Webhook、Secret、Space、Automation、Files 与 Approval 仍是 seed/本地交互，仅在 demo 模式可达；生产导航、命令面板和直达路由均不暴露原型操作 | **Prototype** | 逐域接入权威 API、权限和审计后再加入 production capability allowlist |
-| Session 工作台 | demo 模式保留阶段、事件、Diff、Terminal、Approval 演示；生产详情只显示服务端 Session metadata、配置 revision 引用和执行面未接通状态 | **Partial** | 接入 Message/Turn/Attempt/ToolCall/Artifact/SSE 后，才能按服务端 capability 开放 composer 与运行控制 |
+| Session 工作台 | demo 模式保留阶段、事件、Diff、Terminal、Approval 演示；生产详情显示服务端 Session metadata、配置 revision、Message/Attempt/SessionEvent，并按 execution capability 开放 draft start 与幂等 follow-up composer；失败保留输入，成功后合并权威 Message | **Partial** | ToolCall、Artifact、Files、审批和 pause/resume/cancel/retry 仍需服务化后才能开放 |
 | 身份与权限 | Web 已实现 OIDC Code + PKCE、内存 token、`/me` discovery、合法 Space 选择、空权限/错误状态；API 已校验 token、membership 与 Organization/Space 角色交集 | **Partial** | 缺少细粒度 operation policy、真实 IdP E2E、前端 403 恢复和服务端实时权限变更通知 |
 
 前端显示一个功能不等于该功能已实现。除 Session 创建、列表和单资源读取明确接入 API 的部分外，当前控制面默认按 Prototype/Simulation 处理。

@@ -29,6 +29,7 @@ import {
   listSessionEvents,
   listSessionMessages,
   listSessions,
+  sendSessionMessage,
   startSession,
 } from './services/relayApi'
 import { WorkspaceContext, type WorkspaceContextValue } from './workspace'
@@ -45,6 +46,7 @@ vi.mock('./services/relayApi', async (importOriginal) => ({
   listSessionEvents: vi.fn(),
   listSessionMessages: vi.fn(),
   listSessions: vi.fn(),
+  sendSessionMessage: vi.fn(),
   startSession: vi.fn(),
 }))
 
@@ -290,6 +292,7 @@ describe('Relay prototype', () => {
     vi.mocked(listSessionEvents).mockReset()
     vi.mocked(listSessionMessages).mockReset()
     vi.mocked(listSessions).mockReset()
+    vi.mocked(sendSessionMessage).mockReset()
     vi.mocked(startSession).mockReset()
     vi.mocked(listSessions).mockResolvedValue({
       items: [], page: { nextCursor: null, hasMore: false, projectionUpdatedAt: null },
@@ -464,9 +467,12 @@ describe('Relay prototype', () => {
     expect(screen.queryByText('38.2k')).not.toBeInTheDocument()
     expect(screen.queryByText('￥4.82')).not.toBeInTheDocument()
     expect(screen.queryByRole('tab')).not.toBeInTheDocument()
-    for (const action of ['暂停', '停止', '重试', '批准', '发送']) {
+    for (const action of ['暂停', '停止', '重试', '批准']) {
       expect(screen.queryByRole('button', { name: action })).not.toBeInTheDocument()
     }
+    expect(screen.getByRole('textbox', { name: '后续消息' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
+    expect(screen.getByText('当前部署未开放执行。')).toBeInTheDocument()
     expect(getSession).toHaveBeenCalledWith(
       'organization-production',
       'space-production',
@@ -528,6 +534,64 @@ describe('Relay prototype', () => {
     )
     expect(await screen.findByRole('heading', { name: '已排队，等待执行' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '开始执行' })).not.toBeInTheDocument()
+  })
+
+  it('sends a follow-up Message and immediately merges the accepted record', async () => {
+    const user = userEvent.setup()
+    const active = makeApiSession('organization-production', 'space-production', {
+      title: '可继续对话的生产会话',
+      expertId: 'expert-authoritative',
+      message: { content: '先检查结算主路径。' },
+    }, { id: 'session-send-follow-up', status: 'active', version: 3 })
+    const queued = {
+      ...active,
+      status: 'queued' as const,
+      version: 4,
+      updatedAt: '2026-07-12T04:32:00.000Z',
+      lastActivityAt: '2026-07-12T04:32:00.000Z',
+    }
+    const message = {
+      id: 'message-follow-up', sessionId: active.id, sequence: 2, role: 'user' as const,
+      actorId: 'user-production', content: '再检查取消路径。', attachments: [],
+      createdAt: queued.updatedAt,
+    }
+    const turn = {
+      id: 'turn-follow-up', sessionId: active.id, ordinal: 2, initiatorType: 'user' as const,
+      initiatorId: 'user-production', inputMessageId: message.id, status: 'queued' as const,
+      queuedAt: queued.updatedAt, version: 1,
+    }
+    const command = {
+      id: 'command-follow-up', type: 'session.send' as const, status: 'accepted' as const,
+      resourceType: 'turn' as const, resourceId: turn.id, acceptedAt: queued.updatedAt,
+    }
+    vi.mocked(getRuntimeCapabilities).mockResolvedValueOnce({
+      execution: { enabled: true, events: 'polling' },
+    })
+    vi.mocked(getSession).mockResolvedValue(active)
+    vi.mocked(sendSessionMessage).mockResolvedValue({ session: queued, message, turn, command })
+
+    renderAuthenticatedApp('/sessions/session-send-follow-up')
+
+    const input = await screen.findByRole('textbox', { name: '后续消息' })
+    await waitFor(() => expect(input).toBeEnabled())
+    await user.type(input, message.content)
+    await user.click(screen.getByRole('button', { name: '发送' }))
+
+    await waitFor(() => expect(sendSessionMessage).toHaveBeenCalledOnce())
+    expect(sendSessionMessage).toHaveBeenCalledWith(
+      'organization-production',
+      'space-production',
+      active.id,
+      { content: message.content },
+      expect.stringMatching(/^session-/),
+      expect.objectContaining({
+        accessToken: 'production-access-token',
+        onUnauthorized: expect.any(Function),
+      }),
+    )
+    expect(await screen.findByText(message.content)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '已排队，等待执行' })).toBeInTheDocument()
+    expect(input).toHaveValue('')
   })
 
   it('does not render or retain a stale list projection as canonical Session detail', async () => {

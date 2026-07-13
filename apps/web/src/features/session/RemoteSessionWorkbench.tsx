@@ -21,10 +21,11 @@ import {
   MessageSquare,
   Play,
   RotateCcw,
+  Send,
   ShieldCheck,
   XCircle,
 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { GlobalControls } from '../../components/GlobalControls'
 import { IconButton } from '../../components/ui'
 import { usePreferences, type Locale } from '../../preferences'
@@ -39,6 +40,9 @@ export type RemoteSessionWorkbenchProps = {
   startStatus?: 'idle' | 'submitting' | 'error'
   startError?: string
   onStart?: () => void
+  sendStatus?: 'idle' | 'submitting' | 'error'
+  sendError?: string
+  onSend?: (content: string) => Promise<void>
   onBack: () => void
   onOpenNavigation?: () => void
 }
@@ -227,11 +231,15 @@ export function RemoteSessionWorkbench({
   startStatus = 'idle',
   startError,
   onStart,
+  sendStatus = 'idle',
+  sendError,
+  onSend,
   onBack,
   onOpenNavigation,
 }: RemoteSessionWorkbenchProps) {
   const { locale } = usePreferences()
   const [copyNotice, setCopyNotice] = useState('')
+  const [messageDraft, setMessageDraft] = useState('')
   const copyTimer = useRef<number | undefined>(undefined)
   const execution = executionView(session, events, locale)
   const ExecutionIcon = execution.tone === 'completed'
@@ -265,6 +273,20 @@ export function RemoteSessionWorkbench({
     if (copyTimer.current) window.clearTimeout(copyTimer.current)
     copyTimer.current = window.setTimeout(() => setCopyNotice(''), 2400)
   }
+
+  const submitMessage = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const content = messageDraft.trim()
+    if (!content || !onSend || !executionEnabled || sendStatus === 'submitting') return
+    try {
+      await onSend(content)
+      setMessageDraft('')
+    } catch {
+      // The route owns the error message; retaining the draft lets the user retry safely.
+    }
+  }
+
+  const canAppendMessage = session.status !== 'draft' && session.status !== 'canceled'
 
   return (
     <main className="remote-session-workbench">
@@ -479,6 +501,33 @@ export function RemoteSessionWorkbench({
           </dl>
         </section>
       </div>
+
+      {canAppendMessage && onSend ? (
+        <footer className="remote-session-composer">
+          <form onSubmit={(event) => { void submitMessage(event) }}>
+            <textarea
+              aria-label={text(locale, '后续消息', 'Follow-up message')}
+              placeholder={text(locale, '输入后续消息', 'Add a follow-up message')}
+              value={messageDraft}
+              maxLength={100_000}
+              disabled={!executionEnabled || sendStatus === 'submitting'}
+              onChange={(event) => setMessageDraft(event.target.value)}
+            />
+            <IconButton
+              type="submit"
+              icon={sendStatus === 'submitting' ? LoaderCircle : Send}
+              label={sendStatus === 'submitting'
+                ? text(locale, '正在发送', 'Sending')
+                : text(locale, '发送', 'Send')}
+              disabled={!messageDraft.trim() || !executionEnabled || sendStatus === 'submitting'}
+            />
+          </form>
+          {!executionEnabled ? (
+            <p>{text(locale, '当前部署未开放执行。', 'Execution is unavailable in this deployment.')}</p>
+          ) : null}
+          {sendStatus === 'error' && sendError ? <p role="alert">{sendError}</p> : null}
+        </footer>
+      ) : null}
     </main>
   )
 }

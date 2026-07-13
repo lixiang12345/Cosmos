@@ -12,6 +12,7 @@ import {
   SessionEventPageSchema,
   SessionListResponseSchema,
   SessionMessagePageSchema,
+  SendSessionMessageResponseSchema,
   StartSessionResponseSchema,
   type ApiError,
   type CreateSessionRequestInput,
@@ -21,6 +22,7 @@ import {
   type ExpertDetailDto,
   type ExpertListResponse,
   type MeResponse,
+  type MessageCreateInput,
   type RuntimeCapabilities,
   type SessionDto,
   type SessionEventCursor,
@@ -28,6 +30,7 @@ import {
   type SessionEventPage,
   type SessionListResponse,
   type SessionMessagePage,
+  type SendSessionMessageResponse,
   type StartSessionResponse,
 } from '@relay/contracts'
 
@@ -483,6 +486,39 @@ export function startSession(
       || response.command.resourceId !== response.turn.id
     ) {
       throw new RelayApiError('Relay API returned a start result outside the requested Session.', {
+        code: 'INVALID_RESPONSE', status: 202,
+      })
+    }
+    return response
+  })
+}
+
+export function sendSessionMessage(
+  organizationId: string,
+  spaceId: string,
+  sessionId: string,
+  input: MessageCreateInput,
+  idempotencyKey: string,
+  auth?: RelayApiAuthContext,
+): Promise<SendSessionMessageResponse> {
+  return request(`${sessionPath(organizationId, spaceId, sessionId)}/messages`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey,
+    },
+    body: JSON.stringify(input),
+  }, SendSessionMessageResponseSchema, auth).then((response) => {
+    assertSessionScope(response.session, organizationId, spaceId, sessionId)
+    if (
+      response.message.sessionId !== sessionId
+      || response.turn.sessionId !== sessionId
+      || response.turn.inputMessageId !== response.message.id
+      || response.command.type !== 'session.send'
+      || response.command.resourceId !== response.turn.id
+    ) {
+      throw new RelayApiError('Relay API returned a send result outside the requested Session.', {
         code: 'INVALID_RESPONSE', status: 202,
       })
     }

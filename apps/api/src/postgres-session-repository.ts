@@ -3,10 +3,12 @@ import {
   CreateSessionResponseSchema,
   MeOrganizationSchema,
   SessionDtoSchema,
+  SendSessionMessageResponseSchema,
   StartSessionResponseSchema,
   type CreateSessionResponse,
   type MeOrganization,
   type SessionDto,
+  type SendSessionMessageResponse,
   type StartSessionResponse,
 } from '@relay/contracts'
 import type { Pool, PoolClient } from 'pg'
@@ -19,6 +21,7 @@ import {
   SessionConfigurationNotFoundError,
   canWriteSpace,
   createSessionRecords,
+  createSessionFollowUpRecords,
   createSessionStartRecords,
   createSessionDto,
   orderActorOrganizations,
@@ -28,6 +31,8 @@ import {
   type InMemoryRepositoryBinding,
   type OrganizationRole,
   type ResolvedSessionConfiguration,
+  type SendSessionMessageRecord,
+  type SendSessionMessageResult,
   type SessionRepository,
   type SpaceAccess,
   type SpaceRole,
@@ -129,6 +134,13 @@ function responseToResult(response: CreateSessionResponse, replayed: boolean): C
 }
 
 function responseToStartResult(response: StartSessionResponse, replayed: boolean): StartSessionResult {
+  return { ...response, replayed }
+}
+
+function responseToSendResult(
+  response: SendSessionMessageResponse,
+  replayed: boolean,
+): SendSessionMessageResult {
   return { ...response, replayed }
 }
 
@@ -303,6 +315,214 @@ export class PostgresSessionRepository implements SessionRepository {
     } finally {
       client.release()
     }
+  }
+
+  async send(record: SendSessionMessageRecord): Promise<SendSessionMessageResult | null> {
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      const result = await this.sendInTransaction(client, record)
+      await client.query('COMMIT')
+      return result
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+  }
+
+  private async sendInTransaction(
+    client: PoolClient,
+    record: SendSessionMessageRecord,
+  ): Promise<SendSessionMessageResult | null> {
+    const access = await client.query<SpaceAccess>(`
+      SELECT organization_membership.role AS "organizationRole", space_membership.role AS "spaceRole"
+      FROM relay_organization_memberships organization_membership
+      JOIN relay_space_memberships space_membership
+        ON space_membership.organization_id = organization_membership.organization_id
+        AND space_membership.actor_id = organization_membership.actor_id
+      WHERE organization_membership.organization_id = $1
+        AND space_membership.space_id = $2
+        AND organization_membership.actor_id = $3
+      FOR UPDATE OF organization_membership, space_membership
+    `, [record.organizationId, record.spaceId, record.actorId])
+    if (!access.rowCount || !canWriteSpace(access.rows[0])) throw new AuthorizationChangedError()
+
+    const keyHash = hash(record.idempotencyKey)
+    const requestHash = hash(canonicalJson(record.request))
+    const canonicalPath = `/v1/organizations/${record.organizationId}/spaces/${record.spaceId}/sessions/${record.sessionId}/messages`
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+      JSON.stringify([record.organizationId, record.actorId, 'POST', canonicalPath, keyHash]),
+    ])
+    const now = this.now()
+    const existing = await client.query<{ request_hash: string; response_body: unknown | null }>(`
+      SELECT idempotency.request_hash, response.response_body
+      FROM relay_idempotency_records idempotency
+      LEFT JOIN relay_idempotency_responses response
+        ON response.organization_id = idempotency.organization_id
+        AND response.actor_id = idempotency.actor_id
+        AND response.method = idempotency.method
+        AND response.canonical_path = idempotency.canonical_path
+        AND response.idempotency_key_hash = idempotency.idempotency_key_hash
+        AND response.expires_at > $5
+      WHERE idempotency.organization_id = $1 AND idempotency.actor_id = $2
+        AND idempotency.method = 'POST' AND idempotency.canonical_path = $3
+        AND idempotency.idempotency_key_hash = $4 AND idempotency.expires_at > $5
+    `, [record.organizationId, record.actorId, canonicalPath, keyHash, now.toISOString()])
+    if (existing.rowCount) {
+      if (existing.rows[0].request_hash !== requestHash) throw new IdempotencyConflictError()
+      if (!existing.rows[0].response_body) throw new Error('The idempotent send response is unavailable.')
+      return responseToSendResult(
+        SendSessionMessageResponseSchema.parse(existing.rows[0].response_body),
+        true,
+      )
+    }
+
+    await client.query(`
+      DELETE FROM relay_idempotency_responses
+      WHERE organization_id = $1 AND actor_id = $2 AND method = 'POST'
+        AND canonical_path = $3 AND idempotency_key_hash = $4
+        AND expires_at <= $5
+    `, [record.organizationId, record.actorId, canonicalPath, keyHash, now.toISOString()])
+    await client.query(`
+      DELETE FROM relay_idempotency_records
+      WHERE organization_id = $1 AND actor_id = $2 AND method = 'POST'
+        AND canonical_path = $3 AND idempotency_key_hash = $4
+        AND expires_at <= $5
+    `, [record.organizationId, record.actorId, canonicalPath, keyHash, now.toISOString()])
+
+    const candidate = await client.query<SessionRow & { created_by: string }>(`
+      SELECT ${sessionColumns}, created_by
+      FROM relay_sessions
+      WHERE organization_id = $1 AND space_id = $2 AND id = $3
+      FOR UPDATE
+    `, [record.organizationId, record.spaceId, record.sessionId])
+    const row = candidate.rows[0]
+    if (!row || (row.visibility === 'private' && row.created_by !== record.actorId)) return null
+    const before = mapSession(row)
+    if (before.status === 'draft' || before.status === 'canceled') {
+      throw new SessionStateConflictError(before.status, 'send')
+    }
+    if (record.executionAvailability && record.executionAvailability !== 'available') {
+      throw new ExecutionUnavailableError(record.executionAvailability)
+    }
+
+    const counters = await client.query<{ message_sequence: string; turn_ordinal: number }>(`
+      SELECT
+        COALESCE((SELECT MAX(sequence) FROM relay_messages
+          WHERE organization_id = $1 AND space_id = $2 AND session_id = $3), 0) + 1
+          AS message_sequence,
+        COALESCE((SELECT MAX(ordinal) FROM relay_turns
+          WHERE organization_id = $1 AND space_id = $2 AND session_id = $3), 0) + 1
+          AS turn_ordinal
+    `, [record.organizationId, record.spaceId, record.sessionId])
+    const messageSequence = Number(counters.rows[0]?.message_sequence)
+    const turnOrdinal = counters.rows[0]?.turn_ordinal
+    if (!Number.isSafeInteger(messageSequence) || !Number.isSafeInteger(turnOrdinal)) {
+      throw new Error('The Session Message or Turn sequence could not be allocated.')
+    }
+
+    const targetStatus = before.status === 'completed' || before.status === 'failed'
+      ? 'queued'
+      : before.status
+    const updated = await client.query<SessionRow>(`
+      UPDATE relay_sessions
+      SET status = $4, updated_at = $5, last_activity_at = $5, version = version + 1
+      WHERE organization_id = $1 AND space_id = $2 AND id = $3
+      RETURNING ${sessionColumns}
+    `, [record.organizationId, record.spaceId, record.sessionId, targetStatus, now.toISOString()])
+    const session = mapSession(updated.rows[0])
+    const records = createSessionFollowUpRecords(record, session, {
+      messageSequence,
+      turnOrdinal,
+      createId: this.createId,
+      timestamp: session.updatedAt,
+    })
+
+    await client.query(`
+      INSERT INTO relay_messages (
+        id, organization_id, space_id, session_id, sequence, role,
+        actor_id, content, attachments, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10)
+    `, [
+      records.message.id, session.organizationId, session.spaceId, session.id,
+      records.message.sequence, records.message.role, records.message.actorId,
+      records.message.content, JSON.stringify(records.message.attachments), records.message.createdAt,
+    ])
+    await client.query(`
+      INSERT INTO relay_turns (
+        id, organization_id, space_id, session_id, ordinal, initiator_type,
+        initiator_id, input_message_id, status, queued_at, version
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    `, [
+      records.turn.id, session.organizationId, session.spaceId, session.id,
+      records.turn.ordinal, records.turn.initiatorType, records.turn.initiatorId,
+      records.turn.inputMessageId, records.turn.status, records.turn.queuedAt, records.turn.version,
+    ])
+    await client.query(`
+      INSERT INTO relay_commands (
+        id, organization_id, space_id, session_id, type, status,
+        resource_type, resource_id, payload, accepted_at, available_at,
+        protocol_version, requested_by, request_id, max_attempts
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $10,
+        1, $11, $12, $13
+      )
+    `, [
+      records.command.id, session.organizationId, session.spaceId, session.id,
+      records.command.type, records.command.status, records.command.resourceType,
+      records.command.resourceId, JSON.stringify({
+        turnId: records.turn.id,
+        messageId: records.message.id,
+        configurationResolutionVersion: session.configurationResolutionVersion,
+        expertRevisionId: session.expertRevisionId,
+        environmentRevisionId: session.environmentRevisionId,
+        repositoryId: session.repositoryId,
+      }),
+      records.command.acceptedAt,
+      record.actorId,
+      record.requestId,
+      this.executionMaxAttempts,
+    ])
+    await client.query(`
+      INSERT INTO relay_outbox_events (
+        id, organization_id, space_id, session_id, aggregate_type,
+        aggregate_id, event_type, payload, occurred_at
+      ) VALUES ($1, $2, $3, $4, 'session', $4, 'session.message_sent', $5::jsonb, $6)
+    `, [
+      this.createId(), session.organizationId, session.spaceId, session.id,
+      JSON.stringify({
+        sessionId: session.id,
+        messageId: records.message.id,
+        turnId: records.turn.id,
+        commandId: records.command.id,
+      }),
+      session.updatedAt,
+    ])
+    await this.appendSendLedger(client, record, before, session, records, keyHash)
+
+    const response = SendSessionMessageResponseSchema.parse({ session, ...records })
+    const expiresAt = new Date(now.getTime() + this.idempotencyTtlMs).toISOString()
+    await client.query(`
+      INSERT INTO relay_idempotency_records (
+        organization_id, space_id, actor_id, method, canonical_path,
+        idempotency_key_hash, request_hash, session_id, expires_at
+      ) VALUES ($1, $2, $3, 'POST', $4, $5, $6, $7, $8)
+    `, [
+      record.organizationId, record.spaceId, record.actorId, canonicalPath, keyHash,
+      requestHash, session.id, expiresAt,
+    ])
+    await client.query(`
+      INSERT INTO relay_idempotency_responses (
+        organization_id, actor_id, method, canonical_path, idempotency_key_hash,
+        status_code, response_body, response_headers, expires_at
+      ) VALUES ($1, $2, 'POST', $3, $4, 202, $5::jsonb, $6::jsonb, $7)
+    `, [
+      record.organizationId, record.actorId, canonicalPath, keyHash,
+      JSON.stringify(response), JSON.stringify({ etag: `"${session.version}"` }), expiresAt,
+    ])
+    return responseToSendResult(response, false)
   }
 
   private async startInTransaction(
@@ -875,6 +1095,109 @@ export class PostgresSessionRepository implements SessionRepository {
         status: session.status,
         version: session.version,
         executionQueued: true,
+      }),
+      session.updatedAt,
+    ])
+  }
+
+  private async appendSendLedger(
+    client: PoolClient,
+    record: SendSessionMessageRecord,
+    before: SessionDto,
+    session: SessionDto,
+    records: Pick<SendSessionMessageResponse, 'message' | 'turn' | 'command'>,
+    idempotencyKeyHash: string,
+  ) {
+    const drafts: SessionEventDraft[] = [
+      {
+        eventType: 'message.created',
+        resourceType: 'message',
+        resourceId: records.message.id,
+        payload: { sequence: records.message.sequence, role: records.message.role },
+      },
+      {
+        eventType: 'turn.queued',
+        resourceType: 'turn',
+        resourceId: records.turn.id,
+        payload: {
+          ordinal: records.turn.ordinal,
+          status: records.turn.status,
+          version: records.turn.version,
+          inputMessageId: records.turn.inputMessageId,
+        },
+      },
+      {
+        eventType: 'session.updated',
+        resourceType: 'session',
+        resourceId: session.id,
+        payload: { status: session.status, version: session.version },
+      },
+    ]
+    const reservation = await client.query<{ first_sequence: string }>(`
+      UPDATE relay_sessions
+      SET last_event_sequence = last_event_sequence + $4
+      WHERE organization_id = $1 AND space_id = $2 AND id = $3
+      RETURNING last_event_sequence - $4 + 1 AS first_sequence
+    `, [session.organizationId, session.spaceId, session.id, drafts.length])
+    if (!reservation.rowCount) throw new Error('The Session event sequence could not be reserved.')
+    const firstSequence = Number(reservation.rows[0].first_sequence)
+
+    for (const [index, draft] of drafts.entries()) {
+      await client.query(`
+        INSERT INTO relay_session_events (
+          organization_id, space_id, session_id, event_id, sequence,
+          event_type, resource_type, resource_id, payload, actor_id,
+          actor_kind, message_id, turn_id, command_id, request_id, occurred_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11,
+          $12, $13, $14, $15, $16
+        )
+      `, [
+        session.organizationId,
+        session.spaceId,
+        session.id,
+        this.createId(),
+        firstSequence + index,
+        draft.eventType,
+        draft.resourceType,
+        draft.resourceId,
+        JSON.stringify(draft.payload),
+        record.actorId,
+        record.actorKind,
+        draft.resourceType === 'message' ? draft.resourceId : null,
+        draft.resourceType === 'turn' ? draft.resourceId : null,
+        records.command.id,
+        record.requestId,
+        session.updatedAt,
+      ])
+    }
+
+    await client.query(`
+      INSERT INTO relay_audit_events (
+        organization_id, audit_event_id, space_id, session_id, actor_id,
+        actor_kind, action, target_type, target_id, result, request_id,
+        idempotency_key_hash, policy_decision, policy_reason, before_state,
+        after_state, occurred_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, 'session.send', 'session', $4,
+        'success', $7, $8, 'allow', 'organization_and_space_write',
+        $9::jsonb, $10::jsonb, $11
+      )
+    `, [
+      session.organizationId,
+      this.createId(),
+      session.spaceId,
+      session.id,
+      record.actorId,
+      record.actorKind,
+      record.requestId,
+      idempotencyKeyHash,
+      JSON.stringify({ status: before.status, version: before.version }),
+      JSON.stringify({
+        status: session.status,
+        version: session.version,
+        messageSequence: records.message.sequence,
+        turnOrdinal: records.turn.ordinal,
       }),
       session.updatedAt,
     ])

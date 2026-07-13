@@ -1,4 +1,4 @@
-import type { SessionDto } from '@relay/contracts'
+import type { SessionDto, SessionMessageDto } from '@relay/contracts'
 import { AlertTriangle, CheckCircle2, Home, LoaderCircle, Menu, RefreshCw, X } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
@@ -35,6 +35,7 @@ import {
   getRuntimeCapabilities,
   getSession,
   listSessions,
+  sendSessionMessage,
   startSession,
 } from './services/relayApi'
 import type { NewTaskInput, Run, RunAttempt, TaskCreateMode } from './types'
@@ -337,11 +338,25 @@ function SessionRoute({
     status: 'idle' | 'submitting' | 'error'
     error?: string
   }>()
+  const [sendMutation, setSendMutation] = useState<{
+    key: string
+    status: 'idle' | 'submitting' | 'error'
+    error?: string
+  }>()
+  const [acceptedMessages, setAcceptedMessages] = useState<{
+    key: string
+    items: SessionMessageDto[]
+  }>()
+  const sendIdempotency = useRef<{ sessionId?: string; content?: string; key?: string }>({})
   const startRequest: { status: 'idle' | 'submitting' | 'error'; error?: string } = startMutation
     && startMutation.key === sessionId
     ? startMutation
     : { status: 'idle' as const }
   const startIdempotencyKey = useMemo(() => makeSessionIdempotencyKey(sessionId), [sessionId])
+  const sendRequest: { status: 'idle' | 'submitting' | 'error'; error?: string } = sendMutation
+    && sendMutation.key === sessionId
+    ? sendMutation
+    : { status: 'idle' as const }
   const run = runs.find((item) => item.id === sessionId)
   const auth = useMemo(
     () => ({ accessToken, requestIdentity, onUnauthorized: handleUnauthorized }),
@@ -413,6 +428,12 @@ function SessionRoute({
         }
       : currentRequest?.session
   ), [currentRequest, latestSessionUpdate])
+  const visibleMessages = useMemo(() => {
+    const local = acceptedMessages?.key === requestKey ? acceptedMessages.items : []
+    const messages = new Map(local.map((message) => [message.id, message]))
+    for (const message of timeline.messages) messages.set(message.id, message)
+    return [...messages.values()].sort((left, right) => left.sequence - right.sequence)
+  }, [acceptedMessages, requestKey, timeline.messages])
 
   const startDraft = useCallback(() => {
     if (!resolvedSession || resolvedSession.status !== 'draft' || !executionEnabled) return
@@ -444,6 +465,66 @@ function SessionRoute({
       setStartMutation({ key: resolvedSession.id, status: 'error', error: message })
     })
   }, [auth, concealDetail, executionEnabled, locale, onSessionObserved, organizationId, requestKey, resolvedSession, spaceId, startIdempotencyKey])
+
+  const sendFollowUp = useCallback(async (content: string) => {
+    if (
+      !resolvedSession
+      || !executionEnabled
+      || resolvedSession.status === 'draft'
+      || resolvedSession.status === 'canceled'
+    ) return
+    const currentKey = sendIdempotency.current
+    if (
+      currentKey.sessionId !== resolvedSession.id
+      || currentKey.content !== content
+      || !currentKey.key
+    ) {
+      sendIdempotency.current = {
+        sessionId: resolvedSession.id,
+        content,
+        key: makeSessionIdempotencyKey(resolvedSession.id),
+      }
+    }
+    setSendMutation({ key: resolvedSession.id, status: 'submitting' })
+    try {
+      const response = await sendSessionMessage(
+        organizationId,
+        spaceId,
+        resolvedSession.id,
+        { content },
+        sendIdempotency.current.key!,
+        auth,
+      )
+      setRequest((current) => current?.key === requestKey
+        ? { key: requestKey, status: 'ready', session: response.session }
+        : current)
+      const acceptedMessage: SessionMessageDto = {
+        ...response.message,
+        organizationId,
+        spaceId,
+      }
+      setAcceptedMessages((current) => {
+        const items = current?.key === requestKey ? current.items : []
+        return {
+          key: requestKey,
+          items: [...items.filter((message) => message.id !== acceptedMessage.id), acceptedMessage],
+        }
+      })
+      onSessionObserved(response.session)
+      sendIdempotency.current = {}
+      setSendMutation({ key: response.session.id, status: 'idle' })
+    } catch (cause) {
+      const message = cause instanceof Error
+        ? cause.message
+        : (locale === 'zh' ? '无法发送后续消息。' : 'Unable to send the follow-up message.')
+      if (cause instanceof RelayApiError && cause.status !== undefined && [401, 403, 404].includes(cause.status)) {
+        concealDetail(message)
+      } else {
+        setSendMutation({ key: resolvedSession.id, status: 'error', error: message })
+      }
+      throw cause
+    }
+  }, [auth, concealDetail, executionEnabled, locale, onSessionObserved, organizationId, requestKey, resolvedSession, spaceId])
 
   useEffect(() => {
     if (!resolvedSession || resolvedSession === currentRequest?.session) return
@@ -487,7 +568,7 @@ function SessionRoute({
     return (
       <RemoteSessionWorkbench
         session={resolvedSession}
-        messages={timeline.messages}
+        messages={visibleMessages}
         events={timeline.events}
         timelineStatus={timeline.status}
         timelineError={timeline.error}
@@ -495,6 +576,9 @@ function SessionRoute({
         startStatus={startRequest.status}
         startError={startRequest.error}
         onStart={startDraft}
+        sendStatus={sendRequest.status}
+        sendError={sendRequest.error}
+        onSend={sendFollowUp}
         onOpenNavigation={onOpenNavigation}
         onBack={() => navigate('/sessions')}
       />

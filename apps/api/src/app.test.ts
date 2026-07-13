@@ -9,6 +9,7 @@ import {
   MeResponseSchema,
   SessionDtoSchema,
   SessionListResponseSchema,
+  SendSessionMessageResponseSchema,
   StartSessionResponseSchema,
   type CreateSessionRequestInput,
   type EnvironmentDetailDto,
@@ -853,6 +854,95 @@ describe('Relay API', () => {
     expect(started.statusCode).toBe(202)
     expect(ApiErrorSchema.parse(repeatedTransition.json()).code).toBe('SESSION_STATE_CONFLICT')
     expect(repeatedTransition.statusCode).toBe(409)
+  })
+
+  it('queues consecutive follow-up Messages with stable idempotent FIFO records', async () => {
+    const repository = testRepository()
+    const app = testApp(repository)
+    const collectionUrl = '/api/v1/organizations/relay/spaces/platform/sessions'
+    const created = await app.inject({
+      method: 'POST', url: collectionUrl,
+      headers: { 'idempotency-key': 'create-follow-up-session' },
+      payload: sessionRequest,
+    })
+    const session = CreateSessionResponseSchema.parse(created.json()).session
+    const url = `${collectionUrl}/${session.id}/messages`
+    const firstRequest = {
+      method: 'POST' as const,
+      url,
+      headers: { 'idempotency-key': 'follow-up-1' },
+      payload: { content: 'Queue the first follow-up.', attachments: [] },
+    }
+    const first = await app.inject(firstRequest)
+    const second = await app.inject({
+      method: 'POST', url,
+      headers: { 'idempotency-key': 'follow-up-2' },
+      payload: { content: 'Queue the second follow-up.', attachments: [] },
+    })
+    const replay = await app.inject(firstRequest)
+    const firstBody = SendSessionMessageResponseSchema.parse(first.json())
+    const secondBody = SendSessionMessageResponseSchema.parse(second.json())
+
+    expect(first.statusCode).toBe(202)
+    expect(first.headers.etag).toBe('"2"')
+    expect(firstBody).toMatchObject({
+      session: { status: 'queued', version: 2 },
+      message: { sequence: 2, content: 'Queue the first follow-up.' },
+      turn: { ordinal: 2, status: 'queued' },
+      command: { type: 'session.send', status: 'accepted' },
+    })
+    expect(secondBody).toMatchObject({
+      session: { status: 'queued', version: 3 },
+      message: { sequence: 3, content: 'Queue the second follow-up.' },
+      turn: { ordinal: 3, status: 'queued' },
+      command: { type: 'session.send', status: 'accepted' },
+    })
+    expect(replay.statusCode).toBe(202)
+    expect(replay.headers['idempotency-replayed']).toBe('true')
+    expect(replay.json()).toEqual(first.json())
+  })
+
+  it('rejects follow-up Messages for drafts and while execution is unavailable', async () => {
+    const repository = testRepository()
+    const disabled = createApp({
+      sessionRepository: repository,
+      authenticate: createDevelopmentAuthenticator('user-local-admin'),
+      executionEnabled: false,
+    })
+    openApps.push(disabled)
+    const collectionUrl = '/api/v1/organizations/relay/spaces/platform/sessions'
+    const draftResponse = await disabled.inject({
+      method: 'POST', url: collectionUrl,
+      headers: { 'idempotency-key': 'create-send-draft' },
+      payload: { ...sessionRequest, start: false },
+    })
+    const draft = CreateSessionResponseSchema.parse(draftResponse.json()).session
+    const draftSend = await disabled.inject({
+      method: 'POST', url: `${collectionUrl}/${draft.id}/messages`,
+      headers: { 'idempotency-key': 'send-to-draft' },
+      payload: { content: 'This draft must be started first.' },
+    })
+    expect(draftSend.statusCode).toBe(409)
+    expect(ApiErrorSchema.parse(draftSend.json())).toMatchObject({
+      code: 'SESSION_STATE_CONFLICT', details: { status: 'draft' },
+    })
+
+    const enabled = testApp(repository)
+    const created = await enabled.inject({
+      method: 'POST', url: collectionUrl,
+      headers: { 'idempotency-key': 'create-send-disabled' },
+      payload: sessionRequest,
+    })
+    const queued = CreateSessionResponseSchema.parse(created.json()).session
+    const unavailable = await disabled.inject({
+      method: 'POST', url: `${collectionUrl}/${queued.id}/messages`,
+      headers: { 'idempotency-key': 'send-while-disabled' },
+      payload: { content: 'Do not persist a partial follow-up.' },
+    })
+    expect(unavailable.statusCode).toBe(503)
+    expect(ApiErrorSchema.parse(unavailable.json()).code).toBe('EXECUTION_UNAVAILABLE')
+    await expect(repository.getById('relay', 'platform', queued.id, 'user-local-admin'))
+      .resolves.toMatchObject({ version: 1 })
   })
 
   it('creates a Session for an actor at the OIDC subject length boundary', async () => {

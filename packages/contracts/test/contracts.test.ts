@@ -7,6 +7,7 @@ import {
   MeResponseSchema,
   SessionDtoSchema,
   SessionListResponseSchema,
+  SendSessionMessageResponseSchema,
   SessionStatusSchema,
   StartSessionResponseSchema,
   SessionVisibilitySchema,
@@ -136,6 +137,12 @@ describe('session contracts', () => {
       session, turn, command,
     })
     expect(StartSessionResponseSchema.safeParse({ session, message, turn, command }).success).toBe(false)
+    expect(SendSessionMessageResponseSchema.parse({
+      session,
+      message,
+      turn,
+      command: { ...command, type: 'session.send' },
+    })).toMatchObject({ session, message, turn, command: { type: 'session.send' } })
     expect(SessionListResponseSchema.parse({
       items: [session],
       page: { nextCursor: null, hasMore: false, projectionUpdatedAt: session.updatedAt },
