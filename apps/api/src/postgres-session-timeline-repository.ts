@@ -50,6 +50,8 @@ type EventRow = {
   turn_id: string | null
   attempt_id: string | null
   artifact_id: string | null
+  file_id: string | null
+  file_version_id: string | null
   session_status: string | null
   session_visibility: string | null
   session_version: string | null
@@ -63,6 +65,10 @@ type EventRow = {
   artifact_status: string | null
   artifact_version: string | null
   artifact_removed_at: string | null
+  file_scope: string | null
+  file_path: string | null
+  file_version: string | null
+  file_size: string | null
 }
 
 const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER)
@@ -225,6 +231,20 @@ function mapEvent(row: EventRow): SessionEventDto {
           status: row.artifact_status,
           version: safeInteger(row.artifact_version, 'Artifact event version', 1),
           removedAt: row.artifact_removed_at,
+        },
+      }
+      break
+    case 'file.version.created':
+      projected = {
+        ...base,
+        type: row.event_type,
+        payload: {
+          fileId: row.file_id,
+          fileVersionId: row.file_version_id,
+          scope: row.file_scope,
+          path: row.file_path,
+          version: safeInteger(row.file_version, 'FileVersion event version', 1),
+          size: safeInteger(row.file_size, 'FileVersion event size', 0),
         },
       }
       break
@@ -399,7 +419,7 @@ export class PostgresSessionTimelineRepository implements SessionTimelineReposit
           event.event_id, event.sequence, event.event_type, event.resource_type,
           event.resource_id, event.actor_id, event.command_id, event.request_id,
           event.occurred_at, event.message_id, event.turn_id, event.attempt_id,
-          event.artifact_id,
+          event.artifact_id, event.file_id, event.file_version_id,
           CASE WHEN event.event_type IN (
             'session.created', 'session.updated', 'session.renamed',
             'session.archived', 'session.restored'
@@ -427,7 +447,15 @@ export class PostgresSessionTimelineRepository implements SessionTimelineReposit
           CASE WHEN event.event_type IN ('artifact.created', 'artifact.updated', 'artifact.removed')
             THEN event.payload->>'version' END AS artifact_version,
           CASE WHEN event.event_type = 'artifact.removed'
-            THEN event.payload->>'removedAt' END AS artifact_removed_at
+            THEN event.payload->>'removedAt' END AS artifact_removed_at,
+          CASE WHEN event.event_type = 'file.version.created'
+            THEN event.payload->>'scope' END AS file_scope,
+          CASE WHEN event.event_type = 'file.version.created'
+            THEN event.payload->>'path' END AS file_path,
+          CASE WHEN event.event_type = 'file.version.created'
+            THEN event.payload->>'version' END AS file_version,
+          CASE WHEN event.event_type = 'file.version.created'
+            THEN event.payload->>'size' END AS file_size
         FROM relay_session_events event
         WHERE event.organization_id = $1
           AND event.space_id = $2

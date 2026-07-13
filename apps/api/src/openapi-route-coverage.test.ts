@@ -116,6 +116,10 @@ describe('OpenAPI runtime route coverage', () => {
     const resume = document.paths['/organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/resume']
     const cancel = document.paths['/organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/cancel']
     const retry = document.paths['/organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/turns/{turnId}/retry']
+    const files = document.paths['/organizations/{organizationId}/spaces/{spaceId}/files']
+    const file = document.paths['/organizations/{organizationId}/spaces/{spaceId}/files/{fileId}']
+    const fileContent = document.paths['/organizations/{organizationId}/spaces/{spaceId}/files/{fileId}/content']
+    const fileVersions = document.paths['/organizations/{organizationId}/spaces/{spaceId}/files/{fileId}/versions']
     expect(collection?.get?.responses?.['200']?.content?.['application/json']?.schema?.$ref)
       .toBe('#/components/schemas/RuntimeSessionListResponse')
     expect(collection?.post?.requestBody?.content?.['application/json']?.schema?.$ref)
@@ -140,5 +144,13 @@ describe('OpenAPI runtime route coverage', () => {
     expect(retry?.post?.requestBody).toBeUndefined()
     expect(retry?.post?.responses?.['202']?.content?.['application/json']?.schema?.$ref)
       .toBe('#/components/schemas/RuntimeRetryTurnResult')
+    expect(files?.get?.responses?.['200']?.content?.['application/json']?.schema?.$ref)
+      .toBe('#/components/schemas/RuntimeFileListResponse')
+    expect(file?.get?.responses?.['200']?.content?.['application/json']?.schema?.$ref)
+      .toBe('#/components/schemas/RuntimeFile')
+    expect(fileContent?.get?.responses?.['200']?.content?.['application/octet-stream'])
+      .toBeDefined()
+    expect(fileVersions?.get?.responses?.['200']?.content?.['application/json']?.schema?.$ref)
+      .toBe('#/components/schemas/RuntimeFileVersionListResponse')
   })
 })

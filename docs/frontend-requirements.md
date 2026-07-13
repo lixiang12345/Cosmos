@@ -40,8 +40,9 @@
 | 创建失败恢复 | Home 和 Dialog 等待 API 确认，失败保留输入，同一草稿重试复用幂等 key | **Implemented** | 幂等 key 仅存在内存；页面刷新后的安全恢复尚未实现 |
 | Session 视图模型 | 生产列表仍使用无执行推测的最小 `Run` 兼容投影，并开放服务端重命名、归档和恢复；生产详情直接渲染 canonical `SessionDto` 和 Message/Event timeline，凭据轮换立即隔离旧详情；demo 数据使用独立 `relay.demo.sessions` key | **Partial** | 列表仍需迁移为原生 Session read model；Pin、分享和 Artifact 摘要必须接入服务端 API 后才可开放 |
 | Experts/Environments 查询 | 生产模式使用 tenant-scoped Catalog list/detail API，支持分页聚合、身份切换清屏、401 闭锁、只读详情和 Expert 启动入口；demo 模式保留本地编辑原型 | **Implemented (limited)** | 无创建、编辑、发布、重新配置、审计或 service-account policy |
-| 其他控制面 | Daemon、Repository、Integration、MCP、Webhook、Secret、Space、Automation、Files 与 Approval 仍是 seed/本地交互，仅在 demo 模式可达；生产导航、命令面板和直达路由均不暴露原型操作 | **Prototype** | 逐域接入权威 API、权限和审计后再加入 production capability allowlist |
-| Session 工作台 | demo 模式保留阶段、事件、Diff、Terminal、Approval 演示；生产详情显示服务端 Session metadata、配置 revision、Message/Attempt/SessionEvent，并按 execution capability 开放 draft start 与幂等 follow-up composer；失败保留输入，成功后合并权威 Message | **Partial** | ToolCall、Artifact、Files、审批和 pause/resume/cancel/retry 仍需服务化后才能开放 |
+| Files | 生产模式的 Organization/User 路由使用 tenant-scoped API，提供服务端搜索、分页树、文本预览、鉴权 Blob 下载、内容/路径复制、不可变版本和请求 Session 修改；凭据/Space/scope 变化会隔离旧投影；无上传、编辑、删除或客户端恢复入口 | **Implemented (limited)** | Session Workspace Files、ToolCall 写入编排、binary 内联预览与对象存储容量证据 |
+| 其他控制面 | Daemon、Repository、Integration、MCP、Webhook、Secret、Space、Automation 与 Approval 仍是 seed/本地交互，仅在 demo 模式可达；生产导航、命令面板和直达路由均不暴露原型操作 | **Prototype** | 逐域接入权威 API、权限和审计后再加入 production capability allowlist |
+| Session 工作台 | demo 模式保留阶段、事件、Diff、Terminal、Approval 演示；生产详情显示服务端 Session metadata、配置 revision、Message/Attempt/SessionEvent，并按 execution capability 开放 draft start、幂等 follow-up composer 与执行生命周期控制；失败保留输入，成功后合并权威 Message | **Partial** | ToolCall、Workspace Files、审批与 Worker tree 仍需服务化后才能开放 |
 | 身份与权限 | Web 已实现 OIDC Code + PKCE、内存 token、`/me` discovery、合法 Space 选择、空权限/错误状态；API 已校验 token、membership 与 Organization/Space 角色交集 | **Partial** | 缺少细粒度 operation policy、真实 IdP E2E、前端 403 恢复和服务端实时权限变更通知 |
 
 前端显示一个功能不等于该功能已实现。除 Session 创建、列表、单资源读取、重命名、归档/恢复、draft start 和 follow-up send 明确接入 API 的部分外，当前控制面默认按 Prototype/Simulation 处理。

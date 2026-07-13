@@ -1,4 +1,19 @@
 export {
+  FileDtoSchema,
+  FileListResponseSchema,
+  FilePathSchema,
+  FilePrefixSchema,
+  FileScopeSchema,
+  FileVersionDtoSchema,
+  FileVersionListResponseSchema,
+  type FileDto,
+  type FileListResponse,
+  type FileScope,
+  type FileVersionDto,
+  type FileVersionListResponse,
+} from './file.js'
+
+export {
   ArtifactDtoSchema,
   ArtifactListResponseSchema,
   ArtifactTypeSchema,

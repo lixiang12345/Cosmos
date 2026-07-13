@@ -356,6 +356,7 @@ export const SessionEventTypeSchema = z.enum([
   'artifact.created',
   'artifact.updated',
   'artifact.removed',
+  'file.version.created',
 ])
 
 export type SessionEventType = z.infer<typeof SessionEventTypeSchema>
@@ -469,6 +470,20 @@ export const SessionEventDtoSchema = z.discriminatedUnion('type', [
       removedAt: TimestampSchema.nullable(),
     }).strict(),
   }).strict(),
+  z.object({
+    ...SessionEventBaseShape,
+    type: z.literal('file.version.created'),
+    resourceType: z.literal('file'),
+    resourceId: IdentifierSchema,
+    payload: z.object({
+      fileId: IdentifierSchema,
+      fileVersionId: IdentifierSchema,
+      scope: z.enum(['workspace', 'user', 'organization']),
+      path: z.string().min(1).max(1_024),
+      version: z.number().int().positive(),
+      size: z.number().int().nonnegative().max(1_048_576),
+    }).strict(),
+  }).strict(),
 ]).superRefine((event, context) => {
   if (event.resourceType === 'session'
     && event.resourceId !== event.sessionId) {
@@ -523,6 +538,13 @@ export const SessionEventDtoSchema = z.discriminatedUnion('type', [
         message: 'removedAt must be present exactly for removed Artifact events',
       })
     }
+  }
+  if ('fileId' in event.payload && event.resourceId !== event.payload.fileId) {
+    context.addIssue({
+      code: 'custom',
+      path: ['payload', 'fileId'],
+      message: 'fileId must match resourceId',
+    })
   }
 })
 

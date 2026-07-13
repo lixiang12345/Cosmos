@@ -4,6 +4,8 @@ import type {
   EnvironmentSummaryDto,
   ExpertDetailDto,
   ExpertSummaryDto,
+  FileDto,
+  FileVersionDto,
   SessionEventPage,
   SessionDto,
   SessionMessagePage,
@@ -17,12 +19,16 @@ import {
   createSession,
   getEnvironment,
   getExpert,
+  getFile,
+  getFileContent,
   getMe,
   getRuntimeCapabilities,
   getSession,
   getRelayApiBaseUrl,
   listEnvironments,
   listExperts,
+  listFiles,
+  listFileVersions,
   listSessionEvents,
   listSessionMessages,
   listSessions,
@@ -59,6 +65,21 @@ const session: SessionDto = {
   createdAt: '2026-07-12T08:00:00.000Z', updatedAt: '2026-07-12T08:00:00.000Z',
   lastActivityAt: '2026-07-12T08:00:00.000Z', version: 1,
   archivedAt: null,
+}
+
+const file: FileDto = {
+  organizationId: 'relay', spaceId: null, id: 'file-1', scope: 'user', ownerUserId: 'user-1',
+  sessionId: null, path: 'knowledge/release.md', mimeType: 'text/markdown', size: 15,
+  latestVersionId: 'file-version-2', lastWrittenByToolCallId: 'tool-2',
+  lastWrittenByExpertId: 'expert-pr-author', createdAt: session.createdAt,
+  updatedAt: session.updatedAt, archivedAt: null, version: 2,
+}
+
+const fileVersion: FileVersionDto = {
+  organizationId: 'relay', spaceId: null, fileId: file.id, id: file.latestVersionId,
+  version: 2, contentHash: 'a'.repeat(64), size: file.size,
+  createdByToolCallId: file.lastWrittenByToolCallId, sourceSessionId: session.id,
+  sourceTurnId: 'turn-2', createdAt: session.updatedAt,
 }
 
 const messagePage: SessionMessagePage = {
@@ -381,6 +402,83 @@ describe('Relay API client', () => {
       '/api/v1/organizations/relay/spaces/space-platform/sessions/session-1',
       expect.objectContaining({ method: 'GET' }),
     )
+  })
+
+  it('loads scoped File metadata, pages, and immutable versions', async () => {
+    const filePage = {
+      organizationId: 'relay', requestedSpaceId: 'space-platform', scope: 'user',
+      ownerUserId: 'user-1', sessionId: null, items: [file],
+      page: { nextCursor: null, hasMore: false },
+    }
+    const versionPage = {
+      organizationId: 'relay', requestedSpaceId: 'space-platform', fileId: file.id,
+      items: [fileVersion], page: { nextCursor: null, hasMore: false },
+    }
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(filePage))
+      .mockResolvedValueOnce(jsonResponse(file))
+      .mockResolvedValueOnce(jsonResponse(versionPage))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listFiles('relay', 'space-platform', {
+      scope: 'user', search: 'release', limit: 25,
+    })).resolves.toEqual(filePage)
+    await expect(getFile('relay', 'space-platform', file.id)).resolves.toEqual(file)
+    await expect(listFileVersions(
+      'relay', 'space-platform', file.id, undefined, undefined, { limit: 25 },
+    )).resolves.toEqual(versionPage)
+
+    const listUrl = new URL(String(fetchMock.mock.calls[0][0]), window.location.origin)
+    expect(listUrl.pathname).toBe('/api/v1/organizations/relay/spaces/space-platform/files')
+    expect(Object.fromEntries(listUrl.searchParams)).toMatchObject({
+      scope: 'user', search: 'release', limit: '25',
+    })
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual(expect.arrayContaining([
+      '/api/v1/organizations/relay/spaces/space-platform/files/file-1',
+      '/api/v1/organizations/relay/spaces/space-platform/files/file-1/versions?limit=25',
+    ]))
+  })
+
+  it('downloads authorized File bytes and rejects out-of-scope File pages', async () => {
+    const onUnauthorized = vi.fn()
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response('# Release notes', {
+        headers: {
+          'Content-Type': 'text/markdown; charset=utf-8',
+          'Content-Disposition': "attachment; filename=\"release.md\"; filename*=UTF-8''release.md",
+          ETag: `"sha256:${fileVersion.contentHash}"`,
+        },
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        organizationId: 'other', requestedSpaceId: 'space-platform', scope: 'user',
+        ownerUserId: 'user-1', sessionId: null, items: [{ ...file, organizationId: 'other' }],
+        page: { nextCursor: null, hasMore: false },
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        code: 'AUTHENTICATION_REQUIRED', message: 'Sign in again.', retryable: false,
+      }, 401))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const content = await getFileContent(
+      'relay', 'space-platform', file.id,
+      { accessToken: 'access-token', onUnauthorized }, undefined,
+      { version: 2, disposition: 'attachment' },
+    )
+    expect(await content.blob.text()).toBe('# Release notes')
+    expect(content).toMatchObject({
+      contentType: 'text/markdown; charset=utf-8', fileName: 'release.md',
+      etag: `"sha256:${fileVersion.contentHash}"`,
+    })
+    const contentUrl = new URL(String(fetchMock.mock.calls[0][0]), window.location.origin)
+    expect(Object.fromEntries(contentUrl.searchParams)).toEqual({ version: '2', disposition: 'attachment' })
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('Authorization')).toBe('Bearer access-token')
+
+    await expect(listFiles('relay', 'space-platform', { scope: 'user' }))
+      .rejects.toMatchObject({ code: 'INVALID_RESPONSE', status: 200 })
+    await expect(getFileContent('relay', 'space-platform', file.id, {
+      accessToken: 'expired', onUnauthorized,
+    })).rejects.toMatchObject({ status: 401 })
+    expect(onUnauthorized).toHaveBeenCalledWith('expired')
   })
 
   it('renames a Session with its current ETag', async () => {

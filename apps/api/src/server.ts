@@ -5,6 +5,7 @@ import { loadConfig } from './config.js'
 import { assertMigrationsCurrent, runMigrations } from './migrations.js'
 import { PostgresArtifactRepository } from './postgres-artifact-repository.js'
 import { PostgresConfigurationCatalogRepository } from './postgres-configuration-catalog-repository.js'
+import { PostgresFileRepository } from './postgres-file-repository.js'
 import { assertRuntimeDatabaseRole, createRuntimePool } from './postgres-runtime-database.js'
 import { PostgresSessionRepository } from './postgres-session-repository.js'
 import { PostgresSessionTimelineRepository } from './postgres-session-timeline-repository.js'
@@ -57,6 +58,7 @@ const app = createApp({
     }),
   sessionTimelineRepository: pool ? new PostgresSessionTimelineRepository(pool) : undefined,
   artifactRepository: pool ? new PostgresArtifactRepository(pool) : undefined,
+  fileRepository: pool ? new PostgresFileRepository(pool) : undefined,
   serviceAccountPolicyRepository: pool ? new PostgresServiceAccountPolicyRepository(pool) : undefined,
   configurationCatalogRepository: pool
     ? new PostgresConfigurationCatalogRepository(pool)

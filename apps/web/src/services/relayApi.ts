@@ -5,6 +5,9 @@ import {
   EnvironmentListResponseSchema,
   ExpertDetailDtoSchema,
   ExpertListResponseSchema,
+  FileDtoSchema,
+  FileListResponseSchema,
+  FileVersionListResponseSchema,
   MeResponseSchema,
   RuntimeCapabilitiesSchema,
   RetryTurnResponseSchema,
@@ -23,6 +26,10 @@ import {
   type EnvironmentListResponse,
   type ExpertDetailDto,
   type ExpertListResponse,
+  type FileDto,
+  type FileListResponse,
+  type FileScope,
+  type FileVersionListResponse,
   type MeResponse,
   type MessageCreateInput,
   type RuntimeCapabilities,
@@ -77,6 +84,21 @@ export type RelaySessionEventStreamOptions = {
 export type RelaySessionEventStreamResult = {
   lastEventId?: string
   reconnect: boolean
+}
+
+export type RelayFileListOptions = RelayCatalogListOptions & {
+  scope: FileScope
+  ownerUserId?: string
+  sessionId?: string
+  prefix?: string
+  search?: string
+}
+
+export type RelayFileContent = {
+  blob: Blob
+  contentType: string
+  fileName?: string
+  etag?: string
 }
 
 const sessionListRequests = new Map<string, Promise<SessionListResponse>>()
@@ -295,6 +317,73 @@ async function request<T>(
   return parsed.data
 }
 
+async function requestBlob(
+  path: string,
+  init: RequestInit,
+  auth: RelayApiAuthContext = {},
+): Promise<RelayFileContent> {
+  const headers = new Headers(init.headers)
+  if (auth.accessToken) headers.set('Authorization', `Bearer ${auth.accessToken}`)
+  const timeoutSignal = AbortSignal.timeout(RELAY_API_TIMEOUT_MS)
+  const signal = init.signal ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal
+  let response: Response
+  try {
+    response = await fetch(resolveRelayApiRequestUrl(path), { ...init, headers, signal })
+  } catch (cause) {
+    if (timeoutSignal.aborted && !init.signal?.aborted) {
+      throw new RelayApiError('The Relay API request timed out.', {
+        code: 'REQUEST_TIMEOUT', retryable: true, cause,
+      })
+    }
+    if (init.signal?.aborted) {
+      throw new RelayApiError('The Relay API request was canceled.', {
+        code: 'REQUEST_CANCELED', retryable: true, cause,
+      })
+    }
+    throw new RelayApiError('Unable to reach the Relay API.', {
+      code: 'NETWORK_ERROR', retryable: true, cause,
+    })
+  }
+  if (!response.ok) {
+    const body = await readJson(response, signal)
+    const correlationId = getCorrelationId(response, body)
+    if (response.status === 401 && auth.onUnauthorized) {
+      await Promise.resolve(auth.onUnauthorized(auth.accessToken)).catch(() => undefined)
+    }
+    const parsedError = ApiErrorSchema.safeParse(body)
+    if (parsedError.success) {
+      throw new RelayApiError(parsedError.data.message, {
+        code: parsedError.data.code,
+        status: response.status,
+        correlationId: parsedError.data.correlationId ?? correlationId,
+        retryable: parsedError.data.retryable,
+        fieldErrors: parsedError.data.fieldErrors,
+        details: parsedError.data.details,
+      })
+    }
+    throw new RelayApiError(`Relay API request failed with status ${response.status}.`, {
+      code: 'HTTP_ERROR', status: response.status, correlationId, retryable: response.status >= 500,
+    })
+  }
+  const disposition = response.headers.get('content-disposition') ?? ''
+  const encodedName = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1]
+  const fallbackName = /filename="([^"]*)"/i.exec(disposition)?.[1]
+  let fileName = fallbackName
+  if (encodedName) {
+    try {
+      fileName = decodeURIComponent(encodedName)
+    } catch {
+      fileName = fallbackName
+    }
+  }
+  return {
+    blob: await response.blob(),
+    contentType: response.headers.get('content-type') ?? 'application/octet-stream',
+    fileName,
+    etag: response.headers.get('etag') ?? undefined,
+  }
+}
+
 function sessionsPath(organizationId: string, spaceId: string) {
   return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/sessions`
 }
@@ -309,6 +398,25 @@ function expertsPath(organizationId: string, spaceId: string) {
 
 function environmentsPath(organizationId: string, spaceId: string) {
   return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/environments`
+}
+
+function filesPath(organizationId: string, spaceId: string) {
+  return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/files`
+}
+
+function filePath(organizationId: string, spaceId: string, fileId: string) {
+  return `${filesPath(organizationId, spaceId)}/${encodeURIComponent(fileId)}`
+}
+
+function fileListPath(path: string, options: RelayFileListOptions) {
+  const query = new URLSearchParams({ scope: options.scope })
+  if (options.cursor) query.set('cursor', options.cursor)
+  if (options.limit !== undefined) query.set('limit', String(options.limit))
+  if (options.ownerUserId) query.set('ownerUserId', options.ownerUserId)
+  if (options.sessionId) query.set('sessionId', options.sessionId)
+  if (options.prefix) query.set('prefix', options.prefix)
+  if (options.search) query.set('search', options.search)
+  return `${path}?${query.toString()}`
 }
 
 function catalogListPath(path: string, options: RelayCatalogListOptions | undefined) {
@@ -484,6 +592,103 @@ export function getSession(
     assertSessionScope(session, organizationId, spaceId, sessionId)
     return session
   })
+}
+
+function assertFileScope(
+  file: FileDto,
+  organizationId: string,
+  requestedSpaceId: string,
+  fileId?: string,
+) {
+  if (
+    file.organizationId !== organizationId
+    || (file.scope === 'workspace' && file.spaceId !== requestedSpaceId)
+    || (fileId !== undefined && file.id !== fileId)
+  ) {
+    throw new RelayApiError('Relay API returned a File outside the requested scope.', {
+      code: 'INVALID_RESPONSE', status: 200,
+    })
+  }
+}
+
+export function listFiles(
+  organizationId: string,
+  spaceId: string,
+  options: RelayFileListOptions,
+  auth?: RelayApiAuthContext,
+  signal?: AbortSignal,
+): Promise<FileListResponse> {
+  return request(fileListPath(filesPath(organizationId, spaceId), options), {
+    method: 'GET', headers: { Accept: 'application/json' }, signal,
+  }, FileListResponseSchema, auth).then((response) => {
+    if (
+      response.organizationId !== organizationId
+      || response.requestedSpaceId !== spaceId
+      || response.scope !== options.scope
+    ) {
+      throw new RelayApiError('Relay API returned a File page outside the requested scope.', {
+        code: 'INVALID_RESPONSE', status: 200,
+      })
+    }
+    for (const item of response.items) assertFileScope(item, organizationId, spaceId)
+    return response
+  })
+}
+
+export function getFile(
+  organizationId: string,
+  spaceId: string,
+  fileId: string,
+  auth?: RelayApiAuthContext,
+  signal?: AbortSignal,
+): Promise<FileDto> {
+  return request(filePath(organizationId, spaceId, fileId), {
+    method: 'GET', headers: { Accept: 'application/json' }, signal,
+  }, FileDtoSchema, auth).then((file) => {
+    assertFileScope(file, organizationId, spaceId, fileId)
+    return file
+  })
+}
+
+export function listFileVersions(
+  organizationId: string,
+  spaceId: string,
+  fileId: string,
+  auth?: RelayApiAuthContext,
+  signal?: AbortSignal,
+  options?: RelayCatalogListOptions,
+): Promise<FileVersionListResponse> {
+  return request(catalogListPath(`${filePath(organizationId, spaceId, fileId)}/versions`, options), {
+    method: 'GET', headers: { Accept: 'application/json' }, signal,
+  }, FileVersionListResponseSchema, auth).then((response) => {
+    if (
+      response.organizationId !== organizationId
+      || response.requestedSpaceId !== spaceId
+      || response.fileId !== fileId
+    ) {
+      throw new RelayApiError('Relay API returned File versions outside the requested scope.', {
+        code: 'INVALID_RESPONSE', status: 200,
+      })
+    }
+    return response
+  })
+}
+
+export function getFileContent(
+  organizationId: string,
+  spaceId: string,
+  fileId: string,
+  auth?: RelayApiAuthContext,
+  signal?: AbortSignal,
+  options?: { version?: number; disposition?: 'inline' | 'attachment' },
+) {
+  const query = new URLSearchParams()
+  if (options?.version !== undefined) query.set('version', String(options.version))
+  if (options?.disposition) query.set('disposition', options.disposition)
+  const suffix = query.size ? `?${query.toString()}` : ''
+  return requestBlob(`${filePath(organizationId, spaceId, fileId)}/content${suffix}`, {
+    method: 'GET', headers: { Accept: '*/*' }, signal,
+  }, auth)
 }
 
 export function renameSession(

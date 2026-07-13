@@ -17,6 +17,8 @@ describeWithDatabase('PostgresConfigurationCatalogRepository integration', () =>
       ALTER TABLE relay_audit_events DISABLE TRIGGER relay_audit_events_reject_truncate;
       ALTER TABLE relay_attempts DISABLE TRIGGER relay_attempts_reject_truncate;
       ALTER TABLE relay_artifacts DISABLE TRIGGER relay_artifacts_reject_truncate;
+      ALTER TABLE relay_files DISABLE TRIGGER relay_files_reject_truncate;
+      ALTER TABLE relay_file_versions DISABLE TRIGGER relay_file_versions_reject_truncate;
     `)
     try {
       await pool.query('TRUNCATE relay_organizations CASCADE')
@@ -26,6 +28,8 @@ describeWithDatabase('PostgresConfigurationCatalogRepository integration', () =>
         ALTER TABLE relay_audit_events ENABLE TRIGGER relay_audit_events_reject_truncate;
         ALTER TABLE relay_attempts ENABLE TRIGGER relay_attempts_reject_truncate;
         ALTER TABLE relay_artifacts ENABLE TRIGGER relay_artifacts_reject_truncate;
+        ALTER TABLE relay_files ENABLE TRIGGER relay_files_reject_truncate;
+        ALTER TABLE relay_file_versions ENABLE TRIGGER relay_file_versions_reject_truncate;
       `)
     }
     await pool.query(`

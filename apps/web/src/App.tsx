@@ -57,6 +57,7 @@ const ExpertEditorPage = lazy(() => import('./pages/ExpertsPage').then((module) 
 const RemoteExpertsPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteExpertsPage })))
 const RemoteExpertDetailPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteExpertDetailPage })))
 const RemoteEnvironmentsPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteEnvironmentsPage })))
+const RemoteFilesPage = lazy(() => import('./pages/RemoteFilesPage').then((module) => ({ default: module.RemoteFilesPage })))
 const CosmosHomePage = lazy(() => import('./pages/CosmosOperationsPages').then((module) => ({ default: module.CosmosHomePage })))
 const CosmosFilesPage = lazy(() => import('./pages/CosmosOperationsPages').then((module) => ({ default: module.CosmosFilesPage })))
 const CosmosApprovalsPage = lazy(() => import('./pages/CosmosOperationsPages').then((module) => ({ default: module.CosmosApprovalsPage })))
@@ -1748,9 +1749,33 @@ function RelayApp() {
           />
         } />
         <Route path="/runs/:sessionId" element={<LegacySessionRedirect />} />
-        <Route path="/files" element={demoMode ? <Navigate to="/files/user" replace /> : productionUnavailable} />
-        <Route path="/files/user" element={demoMode ? <CosmosFilesPage key="user" initialScope="user" onOpenNavigation={openNavigation} /> : productionUnavailable} />
-        <Route path="/files/organization" element={demoMode ? <CosmosFilesPage key="organization" initialScope="organization" onOpenNavigation={openNavigation} /> : productionUnavailable} />
+        <Route path="/files" element={<Navigate to={demoMode ? '/files/user' : '/files/organization'} replace />} />
+        <Route path="/files/user" element={demoMode
+          ? <CosmosFilesPage key="user" initialScope="user" onOpenNavigation={openNavigation} />
+          : <RemoteFilesPage
+              key="user"
+              organizationId={organizationId}
+              spaceId={activeSpace.id}
+              scope="user"
+              auth={catalogAuth}
+              credentialVersion={credentialVersion}
+              sessionCreationEnabled={sessionCreationEnabled}
+              onOpenNavigation={openNavigation}
+              onRequestModification={(path) => openNewTask(undefined, locale === 'zh' ? `请修改 ${path}：` : `Please update ${path}:`)}
+            />} />
+        <Route path="/files/organization" element={demoMode
+          ? <CosmosFilesPage key="organization" initialScope="organization" onOpenNavigation={openNavigation} />
+          : <RemoteFilesPage
+              key="organization"
+              organizationId={organizationId}
+              spaceId={activeSpace.id}
+              scope="organization"
+              auth={catalogAuth}
+              credentialVersion={credentialVersion}
+              sessionCreationEnabled={sessionCreationEnabled}
+              onOpenNavigation={openNavigation}
+              onRequestModification={(path) => openNewTask(undefined, locale === 'zh' ? `请修改 ${path}：` : `Please update ${path}:`)}
+            />} />
         <Route path="/approvals" element={demoMode ? <CosmosApprovalsPage runs={scopedRuns} onOpenNavigation={openNavigation} onOpenSession={openSession} onDecision={decide} /> : productionUnavailable} />
         <Route path="/automations" element={demoMode ? <CosmosAutomationsPage onOpenNavigation={openNavigation} /> : productionUnavailable} />
         <Route path="/automations/events" element={demoMode ? <CosmosEventLogPage onOpenNavigation={openNavigation} onSessionCreated={materializeAutomationSession} /> : productionUnavailable} />

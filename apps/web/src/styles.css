@@ -11623,6 +11623,99 @@ button:disabled {
     border-bottom: 0;
   }
 }
+
+.remote-files-page .cosmos-page__content {
+  min-height: 0;
+}
+
+.remote-files-page .cosmos-files-layout {
+  min-height: min(720px, calc(100dvh - 130px));
+}
+
+.remote-files-state,
+.remote-files-preview-state {
+  display: flex;
+  min-height: 90px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-align: center;
+}
+
+.remote-files-state > svg,
+.remote-files-preview-state > svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.remote-files-state--error {
+  color: var(--danger);
+}
+
+.remote-files-state--error button,
+.remote-files-load-more {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.remote-files-state--error button svg,
+.remote-files-load-more svg {
+  width: 13px;
+  height: 13px;
+}
+
+.remote-files-load-more {
+  width: 100%;
+  border-bottom: 1px solid var(--row-line);
+}
+
+.remote-files-load-more:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.remote-files-load-more:disabled {
+  cursor: wait;
+  opacity: .65;
+}
+
+.remote-files-preview-state {
+  min-height: 300px;
+  flex-direction: column;
+  border-bottom: 1px solid var(--line);
+  background: var(--code-surface);
+}
+
+.remote-files-preview-state strong {
+  color: var(--text-secondary);
+}
+
+.remote-files-request {
+  white-space: nowrap;
+}
+
+@media (max-width: 620px) {
+  .remote-files-request {
+    width: 100%;
+  }
+
+  .remote-files-page .cosmos-file-viewer__header > div:last-child {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+}
 /* Environment configuration workbench. Scoped to avoid changing shared control-plane pages. */
 .environment-page .cosmos-page__scroll {
   padding-top: 16px;

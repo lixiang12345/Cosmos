@@ -134,6 +134,11 @@ function eventLabel(event: SessionEventDto, locale: Locale) {
     `已移除产物关联：${event.payload.label}`,
     `Artifact association removed: ${event.payload.label}`,
   )
+  if (event.type === 'file.version.created') return text(
+    locale,
+    `文件已写入：${event.payload.path} · v${event.payload.version}`,
+    `File written: ${event.payload.path} · v${event.payload.version}`,
+  )
   if (!('number' in event.payload)) return event.type
   const attempt = `${text(locale, '第', 'Attempt ')}${event.payload.number}${text(locale, ' 次尝试', '')}`
   const statuses = {

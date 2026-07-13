@@ -8,6 +8,18 @@ export {
 } from './artifact-repository.js'
 export { PostgresArtifactRepository } from './postgres-artifact-repository.js'
 export {
+  EmptyFileRepository,
+  FileQuotaExceededError,
+  FileValidationError,
+  type FileRepository,
+  type FileWriterRepository,
+} from './file-repository.js'
+export {
+  PostgresFileRepository,
+  PostgresFileWriterRepository,
+  type PostgresFileWriterRepositoryOptions,
+} from './postgres-file-repository.js'
+export {
   AuthenticationError,
   createDevelopmentAuthenticator,
   createJwtAuthenticator,

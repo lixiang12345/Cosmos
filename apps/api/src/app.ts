@@ -12,6 +12,9 @@ import {
   EnvironmentListResponseSchema,
   ExpertDetailDtoSchema,
   ExpertListResponseSchema,
+  FileDtoSchema,
+  FileListResponseSchema,
+  FileVersionListResponseSchema,
   MeResponseSchema,
   MessageCreateSchema,
   RenameSessionRequestSchema,
@@ -66,6 +69,22 @@ import {
   EmptyConfigurationCatalogRepository,
   type ConfigurationCatalogRepository,
 } from './configuration-catalog-repository.js'
+import {
+  EmptyFileRepository,
+  type FileRepository,
+} from './file-repository.js'
+import {
+  InvalidFilePaginationError,
+  encodeFileCursor,
+  encodeFileVersionCursor,
+  parseFileContentDisposition,
+  parseFileContentVersion,
+  parseFilePagination,
+  parseFileVersionPagination,
+  type FileContentQuery,
+  type FileListQuery,
+  type FileVersionListQuery,
+} from './file-pagination.js'
 import {
   AuthorizationChangedError,
   EnvironmentNotReadyError,
@@ -139,6 +158,10 @@ type ArtifactParams = SessionParams & {
   artifactId: string
 }
 
+type FileParams = SpaceParams & {
+  fileId: string
+}
+
 type SessionEventStreamOptions = {
   heartbeatMs?: number
   pollMs?: number
@@ -172,6 +195,7 @@ export type CreateAppOptions = {
   sessionRepository?: SessionRepository
   sessionTimelineRepository?: SessionTimelineRepository
   artifactRepository?: ArtifactRepository
+  fileRepository?: FileRepository
   serviceAccountPolicyRepository?: ServiceAccountPolicyRepository
   configurationCatalogRepository?: ConfigurationCatalogRepository
   readinessCheck?: () => Promise<void>
@@ -276,6 +300,32 @@ function sessionEtag(session: { version: number }) {
 
 function resourceEtag(resource: { version: number }) {
   return `"${resource.version}"`
+}
+
+const INLINE_FILE_MIME_TYPES = new Set([
+  'application/json',
+  'image/gif',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'text/markdown',
+  'text/plain',
+])
+
+function safeFileMimeType(value: string) {
+  return /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+(?:\s*;\s*charset=[A-Za-z0-9._-]+)?$/.test(value)
+    ? value
+    : 'application/octet-stream'
+}
+
+function contentDisposition(path: string, requested: 'inline' | 'attachment', mimeType: string) {
+  const name = path.split('/').at(-1) ?? 'download'
+  const fallback = name.replaceAll(/[^\x20-\x21\x23-\x5b\x5d-\x7e]/g, '_').slice(0, 180) || 'download'
+  const baseMimeType = mimeType.split(';', 1)[0]?.trim().toLowerCase() ?? ''
+  const disposition = requested === 'inline' && INLINE_FILE_MIME_TYPES.has(baseMimeType)
+    ? 'inline'
+    : 'attachment'
+  return `${disposition}; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(name)}`
 }
 
 function positiveInteger(value: number | undefined, fallback: number, maximum: number) {
@@ -386,6 +436,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   const sessionRepository = options.sessionRepository ?? new InMemorySessionRepository()
   const sessionTimelineRepository = options.sessionTimelineRepository
   const artifactRepository = options.artifactRepository ?? new EmptyArtifactRepository()
+  const fileRepository = options.fileRepository ?? new EmptyFileRepository()
   const serviceAccountPolicyRepository = options.serviceAccountPolicyRepository
     ?? new DenyServiceAccountPolicyRepository()
   const configurationCatalogRepository = options.configurationCatalogRepository
@@ -630,6 +681,17 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       })
     }
 
+    if (error instanceof InvalidFilePaginationError) {
+      return sendApiError(reply, 400, request, {
+        code: 'VALIDATION_FAILED',
+        message: 'The File request parameters are invalid.',
+        retryable: false,
+        fieldErrors: {
+          [`query.${error.field}`]: ['Use a valid value and a cursor bound to this File scope.'],
+        },
+      })
+    }
+
     if (error instanceof InvalidSessionTimelinePaginationError) {
       return sendApiError(reply, 400, request, {
         code: 'VALIDATION_FAILED',
@@ -735,6 +797,24 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       sendApiError(reply, 403, request, {
         code: 'PERMISSION_DENIED',
         message: 'Service accounts cannot enumerate control-plane configuration.',
+        retryable: false,
+      })
+      return null
+    }
+    return authorizeSpace(request, reply, params)
+  }
+
+  async function authorizeFileSpace(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    params: SpaceParams,
+  ) {
+    const actor = actorsByRequest.get(request)
+    if (!actor) throw new AuthenticationError()
+    if (actor.kind === 'service_account') {
+      sendApiError(reply, 403, request, {
+        code: 'PERMISSION_DENIED',
+        message: 'Service accounts cannot browse or download Files.',
         retryable: false,
       })
       return null
@@ -1107,6 +1187,135 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       reply.header('Idempotency-Replayed', String(result.replayed))
       reply.header('ETag', resourceEtag(grant))
       return grant
+    },
+  )
+
+  app.get<{ Params: SpaceParams; Querystring: FileListQuery }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/files',
+    async (request, reply) => {
+      const authorization = await authorizeFileSpace(request, reply, request.params)
+      if (!authorization) return
+      const pagination = parseFilePagination(
+        request.query,
+        authorization.organizationId,
+        authorization.spaceId,
+        authorization.actor.id,
+      )
+      const page = await fileRepository.list(
+        authorization.organizationId,
+        authorization.spaceId,
+        authorization.actor.id,
+        pagination,
+      )
+      if (!page) return sendResourceNotFound(reply, request)
+      return FileListResponseSchema.parse({
+        organizationId: authorization.organizationId,
+        requestedSpaceId: authorization.spaceId,
+        scope: pagination.scope,
+        ownerUserId: pagination.ownerUserId ?? null,
+        sessionId: pagination.sessionId ?? null,
+        items: page.items,
+        page: {
+          nextCursor: page.nextCursor
+            ? encodeFileCursor(
+              page.nextCursor,
+              authorization.organizationId,
+              authorization.spaceId,
+              pagination,
+            )
+            : null,
+          hasMore: page.hasMore,
+        },
+      })
+    },
+  )
+
+  app.get<{ Params: FileParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/files/:fileId',
+    async (request, reply) => {
+      const authorization = await authorizeFileSpace(request, reply, request.params)
+      if (!authorization) return
+      const fileId = parseSpaceId(request.params.fileId)
+      if (!fileId) return sendResourceNotFound(reply, request)
+      const file = await fileRepository.get(
+        authorization.organizationId,
+        authorization.spaceId,
+        fileId,
+        authorization.actor.id,
+      )
+      if (!file) return sendResourceNotFound(reply, request)
+      const response = FileDtoSchema.parse(file)
+      reply.header('ETag', resourceEtag(response))
+      return response
+    },
+  )
+
+  app.get<{ Params: FileParams; Querystring: FileContentQuery }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/files/:fileId/content',
+    async (request, reply) => {
+      const authorization = await authorizeFileSpace(request, reply, request.params)
+      if (!authorization) return
+      const fileId = parseSpaceId(request.params.fileId)
+      if (!fileId) return sendResourceNotFound(reply, request)
+      const version = parseFileContentVersion(request.query.version)
+      const disposition = parseFileContentDisposition(request.query.disposition)
+      const result = await fileRepository.getContent(
+        authorization.organizationId,
+        authorization.spaceId,
+        fileId,
+        authorization.actor.id,
+        version,
+      )
+      if (!result) return sendResourceNotFound(reply, request)
+      const mimeType = safeFileMimeType(result.file.mimeType)
+      reply.header('Content-Disposition', contentDisposition(result.file.path, disposition, mimeType))
+      reply.header('Content-Length', result.content.byteLength)
+      reply.header('Content-Security-Policy', "sandbox; default-src 'none'")
+      reply.header('ETag', `"sha256:${result.version.contentHash}"`)
+      reply.header('X-Content-Type-Options', 'nosniff')
+      reply.type(mimeType)
+      return reply.send(result.content)
+    },
+  )
+
+  app.get<{ Params: FileParams; Querystring: FileVersionListQuery }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/files/:fileId/versions',
+    async (request, reply) => {
+      const authorization = await authorizeFileSpace(request, reply, request.params)
+      if (!authorization) return
+      const fileId = parseSpaceId(request.params.fileId)
+      if (!fileId) return sendResourceNotFound(reply, request)
+      const pagination = parseFileVersionPagination(
+        request.query,
+        authorization.organizationId,
+        authorization.spaceId,
+        fileId,
+      )
+      const page = await fileRepository.listVersions(
+        authorization.organizationId,
+        authorization.spaceId,
+        fileId,
+        authorization.actor.id,
+        pagination,
+      )
+      if (!page) return sendResourceNotFound(reply, request)
+      return FileVersionListResponseSchema.parse({
+        organizationId: authorization.organizationId,
+        requestedSpaceId: authorization.spaceId,
+        fileId,
+        items: page.items,
+        page: {
+          nextCursor: page.nextCursor
+            ? encodeFileVersionCursor(
+              page.nextCursor,
+              authorization.organizationId,
+              authorization.spaceId,
+              fileId,
+            )
+            : null,
+          hasMore: page.hasMore,
+        },
+      })
     },
   )
 

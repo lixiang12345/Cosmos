@@ -150,9 +150,9 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
         AND relname NOT IN ('relay_schema_migrations', 'relay_worker_heartbeats')
     `)
     expect(protection.rows[0]).toEqual({
-      tenant_tables: '25',
-      rls_tables: '25',
-      forced_tables: '25',
+      tenant_tables: '27',
+      rls_tables: '27',
+      forced_tables: '27',
     })
   })
 

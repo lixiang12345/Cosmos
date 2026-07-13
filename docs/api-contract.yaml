@@ -1530,15 +1530,22 @@ paths:
 
   /organizations/{organizationId}/spaces/{spaceId}/files:
     parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
     get:
       tags: [Files]
       operationId: listFiles
+      x-relay-implementation-status: implemented
       summary: Browse Workspace, User, or Organization Files
       parameters:
-        - $ref: '#/components/parameters/Cursor'
-        - $ref: '#/components/parameters/Limit'
+        - name: cursor
+          in: query
+          description: Opaque cursor bound to this Space, scope, owner, Session, prefix, and search.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 4096
+        - $ref: '#/components/parameters/RuntimeCatalogLimit'
         - name: scope
           in: query
           required: true
@@ -1548,46 +1555,50 @@ paths:
           in: query
           description: Required for workspace scope.
           schema:
-            type: string
-            format: uuid
+            $ref: '#/components/schemas/RuntimeIdentifier'
         - name: ownerUserId
           in: query
           description: Defaults to the caller for user scope; privileged callers may specify another user.
           schema:
-            type: string
-            format: uuid
+            $ref: '#/components/schemas/RuntimeActorIdentifier'
         - name: prefix
           in: query
           schema:
             type: string
             maxLength: 1024
-        - $ref: '#/components/parameters/Search'
+        - name: search
+          in: query
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 240
       responses:
         '200':
           description: File page
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: '#/components/schemas/Page'
-                  - type: object
-                    required: [items]
-                    properties:
-                      items:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/File'
+                $ref: '#/components/schemas/RuntimeFileListResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
 
   /organizations/{organizationId}/spaces/{spaceId}/files/{fileId}:
     parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
       - $ref: '#/components/parameters/FileId'
     get:
       tags: [Files]
       operationId: getFile
+      x-relay-implementation-status: implemented
       summary: Get File metadata
       responses:
         '200':
@@ -1598,18 +1609,25 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/File'
+                $ref: '#/components/schemas/RuntimeFile'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
 
   /organizations/{organizationId}/spaces/{spaceId}/files/{fileId}/content:
     parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
       - $ref: '#/components/parameters/FileId'
     get:
       tags: [Files]
       operationId: downloadFileContent
+      x-relay-implementation-status: implemented
       summary: Preview or download an authorized File version
       parameters:
         - name: version
@@ -1638,39 +1656,52 @@ paths:
                 type: string
                 format: binary
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/RuntimeForbidden'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
 
   /organizations/{organizationId}/spaces/{spaceId}/files/{fileId}/versions:
     parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
       - $ref: '#/components/parameters/FileId'
     get:
       tags: [Files]
       operationId: listFileVersions
+      x-relay-implementation-status: implemented
       summary: List immutable File versions
       parameters:
-        - $ref: '#/components/parameters/Cursor'
-        - $ref: '#/components/parameters/Limit'
+        - name: cursor
+          in: query
+          description: Opaque cursor bound to this File and Space.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 4096
+        - $ref: '#/components/parameters/RuntimeCatalogLimit'
       responses:
         '200':
           description: File version page
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: '#/components/schemas/Page'
-                  - type: object
-                    required: [items]
-                    properties:
-                      items:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/FileVersion'
+                $ref: '#/components/schemas/RuntimeFileVersionListResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
 
   /organizations/{organizationId}/spaces/{spaceId}/sessions/{sessionId}/artifacts:
     parameters:
@@ -2324,8 +2355,7 @@ components:
       in: path
       required: true
       schema:
-        type: string
-        format: uuid
+        $ref: '#/components/schemas/RuntimeIdentifier'
     ArtifactId:
       name: artifactId
       in: path
@@ -3378,6 +3408,184 @@ components:
               oneOf:
                 - $ref: '#/components/schemas/Timestamp'
                 - type: 'null'
+          additionalProperties: false
+      additionalProperties: false
+    RuntimeFile:
+      type: object
+      required:
+        - organizationId
+        - spaceId
+        - id
+        - scope
+        - ownerUserId
+        - sessionId
+        - path
+        - mimeType
+        - size
+        - latestVersionId
+        - lastWrittenByToolCallId
+        - lastWrittenByExpertId
+        - createdAt
+        - updatedAt
+        - archivedAt
+        - version
+      properties:
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        spaceId:
+          oneOf:
+            - $ref: '#/components/schemas/RuntimeIdentifier'
+            - type: 'null'
+        id:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        scope:
+          $ref: '#/components/schemas/FileScope'
+        ownerUserId:
+          oneOf:
+            - $ref: '#/components/schemas/RuntimeActorIdentifier'
+            - type: 'null'
+        sessionId:
+          oneOf:
+            - $ref: '#/components/schemas/RuntimeIdentifier'
+            - type: 'null'
+        path:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        mimeType:
+          type: string
+          minLength: 1
+          maxLength: 255
+        size:
+          type: integer
+          minimum: 0
+          maximum: 1048576
+        latestVersionId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        lastWrittenByToolCallId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        lastWrittenByExpertId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        updatedAt:
+          $ref: '#/components/schemas/Timestamp'
+        archivedAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        version:
+          type: integer
+          minimum: 1
+      additionalProperties: false
+    RuntimeFileVersion:
+      type: object
+      required:
+        - organizationId
+        - spaceId
+        - fileId
+        - id
+        - version
+        - contentHash
+        - size
+        - createdByToolCallId
+        - sourceSessionId
+        - sourceTurnId
+        - createdAt
+      properties:
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        spaceId:
+          oneOf:
+            - $ref: '#/components/schemas/RuntimeIdentifier'
+            - type: 'null'
+        fileId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        id:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        version:
+          type: integer
+          minimum: 1
+        contentHash:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        size:
+          type: integer
+          minimum: 0
+          maximum: 1048576
+        createdByToolCallId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        sourceSessionId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        sourceTurnId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+      additionalProperties: false
+    RuntimeFileListResponse:
+      type: object
+      required: [organizationId, requestedSpaceId, scope, ownerUserId, sessionId, items, page]
+      properties:
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        requestedSpaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        scope:
+          $ref: '#/components/schemas/FileScope'
+        ownerUserId:
+          oneOf:
+            - $ref: '#/components/schemas/RuntimeActorIdentifier'
+            - type: 'null'
+        sessionId:
+          oneOf:
+            - $ref: '#/components/schemas/RuntimeIdentifier'
+            - type: 'null'
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/RuntimeFile'
+        page:
+          type: object
+          required: [nextCursor, hasMore]
+          properties:
+            nextCursor:
+              oneOf:
+                - type: string
+                  minLength: 1
+                  maxLength: 2048
+                - type: 'null'
+            hasMore:
+              type: boolean
+          additionalProperties: false
+      additionalProperties: false
+    RuntimeFileVersionListResponse:
+      type: object
+      required: [organizationId, requestedSpaceId, fileId, items, page]
+      properties:
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        requestedSpaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        fileId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/RuntimeFileVersion'
+        page:
+          type: object
+          required: [nextCursor, hasMore]
+          properties:
+            nextCursor:
+              oneOf:
+                - type: string
+                  minLength: 1
+                  maxLength: 2048
+                - type: 'null'
+            hasMore:
+              type: boolean
           additionalProperties: false
       additionalProperties: false
     RuntimeArtifactCreate:
@@ -5054,73 +5262,6 @@ components:
     FileScope:
       type: string
       enum: [workspace, user, organization]
-    File:
-      allOf:
-        - $ref: '#/components/schemas/ResourceBase'
-        - type: object
-          required: [scope, path, mimeType, size, latestVersionId]
-          properties:
-            spaceId:
-              type: [string, 'null']
-              format: uuid
-            scope:
-              $ref: '#/components/schemas/FileScope'
-            ownerUserId:
-              type: [string, 'null']
-              format: uuid
-            sessionId:
-              type: [string, 'null']
-              format: uuid
-            path:
-              type: string
-            mimeType:
-              type: string
-            size:
-              type: integer
-              format: int64
-              minimum: 0
-            latestVersionId:
-              type: string
-              format: uuid
-            lastWrittenByToolCallId:
-              type: string
-              format: uuid
-            lastWrittenByExpertId:
-              type: string
-              format: uuid
-            archivedAt:
-              type: [string, 'null']
-              format: date-time
-    FileVersion:
-      type: object
-      required: [id, fileId, version, contentHash, size, createdByToolCallId, sourceSessionId, sourceTurnId, createdAt]
-      properties:
-        id:
-          type: string
-          format: uuid
-        fileId:
-          type: string
-          format: uuid
-        version:
-          type: integer
-          minimum: 1
-        contentHash:
-          type: string
-        size:
-          type: integer
-          format: int64
-          minimum: 0
-        createdByToolCallId:
-          type: string
-          format: uuid
-        sourceSessionId:
-          type: string
-          format: uuid
-        sourceTurnId:
-          type: string
-          format: uuid
-        createdAt:
-          $ref: '#/components/schemas/Timestamp'
 
     ArtifactType:
       type: string
