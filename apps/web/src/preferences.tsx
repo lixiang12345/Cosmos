@@ -750,7 +750,7 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
       themeColor.name = 'theme-color'
       document.head.append(themeColor)
     }
-    themeColor.content = theme === 'dark' ? '#0e1012' : '#f7f8f7'
+    themeColor.content = theme === 'dark' ? '#0a0a0a' : '#f5f5f5'
     writePreference(PREFERENCE_STORAGE_KEYS.theme, theme)
   }, [theme])
 

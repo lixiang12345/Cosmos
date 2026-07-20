@@ -7549,6 +7549,12 @@ button:disabled {
     flex-direction: row;
   }
 
+  /* Keep nested navigation vertical in the mobile drawer. The drawer may
+     reuse the desktop collapsed class, but its hierarchy must remain a list. */
+  .sidebar--collapsed .sidebar-configuration-list {
+    display: block;
+  }
+
   .sidebar--collapsed .sidebar__quick-actions .button {
     width: auto;
     min-width: 0;
@@ -8714,9 +8720,19 @@ button:disabled {
 
   .sidebar--collapsed .sidebar-new-session span,
   .sidebar--collapsed .sidebar-configuration-toggle span,
-  .sidebar--collapsed .sidebar-configuration-toggle > svg:last-child,
-  .sidebar--collapsed .sidebar-configuration-list {
+  .sidebar--collapsed .sidebar-configuration-toggle > svg:last-child {
     display: flex;
+  }
+
+  .sidebar--collapsed .sidebar-configuration-list {
+    display: block;
+  }
+
+  .sidebar--collapsed .sidebar-link--nested > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .sidebar--collapsed .sidebar-configuration-toggle > svg:last-child {
@@ -15808,81 +15824,81 @@ button:disabled {
 
 /* Unified application visual system. */
 :root {
-  --canvas: #101517;
-  --navigation: #0c1113;
-  --surface: #171e21;
-  --surface-strong: #1d262a;
-  --surface-hover: #222d31;
-  --border: #293539;
-  --border-strong: #3b4a50;
-  --text: #edf3f3;
-  --text-secondary: #a8b8ba;
-  --text-muted: #7b8d91;
-  --brand: #59c7c5;
-  --brand-strong: #35a9ab;
-  --brand-soft: #143436;
-  --info: #78a8e8;
-  --info-soft: #182a40;
-  --warning: #e3b65d;
-  --warning-soft: #332817;
-  --danger: #ed7e88;
-  --danger-soft: #361f24;
-  --chrome: #131a1d;
-  --chrome-subtle: #101619;
-  --line: #243034;
-  --stage: #111719;
-  --footer-surface: #151c1f;
-  --row-line: #202a2e;
-  --soft-line: #253034;
-  --on-brand: #071314;
-  --primary-bg: #eaf1f1;
+  --canvas: #0a0a0a;
+  --navigation: #0f0f0f;
+  --surface: #151515;
+  --surface-strong: #1c1c1c;
+  --surface-hover: #242424;
+  --border: #2b2b2b;
+  --border-strong: #454545;
+  --text: #f5f5f5;
+  --text-secondary: #b2b2b2;
+  --text-muted: #7d7d7d;
+  --brand: #f1f1f1;
+  --brand-strong: #ffffff;
+  --brand-soft: #262626;
+  --info: #c7c7c7;
+  --info-soft: #242424;
+  --warning: #d3d3d3;
+  --warning-soft: #292929;
+  --danger: #e2e2e2;
+  --danger-soft: #2c2c2c;
+  --chrome: #111111;
+  --chrome-subtle: #181818;
+  --line: #232323;
+  --stage: #0d0d0d;
+  --footer-surface: #121212;
+  --row-line: #202020;
+  --soft-line: #252525;
+  --on-brand: #0a0a0a;
+  --primary-bg: #f1f1f1;
   --primary-hover: #ffffff;
-  --primary-text: #101719;
-  --control-surface: #141c1f;
-  --control-surface-hover: #1b2529;
-  --control-placeholder: #718387;
-  --focus-ring: rgba(89, 199, 197, 0.2);
-  --scrollbar-thumb: #39484d;
+  --primary-text: #0a0a0a;
+  --control-surface: #121212;
+  --control-surface-hover: #1b1b1b;
+  --control-placeholder: #737373;
+  --focus-ring: rgba(255, 255, 255, 0.16);
+  --scrollbar-thumb: #464646;
   --shadow: 0 18px 44px rgba(0, 0, 0, 0.28);
 }
 
 :root[data-theme="light"] {
-  --canvas: #f2f5f5;
-  --navigation: #e9eeee;
-  --surface: #fbfcfc;
-  --surface-strong: #f3f7f7;
-  --surface-hover: #e7eeee;
-  --border: #d4dfe0;
-  --border-strong: #b8c8ca;
-  --text: #1d292b;
-  --text-secondary: #4c5f62;
-  --text-muted: #718185;
-  --brand: #147f86;
-  --brand-strong: #0f6970;
-  --brand-soft: #e1f1f2;
-  --info: #3d76bd;
-  --info-soft: #e8f0fa;
-  --warning: #94651d;
-  --warning-soft: #fbf0d9;
-  --danger: #b64e5a;
-  --danger-soft: #fae8eb;
-  --chrome: #f8fbfb;
-  --chrome-subtle: #edf3f3;
-  --line: #dbe5e6;
-  --stage: #f6f9f9;
-  --footer-surface: #f4f8f8;
-  --row-line: #e3ebec;
-  --soft-line: #dce6e7;
+  --canvas: #f5f5f5;
+  --navigation: #ffffff;
+  --surface: #ffffff;
+  --surface-strong: #f0f0f0;
+  --surface-hover: #e8e8e8;
+  --border: #d5d5d5;
+  --border-strong: #bdbdbd;
+  --text: #111111;
+  --text-secondary: #4d4d4d;
+  --text-muted: #777777;
+  --brand: #111111;
+  --brand-strong: #000000;
+  --brand-soft: #ededed;
+  --info: #555555;
+  --info-soft: #efefef;
+  --warning: #555555;
+  --warning-soft: #eeeeee;
+  --danger: #222222;
+  --danger-soft: #eeeeee;
+  --chrome: #ffffff;
+  --chrome-subtle: #f1f1f1;
+  --line: #dedede;
+  --stage: #fafafa;
+  --footer-surface: #f7f7f7;
+  --row-line: #e5e5e5;
+  --soft-line: #e1e1e1;
   --on-brand: #ffffff;
-  --primary-bg: #1d292b;
-  --primary-hover: #101719;
+  --primary-bg: #111111;
+  --primary-hover: #000000;
   --primary-text: #ffffff;
-  --control-surface: #f7fafa;
-  --control-surface-hover: #edf3f3;
-  --control-placeholder: #718185;
-  --focus-ring: rgba(20, 127, 134, 0.18);
-  --scrollbar-thumb: #a9b9bc;
-  --shadow: 0 18px 44px rgba(38, 62, 65, 0.13);
+  --control-surface: #fafafa;
+  --control-surface-hover: #f1f1f1;
+  --control-placeholder: #777777;
+  --focus-ring: rgba(0, 0, 0, 0.14);
+  --scrollbar-thumb: #b7b7b7;
+  --shadow: 0 18px 44px rgba(0, 0, 0, 0.12);
 }
 
 body {
@@ -15910,6 +15926,19 @@ body {
   background: var(--brand-soft);
   color: var(--text);
   box-shadow: inset 2px 0 var(--brand);
+}
+
+/* Status remains readable through labels and icons, while the shell stays
+   intentionally monochrome like Cosmos. */
+.status-badge--running,
+.status-badge--waiting,
+.status-badge--completed,
+.status-badge--failed,
+.status-badge--draft,
+.status-badge--queued {
+  border-color: var(--border-strong);
+  background: var(--surface-strong);
+  color: var(--text-secondary);
 }
 
 .module-page,

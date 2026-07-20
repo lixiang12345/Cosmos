@@ -1753,7 +1753,7 @@ describe('Relay prototype', () => {
 
     await user.click(within(sessionsPage).getByRole('button', { name: '切换到浅色模式' }))
     expect(document.documentElement).toHaveAttribute('data-theme', 'light')
-    expect(document.querySelector('meta[name="theme-color"]')).toHaveAttribute('content', '#f7f8f7')
+    expect(document.querySelector('meta[name="theme-color"]')).toHaveAttribute('content', '#f5f5f5')
     expect(window.localStorage.getItem(PREFERENCE_STORAGE_KEYS.theme)).toBe('light')
 
     await user.click(within(sessionsPage).getByRole('button', { name: '切换到英文' }))
