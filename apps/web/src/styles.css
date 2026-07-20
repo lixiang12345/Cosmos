@@ -8681,6 +8681,32 @@ button:disabled {
   padding: 0;
 }
 
+/* A mobile sidebar is a full navigation drawer, even when the shell keeps
+   the collapsed state used by the desktop rail. Keep its hierarchy visible. */
+@media (max-width: 820px) {
+  .sidebar--collapsed .sidebar-new-session {
+    width: 100%;
+    justify-content: flex-start;
+    padding: 0 10px;
+  }
+
+  .sidebar--collapsed .sidebar-new-session span,
+  .sidebar--collapsed .sidebar-configuration-toggle span,
+  .sidebar--collapsed .sidebar-configuration-toggle > svg:last-child,
+  .sidebar--collapsed .sidebar-configuration-list {
+    display: flex;
+  }
+
+  .sidebar--collapsed .sidebar-configuration-toggle > svg:last-child {
+    display: block;
+  }
+
+  .sidebar--collapsed .sidebar-configuration-toggle {
+    justify-content: flex-start;
+    padding: 0 9px;
+  }
+}
+
 .status-badge--paused {
   border-color: var(--border-strong);
   background: var(--surface-strong);
