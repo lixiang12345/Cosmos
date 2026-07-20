@@ -269,6 +269,16 @@ function ConversationView({ run, onDecision }: { run: Run; onDecision: RunWorkbe
               ))}
             </div>
           ) : null}
+          {run.status === 'running' || run.status === 'queued' ? (
+            <div className="composer__queue-state" aria-live="polite">
+              <span className="composer__queue-dot" aria-hidden="true" />
+              <span>
+                {locale === 'zh'
+                  ? `Expert 正在工作，后续消息将在当前回合结束后发送${queuedMessages.length ? ` · 已排队 ${queuedMessages.length} 条` : ''}`
+                  : `The Expert is working. Follow-up messages will send when this turn finishes${queuedMessages.length ? ` · ${queuedMessages.length} queued` : ''}`}
+              </span>
+            </div>
+          ) : null}
           {matchingCommands.length ? (
             <div className="composer-command-menu" role="listbox" aria-label={locale === 'zh' ? '可用命令' : 'Available commands'}>
               {matchingCommands.map((item) => (

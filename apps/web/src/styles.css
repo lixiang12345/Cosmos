@@ -4110,6 +4110,28 @@ button:disabled {
   gap: 3px;
 }
 
+.composer__queue-state {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--brand) 22%, var(--line));
+  background: color-mix(in srgb, var(--brand-soft) 62%, transparent);
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.composer__queue-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--brand);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 16%, transparent);
+}
+
 .model-select {
   position: relative;
   display: inline-flex;
@@ -12349,11 +12371,18 @@ button:disabled {
     margin: 0 -14px;
     padding: 0 14px 6px;
     overflow-x: auto;
+    scrollbar-width: none;
+    scroll-snap-type: x proximity;
+  }
+
+  .home-expert-grid::-webkit-scrollbar {
+    display: none;
   }
 
   .home-expert-card {
     width: 240px;
     min-width: 240px;
+    scroll-snap-align: start;
   }
 
   .home-session-composer footer > span {

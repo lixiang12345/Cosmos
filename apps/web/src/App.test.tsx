@@ -9,7 +9,7 @@ import type {
   SessionDto,
   SpaceRole,
 } from '@relay/contracts'
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import App from './App'
@@ -378,6 +378,17 @@ describe('Relay prototype', () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: '选择 Expert，开始一个会话' })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: '首页' })).not.toBeInTheDocument()
+  })
+
+  it('supports the Cosmos global navigation shortcuts', async () => {
+    renderApp('/home')
+
+    await screen.findByRole('heading', { level: 1, name: '选择 Expert，开始一个会话' })
+    fireEvent.keyDown(window, { key: 'l', ctrlKey: true, shiftKey: true })
+    expect(await screen.findByRole('heading', { level: 1, name: '会话' })).toBeInTheDocument()
+
+    fireEvent.keyDown(window, { key: 'e', ctrlKey: true, shiftKey: true })
+    expect(await screen.findByRole('heading', { level: 1, name: '个人文件' })).toBeInTheDocument()
   })
 
   it('switches between run evidence views', async () => {

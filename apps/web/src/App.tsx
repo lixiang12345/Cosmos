@@ -1150,14 +1150,42 @@ function RelayApp() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 'k') {
+      const modifier = event.metaKey || event.ctrlKey
+      const key = event.key.toLocaleLowerCase()
+      if (!modifier) return
+
+      if (key === 'k' && !event.shiftKey) {
         event.preventDefault()
         setCommandOpen((value) => !value)
+        return
+      }
+
+      if (key === 'o' && event.shiftKey && sessionCreationEnabled) {
+        event.preventDefault()
+        setNewTaskOpen(true)
+        return
+      }
+
+      if (key === 'l' && event.shiftKey) {
+        event.preventDefault()
+        navigate('/sessions')
+        return
+      }
+
+      if (key === 'e' && event.shiftKey) {
+        event.preventDefault()
+        navigate('/files')
+        return
+      }
+
+      if (key === '.' && !event.shiftKey) {
+        event.preventDefault()
+        setSidebarCollapsed((value) => !value)
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
+  }, [navigate, sessionCreationEnabled])
 
   const mergeScopedExpertStore = (next: ExpertStore) => {
     setExpertStore((current) => {
