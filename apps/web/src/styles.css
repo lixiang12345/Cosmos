@@ -16338,6 +16338,128 @@ body {
   background: var(--canvas);
 }
 
+/* Session tool events use a compact terminal treatment instead of native
+   browser button styles. */
+.event-card__tool-body {
+  max-width: 820px;
+  margin-top: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--code-surface);
+}
+
+.event-card__tool-command {
+  display: flex;
+  min-width: 0;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--code-surface) 86%, var(--surface-strong));
+}
+
+.event-card__tool-command code {
+  min-width: 0;
+  overflow-x: auto;
+  color: #dceaea;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: nowrap;
+}
+
+.event-card__exit-code {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.event-card__exit-code svg {
+  width: 13px;
+  height: 13px;
+}
+
+.event-card__exit-code--success {
+  color: #79d6cf;
+}
+
+.event-card__exit-code--failure {
+  color: #f39aa3;
+}
+
+.event-card__tool-output-toggle {
+  display: flex;
+  width: 100%;
+  min-height: 32px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 0;
+  background: color-mix(in srgb, var(--code-surface) 78%, var(--surface-strong));
+  color: #9aabad;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.event-card__tool-output-toggle:hover {
+  background: color-mix(in srgb, var(--brand-soft) 42%, var(--code-surface));
+  color: #e8f2f2;
+}
+
+.event-card__tool-output-toggle:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--brand);
+  outline-offset: -2px;
+}
+
+.event-card__tool-output-chevron {
+  width: 14px;
+  height: 14px;
+  transition: transform 140ms ease;
+}
+
+.event-card__tool-output-chevron--collapsed {
+  transform: rotate(-90deg);
+}
+
+.event-card pre.event-card__tool-output-content {
+  max-height: 280px;
+  margin: 0;
+  overflow: auto;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--code-surface);
+  color: #cbdada;
+  font-size: 10px;
+  line-height: 1.65;
+}
+
+@media (max-width: 600px) {
+  .event-card__tool-command {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .event-card__tool-command code {
+    width: 100%;
+  }
+}
+
 @media (max-width: 820px) {
   .module-page,
   .cosmos-page,
