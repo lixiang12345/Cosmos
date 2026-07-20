@@ -8,6 +8,7 @@ import {
   Home,
   Inbox,
   KeyRound,
+  Network,
   Orbit,
   Plus,
   Search,
@@ -76,6 +77,7 @@ export function CommandPalette({
       ? (locale === 'zh' ? '选择 Expert 开始会话' : 'Choose an Expert and start a session')
       : (locale === 'zh' ? '选择 Expert 保存会话草稿' : 'Choose an Expert and save a Session draft'), icon: Home, keywords: 'home launcher expert 启动 首页', action: () => go('/home') },
     { id: 'sessions', label: locale === 'zh' ? '会话' : 'Sessions', detail: locale === 'zh' ? '全部会话' : 'All sessions', icon: Bot, keywords: 'sessions 会话', action: () => go('/sessions') },
+    { id: 'context', label: locale === 'zh' ? '上下文工作区' : 'Context workspace', detail: locale === 'zh' ? '检索、审阅并打包代码证据' : 'Retrieve, review, and pack code evidence', icon: Network, keywords: 'context code search retrieval evidence 上下文 代码 检索 证据', action: () => go('/context') },
     { id: 'files', label: locale === 'zh' ? '文件' : 'Files', detail: 'Organization / User', icon: FileText, keywords: 'files memory 文件 记忆', action: () => go('/files') },
     { id: 'approvals', label: locale === 'zh' ? '待处理' : 'Approvals', detail: locale === 'zh' ? '人工输入与审批' : 'Human input and approvals', icon: Inbox, keywords: 'approvals human input 审批 待处理', action: () => go('/approvals') },
     { id: 'automations', label: locale === 'zh' ? '自动化' : 'Automations', detail: locale === 'zh' ? '触发器与订阅' : 'Triggers and subscriptions', icon: Workflow, keywords: 'automation trigger 自动化 触发器', action: () => go('/automations') },
@@ -104,7 +106,7 @@ export function CommandPalette({
   const matches = (command: Command) => !normalizedQuery || `${command.label} ${command.detail} ${command.keywords}`.toLocaleLowerCase().includes(normalizedQuery)
   const filteredNavigation = navigationCommands
     .filter((command) => prototypeNavigation || [
-      'new-session', 'home', 'sessions', 'experts', 'environments',
+      'new-session', 'home', 'sessions', 'context', 'experts', 'environments',
     ].includes(command.id))
     .filter(matches)
   const filteredSessions = sessionCommands.filter(matches)

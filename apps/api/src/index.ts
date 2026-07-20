@@ -1,5 +1,12 @@
 export { createApp, type CreateAppOptions } from './app.js'
 export {
+  ContextEngineGatewayError,
+  HttpContextEngineGateway,
+  type ContextEngineGateway,
+  type ContextEngineGatewayErrorCode,
+  type HttpContextEngineGatewayOptions,
+} from './context-engine-gateway.js'
+export {
   ArtifactConflictError,
   ArtifactValidationError,
   ArtifactVersionConflictError,
@@ -7,6 +14,14 @@ export {
   type ArtifactRepository,
 } from './artifact-repository.js'
 export { PostgresArtifactRepository } from './postgres-artifact-repository.js'
+export {
+  PostgresSecurityAuditRepository,
+  type PostgresSecurityAuditRepositoryOptions,
+} from './postgres-security-audit-repository.js'
+export {
+  type SecurityAuditRecord,
+  type SecurityAuditRepository,
+} from './security-audit-repository.js'
 export {
   PostgresToolApprovalRepository,
   type PostgresToolApprovalRepositoryOptions,
@@ -64,7 +79,7 @@ export {
   type AuthenticatedActor,
   type JwtAuthenticatorOptions,
 } from './auth.js'
-export { loadConfig, type ApiConfig } from './config.js'
+export { loadConfig, loadMigrationConfig, type ApiConfig, type MigrationConfig } from './config.js'
 export { loadWorkerConfig, type WorkerConfig } from './worker-config.js'
 export {
   AgentProviderError,

@@ -96,7 +96,6 @@ jobs:
           mkdir -p dist/recovery
           docker run --rm \
             --network host \
-            --env AUTH_MODE=development \
             --env DATABASE_URL="$TEST_DATABASE_URL" \
             relay-api:ci node dist/migrate.js
           cleanup_restore
@@ -210,12 +209,7 @@ jobs:
           docker run --rm \
             --network relay-smoke \
             --add-host host.docker.internal:host-gateway \
-            --env AUTH_MODE=oidc \
-            --env CORS_ORIGIN=https://relay.example.com \
             --env DATABASE_URL=postgresql://relay_ci:relay_ci@host.docker.internal:5432/relay_test \
-            --env OIDC_AUDIENCE=relay-api \
-            --env OIDC_ISSUER=https://identity.example.com/ \
-            --env OIDC_JWKS_URI=https://identity.example.com/.well-known/jwks.json \
             relay-api:ci node dist/migrate.js
           docker run --detach \
             --name relay-worker-smoke \
@@ -237,6 +231,8 @@ jobs:
             --env OIDC_AUDIENCE=relay-api \
             --env OIDC_ISSUER=https://identity.example.com/ \
             --env OIDC_JWKS_URI=https://identity.example.com/.well-known/jwks.json \
+            --env SECURITY_AUDIT_HMAC_KEY=0000000000000000000000000000000000000000000000000000000000000000 \
+            --env SECURITY_AUDIT_HMAC_KEY_ID=ci-smoke-v1 \
             relay-api:ci
           docker run --detach \
             --name relay-web-smoke \

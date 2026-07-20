@@ -211,6 +211,9 @@ function testConfigurationCatalog(
     updatedAt: environmentDetail.updatedAt,
   }
   return {
+    async hasRepositoryAccess() {
+      return true
+    },
     async listExperts(_organizationId, _spaceId, _actorId, options = {}) {
       onListExperts?.(options)
       return {
@@ -291,10 +294,12 @@ describe('Relay API', () => {
   })
 
   it('returns the shared error contract when the per-instance request limit is exceeded', async () => {
+    const appendSecurityAudit = vi.fn().mockResolvedValue(undefined)
     const app = createApp({
       authenticate: createDevelopmentAuthenticator('user-local-admin'),
       sessionRepository: testRepository(),
       rateLimit: { max: 2, timeWindowMs: 60_000, cache: 100 },
+      securityAuditRepository: { append: appendSecurityAudit },
     })
     openApps.push(app)
 
@@ -315,6 +320,60 @@ describe('Relay API', () => {
     expect(limited.headers['ratelimit-limit']).toBe('2')
     expect(limited.headers['cache-control']).toBe('private, no-store')
     expect(health.every(({ statusCode }) => statusCode === 200)).toBe(true)
+    expect(appendSecurityAudit).toHaveBeenCalledOnce()
+    expect(appendSecurityAudit).toHaveBeenCalledWith(expect.objectContaining({
+      errorCode: 'RATE_LIMITED',
+      routePattern: '/api/v1/me',
+      statusCode: 429,
+    }))
+  })
+
+  it('submits sanitized error context to the security audit repository', async () => {
+    const append = vi.fn().mockResolvedValue(undefined)
+    const app = createApp({
+      authenticate: createDevelopmentAuthenticator('user-local-admin'),
+      sessionRepository: testRepository(),
+      securityAuditRepository: { append },
+    })
+    openApps.push(app)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/organizations/relay/spaces/platform/sessions/missing-private-session',
+      headers: { 'user-agent': 'audit-test-agent' },
+    })
+
+    expect(response.statusCode).toBe(404)
+    expect(append).toHaveBeenCalledWith({
+      requestId: response.headers['x-request-id'],
+      actor: { id: 'user-local-admin', kind: 'user' },
+      method: 'GET',
+      routePattern: '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId',
+      statusCode: 404,
+      errorCode: 'RESOURCE_NOT_FOUND',
+      organizationId: 'relay',
+      spaceId: 'platform',
+      target: { sessionId: 'missing-private-session' },
+      clientIp: '127.0.0.1',
+      userAgent: 'audit-test-agent',
+    })
+  })
+
+  it('preserves the original denial if the security audit sink is unavailable', async () => {
+    const app = createApp({
+      authenticate: createDevelopmentAuthenticator('user-local-admin'),
+      sessionRepository: testRepository(),
+      securityAuditRepository: { append: vi.fn().mockRejectedValue(new Error('audit unavailable')) },
+    })
+    openApps.push(app)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/organizations/relay/spaces/platform/sessions/missing-private-session',
+    })
+
+    expect(response.statusCode).toBe(404)
+    expect(ApiErrorSchema.parse(response.json())).toMatchObject({ code: 'RESOURCE_NOT_FOUND' })
   })
 
   it('ignores forwarded client addresses unless the immediate proxy is explicitly trusted', async () => {

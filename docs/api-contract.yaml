@@ -60,6 +60,8 @@ tags:
     description: Runtime listeners that deliver future Events into an existing Session.
   - name: Approvals
     description: Human decisions that gate an exact high-risk ToolCall input.
+  - name: ContextEngine
+    description: Space-scoped repository evidence retrieval and context packing.
 
 paths:
   /capabilities:
@@ -111,6 +113,113 @@ paths:
                 $ref: '#/components/schemas/MeResponse'
         '401':
           $ref: '#/components/responses/RuntimeUnauthorized'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+
+  /organizations/{organizationId}/spaces/{spaceId}/context-engine/status:
+    parameters:
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
+    get:
+      tags: [ContextEngine]
+      operationId: getContextEngineStatus
+      x-relay-implementation-status: implemented
+      summary: Read the index status for an authorized repository
+      parameters:
+        - name: repository
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 512
+      responses:
+        '200':
+          description: Context index status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeContextEngineStatus'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '503':
+          $ref: '#/components/responses/RuntimeServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+
+  /organizations/{organizationId}/spaces/{spaceId}/context-engine/search:
+    parameters:
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
+    post:
+      tags: [ContextEngine]
+      operationId: searchContextEngine
+      x-relay-implementation-status: implemented
+      summary: Search repository evidence across retrieval channels
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeContextSearchRequest'
+      responses:
+        '200':
+          description: Ranked evidence hits
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeContextSearchResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '503':
+          $ref: '#/components/responses/RuntimeServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+
+  /organizations/{organizationId}/spaces/{spaceId}/context-engine/context:
+    parameters:
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
+    post:
+      tags: [ContextEngine]
+      operationId: packContextEngine
+      x-relay-implementation-status: implemented
+      summary: Build a bounded Agent context pack from repository evidence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeContextPackRequest'
+      responses:
+        '200':
+          description: Packed repository context
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeContextPackResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '503':
+          $ref: '#/components/responses/RuntimeServiceUnavailable'
         '500':
           $ref: '#/components/responses/RuntimeInternalError'
 
@@ -3244,6 +3353,114 @@ components:
               type: string
               enum: [polling, sse]
           additionalProperties: false
+        contextEngine:
+          type: object
+          required: [enabled, provider]
+          properties:
+            enabled:
+              type: boolean
+            provider:
+              type: string
+              const: contextengine-plugin
+          additionalProperties: false
+      additionalProperties: false
+    RuntimeContextEngineHit:
+      type: object
+      required: [path, startLine, endLine, symbol, language, content, preview, score, source, intent, channels]
+      properties:
+        path: { type: string, minLength: 1, maxLength: 4096 }
+        startLine: { type: integer, minimum: 1 }
+        endLine: { type: integer, minimum: 1 }
+        symbol: { type: [string, 'null'] }
+        language: { type: string }
+        content: { type: string, maxLength: 200000 }
+        preview: { type: string, maxLength: 20000 }
+        score: { type: number }
+        source: { type: string }
+        intent: { type: [string, 'null'] }
+        channels:
+          type: array
+          maxItems: 20
+          items: { type: string }
+      additionalProperties: false
+    RuntimeContextEngineStatus:
+      type: object
+      required: [provider, repository, available, indexed, revision, updatedAt, retrievalMode, stats]
+      properties:
+        provider: { type: string, const: contextengine-plugin }
+        repository: { type: string }
+        available: { type: boolean }
+        indexed: { type: boolean }
+        revision: { type: [integer, 'null'], minimum: 0 }
+        updatedAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        retrievalMode: { type: string, enum: [bm25, hybrid] }
+        stats:
+          type: object
+          required: [files, chunks, symbols, embeddedChunks]
+          properties:
+            files: { type: integer, minimum: 0 }
+            chunks: { type: integer, minimum: 0 }
+            symbols: { type: integer, minimum: 0 }
+            embeddedChunks: { type: integer, minimum: 0 }
+          additionalProperties: false
+      additionalProperties: false
+    RuntimeContextSearchRequest:
+      type: object
+      required: [repository, query]
+      properties:
+        repository: { type: string, minLength: 1, maxLength: 512 }
+        query: { type: string, minLength: 1, maxLength: 20000 }
+        topK: { type: integer, minimum: 1, maximum: 40, default: 10 }
+        mode: { type: string, enum: [auto, bm25, semantic, hybrid], default: auto }
+        pathPrefix: { type: string, minLength: 1, maxLength: 4096 }
+        language: { type: string, minLength: 1, maxLength: 80 }
+        expandGraph: { type: boolean, default: true }
+        neuralRerank: { type: boolean }
+      additionalProperties: false
+    RuntimeContextSearchResponse:
+      type: object
+      required: [provider, repository, query, mode, durationMs, hits]
+      properties:
+        provider: { type: string, const: contextengine-plugin }
+        repository: { type: string }
+        query: { type: string }
+        mode: { type: string, enum: [auto, bm25, semantic, hybrid] }
+        durationMs: { type: integer, minimum: 0 }
+        hits:
+          type: array
+          maxItems: 40
+          items:
+            $ref: '#/components/schemas/RuntimeContextEngineHit'
+      additionalProperties: false
+    RuntimeContextPackRequest:
+      type: object
+      required: [repository, task]
+      properties:
+        repository: { type: string, minLength: 1, maxLength: 512 }
+        task: { type: string, minLength: 1, maxLength: 20000 }
+        topK: { type: integer, minimum: 1, maximum: 40, default: 14 }
+        maxTokens: { type: integer, minimum: 256, maximum: 100000, default: 16000 }
+        pathPrefix: { type: string, minLength: 1, maxLength: 4096 }
+      additionalProperties: false
+    RuntimeContextPackResponse:
+      type: object
+      required: [provider, repository, task, packedText, estimatedTokens, truncated, durationMs, hits]
+      properties:
+        provider: { type: string, const: contextengine-plugin }
+        repository: { type: string }
+        task: { type: string }
+        packedText: { type: string, maxLength: 1000000 }
+        estimatedTokens: { type: integer, minimum: 0 }
+        truncated: { type: boolean }
+        durationMs: { type: integer, minimum: 0 }
+        hits:
+          type: array
+          maxItems: 40
+          items:
+            $ref: '#/components/schemas/RuntimeContextEngineHit'
       additionalProperties: false
     RuntimeSessionMessageCreate:
       type: object

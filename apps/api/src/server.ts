@@ -2,11 +2,13 @@ import { Pool } from 'pg'
 import { createApp } from './app.js'
 import { createDevelopmentAuthenticator, createJwtAuthenticator } from './auth.js'
 import { loadConfig } from './config.js'
+import { HttpContextEngineGateway } from './context-engine-gateway.js'
 import { assertMigrationsCurrent, runMigrations } from './migrations.js'
 import { PostgresArtifactRepository } from './postgres-artifact-repository.js'
 import { PostgresConfigurationCatalogRepository } from './postgres-configuration-catalog-repository.js'
 import { PostgresFileRepository } from './postgres-file-repository.js'
 import { assertRuntimeDatabaseRole, createRuntimePool } from './postgres-runtime-database.js'
+import { PostgresSecurityAuditRepository } from './postgres-security-audit-repository.js'
 import { PostgresSessionRepository } from './postgres-session-repository.js'
 import { PostgresSessionTimelineRepository } from './postgres-session-timeline-repository.js'
 import { PostgresSessionWorkerRepository } from './postgres-session-worker-repository.js'
@@ -47,6 +49,9 @@ const developmentOrganizations = config.authentication.mode === 'development' ? 
   }],
 } : undefined
 const workerReadinessRepository = pool ? new PostgresWorkerReadinessRepository(pool) : undefined
+const contextEngineGateway = config.contextEngine
+  ? new HttpContextEngineGateway(config.contextEngine)
+  : undefined
 const app = createApp({
   logger: true,
   corsOrigin: config.corsOrigin,
@@ -57,6 +62,12 @@ const app = createApp({
   keepAliveTimeoutMs: config.keepAliveTimeoutMs,
   securityHeaders: config.securityHeaders,
   rateLimit: config.rateLimit,
+  contextEngineGateway,
+  securityAuditRepository: pool && config.securityAuditHmacKey && config.securityAuditHmacKeyId
+    ? new PostgresSecurityAuditRepository(pool, config.securityAuditHmacKey, {
+      hmacKeyId: config.securityAuditHmacKeyId,
+    })
+    : undefined,
   sessionRepository: pool
     ? new PostgresSessionRepository(pool, {
       executionMaxAttempts: config.executionMaxAttempts,

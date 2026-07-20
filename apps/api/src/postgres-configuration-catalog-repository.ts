@@ -313,6 +313,44 @@ function mapEnvironmentDetail(rows: EnvironmentDetailRow[]): EnvironmentDetailDt
 export class PostgresConfigurationCatalogRepository implements ConfigurationCatalogRepository {
   constructor(private readonly pool: Pool) {}
 
+  async hasRepositoryAccess(
+    organizationId: string,
+    spaceId: string,
+    actorId: string,
+    repository: string,
+  ): Promise<boolean> {
+    const result = await queryWithApiDatabaseContext<{ allowed: boolean }>(
+      this.pool,
+      { organizationId, spaceId, actorId },
+      `
+      ${accessCte}
+      SELECT EXISTS (
+        SELECT 1
+        FROM access
+        JOIN relay_environments environment
+          ON environment.organization_id = $1
+          AND environment.space_id = $2
+          AND environment.status = 'ready'
+          AND environment.active_revision_id IS NOT NULL
+        JOIN relay_environment_revisions active_revision
+          ON active_revision.organization_id = environment.organization_id
+          AND active_revision.space_id = environment.space_id
+          AND active_revision.environment_id = environment.id
+          AND active_revision.id = environment.active_revision_id
+          AND active_revision.status = 'ready'
+        JOIN relay_environment_revision_repositories repository_binding
+          ON repository_binding.organization_id = active_revision.organization_id
+          AND repository_binding.space_id = active_revision.space_id
+          AND repository_binding.environment_id = active_revision.environment_id
+          AND repository_binding.environment_revision_id = active_revision.id
+          AND repository_binding.repository = $4
+      ) AS allowed
+      `,
+      [organizationId, spaceId, actorId, repository.trim()],
+    )
+    return result.rows[0]?.allowed === true
+  }
+
   async listExperts(
     organizationId: string,
     spaceId: string,

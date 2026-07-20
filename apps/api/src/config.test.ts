@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { loadConfig } from './config.js'
+import { loadConfig, loadMigrationConfig } from './config.js'
+
+const securityAuditHmacKey = '01'.repeat(32)
 
 describe('API configuration', () => {
   it('supports an explicitly selected loopback-only development identity', () => {
@@ -11,6 +13,8 @@ describe('API configuration', () => {
       requestTimeoutMs: 15_000,
       keepAliveTimeoutMs: 5_000,
       securityHeaders: { hsts: false },
+      securityAuditHmacKey: undefined,
+      securityAuditHmacKeyId: undefined,
       rateLimit: { max: 600, timeWindowMs: 60_000, cache: 10_000 },
       databaseConnectionTimeoutMs: 5_000,
       databaseQueryTimeoutMs: 20_000,
@@ -79,6 +83,8 @@ describe('API configuration', () => {
       OIDC_ISSUER: 'https://identity.test/',
       OIDC_AUDIENCE: 'relay-api',
       OIDC_JWKS_URI: 'https://identity.test/.well-known/jwks.json',
+      SECURITY_AUDIT_HMAC_KEY: securityAuditHmacKey,
+      SECURITY_AUDIT_HMAC_KEY_ID: 'production-v1',
     }
     for (const corsOrigin of ['*', 'http://relay.example', 'https://relay.example/path', 'https://relay.example/']) {
       expect(() => loadConfig({ ...production, CORS_ORIGIN: corsOrigin })).toThrow('exact HTTPS origin')
@@ -107,11 +113,55 @@ describe('API configuration', () => {
       OIDC_ISSUER: 'https://identity.test/',
       OIDC_AUDIENCE: 'relay-api',
       OIDC_JWKS_URI: 'https://identity.test/.well-known/jwks.json',
+      SECURITY_AUDIT_HMAC_KEY: securityAuditHmacKey,
+      SECURITY_AUDIT_HMAC_KEY_ID: 'production-v1',
     }
     expect(loadConfig(production).migrateOnStart).toBe(false)
     expect(loadConfig(production).executionEnabled).toBe(false)
     expect(() => loadConfig({ ...production, MIGRATE_ON_START: 'true' })).toThrow('migration job')
     expect(() => loadConfig({ AUTH_MODE: 'development', MIGRATE_ON_START: 'sometimes' })).toThrow('true or false')
+  })
+
+  it('requires a strong security-audit HMAC key outside development', () => {
+    const production = {
+      NODE_ENV: 'production',
+      AUTH_MODE: 'oidc',
+      DATABASE_URL: 'postgres://relay',
+      CORS_ORIGIN: 'https://relay.example',
+      OIDC_ISSUER: 'https://identity.test/',
+      OIDC_AUDIENCE: 'relay-api',
+      OIDC_JWKS_URI: 'https://identity.test/.well-known/jwks.json',
+    }
+    expect(() => loadConfig(production)).toThrow('SECURITY_AUDIT_HMAC_KEY is required')
+    expect(() => loadConfig({
+      ...production, SECURITY_AUDIT_HMAC_KEY: 'too-short',
+    })).toThrow('exactly 64 hexadecimal')
+    expect(() => loadConfig({
+      ...production, SECURITY_AUDIT_HMAC_KEY: securityAuditHmacKey,
+    })).toThrow('SECURITY_AUDIT_HMAC_KEY_ID is required')
+    expect(loadConfig({
+      ...production,
+      SECURITY_AUDIT_HMAC_KEY: securityAuditHmacKey.toUpperCase(),
+      SECURITY_AUDIT_HMAC_KEY_ID: 'production-v1',
+    })).toMatchObject({
+      securityAuditHmacKey,
+      securityAuditHmacKeyId: 'production-v1',
+    })
+    expect(() => loadConfig({
+      ...production,
+      SECURITY_AUDIT_HMAC_KEY: securityAuditHmacKey,
+      SECURITY_AUDIT_HMAC_KEY_ID: 'invalid key id',
+    })).toThrow('stable key identifier')
+  })
+
+  it('loads migration-only database settings without runtime credentials', () => {
+    expect(loadMigrationConfig({ DATABASE_URL: 'postgres://relay' })).toEqual({
+      databaseUrl: 'postgres://relay',
+      databaseConnectionTimeoutMs: 5_000,
+      databaseQueryTimeoutMs: 20_000,
+      databaseStatementTimeoutMs: 15_000,
+    })
+    expect(() => loadMigrationConfig({})).toThrow('DATABASE_URL is required to run migrations')
   })
 
   it('requires an explicit, bounded production execution policy', () => {

@@ -8,6 +8,9 @@ import {
   ArtifactDtoSchema,
   ArtifactListResponseSchema,
   CancelSessionRequestSchema,
+  ContextEngineStatusRequestSchema,
+  ContextPackRequestSchema,
+  ContextSearchRequestSchema,
   CreateArtifactRequestSchema,
   CreateShareGrantRequestSchema,
   CreateSessionRequestSchema,
@@ -72,6 +75,10 @@ import {
   type CatalogResource,
 } from './catalog-pagination.js'
 import {
+  ContextEngineGatewayError,
+  type ContextEngineGateway,
+} from './context-engine-gateway.js'
+import {
   EmptyConfigurationCatalogRepository,
   type ConfigurationCatalogRepository,
 } from './configuration-catalog-repository.js'
@@ -116,6 +123,7 @@ import {
   parseSessionListPagination,
   type SessionListQuery,
 } from './session-list-pagination.js'
+import type { SecurityAuditRepository } from './security-audit-repository.js'
 import {
   InvalidSessionSharePaginationError,
   encodeSessionShareCursor,
@@ -223,6 +231,10 @@ type CatalogQuery = {
   limit?: string
 }
 
+type ContextStatusQuery = {
+  repository?: string
+}
+
 type ValidationIssue = {
   path: PropertyKey[]
   message: string
@@ -237,6 +249,7 @@ export type CreateAppOptions = {
   sessionWorkerRepository?: SessionWorkerRepository
   serviceAccountPolicyRepository?: ServiceAccountPolicyRepository
   configurationCatalogRepository?: ConfigurationCatalogRepository
+  contextEngineGateway?: ContextEngineGateway
   readinessCheck?: () => Promise<void>
   logger?: FastifyServerOptions['logger']
   corsOrigin?: boolean | string
@@ -253,6 +266,7 @@ export type CreateAppOptions = {
     timeWindowMs: number
     cache: number
   }
+  securityAuditRepository?: SecurityAuditRepository
   authenticate?: AuthenticateRequest
   executionEnabled?: boolean
   executionReadinessCheck?: () => Promise<boolean>
@@ -270,12 +284,24 @@ function validationFieldErrors(issues: readonly ValidationIssue[]): Record<strin
   return fieldErrors
 }
 
+const errorAuditByRequest = new WeakMap<FastifyRequest, {
+  audit: boolean
+  errorCode: string
+  statusCode: number
+}>()
+
 function sendApiError(
   reply: FastifyReply,
   statusCode: number,
   request: FastifyRequest,
   error: Omit<ApiError, 'correlationId'>,
+  options: { audit?: boolean } = {},
 ) {
+  errorAuditByRequest.set(request, {
+    audit: options.audit ?? true,
+    errorCode: error.code,
+    statusCode,
+  })
   const payload = ApiErrorSchema.parse({
     ...error,
     correlationId: request.id,
@@ -289,6 +315,26 @@ function sendResourceNotFound(reply: FastifyReply, request: FastifyRequest) {
     code: 'RESOURCE_NOT_FOUND',
     message: 'The requested API resource was not found.',
     retryable: false,
+  })
+}
+
+function sendContextEngineError(
+  reply: FastifyReply,
+  request: FastifyRequest,
+  error: ContextEngineGatewayError,
+) {
+  if (error.code === 'repository_not_configured') return sendResourceNotFound(reply, request)
+  if (error.upstreamStatus === 409) {
+    return sendApiError(reply, 409, request, {
+      code: 'CONTEXT_INDEX_NOT_READY',
+      message: error.message,
+      retryable: true,
+    })
+  }
+  return sendApiError(reply, error.code === 'service_unavailable' ? 503 : 502, request, {
+    code: error.code === 'service_unavailable' ? 'DEPENDENCY_UNAVAILABLE' : 'CONTEXT_ENGINE_ERROR',
+    message: error.message,
+    retryable: error.retryable,
   })
 }
 
@@ -475,6 +521,7 @@ function createRequestRateLimiter(options: { max: number; timeWindowMs: number; 
       const retryAfterSeconds = Math.max(1, Math.ceil((bucket.resetAt - now) / 1_000))
       return {
         allowed: bucket.count <= options.max,
+        firstDenied: bucket.count === options.max + 1,
         remaining: Math.max(0, options.max - bucket.count),
         retryAfterSeconds,
       }
@@ -551,6 +598,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     ?? new DenyServiceAccountPolicyRepository()
   const configurationCatalogRepository = options.configurationCatalogRepository
     ?? new EmptyConfigurationCatalogRepository()
+  const contextEngineGateway = options.contextEngineGateway
   const authenticate = options.authenticate ?? rejectAuthentication
   const executionEnabled = options.executionEnabled ?? true
   async function executionAvailable(request: FastifyRequest) {
@@ -630,10 +678,50 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
           code: 'RATE_LIMITED',
           message: 'The API request rate limit was exceeded.',
           retryable: true,
-        })
+        }, { audit: rate.firstDenied })
       }
     }
     actorsByRequest.set(request, await authenticate(request.headers.authorization))
+  })
+
+  app.addHook('onSend', async (request, _reply, payload) => {
+    const error = errorAuditByRequest.get(request)
+    errorAuditByRequest.delete(request)
+    if (!error?.audit || !options.securityAuditRepository) return payload
+    const actor = actorsByRequest.get(request)
+    const params = typeof request.params === 'object' && request.params !== null
+      ? request.params as Record<string, unknown>
+      : {}
+    const organizationId = typeof params.organizationId === 'string' ? params.organizationId : undefined
+    const spaceId = typeof params.spaceId === 'string' ? params.spaceId : undefined
+    const target = Object.fromEntries(Object.entries(params)
+      .filter(([key, value]) => (
+        key !== 'organizationId'
+        && key !== 'spaceId'
+        && typeof value === 'string'
+      ))
+      .map(([key, value]) => [key, value as string]))
+    const idempotencyKey = request.headers['idempotency-key']
+    const userAgent = request.headers['user-agent']
+    try {
+      await options.securityAuditRepository.append({
+        requestId: request.id,
+        ...(actor ? { actor } : {}),
+        method: request.method,
+        routePattern: request.routeOptions.url || '<unmatched>',
+        statusCode: error.statusCode,
+        errorCode: error.errorCode,
+        ...(organizationId === undefined ? {} : { organizationId }),
+        ...(spaceId === undefined ? {} : { spaceId }),
+        ...(Object.keys(target).length === 0 ? {} : { target }),
+        ...(typeof idempotencyKey === 'string' ? { idempotencyKey } : {}),
+        clientIp: request.ip,
+        ...(typeof userAgent === 'string' ? { userAgent } : {}),
+      })
+    } catch (auditError) {
+      request.log.error({ err: auditError }, 'Security audit append failed')
+    }
+    return payload
   })
 
   app.setNotFoundHandler((request, reply) => sendApiError(reply, 404, request, {
@@ -979,6 +1067,12 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       enabled: await executionAvailable(request),
       events: sessionTimelineRepository ? 'sse' : 'polling',
     },
+    ...(contextEngineGateway ? {
+      contextEngine: {
+        enabled: true,
+        provider: 'contextengine-plugin' as const,
+      },
+    } : {}),
   }))
 
   async function authorizeSpace(request: FastifyRequest, reply: FastifyReply, params: SpaceParams) {
@@ -1020,6 +1114,161 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     }
     return authorizeSpace(request, reply, params)
   }
+
+  async function authorizeContextSpace(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    params: SpaceParams,
+  ) {
+    const actor = actorsByRequest.get(request)
+    if (!actor) throw new AuthenticationError()
+    if (actor.kind === 'service_account') {
+      sendApiError(reply, 403, request, {
+        code: 'PERMISSION_DENIED',
+        message: 'Service accounts cannot browse interactive Context Engine results.',
+        retryable: false,
+      })
+      return null
+    }
+    return authorizeSpace(request, reply, params)
+  }
+
+  async function authorizeContextRepository(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    authorization: NonNullable<Awaited<ReturnType<typeof authorizeSpace>>>,
+    repository: string,
+  ) {
+    if (!contextEngineGateway?.hasRepository(repository)) {
+      sendResourceNotFound(reply, request)
+      return false
+    }
+    const allowed = await configurationCatalogRepository.hasRepositoryAccess(
+      authorization.organizationId,
+      authorization.spaceId,
+      authorization.actor.id,
+      repository,
+    )
+    if (!allowed) {
+      sendResourceNotFound(reply, request)
+      return false
+    }
+    return true
+  }
+
+  app.get<{ Params: SpaceParams; Querystring: ContextStatusQuery }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/context-engine/status',
+    async (request, reply) => {
+      const authorization = await authorizeContextSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!contextEngineGateway) {
+        return sendApiError(reply, 503, request, {
+          code: 'DEPENDENCY_UNAVAILABLE',
+          message: 'Context Engine is not configured for this Relay deployment.',
+          retryable: false,
+        })
+      }
+      const parsed = ContextEngineStatusRequestSchema.safeParse(request.query)
+      if (!parsed.success) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED',
+          message: 'The Context Engine status request is invalid.',
+          retryable: false,
+          fieldErrors: validationFieldErrors(parsed.error.issues),
+        })
+      }
+      const repositoryAllowed = await authorizeContextRepository(
+        request,
+        reply,
+        authorization,
+        parsed.data.repository,
+      )
+      if (!repositoryAllowed) return
+      try {
+        reply.header('Cache-Control', 'no-store')
+        return await contextEngineGateway.status(parsed.data.repository)
+      } catch (error) {
+        if (error instanceof ContextEngineGatewayError) return sendContextEngineError(reply, request, error)
+        throw error
+      }
+    },
+  )
+
+  app.post<{ Params: SpaceParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/context-engine/search',
+    async (request, reply) => {
+      const authorization = await authorizeContextSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!contextEngineGateway) {
+        return sendApiError(reply, 503, request, {
+          code: 'DEPENDENCY_UNAVAILABLE',
+          message: 'Context Engine is not configured for this Relay deployment.',
+          retryable: false,
+        })
+      }
+      const parsed = ContextSearchRequestSchema.safeParse(request.body)
+      if (!parsed.success) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED',
+          message: 'The Context Engine search request is invalid.',
+          retryable: false,
+          fieldErrors: validationFieldErrors(parsed.error.issues),
+        })
+      }
+      const repositoryAllowed = await authorizeContextRepository(
+        request,
+        reply,
+        authorization,
+        parsed.data.repository,
+      )
+      if (!repositoryAllowed) return
+      try {
+        reply.header('Cache-Control', 'no-store')
+        return await contextEngineGateway.search(parsed.data)
+      } catch (error) {
+        if (error instanceof ContextEngineGatewayError) return sendContextEngineError(reply, request, error)
+        throw error
+      }
+    },
+  )
+
+  app.post<{ Params: SpaceParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/context-engine/context',
+    async (request, reply) => {
+      const authorization = await authorizeContextSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!contextEngineGateway) {
+        return sendApiError(reply, 503, request, {
+          code: 'DEPENDENCY_UNAVAILABLE',
+          message: 'Context Engine is not configured for this Relay deployment.',
+          retryable: false,
+        })
+      }
+      const parsed = ContextPackRequestSchema.safeParse(request.body)
+      if (!parsed.success) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED',
+          message: 'The Context Engine pack request is invalid.',
+          retryable: false,
+          fieldErrors: validationFieldErrors(parsed.error.issues),
+        })
+      }
+      const repositoryAllowed = await authorizeContextRepository(
+        request,
+        reply,
+        authorization,
+        parsed.data.repository,
+      )
+      if (!repositoryAllowed) return
+      try {
+        reply.header('Cache-Control', 'no-store')
+        return await contextEngineGateway.pack(parsed.data)
+      } catch (error) {
+        if (error instanceof ContextEngineGatewayError) return sendContextEngineError(reply, request, error)
+        throw error
+      }
+    },
+  )
 
   async function authorizeFileSpace(
     request: FastifyRequest,

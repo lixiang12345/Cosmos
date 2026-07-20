@@ -1,11 +1,15 @@
 import { Pool } from 'pg'
-import { loadConfig } from './config.js'
+import { loadMigrationConfig } from './config.js'
 import { runMigrations } from './migrations.js'
 
-const config = loadConfig()
-if (!config.databaseUrl) throw new Error('DATABASE_URL is required to run migrations.')
+const config = loadMigrationConfig()
 
-const pool = new Pool({ connectionString: config.databaseUrl })
+const pool = new Pool({
+  connectionString: config.databaseUrl,
+  connectionTimeoutMillis: config.databaseConnectionTimeoutMs,
+  query_timeout: config.databaseQueryTimeoutMs,
+  statement_timeout: config.databaseStatementTimeoutMs,
+})
 try {
   await runMigrations(pool)
 } finally {

@@ -61,6 +61,7 @@ const migrationVersions = [
   '056_validate_session_workers.sql',
   '057_worker_workspace_file_reads.sql',
   '058_validate_worker_workspace_file_reads.sql',
+  '059_security_failure_audit.sql',
 ]
 
 function poolWithVersions(versions: string[]) {
@@ -77,6 +78,13 @@ describe('migration readiness', () => {
   it('rejects a database with pending migrations', async () => {
     await expect(assertMigrationsCurrent(poolWithVersions(migrationVersions.slice(0, -1))))
       .rejects.toThrow('1 pending migration')
+  })
+
+  it('rejects migration history that diverges from the immutable repository set', async () => {
+    await expect(assertMigrationsCurrent(poolWithVersions([
+      ...migrationVersions,
+      '059_replaced_history.sql',
+    ]))).rejects.toThrow('1 unknown migration')
   })
 
   it('rejects a database without migration metadata', async () => {

@@ -18,8 +18,12 @@ export async function assertMigrationsCurrent(pool: Pool) {
   )
   const appliedVersions = new Set(applied.rows.map((row) => row.version))
   const pending = files.filter((file) => !appliedVersions.has(file))
+  const unexpected = [...appliedVersions].filter((version) => !files.includes(version))
   if (pending.length > 0) {
     throw new Error(`Database schema has ${pending.length} pending migration(s).`)
+  }
+  if (unexpected.length > 0) {
+    throw new Error(`Database schema has ${unexpected.length} unknown migration(s).`)
   }
 }
 

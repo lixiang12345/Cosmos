@@ -22,6 +22,12 @@ export type ConfigurationCatalogPage<T> = {
 }
 
 export interface ConfigurationCatalogRepository {
+  hasRepositoryAccess(
+    organizationId: string,
+    spaceId: string,
+    actorId: string,
+    repository: string,
+  ): Promise<boolean>
   listExperts(
     organizationId: string,
     spaceId: string,
@@ -53,6 +59,13 @@ function emptyPage<T>(): ConfigurationCatalogPage<T> {
 }
 
 export class EmptyConfigurationCatalogRepository implements ConfigurationCatalogRepository {
+  hasRepositoryAccess(
+    ...arguments_: Parameters<ConfigurationCatalogRepository['hasRepositoryAccess']>
+  ): Promise<boolean> {
+    void arguments_
+    return Promise.resolve(false)
+  }
+
   listExperts(
     ...arguments_: Parameters<ConfigurationCatalogRepository['listExperts']>
   ): Promise<ConfigurationCatalogPage<ExpertSummaryDto>> {

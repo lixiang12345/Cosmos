@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { runMigrations } from './migrations.js'
 import { PostgresArtifactRepository } from './postgres-artifact-repository.js'
 import { PostgresExecutionRepository } from './postgres-execution-repository.js'
+import { PostgresSecurityAuditRepository } from './postgres-security-audit-repository.js'
 import {
   assertRuntimeDatabaseRole,
   withApiDatabaseContext,
@@ -33,6 +34,11 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
   const sessions = new PostgresSessionRepository(apiPool)
   const artifacts = new PostgresArtifactRepository(apiPool)
   const execution = new PostgresExecutionRepository(workerPool)
+  const securityAudit = new PostgresSecurityAuditRepository(apiPool, '11'.repeat(32), {
+    createId: () => 'security-audit-1',
+    hmacKeyId: 'integration-v1',
+    now: () => new Date('2026-07-13T16:00:00.000Z'),
+  })
   let sessionA = ''
   let sessionB = ''
 
@@ -135,12 +141,12 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
     ])
 
     const protection = await migrationPool.query<{
-      tenant_tables: string
+      protected_tables: string
       rls_tables: string
       forced_tables: string
     }>(`
       SELECT
-        count(*)::text AS tenant_tables,
+        count(*)::text AS protected_tables,
         count(*) FILTER (WHERE relrowsecurity)::text AS rls_tables,
         count(*) FILTER (WHERE relforcerowsecurity)::text AS forced_tables
       FROM pg_class
@@ -150,10 +156,74 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
         AND relname NOT IN ('relay_schema_migrations', 'relay_worker_heartbeats')
     `)
     expect(protection.rows[0]).toEqual({
-      tenant_tables: '33',
-      rls_tables: '33',
-      forced_tables: '33',
+      protected_tables: '34',
+      rls_tables: '34',
+      forced_tables: '34',
     })
+  })
+
+  it('appends fingerprint-only security failures outside rolled-back domain transactions', async () => {
+    await securityAudit.append({
+      requestId: 'security-request-1',
+      actor: { id: 'rls-user-a', kind: 'user' },
+      method: 'PATCH',
+      routePattern: '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId',
+      statusCode: 404,
+      errorCode: 'RESOURCE_NOT_FOUND',
+      organizationId: 'rls-org-a',
+      spaceId: 'rls-space-a',
+      target: { sessionId: 'private-session-that-must-not-leak' },
+      idempotencyKey: 'never-store-this-key',
+      clientIp: '203.0.113.8',
+      userAgent: 'security-audit-test-agent',
+    })
+
+    const rows = await migrationPool.query<{
+      actor_fingerprint: string
+      client_ip_fingerprint: string
+      error_code: string
+      hmac_key_id: string
+      idempotency_key_fingerprint: string
+      organization_fingerprint: string
+      outcome: string
+      route_pattern: string
+      space_fingerprint: string
+      target_fingerprint: string
+      user_agent_fingerprint: string
+    }>('SELECT * FROM relay_security_audit_events WHERE audit_event_id = $1', ['security-audit-1'])
+    expect(rows.rows[0]).toMatchObject({
+      error_code: 'RESOURCE_NOT_FOUND',
+      hmac_key_id: 'integration-v1',
+      outcome: 'denied',
+      route_pattern: '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId',
+      actor_fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+      client_ip_fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+      idempotency_key_fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+      organization_fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+      space_fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+      target_fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+      user_agent_fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+    })
+    expect(JSON.stringify(rows.rows[0])).not.toContain('rls-user-a')
+    expect(JSON.stringify(rows.rows[0])).not.toContain('private-session-that-must-not-leak')
+    expect(JSON.stringify(rows.rows[0])).not.toContain('never-store-this-key')
+    await expect(apiPool.query('SELECT * FROM relay_security_audit_events'))
+      .rejects.toMatchObject({ code: '42501' })
+    await expect(workerPool.query(`
+      INSERT INTO relay_security_audit_events (
+        audit_event_id, request_id, hmac_key_id, method, route_pattern, outcome, status_code,
+        error_code, client_ip_fingerprint, occurred_at
+      ) VALUES (
+        'worker-audit', 'worker-request', 'worker-v1', 'GET', '/forbidden', 'failed', 500,
+        'INTERNAL_ERROR', repeat('0', 64), clock_timestamp()
+      )
+    `)).rejects.toMatchObject({ code: '42501' })
+    await expect(migrationPool.query('UPDATE relay_security_audit_events SET error_code = error_code'))
+      .rejects.toMatchObject({ code: '55000' })
+    await expect(migrationPool.query('DELETE FROM relay_security_audit_events'))
+      .rejects.toMatchObject({ code: '55000' })
+    await expect(migrationPool.query('TRUNCATE relay_security_audit_events'))
+      .rejects.toMatchObject({ code: '55000' })
   })
 
   it('requires current membership and exact transaction-local tenant context', async () => {

@@ -391,6 +391,6 @@ describeWithDatabase('Postgres ToolCall and Approval governance', () => {
         AND relkind = 'r' AND relname NOT IN ('relay_schema_migrations', 'relay_worker_heartbeats')
         AND relrowsecurity AND relforcerowsecurity
     `)
-    expect(protectedTables.rows[0].count).toBe('33')
+    expect(protectedTables.rows[0].count).toBe('34')
   })
 })

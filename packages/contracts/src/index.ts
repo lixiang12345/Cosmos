@@ -50,6 +50,26 @@ export {
   type RuntimeCapabilities,
 } from './capabilities.js'
 export {
+  ContextEngineHitSchema,
+  ContextEngineStatusRequestSchema,
+  ContextEngineStatusSchema,
+  ContextPackRequestSchema,
+  ContextPackResponseSchema,
+  ContextRetrievalModeSchema,
+  ContextSearchRequestSchema,
+  ContextSearchResponseSchema,
+  type ContextEngineHit,
+  type ContextEngineStatus,
+  type ContextEngineStatusRequest,
+  type ContextPackRequest,
+  type ContextPackRequestInput,
+  type ContextPackResponse,
+  type ContextRetrievalMode,
+  type ContextSearchRequest,
+  type ContextSearchRequestInput,
+  type ContextSearchResponse,
+} from './context-engine.js'
+export {
   AttemptDtoSchema,
   AttemptStatusSchema,
   CancelSessionRequestSchema,

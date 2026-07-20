@@ -40,7 +40,7 @@ pnpm db:restore
 
 脚本先验证 SHA-256、custom archive 目录和目标库名，再以单事务、`--clean --if-exists` 恢复。失败会回滚恢复事务并返回非零状态。完成后至少验证：
 
-1. `relay_schema_migrations` 与源库版本和数量一致，应用 migration readiness 通过，API/Worker runtime 角色 ACL 可用。
+1. `relay_schema_migrations` 与源库版本和数量一致，应用 migration readiness 对 pending/unknown 版本均通过，API/Worker runtime 角色 ACL 可用。
 2. Organization、Session、Message、FileVersion、ToolCall、AuditEvent 的计数与抽样 hash 符合演练清单。
 3. API 以恢复库启动后 `/api/ready` 成功，跨租户负向验证仍被 FORCE RLS 拒绝。
 4. Worker 能领取合成命令并写终态，且不会联系真实 provider 或外部集成。

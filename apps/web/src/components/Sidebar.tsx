@@ -11,6 +11,7 @@ import {
   LayoutGrid,
   LogOut,
   MessageCircle,
+  Network,
   Orbit,
   PanelLeftClose,
   PanelLeftOpen,
@@ -186,6 +187,7 @@ export function Sidebar({
 
         <nav className="sidebar__nav sidebar__nav--cosmos" aria-label={t('nav.mainLabel')}>
           <SidebarLink item={{ to: '/sessions', label: { zh: '会话', en: 'Sessions' }, icon: MessageCircle }} onNavigate={onClose} />
+          <SidebarLink item={{ to: '/context', label: { zh: '上下文', en: 'Context' }, icon: Network }} onNavigate={onClose} />
 
           {pinnedRuns.length ? <div className="sidebar__group sidebar__favorites">
             <div className="sidebar__group-heading"><p className="sidebar__group-label">{copy.pinned}</p><Pin aria-hidden="true" /></div>

@@ -2,6 +2,9 @@ import {
   ApiErrorSchema,
   ApprovalDtoSchema,
   ApprovalListResponseSchema,
+  ContextEngineStatusSchema,
+  ContextPackResponseSchema,
+  ContextSearchResponseSchema,
   CreateSessionResponseSchema,
   EnvironmentDetailDtoSchema,
   EnvironmentListResponseSchema,
@@ -29,6 +32,11 @@ import {
   type ApprovalStatus,
   type CreateSessionRequestInput,
   type CreateSessionResponse,
+  type ContextEngineStatus,
+  type ContextPackRequestInput,
+  type ContextPackResponse,
+  type ContextSearchRequestInput,
+  type ContextSearchResponse,
   type EnvironmentDetailDto,
   type EnvironmentListResponse,
   type ExpertDetailDto,
@@ -412,6 +420,10 @@ function expertsPath(organizationId: string, spaceId: string) {
 
 function environmentsPath(organizationId: string, spaceId: string) {
   return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/environments`
+}
+
+function contextEnginePath(organizationId: string, spaceId: string) {
+  return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/context-engine`
 }
 
 function filesPath(organizationId: string, spaceId: string) {
@@ -1346,4 +1358,49 @@ export function getRuntimeCapabilities(
     headers: { Accept: 'application/json' },
     signal,
   }, RuntimeCapabilitiesSchema, auth)
+}
+
+export function getContextEngineStatus(
+  organizationId: string,
+  spaceId: string,
+  repository: string,
+  auth?: RelayApiAuthContext,
+  signal?: AbortSignal,
+): Promise<ContextEngineStatus> {
+  const query = new URLSearchParams({ repository })
+  return request(`${contextEnginePath(organizationId, spaceId)}/status?${query}`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    signal,
+  }, ContextEngineStatusSchema, auth)
+}
+
+export function searchContextEngine(
+  organizationId: string,
+  spaceId: string,
+  input: ContextSearchRequestInput,
+  auth?: RelayApiAuthContext,
+  signal?: AbortSignal,
+): Promise<ContextSearchResponse> {
+  return request(`${contextEnginePath(organizationId, spaceId)}/search`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  }, ContextSearchResponseSchema, auth)
+}
+
+export function packContextEngine(
+  organizationId: string,
+  spaceId: string,
+  input: ContextPackRequestInput,
+  auth?: RelayApiAuthContext,
+  signal?: AbortSignal,
+): Promise<ContextPackResponse> {
+  return request(`${contextEnginePath(organizationId, spaceId)}/context`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal,
+  }, ContextPackResponseSchema, auth)
 }

@@ -1,3 +1,4 @@
+import type { ContextPackResponse } from '@relay/contracts'
 import {
   Activity,
   AlertTriangle,
@@ -14,6 +15,7 @@ import {
   CirclePlay,
   Clock3,
   Copy,
+  DatabaseZap,
   Download,
   ExternalLink,
   FileClock,
@@ -187,6 +189,8 @@ export type CosmosHomePageProps = CosmosPageBaseProps & {
   prototypeTools?: boolean
   sessionCreationEnabled?: boolean
   executionEnabled?: boolean
+  contextEnabled?: boolean
+  contextPreflight?: (repository: string, task: string) => Promise<ContextPackResponse>
   onRetryCatalog?: () => void
   onCreateSession?: (draft: {
     expertId: string
@@ -194,6 +198,7 @@ export type CosmosHomePageProps = CosmosPageBaseProps & {
     visibility: 'private' | 'space'
     attachments: string[]
     mode: 'run' | 'draft'
+    contextPack?: ContextPackResponse | null
   }) => Promise<void>
 }
 
@@ -208,6 +213,8 @@ export function CosmosHomePage({
   prototypeTools = true,
   sessionCreationEnabled = true,
   executionEnabled = true,
+  contextEnabled = false,
+  contextPreflight,
   onRetryCatalog,
   onCreateSession,
 }: CosmosHomePageProps) {
@@ -219,26 +226,36 @@ export function CosmosHomePage({
   const [attachments, setAttachments] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
+  const [contextState, setContextState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  const [contextPack, setContextPack] = useState<ContextPackResponse>()
+  const [contextError, setContextError] = useState('')
+  const [pendingDraft, setPendingDraft] = useState<{
+    expertId: string
+    prompt: string
+    visibility: 'private' | 'space'
+    attachments: string[]
+    mode: 'run' | 'draft'
+  }>()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const selectedExpert = experts.find((expert) => expert.id === selectedExpertId) ?? experts[0]
   const recentRuns = runs.filter((run) => !run.archived).slice(0, 5)
   const resolvedCatalogStatus = catalogStatus ?? (experts.length ? 'ready' : 'empty')
 
-  const submitSession = async (event: FormEvent) => {
-    event.preventDefault()
-    const value = prompt.trim()
-    if (!value || !selectedExpert || submitting) return
+  const createFromDraft = async (
+    draft: NonNullable<typeof pendingDraft>,
+    nextContextPack?: ContextPackResponse | null,
+  ) => {
     if (onCreateSession) {
       setSubmitError('')
       setSubmitting(true)
       try {
         await onCreateSession({
-          expertId: selectedExpert.id,
-          prompt: value,
-          visibility,
-          attachments: prototypeTools ? attachments : [],
-          mode: executionEnabled ? 'run' : 'draft',
+          ...draft,
+          contextPack: nextContextPack,
         })
+        setPendingDraft(undefined)
+        setContextPack(undefined)
+        setContextState('idle')
       } catch (error) {
         setSubmitError(getSubmissionErrorMessage(error, locale))
       } finally {
@@ -246,7 +263,37 @@ export function CosmosHomePage({
       }
       return
     }
-    onNewTask?.(selectedExpert.id, value)
+    onNewTask?.(draft.expertId, draft.prompt)
+  }
+
+  const submitSession = async (event: FormEvent) => {
+    event.preventDefault()
+    const value = prompt.trim()
+    if (!value || !selectedExpert || submitting || contextState === 'loading') return
+    const draft = {
+      expertId: selectedExpert.id,
+      prompt: value,
+      visibility,
+      attachments: prototypeTools ? attachments : [],
+      mode: executionEnabled ? 'run' as const : 'draft' as const,
+    }
+    if (contextEnabled && contextPreflight && selectedExpert.repository) {
+      setSubmitError('')
+      setContextError('')
+      setContextPack(undefined)
+      setPendingDraft(draft)
+      setContextState('loading')
+      try {
+        const nextPack = await contextPreflight(selectedExpert.repository, value)
+        setContextPack(nextPack)
+        setContextState('ready')
+      } catch (error) {
+        setContextError(getSubmissionErrorMessage(error, locale))
+        setContextState('error')
+      }
+      return
+    }
+    await createFromDraft(draft)
   }
 
   const openSession = (runId: string) => {
@@ -274,7 +321,7 @@ export function CosmosHomePage({
           {resolvedCatalogStatus === 'ready' ? (
             <div className="home-expert-grid" role="radiogroup" aria-label={localize(locale, '选择 Expert', 'Choose an Expert')}>
               {experts.slice(0, 6).map((expert) => (
-                <button type="button" role="radio" aria-checked={expert.id === selectedExpert?.id} className={`home-expert-card${expert.id === selectedExpert?.id ? ' home-expert-card--selected' : ''}`} key={expert.id} onClick={() => setSelectedExpertId(expert.id)}>
+                <button type="button" role="radio" aria-checked={expert.id === selectedExpert?.id} className={`home-expert-card${expert.id === selectedExpert?.id ? ' home-expert-card--selected' : ''}`} key={expert.id} onClick={() => { setSelectedExpertId(expert.id); setPendingDraft(undefined); setContextPack(undefined); setContextState('idle') }}>
                   <span>{expert.builtIn ? <Sparkles aria-hidden="true" /> : <Bot aria-hidden="true" />}</span>
                   <strong>{expert.name}</strong>
                   <small>{expert.description}</small>
@@ -310,7 +357,7 @@ export function CosmosHomePage({
           )}
 
           {resolvedCatalogStatus === 'ready' && sessionCreationEnabled ? <form className="home-session-composer" onSubmit={submitSession}>
-            <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder={selectedExpert?.launchGuidance || localize(locale, '描述你想完成的工作…', 'Describe the work you want done…')} rows={3} aria-label={localize(locale, '会话任务', 'Session task')} />
+            <textarea value={prompt} onChange={(event) => { setPrompt(event.target.value); setPendingDraft(undefined); setContextPack(undefined); setContextState('idle') }} placeholder={selectedExpert?.launchGuidance || localize(locale, '描述你想完成的工作…', 'Describe the work you want done…')} rows={3} aria-label={localize(locale, '会话任务', 'Session task')} />
             {prototypeTools && attachments.length ? (
               <div className="home-session-composer__attachments">
                 {attachments.map((name) => (
@@ -341,16 +388,44 @@ export function CosmosHomePage({
                 </label>
                 <span><ShieldCheck aria-hidden="true" />{selectedExpert?.tools}</span>
               </div>
-              <button type="submit" className="cosmos-button cosmos-button--primary" disabled={!prompt.trim() || !selectedExpert || submitting} aria-busy={submitting}>
-                {submitting
+              <button type="submit" className="cosmos-button cosmos-button--primary" disabled={!prompt.trim() || !selectedExpert || submitting || contextState === 'loading'} aria-busy={submitting || contextState === 'loading'}>
+                {submitting || contextState === 'loading'
                   ? <LoaderCircle className="new-task-submit-spinner" aria-hidden="true" />
                   : executionEnabled ? <Send aria-hidden="true" /> : <Save aria-hidden="true" />}
-                {submitting
+                {contextState === 'loading'
+                  ? localize(locale, '正在预检上下文…', 'Checking context…')
+                  : submitting
                   ? (executionEnabled ? localize(locale, '正在启动…', 'Starting…') : localize(locale, '正在保存…', 'Saving…'))
                   : (executionEnabled ? localize(locale, '开始会话', 'Start session') : localize(locale, '保存草稿', 'Save draft'))}
               </button>
             </footer>
           </form> : resolvedCatalogStatus === 'ready' ? <p className="cosmos-empty-state" role="note">{localize(locale, '你在当前 Space 中只有查看权限。', 'You have view-only access in this Space.')}</p> : null}
+
+          {pendingDraft && contextState !== 'loading' ? (
+            <section className={`home-context-confirmation${contextState === 'error' ? ' home-context-confirmation--error' : ''}`} aria-live="polite" aria-label={localize(locale, '上下文预检', 'Context preflight')}>
+              <span className="home-context-confirmation__icon">{contextState === 'error' ? <AlertTriangle aria-hidden="true" /> : <DatabaseZap aria-hidden="true" />}</span>
+              <div className="home-context-confirmation__body">
+                <small>{localize(locale, 'ContextEngine 预检', 'ContextEngine preflight')}</small>
+                <strong>{contextState === 'error'
+                  ? localize(locale, '无法构建上下文包', 'Unable to build the context pack')
+                  : localize(locale, '上下文包已就绪，请确认后启动', 'Context pack ready. Confirm before launch.')}</strong>
+                {contextState === 'error' ? <p>{contextError}</p> : <>
+                  <p>{contextPack?.hits.slice(0, 4).map((hit) => hit.path).join(' · ') || localize(locale, '未命中代码证据', 'No code evidence matched')}</p>
+                  <dl>
+                    <div><dt>{localize(locale, '证据', 'Sources')}</dt><dd>{contextPack?.hits.length ?? 0}</dd></div>
+                    <div><dt>{localize(locale, '预估 token', 'Estimated tokens')}</dt><dd>{new Intl.NumberFormat(locale === 'zh' ? 'zh-CN' : 'en-US').format(contextPack?.estimatedTokens ?? 0)}</dd></div>
+                    <div><dt>{localize(locale, '完整性', 'Coverage')}</dt><dd>{contextPack?.truncated ? localize(locale, '已截断', 'Truncated') : localize(locale, '完整', 'Complete')}</dd></div>
+                  </dl>
+                  <em>{localize(locale, '仓库内容将作为非可信证据附加，Agent 不会把其中内容当作指令。', 'Repository content is attached as untrusted evidence, never as instructions.')}</em>
+                </>}
+              </div>
+              <div className="home-context-confirmation__actions">
+                {contextState === 'ready' ? <button type="button" className="cosmos-button cosmos-button--primary" disabled={submitting} onClick={() => { void createFromDraft(pendingDraft, contextPack) }}><ShieldCheck aria-hidden="true" />{localize(locale, '附加并启动', 'Attach and start')}</button> : null}
+                <button type="button" className="cosmos-button cosmos-button--secondary" disabled={submitting} onClick={() => { void createFromDraft(pendingDraft, null) }}>{localize(locale, '不附加，继续', 'Continue without it')}</button>
+                <button type="button" className="cosmos-button cosmos-button--ghost" disabled={submitting} onClick={() => { setPendingDraft(undefined); setContextPack(undefined); setContextState('idle'); setContextError('') }}>{localize(locale, '取消', 'Cancel')}</button>
+              </div>
+            </section>
+          ) : null}
         </section>
 
         <section className="home-recent" aria-labelledby="cosmos-recent-title">

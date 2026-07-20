@@ -7,3 +7,4 @@ coverage
 *.local
 playwright-report
 test-results
+.understand-anything

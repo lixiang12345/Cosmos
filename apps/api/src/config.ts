@@ -10,6 +10,14 @@ export type ApiConfig = {
   securityHeaders: {
     hsts: boolean
   }
+  securityAuditHmacKey?: string
+  securityAuditHmacKeyId?: string
+  contextEngine?: {
+    baseUrl: string
+    apiKey: string
+    workspaces: Record<string, string>
+    timeoutMs: number
+  }
   rateLimit: {
     max: number
     timeWindowMs: number
@@ -32,6 +40,13 @@ export type ApiConfig = {
   authentication:
     | { mode: 'development'; actorId: string }
     | { mode: 'oidc'; issuer: string; audience: string; jwksUri: string }
+}
+
+export type MigrationConfig = {
+  databaseUrl: string
+  databaseConnectionTimeoutMs: number
+  databaseQueryTimeoutMs: number
+  databaseStatementTimeoutMs: number
 }
 
 const RUNTIME_ENVIRONMENTS = new Set(['development', 'test', 'staging', 'production'])
@@ -125,6 +140,113 @@ function parseTrustProxy(value: string | undefined) {
   return [...new Set(entries)]
 }
 
+function parseSecurityAuditHmacKey(value: string | undefined, environment: string) {
+  const key = value?.trim()
+  if (!key) {
+    if (environment === 'staging' || environment === 'production') {
+      throw new Error('SECURITY_AUDIT_HMAC_KEY is required in staging and production.')
+    }
+    return undefined
+  }
+  if (!/^[a-f0-9]{64}$/i.test(key)) {
+    throw new Error('SECURITY_AUDIT_HMAC_KEY must contain exactly 64 hexadecimal characters.')
+  }
+  return key.toLowerCase()
+}
+
+function parseSecurityAuditHmacKeyId(value: string | undefined, environment: string, hasKey: boolean) {
+  const keyId = value?.trim()
+  if (!keyId) {
+    if (environment === 'staging' || environment === 'production') {
+      throw new Error('SECURITY_AUDIT_HMAC_KEY_ID is required in staging and production.')
+    }
+    return hasKey ? 'development' : undefined
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(keyId)) {
+    throw new Error('SECURITY_AUDIT_HMAC_KEY_ID must be a 1 to 64 character stable key identifier.')
+  }
+  return keyId
+}
+
+function parseContextEngineConfig(env: NodeJS.ProcessEnv) {
+  const baseUrl = env.CONTEXT_ENGINE_BASE_URL?.trim()
+  const apiKey = env.CONTEXT_ENGINE_API_KEY?.trim()
+  const workspacesJson = env.CONTEXT_ENGINE_WORKSPACES_JSON?.trim()
+  const configured = [baseUrl, apiKey, workspacesJson].filter(Boolean).length
+  if (configured === 0) return undefined
+  if (configured !== 3 || !baseUrl || !apiKey || !workspacesJson) {
+    throw new Error('CONTEXT_ENGINE_BASE_URL, CONTEXT_ENGINE_API_KEY, and CONTEXT_ENGINE_WORKSPACES_JSON must be configured together.')
+  }
+  let url: URL
+  try {
+    url = new URL(baseUrl)
+  } catch {
+    throw new Error('CONTEXT_ENGINE_BASE_URL must be a valid URL.')
+  }
+  const loopback = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]'
+  if (
+    (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback))
+    || url.username
+    || url.password
+    || url.search
+    || url.hash
+  ) {
+    throw new Error('CONTEXT_ENGINE_BASE_URL must use HTTPS except for loopback development and must not contain credentials, a query, or a fragment.')
+  }
+  if (/\r|\n/.test(apiKey)) throw new Error('CONTEXT_ENGINE_API_KEY must be a valid bearer token.')
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(workspacesJson)
+  } catch {
+    throw new Error('CONTEXT_ENGINE_WORKSPACES_JSON must be a JSON object mapping repository names to workspace ids.')
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('CONTEXT_ENGINE_WORKSPACES_JSON must be a JSON object mapping repository names to workspace ids.')
+  }
+  const entries = Object.entries(parsed)
+  if (
+    entries.length === 0
+    || entries.length > 256
+    || entries.some(([repository, workspaceId]) => (
+      !repository.trim()
+      || repository.length > 512
+      || typeof workspaceId !== 'string'
+      || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(workspaceId)
+    ))
+  ) {
+    throw new Error('CONTEXT_ENGINE_WORKSPACES_JSON must contain 1 to 256 valid repository-to-workspace mappings.')
+  }
+  return {
+    baseUrl: url.toString().replace(/\/$/, ''),
+    apiKey,
+    workspaces: Object.fromEntries(entries.map(([repository, workspaceId]) => [repository.trim(), workspaceId])),
+    timeoutMs: parseDuration(env.CONTEXT_ENGINE_TIMEOUT_MS, 'CONTEXT_ENGINE_TIMEOUT_MS', 20_000),
+  }
+}
+
+export function loadMigrationConfig(env: NodeJS.ProcessEnv = process.env): MigrationConfig {
+  const databaseUrl = env.DATABASE_URL?.trim()
+  if (!databaseUrl) throw new Error('DATABASE_URL is required to run migrations.')
+  return {
+    databaseUrl,
+    databaseConnectionTimeoutMs: parseDuration(
+      env.DATABASE_CONNECTION_TIMEOUT_MS,
+      'DATABASE_CONNECTION_TIMEOUT_MS',
+      5_000,
+    ),
+    databaseQueryTimeoutMs: parseDuration(
+      env.DATABASE_QUERY_TIMEOUT_MS,
+      'DATABASE_QUERY_TIMEOUT_MS',
+      20_000,
+    ),
+    databaseStatementTimeoutMs: parseDuration(
+      env.DATABASE_STATEMENT_TIMEOUT_MS,
+      'DATABASE_STATEMENT_TIMEOUT_MS',
+      15_000,
+    ),
+  }
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   const configuredEnvironment = env.NODE_ENV?.trim()
   const environment = configuredEnvironment || 'development'
@@ -181,6 +303,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     throw new Error('Development authentication may bind only to a loopback host.')
   }
 
+  const securityAuditHmacKey = parseSecurityAuditHmacKey(env.SECURITY_AUDIT_HMAC_KEY, environment)
   return {
     host,
     port: parsePort(env.PORT),
@@ -203,6 +326,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       5_000,
     ),
     securityHeaders: { hsts: environment === 'production' },
+    securityAuditHmacKey,
+    securityAuditHmacKeyId: parseSecurityAuditHmacKeyId(
+      env.SECURITY_AUDIT_HMAC_KEY_ID,
+      environment,
+      securityAuditHmacKey !== undefined,
+    ),
+    contextEngine: parseContextEngineConfig(env),
     rateLimit: {
       max: parseInteger(env.API_RATE_LIMIT_MAX, 'API_RATE_LIMIT_MAX', 600, 1, 100_000),
       timeWindowMs: parseInteger(
