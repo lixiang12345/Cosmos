@@ -948,6 +948,7 @@ function RelayApp() {
   const [newTaskOpen, setNewTaskOpen] = useState(false)
   const [presetExpertId, setPresetExpertId] = useState<string>()
   const [presetPrompt, setPresetPrompt] = useState('')
+  const [presetContextPack, setPresetContextPack] = useState<ContextPackResponse>()
   const [toast, setToast] = useState('')
   const sessionIdempotencyKeys = useRef(new Map<string, string>())
   const navigate = useNavigate()
@@ -1027,6 +1028,14 @@ function RelayApp() {
       // The collapsed state still applies for this browser session.
     }
   }, [sidebarCollapsed])
+
+  useEffect(() => {
+    if (location.pathname !== '/context' || typeof window.matchMedia !== 'function') return
+    if (window.matchMedia('(min-width: 821px) and (max-width: 1180px)').matches) {
+      const timer = window.setTimeout(() => setSidebarCollapsed(true), 0)
+      return () => window.clearTimeout(timer)
+    }
+  }, [location.pathname])
 
   useEffect(() => {
     if (!demoMode) return
@@ -1398,10 +1407,11 @@ function RelayApp() {
     setToast(locale === 'zh' ? '会话已停止' : 'Session stopped.')
   }
 
-  const openNewTask = (expertId?: string, initialPrompt = '') => {
+  const openNewTask = (expertId?: string, initialPrompt = '', contextPack?: ContextPackResponse) => {
     if (!sessionCreationEnabled) return
     setPresetExpertId(expertId)
     setPresetPrompt(initialPrompt)
+    setPresetContextPack(contextPack)
     setNewTaskOpen(true)
   }
 
@@ -1984,6 +1994,7 @@ function RelayApp() {
           open
           initialExpertId={presetExpertId}
           initialPrompt={presetPrompt}
+          initialContextPack={presetContextPack}
           experts={sessionExpertOptions}
           repositories={sessionRepositories}
           environments={sessionEnvironments}
@@ -1992,7 +2003,7 @@ function RelayApp() {
           prototypeTools={demoMode}
           executionEnabled={demoMode || productionExecutionEnabled}
           onRetryCatalog={retrySessionCatalog}
-          onClose={() => { setNewTaskOpen(false); setPresetExpertId(undefined); setPresetPrompt('') }}
+          onClose={() => { setNewTaskOpen(false); setPresetExpertId(undefined); setPresetPrompt(''); setPresetContextPack(undefined) }}
           onCreate={createTask}
         />
       ) : null}
