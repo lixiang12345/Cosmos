@@ -125,6 +125,17 @@ export function Sidebar({
     : { files: 'Files', automations: 'Automations', configuration: 'Configuration', pinned: 'Pinned', recent: 'Recent Sessions', expand: 'Expand navigation', collapse: 'Collapse navigation', role: 'Authenticated organization member', signOut: 'Sign out' }
   const displayName = auth.displayName ?? auth.actorId ?? 'Relay user'
   const avatar = Array.from(displayName.trim())[0]?.toLocaleUpperCase() ?? 'R'
+  const toggleNavigationGroup = (setOpen: (update: (value: boolean) => boolean) => void) => {
+    const compactDesktopRail = collapsed
+      && typeof window !== 'undefined'
+      && window.matchMedia('(min-width: 821px)').matches
+    if (compactDesktopRail) {
+      setOpen(() => true)
+      onToggleCollapsed()
+      return
+    }
+    setOpen((value) => !value)
+  }
 
   return (
     <>
@@ -206,7 +217,7 @@ export function Sidebar({
           </div>
 
           {prototypeNavigation ? <div className="sidebar__configuration sidebar__files">
-            <button type="button" className="sidebar-configuration-toggle" aria-expanded={filesOpen} onClick={() => setFilesOpen((value) => !value)}>
+            <button type="button" className="sidebar-configuration-toggle" aria-label={copy.files} data-tooltip={copy.files} aria-expanded={filesOpen} onClick={() => toggleNavigationGroup(setFilesOpen)}>
               <FileText aria-hidden="true" />
               <span>{copy.files}</span>
               {filesOpen ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
@@ -219,7 +230,7 @@ export function Sidebar({
           </div> : null}
 
           {prototypeNavigation ? <div className="sidebar__configuration sidebar__automations">
-            <button type="button" className="sidebar-configuration-toggle" aria-expanded={automationsOpen} onClick={() => setAutomationsOpen((value) => !value)}>
+            <button type="button" className="sidebar-configuration-toggle" aria-label={copy.automations} data-tooltip={copy.automations} aria-expanded={automationsOpen} onClick={() => toggleNavigationGroup(setAutomationsOpen)}>
               <Workflow aria-hidden="true" />
               <span>{copy.automations}</span>
               {automationsOpen ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
@@ -232,7 +243,7 @@ export function Sidebar({
           </div> : null}
 
           <div className="sidebar__configuration">
-            <button type="button" className="sidebar-configuration-toggle" aria-expanded={configurationOpen} onClick={() => setConfigurationOpen((value) => !value)}>
+            <button type="button" className="sidebar-configuration-toggle" aria-label={copy.configuration} data-tooltip={copy.configuration} aria-expanded={configurationOpen} onClick={() => toggleNavigationGroup(setConfigurationOpen)}>
               <SlidersHorizontal aria-hidden="true" />
               <span>{copy.configuration}</span>
               {configurationOpen ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
