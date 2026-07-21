@@ -84,7 +84,7 @@
 6. Recent Sessions — **Official**。
 7. Files：Organization、User — **Official**。
 8. Automations：Overview、Event Log、Run History — **Official**。
-9. Configuration：Experts、Environments、Repositories、Integrations、MCP、Webhooks、Secrets — **Inferred**。
+9. Experts、Environments 是核心资源入口；Settings 下的 Capabilities / Integrations、Personal / Linked Accounts 与 Webhooks 层级有官方文档证据。不存在足够证据支持一个包含所有项目的 Configuration 侧栏组；生产导航只开放已有生产 API 的入口。
 10. Governance/Approvals 与偏好 — **Relay extension**，视觉上单独分组。
 
 ### 4.2 布局要求

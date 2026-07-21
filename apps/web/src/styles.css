@@ -8651,6 +8651,12 @@ button:disabled {
   margin-top: 2px;
 }
 
+.sidebar__core-resources {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
 .sidebar-configuration-list {
   margin: 2px 0 6px 17px;
   padding-left: 9px;

@@ -53,9 +53,13 @@ type NavItem = {
   icon?: typeof Sparkles
 }
 
-const configurationItems: NavItem[] = [
+const coreResourceItems: NavItem[] = [
   { to: '/experts', label: { zh: '专家', en: 'Experts' }, icon: Sparkles },
   { to: '/environments', label: { zh: '环境', en: 'Environments' }, icon: CloudCog },
+]
+
+const prototypeConfigurationItems: NavItem[] = [
+  ...coreResourceItems,
   { to: '/daemons', label: { zh: '守护进程', en: 'Daemons' }, icon: ServerCog },
   { to: '/integrations', label: { zh: '集成', en: 'Integrations' }, icon: Plug },
   { to: '/mcp', label: { zh: 'MCP 注册表', en: 'MCP Registry' }, icon: Boxes },
@@ -117,9 +121,6 @@ export function Sidebar({
   const [configurationOpen, setConfigurationOpen] = useState(true)
   const pinnedRuns = runs.filter((run) => run.favorite && !run.archived).slice(0, 3)
   const recentRuns = runs.filter((run) => !run.archived && !run.favorite).slice(0, 6)
-  const visibleConfigurationItems = prototypeNavigation
-    ? configurationItems
-    : configurationItems.filter((item) => item.to === '/experts' || item.to === '/environments')
   const copy = locale === 'zh'
     ? { files: '文件', automations: '自动化', configuration: '配置', pinned: '置顶', recent: '最近会话', expand: '展开导航', collapse: '收起导航', role: '已认证组织成员', signOut: '退出登录' }
     : { files: 'Files', automations: 'Automations', configuration: 'Configuration', pinned: 'Pinned', recent: 'Recent Sessions', expand: 'Expand navigation', collapse: 'Collapse navigation', role: 'Authenticated organization member', signOut: 'Sign out' }
@@ -216,7 +217,7 @@ export function Sidebar({
             })}
           </div>
 
-          {prototypeNavigation ? <div className="sidebar__configuration sidebar__files">
+          <div className="sidebar__configuration sidebar__files">
             <button type="button" className="sidebar-configuration-toggle" aria-label={copy.files} data-tooltip={copy.files} aria-expanded={filesOpen} onClick={() => toggleNavigationGroup(setFilesOpen)}>
               <FileText aria-hidden="true" />
               <span>{copy.files}</span>
@@ -227,7 +228,7 @@ export function Sidebar({
                 {fileItems.map((item) => <SidebarLink key={item.to} item={item} nested onNavigate={onClose} />)}
               </div>
             ) : null}
-          </div> : null}
+          </div>
 
           {prototypeNavigation ? <div className="sidebar__configuration sidebar__automations">
             <button type="button" className="sidebar-configuration-toggle" aria-label={copy.automations} data-tooltip={copy.automations} aria-expanded={automationsOpen} onClick={() => toggleNavigationGroup(setAutomationsOpen)}>
@@ -242,7 +243,7 @@ export function Sidebar({
             ) : null}
           </div> : null}
 
-          <div className="sidebar__configuration">
+          {prototypeNavigation ? <div className="sidebar__configuration">
             <button type="button" className="sidebar-configuration-toggle" aria-label={copy.configuration} data-tooltip={copy.configuration} aria-expanded={configurationOpen} onClick={() => toggleNavigationGroup(setConfigurationOpen)}>
               <SlidersHorizontal aria-hidden="true" />
               <span>{copy.configuration}</span>
@@ -250,10 +251,12 @@ export function Sidebar({
             </button>
             {configurationOpen ? (
               <div className="sidebar-configuration-list">
-                {visibleConfigurationItems.map((item) => <SidebarLink key={item.to} item={item} nested onNavigate={onClose} />)}
+                {prototypeConfigurationItems.map((item) => <SidebarLink key={item.to} item={item} nested onNavigate={onClose} />)}
               </div>
             ) : null}
-          </div>
+          </div> : <div className="sidebar__core-resources">
+            {coreResourceItems.map((item) => <SidebarLink key={item.to} item={item} onNavigate={onClose} />)}
+          </div>}
 
         </nav>
 

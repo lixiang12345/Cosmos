@@ -380,6 +380,20 @@ describe('Relay prototype', () => {
     expect(screen.queryByRole('link', { name: '首页' })).not.toBeInTheDocument()
   })
 
+  it('exposes only production-backed resources in the production sidebar', async () => {
+    renderAuthenticatedApp('/context')
+
+    expect(await screen.findByRole('heading', { level: 1, name: '代码上下文' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '专家' })).toHaveAttribute('href', '/experts')
+    expect(screen.getByRole('link', { name: '环境' })).toHaveAttribute('href', '/environments')
+    expect(screen.getByRole('button', { name: '文件' })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('link', { name: '组织' })).toHaveAttribute('href', '/files/organization')
+    expect(screen.getByRole('link', { name: '个人' })).toHaveAttribute('href', '/files/user')
+    expect(screen.queryByRole('button', { name: '配置' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '集成' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '密钥' })).not.toBeInTheDocument()
+  })
+
   it('supports the Cosmos global navigation shortcuts', async () => {
     renderApp('/home')
 
