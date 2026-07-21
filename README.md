@@ -132,4 +132,4 @@ pnpm openapi:bundle
 - 视觉系统：中性 Graphite 基底、受控绿色主色和语义状态色；Lucide 细线图标，4–8px 圆角，无装饰性渐变。
 - 响应式：桌面使用紧凑数据表和 Inspector，390px 小屏使用 Session/Run 信息卡与紧凑阶段条。
 
-完整产品与工程蓝图见 [docs/product-blueprint.md](./docs/product-blueprint.md)。
+完整产品与工程蓝图见 [docs/product-blueprint.md](./docs/product-blueprint.md)。下一条垂直切片、当前真实缺口和固定交付/推送流程见 [docs/next-delivery-plan.md](./docs/next-delivery-plan.md)。
