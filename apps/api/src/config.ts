@@ -17,6 +17,7 @@ export type ApiConfig = {
     apiKey: string
     workspaces: Record<string, string>
     timeoutMs: number
+    allowInsecureHttp: boolean
   }
   rateLimit: {
     max: number
@@ -168,7 +169,7 @@ function parseSecurityAuditHmacKeyId(value: string | undefined, environment: str
   return keyId
 }
 
-function parseContextEngineConfig(env: NodeJS.ProcessEnv) {
+function parseContextEngineConfig(env: NodeJS.ProcessEnv, environment: string) {
   const baseUrl = env.CONTEXT_ENGINE_BASE_URL?.trim()
   const apiKey = env.CONTEXT_ENGINE_API_KEY?.trim()
   const workspacesJson = env.CONTEXT_ENGINE_WORKSPACES_JSON?.trim()
@@ -184,14 +185,23 @@ function parseContextEngineConfig(env: NodeJS.ProcessEnv) {
     throw new Error('CONTEXT_ENGINE_BASE_URL must be a valid URL.')
   }
   const loopback = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]'
+  const allowInsecureHttp = parseBoolean(
+    env.CONTEXT_ENGINE_ALLOW_INSECURE_HTTP,
+    'CONTEXT_ENGINE_ALLOW_INSECURE_HTTP',
+    false,
+  )
+  if (allowInsecureHttp && environment !== 'development') {
+    throw new Error('CONTEXT_ENGINE_ALLOW_INSECURE_HTTP may be enabled only when NODE_ENV is development.')
+  }
+  const developmentHttp = environment === 'development' && allowInsecureHttp && url.protocol === 'http:'
   if (
-    (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback))
+    (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback) && !developmentHttp)
     || url.username
     || url.password
     || url.search
     || url.hash
   ) {
-    throw new Error('CONTEXT_ENGINE_BASE_URL must use HTTPS except for loopback development and must not contain credentials, a query, or a fragment.')
+    throw new Error('CONTEXT_ENGINE_BASE_URL must use HTTPS except for loopback or explicitly allowed development HTTP, and must not contain credentials, a query, or a fragment.')
   }
   if (/\r|\n/.test(apiKey)) throw new Error('CONTEXT_ENGINE_API_KEY must be a valid bearer token.')
   let parsed: unknown
@@ -221,6 +231,7 @@ function parseContextEngineConfig(env: NodeJS.ProcessEnv) {
     apiKey,
     workspaces: Object.fromEntries(entries.map(([repository, workspaceId]) => [repository.trim(), workspaceId])),
     timeoutMs: parseDuration(env.CONTEXT_ENGINE_TIMEOUT_MS, 'CONTEXT_ENGINE_TIMEOUT_MS', 20_000),
+    allowInsecureHttp,
   }
 }
 
@@ -299,7 +310,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     }
   }
   const host = env.HOST?.trim() || (authMode === 'development' ? '127.0.0.1' : '0.0.0.0')
-  if (authMode === 'development' && !['127.0.0.1', 'localhost', '::1'].includes(host)) {
+  const allowNonLoopbackDevelopmentAuth = parseBoolean(
+    env.ALLOW_NON_LOOPBACK_DEVELOPMENT_AUTH,
+    'ALLOW_NON_LOOPBACK_DEVELOPMENT_AUTH',
+    false,
+  )
+  if (
+    authMode === 'development'
+    && !['127.0.0.1', 'localhost', '::1'].includes(host)
+    && !(environment === 'development' && allowNonLoopbackDevelopmentAuth)
+  ) {
     throw new Error('Development authentication may bind only to a loopback host.')
   }
 
@@ -332,7 +352,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       environment,
       securityAuditHmacKey !== undefined,
     ),
-    contextEngine: parseContextEngineConfig(env),
+    contextEngine: parseContextEngineConfig(env, environment),
     rateLimit: {
       max: parseInteger(env.API_RATE_LIMIT_MAX, 'API_RATE_LIMIT_MAX', 600, 1, 100_000),
       timeWindowMs: parseInteger(

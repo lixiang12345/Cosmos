@@ -66,11 +66,16 @@ export function loadWebAuthConfig(
     throw new Error('VITE_AUTH_MODE must be explicitly set to development or oidc.')
   }
   if (mode === 'development') {
-    if (production) throw new Error('Development authentication is disabled in production builds.')
+    const allowProductionDevelopmentAuth = env.VITE_ALLOW_PRODUCTION_DEVELOPMENT_AUTH === 'true'
+    if (production && (!allowProductionDevelopmentAuth || !isLoopback(new URL(locationOrigin)))) {
+      throw new Error('Development authentication is disabled in production builds outside an explicitly enabled loopback runtime.')
+    }
+    const demoMode = env.VITE_DEMO_MODE === 'true' || isTest
+    if (production && demoMode) throw new Error('Demo mode is disabled in production builds.')
     return {
       mode,
       actorId: required(env.VITE_DEVELOPMENT_ACTOR_ID ?? 'user-local-admin', 'VITE_DEVELOPMENT_ACTOR_ID'),
-      demoMode: env.VITE_DEMO_MODE === 'true' || isTest,
+      demoMode,
     }
   }
 

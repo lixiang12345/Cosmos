@@ -3,6 +3,7 @@ import { createApp } from './app.js'
 import { createDevelopmentAuthenticator, createJwtAuthenticator } from './auth.js'
 import { loadConfig } from './config.js'
 import { HttpContextEngineGateway } from './context-engine-gateway.js'
+import { bootstrapDevelopmentDatabase } from './development-database-bootstrap.js'
 import { assertMigrationsCurrent, runMigrations } from './migrations.js'
 import { PostgresArtifactRepository } from './postgres-artifact-repository.js'
 import { PostgresConfigurationCatalogRepository } from './postgres-configuration-catalog-repository.js'
@@ -24,10 +25,14 @@ const poolConfig = config.databaseUrl ? {
   query_timeout: config.databaseQueryTimeoutMs,
   statement_timeout: config.databaseStatementTimeoutMs,
 } : undefined
-if (poolConfig && config.migrateOnStart) {
+if (poolConfig && (config.migrateOnStart || config.authentication.mode === 'development')) {
   const migrationPool = new Pool(poolConfig)
   try {
-    await runMigrations(migrationPool)
+    if (config.migrateOnStart) await runMigrations(migrationPool)
+    else await assertMigrationsCurrent(migrationPool)
+    if (config.authentication.mode === 'development') {
+      await bootstrapDevelopmentDatabase(migrationPool, config.authentication.actorId)
+    }
   } finally {
     await migrationPool.end()
   }

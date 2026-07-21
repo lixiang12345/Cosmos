@@ -80,6 +80,7 @@ export {
   type JwtAuthenticatorOptions,
 } from './auth.js'
 export { loadConfig, loadMigrationConfig, type ApiConfig, type MigrationConfig } from './config.js'
+export { bootstrapDevelopmentDatabase } from './development-database-bootstrap.js'
 export { loadWorkerConfig, type WorkerConfig } from './worker-config.js'
 export {
   AgentProviderError,

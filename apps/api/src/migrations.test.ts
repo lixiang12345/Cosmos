@@ -75,6 +75,14 @@ describe('migration readiness', () => {
     await expect(assertMigrationsCurrent(poolWithVersions(migrationVersions))).resolves.toBeUndefined()
   })
 
+  it('accepts the two known pre-release migration history entries', async () => {
+    await expect(assertMigrationsCurrent(poolWithVersions([
+      ...migrationVersions,
+      '010_tenant_reference_constraints.sql',
+      '011_session_audit_ledgers.sql',
+    ]))).resolves.toBeUndefined()
+  })
+
   it('rejects a database with pending migrations', async () => {
     await expect(assertMigrationsCurrent(poolWithVersions(migrationVersions.slice(0, -1))))
       .rejects.toThrow('1 pending migration')

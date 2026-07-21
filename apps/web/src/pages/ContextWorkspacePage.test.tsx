@@ -77,10 +77,13 @@ describe('Context workspace', () => {
     await user.click(screen.getByRole('button', { name: '检索证据' }))
 
     expect(await screen.findByRole('heading', { name: '5 项高相关证据' })).toBeInTheDocument()
+    expect(screen.getByRole('article')).toHaveTextContent('相对相关度100%')
+    expect(screen.getByRole('article')).toHaveTextContent('相对相关度 100%')
     const clientHit = screen.getByRole('button', { name: /src\/clients\/payment-client\.ts/ })
     await user.click(clientHit)
     expect(screen.getByRole('article')).toHaveTextContent('src/clients/payment-client.ts')
     expect(screen.getByRole('article')).toHaveTextContent('requestPayment')
+    expect(screen.getByRole('article')).toHaveTextContent('相对相关度96%')
 
     await user.click(screen.getByRole('button', { name: '打包上下文' }))
     expect(await screen.findByRole('heading', { name: /5 证据来源/ })).toBeInTheDocument()

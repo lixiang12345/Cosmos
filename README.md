@@ -20,12 +20,14 @@ pnpm install
 pnpm dev
 ```
 
-启动后访问：
+`pnpm dev` 启动完整 Docker Compose runtime（PostgreSQL、API、Worker、Web），访问：
 
 - Web：<http://127.0.0.1:5173>
 - API 健康检查：<http://127.0.0.1:8787/api/health>
 
-Vite 会把浏览器发往 `/api` 的请求代理到本地 API。也可以分别运行 `pnpm dev:web` 和 `pnpm dev:api`；如需连接跨域 HTTPS API，同时设置 `VITE_API_BASE_URL` 和逗号分隔的 `VITE_API_ALLOWED_ORIGINS`，否则浏览器会在发送 Bearer token 前拒绝请求。
+Compose 会等待 PostgreSQL 健康后启动 API，API 完成 migration 后才启动 Worker 和 Web；Web 通过 nginx 将同源 `/api/*` 反向代理到 API。Worker 所需的 Provider、Context Engine 等敏感配置从未提交的 `.env.local` 注入，不会进入浏览器构建产物。首次使用可从 `.env.example` 复制并填写 Provider 配置；没有 Provider 凭据时 Worker 会保持失败并由健康检查标记为不可用，但 API 控制面仍可访问。
+
+只想运行带 seed 数据的前端原型时，显式使用 `pnpm dev:demo`；该模式不代表真实 PostgreSQL/Worker 运行态。也可以分别运行 `pnpm dev:web` 和 `pnpm dev:api`；如需连接跨域 HTTPS API，同时设置 `VITE_API_BASE_URL` 和逗号分隔的 `VITE_API_ALLOWED_ORIGINS`，否则浏览器会在发送 Bearer token 前拒绝请求。
 
 如果默认 API 端口被占用，可同时覆盖 API 监听端口和 Vite 的开发代理目标：
 
@@ -33,7 +35,7 @@ Vite 会把浏览器发往 `/api` 的请求代理到本地 API。也可以分别
 PORT=8790 VITE_API_PROXY_TARGET=http://127.0.0.1:8790 pnpm dev
 ```
 
-开发脚本会显式选择仅允许绑定 loopback 的固定本地身份，并开启带 seed 的 demo 模式；生产构建不允许 development 身份，也不会读取 demo Session、Expert 或控制面缓存。生产 Web 使用 OIDC Authorization Code + PKCE，access token 仅驻留 JavaScript 内存，只有一次性授权 state 与 PKCE 数据保存在当前标签页的 `sessionStorage`；401、过期和登出会立即清除身份。API 拒绝生命周期超过 300 秒的 access token，把无法即时 introspect 的 JWT 撤销残余窗口硬限制为 5 分钟；接入支持 introspection 或 `jti` denylist 的企业 IdP 后可进一步缩短。需要验证持久化链路时启动本地 PostgreSQL：
+`pnpm dev:demo` 会显式选择仅允许绑定 loopback 的固定本地身份并开启带 seed 的 demo 模式；Compose runtime 仅在本地 development 环境通过 `ALLOW_NON_LOOPBACK_DEVELOPMENT_AUTH=true` 允许容器内 API 监听 `0.0.0.0`，Web production bundle 也必须显式设置 `VITE_ALLOW_PRODUCTION_DEVELOPMENT_AUTH=true` 且只能从 loopback origin 运行。其他环境仍拒绝 development auth，production bundle 始终拒绝 demo 模式。生产 Web 使用 OIDC Authorization Code + PKCE，access token 仅驻留 JavaScript 内存，只有一次性授权 state 与 PKCE 数据保存在当前标签页的 `sessionStorage`；401、过期和登出会立即清除身份。API 拒绝生命周期超过 300 秒的 access token，把无法即时 introspect 的 JWT 撤销残余窗口硬限制为 5 分钟；接入支持 introspection 或 `jti` denylist 的企业 IdP 后可进一步缩短。需要仅验证本地 PostgreSQL 时启动：
 
 ```bash
 pnpm db:up
@@ -47,7 +49,7 @@ TEST_DATABASE_URL=postgres://relay:relay-local-only@127.0.0.1:55432/relay pnpm t
 
 要运行 protocol-1 基础对话 Worker，还需配置 `.env.example` 中的 Worker 与 OpenAI-compatible provider 变量，并在 migration 完成后启动独立进程：
 
-要启用代码库上下文检索，可部署 [ContextEngine-plugin](https://github.com/lixiang12345/ContextEngine-plugin) 作为内网服务，并在 API 侧成组配置 `CONTEXT_ENGINE_BASE_URL`、`CONTEXT_ENGINE_API_KEY`、`CONTEXT_ENGINE_WORKSPACES_JSON` 和可选的 `CONTEXT_ENGINE_TIMEOUT_MS`。浏览器只访问 Relay 的 `/api/v1/organizations/:organizationId/spaces/:spaceId/context-engine/*` 代理，不接触插件密钥。Relay 会先验证当前 Space 的 active Environment revision 是否绑定请求仓库，再允许状态查询、混合检索和上下文打包；Home 启动器可在真实部署中预检证据，用户确认后才将其以“非可信仓库证据”附加到 Session 首条消息。
+要启用代码库上下文检索，可部署 [ContextEngine-plugin](https://github.com/lixiang12345/ContextEngine-plugin) 作为内网服务，并在 API 侧成组配置 `CONTEXT_ENGINE_BASE_URL`、`CONTEXT_ENGINE_API_KEY`、`CONTEXT_ENGINE_WORKSPACES_JSON` 和可选的 `CONTEXT_ENGINE_TIMEOUT_MS`。Compose 中访问宿主机插件可使用 `http://host.docker.internal:8790`，并仅在本地 `.env.local` 设置 `CONTEXT_ENGINE_ALLOW_INSECURE_HTTP=true`；staging/production 始终要求 HTTPS。浏览器只访问 Relay 的 `/api/v1/organizations/:organizationId/spaces/:spaceId/context-engine/*` 代理，不接触插件密钥。Relay 会先验证当前 Space 的 active Environment revision 是否绑定请求仓库，再允许状态查询、混合检索和上下文打包；Home 启动器可在真实部署中预检证据，用户确认后才将其以“非可信仓库证据”附加到 Session 首条消息。
 
 ```bash
 pnpm --filter @relay/api build

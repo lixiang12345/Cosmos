@@ -111,6 +111,18 @@ describe('HttpContextEngineGateway', () => {
     })).rejects.toBeInstanceOf(Error)
   })
 
+  it('requires an explicit opt-in for non-loopback HTTP endpoints', () => {
+    expect(() => new HttpContextEngineGateway({
+      ...options,
+      baseUrl: 'http://host.docker.internal:8790',
+    })).toThrow('must use HTTPS')
+    expect(() => new HttpContextEngineGateway({
+      ...options,
+      baseUrl: 'http://host.docker.internal:8790',
+      allowInsecureHttp: true,
+    })).not.toThrow()
+  })
+
   it('turns timeouts into retryable service errors', async () => {
     const fetchImpl = ((_url: string | URL | Request, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
       init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })

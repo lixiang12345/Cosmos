@@ -108,12 +108,16 @@ function CodePreview({ hit }: { hit: ContextEngineHit }) {
   )
 }
 
-function describeMatch(hit: ContextEngineHit, locale: 'zh' | 'en') {
+function relativeRelevancePercent(score: number, maximumScore: number) {
+  if (maximumScore <= 0) return 0
+  return Math.round(Math.min(1, Math.max(0, score / maximumScore)) * 100)
+}
+
+function describeMatch(hit: ContextEngineHit, relevancePercent: number, locale: 'zh' | 'en') {
   const channels = (hit.channels.length ? hit.channels : [hit.source]).slice(0, 4).join(' + ')
-  const score = Math.round(hit.score * 100)
   return locale === 'zh'
-    ? `${channels} 联合召回，相关度 ${score}%。已结合符号、路径与代码关系进行排序。`
-    : `Retrieved through ${channels} at ${score}% relevance, ranked with symbol, path, and code relationships.`
+    ? `${channels} 联合召回，相对相关度 ${relevancePercent}%。已结合符号、路径与代码关系进行排序。`
+    : `Retrieved through ${channels} at ${relevancePercent}% relative relevance, ranked with symbol, path, and code relationships.`
 }
 
 function formatNumber(value: number, locale: 'zh' | 'en') {
@@ -158,8 +162,9 @@ function ContextMetric({ icon: Icon, label, value, detail }: {
   )
 }
 
-function HitRow({ hit, active, onSelect }: {
+function HitRow({ hit, relevancePercent, active, onSelect }: {
   hit: ContextEngineHit
+  relevancePercent: number
   active: boolean
   onSelect: () => void
 }) {
@@ -174,7 +179,7 @@ function HitRow({ hit, active, onSelect }: {
           {(hit.channels.length ? hit.channels : [hit.source]).slice(0, 3).map((channel) => <em key={channel}>{channel}</em>)}
         </span>
       </span>
-      <span className="context-hit__score"><strong>{Math.round(hit.score * 100)}<small>%</small></strong><span aria-hidden="true"><i style={{ width: `${Math.min(100, Math.max(0, hit.score * 100))}%` }} /></span></span>
+      <span className="context-hit__score"><strong>{relevancePercent}<small>%</small></strong><span aria-hidden="true"><i style={{ width: `${relevancePercent}%` }} /></span></span>
       <ChevronRight aria-hidden="true" />
     </button>
   )
@@ -223,6 +228,10 @@ export function ContextWorkspacePage({
   const visibleResult = resultRequestKey === currentSearchKey ? result : undefined
   const visiblePack = packRequestKey === currentPackKey ? pack : undefined
   const selectedHit = visibleResult?.hits.find((hit) => hit.path === selectedPath) ?? visibleResult?.hits[0]
+  const maximumVisibleScore = Math.max(0, ...(visibleResult?.hits.map((hit) => hit.score) ?? []))
+  const selectedRelevancePercent = selectedHit
+    ? relativeRelevancePercent(selectedHit.score, maximumVisibleScore)
+    : 0
   const authContext = useMemo<RelayApiAuthContext>(() => ({
     accessToken: auth.accessToken,
     requestIdentity: `${auth.actorId ?? 'anonymous'}:${auth.credentialVersion}`,
@@ -380,7 +389,7 @@ export function ContextWorkspacePage({
         askLabel: '向代码库提问', askDetail: '一次描述目标，ContextEngine 会联动全文、符号、语义与代码关系。',
         startingPoint: '建议起点', startingTitle: '从真实工程问题开始，而不是猜关键词',
         startingDetail: '选择一个示例，或按 / 立即聚焦输入框。检索后可审阅证据并安全附加到会话。',
-        whyMatched: '为什么相关', confidence: '匹配置信度', rankedEvidence: '排序证据', previewHint: '逐行审阅命中内容',
+        whyMatched: '为什么相关', confidence: '相对相关度', rankedEvidence: '排序证据', previewHint: '逐行审阅命中内容',
         packPending: '打包后会将仓库证据作为非可信数据附加到新会话。', launch: '打包并开始会话', launchReady: '携带上下文开始会话',
         setup: 'ContextEngine 尚未在此部署启用。配置服务地址、API Key 与代码库 Workspace 映射后即可使用。',
         demo: '演示索引', demoHint: '当前展示确定性演示数据；生产模式由 ContextEngine-plugin 实时返回。',
@@ -397,7 +406,7 @@ export function ContextWorkspacePage({
         askLabel: 'Ask your codebase', askDetail: 'Describe the goal once. ContextEngine combines full text, symbols, semantics, and code relationships.',
         startingPoint: 'Suggested starting points', startingTitle: 'Begin with an engineering question, not guessed keywords',
         startingDetail: 'Choose an example or press / to focus the composer. Review the evidence before attaching it to a session.',
-        whyMatched: 'Why this matched', confidence: 'Match confidence', rankedEvidence: 'Ranked evidence', previewHint: 'Review the matched lines',
+        whyMatched: 'Why this matched', confidence: 'Relative relevance', rankedEvidence: 'Ranked evidence', previewHint: 'Review the matched lines',
         packPending: 'Packing attaches repository evidence to the new session as untrusted data.', launch: 'Pack and start session', launchReady: 'Start with context',
         setup: 'ContextEngine is not enabled for this deployment. Configure the service URL, API key, and repository workspace mappings to use it.',
         demo: 'Demo index', demoHint: 'Showing deterministic demo data. Production results come directly from ContextEngine-plugin.',
@@ -502,11 +511,11 @@ export function ContextWorkspacePage({
                   <div className="context-results__grid">
                     <aside className="context-hit-list" aria-label={copy.rankedEvidence}>
                       <header><span><strong>{copy.rankedEvidence}</strong><small>{visibleResult.hits.length} {copy.sources}</small></span><CircleGauge aria-hidden="true" /></header>
-                      {visibleResult.hits.map((hit) => <HitRow key={`${hit.path}:${hit.startLine}`} hit={hit} active={selectedHit?.path === hit.path} onSelect={() => setSelectedPath(hit.path)} />)}
+                      {visibleResult.hits.map((hit) => <HitRow key={`${hit.path}:${hit.startLine}`} hit={hit} relevancePercent={relativeRelevancePercent(hit.score, maximumVisibleScore)} active={selectedHit?.path === hit.path} onSelect={() => setSelectedPath(hit.path)} />)}
                     </aside>
                     {selectedHit ? <article className="context-preview">
-                      <header><span className="context-preview__file-icon"><Braces aria-hidden="true" /></span><div><small>{copy.detail}</small><strong title={selectedHit.path}>{selectedHit.path}</strong><p>L{selectedHit.startLine}–{selectedHit.endLine}{selectedHit.symbol ? ` · ${selectedHit.symbol}` : ''}</p></div><div className="context-preview__header-actions"><span className="context-preview__confidence"><small>{copy.confidence}</small><strong>{Math.round(selectedHit.score * 100)}%</strong></span><button type="button" onClick={() => { void copyReference() }}>{copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}{copied ? copy.copied : copy.copyRef}</button></div></header>
-                      <aside className="context-preview__reason"><Sparkles aria-hidden="true" /><span><strong>{copy.whyMatched}</strong><p>{describeMatch(selectedHit, locale)}</p></span></aside>
+                      <header><span className="context-preview__file-icon"><Braces aria-hidden="true" /></span><div><small>{copy.detail}</small><strong title={selectedHit.path}>{selectedHit.path}</strong><p>L{selectedHit.startLine}–{selectedHit.endLine}{selectedHit.symbol ? ` · ${selectedHit.symbol}` : ''}</p></div><div className="context-preview__header-actions"><span className="context-preview__confidence"><small>{copy.confidence}</small><strong>{selectedRelevancePercent}%</strong></span><button type="button" onClick={() => { void copyReference() }}>{copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}{copied ? copy.copied : copy.copyRef}</button></div></header>
+                      <aside className="context-preview__reason"><Sparkles aria-hidden="true" /><span><strong>{copy.whyMatched}</strong><p>{describeMatch(selectedHit, selectedRelevancePercent, locale)}</p></span></aside>
                       <CodePreview hit={selectedHit} />
                       <footer><span>{selectedHit.language}</span><span>{selectedHit.source}</span>{selectedHit.channels.map((channel) => <span key={channel}>{channel}</span>)}<small>{copy.previewHint}</small></footer>
                     </article> : null}

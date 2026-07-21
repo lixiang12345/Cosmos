@@ -6,6 +6,10 @@ import type { Pool } from 'pg'
 const migrationsDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '../migrations')
 const nonTransactionalMarker = '-- relay-migration: non-transactional'
 const concurrentIndexMarker = /^-- relay-migration: concurrent-index ([a-z][a-z0-9_]*)$/m
+const knownLegacyMigrationVersions = new Set([
+  '010_tenant_reference_constraints.sql',
+  '011_session_audit_ledgers.sql',
+])
 
 async function migrationFiles() {
   return (await readdir(migrationsDirectory)).filter((file) => file.endsWith('.sql')).sort()
@@ -18,7 +22,9 @@ export async function assertMigrationsCurrent(pool: Pool) {
   )
   const appliedVersions = new Set(applied.rows.map((row) => row.version))
   const pending = files.filter((file) => !appliedVersions.has(file))
-  const unexpected = [...appliedVersions].filter((version) => !files.includes(version))
+  const unexpected = [...appliedVersions].filter((version) => (
+    !files.includes(version) && !knownLegacyMigrationVersions.has(version)
+  ))
   if (pending.length > 0) {
     throw new Error(`Database schema has ${pending.length} pending migration(s).`)
   }

@@ -48,6 +48,7 @@ export type HttpContextEngineGatewayOptions = {
   apiKey: string
   workspaces: Readonly<Record<string, string>>
   timeoutMs?: number
+  allowInsecureHttp?: boolean
   fetchImpl?: typeof fetch
 }
 
@@ -125,7 +126,7 @@ async function readBoundedResponseText(response: Response) {
   return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)), total).toString('utf8')
 }
 
-function resolveEndpoint(value: string) {
+function resolveEndpoint(value: string, allowInsecureHttp: boolean) {
   let url: URL
   try {
     url = new URL(value)
@@ -133,7 +134,7 @@ function resolveEndpoint(value: string) {
     throw new Error('Context Engine base URL must be a valid URL.')
   }
   const loopback = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]'
-  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) {
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && (loopback || allowInsecureHttp))) {
     throw new Error('Context Engine base URL must use HTTPS except for loopback development.')
   }
   if (url.username || url.password || url.search || url.hash) {
@@ -205,7 +206,7 @@ export class HttpContextEngineGateway implements ContextEngineGateway {
   private readonly fetchImpl: typeof fetch
 
   constructor(options: HttpContextEngineGatewayOptions) {
-    this.endpoint = resolveEndpoint(options.baseUrl)
+    this.endpoint = resolveEndpoint(options.baseUrl, options.allowInsecureHttp === true)
     this.apiKey = validateApiKey(options.apiKey)
     this.workspaces = validateWorkspaces(options.workspaces)
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS

@@ -11,6 +11,20 @@ describe('web authentication configuration', () => {
     expect(() => loadWebAuthConfig({
       VITE_AUTH_MODE: 'development', PROD: true,
     }, 'https://relay.example')).toThrow('disabled in production')
+    expect(loadWebAuthConfig({
+      VITE_AUTH_MODE: 'development', PROD: true,
+      VITE_ALLOW_PRODUCTION_DEVELOPMENT_AUTH: 'true',
+    }, 'http://127.0.0.1:5173')).toEqual({
+      mode: 'development', actorId: 'user-local-admin', demoMode: false,
+    })
+    expect(() => loadWebAuthConfig({
+      VITE_AUTH_MODE: 'development', PROD: true,
+      VITE_ALLOW_PRODUCTION_DEVELOPMENT_AUTH: 'true',
+    }, 'https://relay.example')).toThrow('loopback runtime')
+    expect(() => loadWebAuthConfig({
+      VITE_AUTH_MODE: 'development', PROD: true, VITE_DEMO_MODE: 'true',
+      VITE_ALLOW_PRODUCTION_DEVELOPMENT_AUTH: 'true',
+    }, 'http://localhost:5173')).toThrow('Demo mode')
   })
 
   it('requires complete OIDC client configuration without deployment-scoped tenant ids', () => {

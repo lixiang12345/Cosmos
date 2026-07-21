@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:17-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: relay
       POSTGRES_USER: relay
@@ -14,6 +15,76 @@ services:
       retries: 20
     volumes:
       - relay_postgres_data:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: api
+    restart: unless-stopped
+    env_file:
+      - path: .env.local
+        required: false
+      - path: .env.context-engine.local
+        required: false
+    environment:
+      NODE_ENV: development
+      AUTH_MODE: development
+      ALLOW_NON_LOOPBACK_DEVELOPMENT_AUTH: "true"
+      HOST: 0.0.0.0
+      PORT: 8787
+      DATABASE_URL: postgres://relay:relay-local-only@postgres:5432/relay
+      MIGRATE_ON_START: "true"
+      EXECUTION_ENABLED: "true"
+      CORS_ORIGIN: http://127.0.0.1:5173
+      WORKER_READINESS_MAX_AGE_MS: ${WORKER_READINESS_MAX_AGE_MS:-30000}
+    ports:
+      - "127.0.0.1:8787:8787"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: worker
+    restart: unless-stopped
+    env_file:
+      - path: .env.local
+        required: false
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgres://relay:relay-local-only@postgres:5432/relay
+      WORKER_ID: ${WORKER_ID:-worker-compose-1}
+      WORKER_READINESS_MAX_AGE_MS: ${WORKER_READINESS_MAX_AGE_MS:-30000}
+    depends_on:
+      api:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: runtime
+      args:
+        VITE_AUTH_MODE: development
+        VITE_DEMO_MODE: "false"
+        VITE_ALLOW_PRODUCTION_DEVELOPMENT_AUTH: "true"
+        VITE_API_BASE_URL: ""
+        VITE_API_ALLOWED_ORIGINS: ""
+    restart: unless-stopped
+    environment:
+      RELAY_API_UPSTREAM: http://api:8787
+      RELAY_CSP_CONNECT_SRC: "'self'"
+      RELAY_CSP_FRAME_SRC: "'self'"
+    ports:
+      - "127.0.0.1:5173:8080"
+    depends_on:
+      api:
+        condition: service_healthy
 
 volumes:
   relay_postgres_data:

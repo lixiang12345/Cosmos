@@ -33,6 +33,43 @@ describe('API configuration', () => {
     })
   })
 
+  it('keeps Context Engine HTTP limited to explicit development deployments', () => {
+    const contextEngine = {
+      CONTEXT_ENGINE_API_KEY: 'context-secret',
+      CONTEXT_ENGINE_WORKSPACES_JSON: '{"relay/platform":"workspace-platform"}',
+    }
+    expect(loadConfig({
+      AUTH_MODE: 'development',
+      ...contextEngine,
+      CONTEXT_ENGINE_BASE_URL: 'http://127.0.0.1:8790',
+    }).contextEngine).toMatchObject({
+      baseUrl: 'http://127.0.0.1:8790',
+      workspaces: { 'relay/platform': 'workspace-platform' },
+    })
+    expect(() => loadConfig({
+      AUTH_MODE: 'development',
+      ...contextEngine,
+      CONTEXT_ENGINE_BASE_URL: 'http://host.docker.internal:8790',
+    })).toThrow('explicitly allowed development HTTP')
+    expect(loadConfig({
+      AUTH_MODE: 'development',
+      ...contextEngine,
+      CONTEXT_ENGINE_BASE_URL: 'http://host.docker.internal:8790',
+      CONTEXT_ENGINE_ALLOW_INSECURE_HTTP: 'true',
+    }).contextEngine?.baseUrl).toBe('http://host.docker.internal:8790')
+    expect(() => loadConfig({
+      NODE_ENV: 'test',
+      AUTH_MODE: 'oidc',
+      DATABASE_URL: 'postgres://relay',
+      OIDC_ISSUER: 'https://identity.test/',
+      OIDC_AUDIENCE: 'relay-api',
+      OIDC_JWKS_URI: 'https://identity.test/.well-known/jwks.json',
+      ...contextEngine,
+      CONTEXT_ENGINE_BASE_URL: 'http://contextengine.internal:8790',
+      CONTEXT_ENGINE_ALLOW_INSECURE_HTTP: 'true',
+    })).toThrow('only when NODE_ENV is development')
+  })
+
   it('requires persistent storage and an explicit CORS origin in production', () => {
     expect(() => loadConfig({ NODE_ENV: 'production', AUTH_MODE: 'oidc' })).toThrow('DATABASE_URL')
     expect(() => loadConfig({
@@ -291,5 +328,13 @@ describe('API configuration', () => {
     expect(() => loadConfig({
       NODE_ENV: 'development', AUTH_MODE: 'development', HOST: '0.0.0.0',
     })).toThrow('loopback')
+    expect(loadConfig({
+      NODE_ENV: 'development', AUTH_MODE: 'development', HOST: '0.0.0.0',
+      ALLOW_NON_LOOPBACK_DEVELOPMENT_AUTH: 'true',
+    }).host).toBe('0.0.0.0')
+    expect(() => loadConfig({
+      NODE_ENV: 'development', AUTH_MODE: 'development', HOST: '0.0.0.0',
+      ALLOW_NON_LOOPBACK_DEVELOPMENT_AUTH: 'sometimes',
+    })).toThrow('ALLOW_NON_LOOPBACK_DEVELOPMENT_AUTH')
   })
 })

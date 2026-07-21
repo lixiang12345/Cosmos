@@ -8,10 +8,14 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "AUTH_MODE=development VITE_AUTH_MODE=development VITE_DEMO_MODE=true pnpm --parallel --filter @relay/api --filter @relay/web dev",
+    "dev": "pnpm dev:runtime",
+    "dev:demo": "AUTH_MODE=development VITE_AUTH_MODE=development VITE_DEMO_MODE=true pnpm --parallel --filter @relay/api --filter @relay/web dev",
     "dev:web": "VITE_AUTH_MODE=development VITE_DEMO_MODE=true pnpm --filter @relay/web dev",
     "dev:api": "AUTH_MODE=development pnpm --filter @relay/api dev",
     "dev:worker": "pnpm --filter @relay/api dev:worker",
+    "dev:runtime": "docker compose up --build --wait",
+    "runtime:down": "docker compose down",
+    "runtime:logs": "docker compose logs -f api worker web",
     "db:up": "docker compose up -d --wait postgres",
     "db:down": "docker compose down",
     "db:migrate": "pnpm --filter @relay/api migrate",
