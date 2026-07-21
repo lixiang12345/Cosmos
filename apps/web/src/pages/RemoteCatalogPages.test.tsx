@@ -11,10 +11,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PREFERENCE_STORAGE_KEYS, PreferencesProvider } from '../preferences'
 import {
   RelayApiError,
+  createEnvironment,
   createExpert,
   getEnvironment,
   getExpert,
   listExpertRevisions,
+  listEnvironmentRevisions,
   publishExpert,
   updateExpert,
   type RelayApiAuthContext,
@@ -33,9 +35,11 @@ vi.mock('../services/relayApi', async (importOriginal) => ({
   getEnvironment: vi.fn(),
   getExpert: vi.fn(),
   createExpert: vi.fn(),
+  createEnvironment: vi.fn(),
   updateExpert: vi.fn(),
   publishExpert: vi.fn(),
   listExpertRevisions: vi.fn(),
+  listEnvironmentRevisions: vi.fn(),
 }))
 
 const publishedRevision = {
@@ -165,8 +169,10 @@ function environmentSummary(
     id,
     organizationId: 'organization-a',
     spaceId: 'space-a',
+    type: 'cloud',
     name,
     description: `${name} description`,
+    visibility: 'space',
     status: 'ready',
     activeRevisionId: `${id}-revision-1`,
     activeRevision: {
@@ -177,6 +183,7 @@ function environmentSummary(
       defaultRepository: repository,
       createdAt: '2026-07-13T08:00:00.000Z',
     },
+    provisioning: null,
     version: 1,
     createdAt: '2026-07-13T07:00:00.000Z',
     updatedAt: '2026-07-13T08:00:00.000Z',
@@ -190,7 +197,23 @@ function environmentDetail(summary: EnvironmentSummaryDto): EnvironmentDetailDto
     activeRevision: {
       ...summary.activeRevision,
       repositoryBindings: [summary.activeRevision.defaultRepository],
+      image: 'ghcr.io/relay/runtime:stable',
+      variableReferences: [],
+      hooks: [],
+      networkPolicy: { mode: 'restricted', allowedHosts: [] },
+      sharing: 'space',
+      daemonPoolId: null,
+      checksum: 'a'.repeat(64),
     },
+    latestRevision: {
+      id: summary.activeRevision.id, environmentId: summary.id,
+      revision: summary.activeRevision.revision, status: 'ready',
+      repositoryBindings: [summary.activeRevision.defaultRepository],
+      image: 'ghcr.io/relay/runtime:stable', variableReferences: [], hooks: [],
+      networkPolicy: { mode: 'restricted', allowedHosts: [] }, sharing: 'space', daemonPoolId: null,
+      checksum: 'a'.repeat(64), createdAt: summary.activeRevision.createdAt,
+    },
+    provisioningHistory: [],
   }
 }
 
@@ -251,9 +274,12 @@ describe('remote Catalog pages', () => {
     vi.mocked(getExpert).mockReset()
     vi.mocked(getEnvironment).mockReset()
     vi.mocked(createExpert).mockReset()
+    vi.mocked(createEnvironment).mockReset()
     vi.mocked(updateExpert).mockReset()
     vi.mocked(publishExpert).mockReset()
     vi.mocked(listExpertRevisions).mockReset()
+    vi.mocked(listEnvironmentRevisions).mockReset()
+    vi.mocked(listEnvironmentRevisions).mockResolvedValue({ items: [] })
     vi.mocked(listExpertRevisions).mockResolvedValue({ items: [] })
   })
 
@@ -474,6 +500,40 @@ describe('remote Catalog pages', () => {
 
     await act(async () => { rotated.resolve(environmentDetail(environmentB)) })
     expect(await screen.findByRole('heading', { name: 'Environment B' })).toBeInTheDocument()
+  })
+
+  it('lets a manager create a real Environment configuration', async () => {
+    const user = userEvent.setup()
+    vi.mocked(getEnvironment).mockResolvedValue(environmentDetail(environmentA))
+    vi.mocked(createEnvironment).mockResolvedValue(environmentDetail(environmentA))
+    const onRetry = vi.fn()
+    render(withPreferences(<RemoteEnvironmentsPage {...environmentPageProps({ canManage: true, onRetry })} />))
+
+    await user.click(screen.getByRole('button', { name: '创建环境' }))
+    await user.type(screen.getByLabelText('名称'), 'Release runtime')
+    await user.type(screen.getByLabelText('镜像'), 'ghcr.io/relay/runtime:stable')
+    await user.type(screen.getByLabelText('仓库 ID'), 'repository-release')
+    await user.type(screen.getByLabelText('仓库'), 'relay/release')
+    await user.click(screen.getByRole('button', { name: '保存并配置' }))
+
+    await waitFor(() => expect(createEnvironment).toHaveBeenCalledTimes(1))
+    expect(createEnvironment).toHaveBeenCalledWith(
+      'organization-a',
+      'space-a',
+      expect.objectContaining({
+        type: 'cloud',
+        name: 'Release runtime',
+        repositoryBindings: [{
+          repositoryId: 'repository-release', repository: 'relay/release', baseBranch: 'main', isDefault: true,
+        }],
+        variableReferences: [],
+        networkPolicy: { mode: 'restricted', allowedHosts: [] },
+        daemonPoolId: null,
+      }),
+      expect.any(String),
+      auth,
+    )
+    expect(onRetry).toHaveBeenCalled()
   })
 
   it('shows list errors in English without exposing mutation actions', async () => {

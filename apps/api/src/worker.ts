@@ -1,8 +1,11 @@
 import { OpenAiCompatibleChatCompletionsProvider } from './conversation-agent-provider.js'
 import { GovernedConversationToolBroker } from './conversation-tool-broker.js'
 import { ExecutionWorker, type ExecutionWorkerLogger } from './execution-worker.js'
+import { UnavailableEnvironmentProvisioner } from './environment-provisioning-repository.js'
+import { EnvironmentProvisioningWorker } from './environment-provisioning-worker.js'
 import { assertMigrationsCurrent } from './migrations.js'
 import { PostgresExecutionRepository } from './postgres-execution-repository.js'
+import { PostgresEnvironmentProvisioningRepository } from './postgres-environment-provisioning-repository.js'
 import { PostgresFileRepository } from './postgres-file-repository.js'
 import { assertRuntimeDatabaseRole, createRuntimePool } from './postgres-runtime-database.js'
 import { PostgresToolCoordinatorRepository } from './postgres-tool-coordinator-repository.js'
@@ -35,6 +38,16 @@ try {
   await assertMigrationsCurrent(pool)
   const provider = new OpenAiCompatibleChatCompletionsProvider(config.provider)
   const repository = new PostgresExecutionRepository(pool)
+  const environmentProvisioningWorker = new EnvironmentProvisioningWorker({
+    repository: new PostgresEnvironmentProvisioningRepository(pool),
+    provisioner: new UnavailableEnvironmentProvisioner(),
+    workerId: config.workerId,
+    leaseDurationMs: config.leaseDurationMs,
+    heartbeatIntervalMs: config.heartbeatIntervalMs,
+    pollIntervalMs: config.pollIntervalMs,
+    recoveryBatchSize: config.recoveryBatchSize,
+    logger,
+  })
   const toolBroker = new GovernedConversationToolBroker(
     new PostgresToolCoordinatorRepository(pool),
     new PostgresFileRepository(pool),
@@ -59,7 +72,10 @@ try {
   }, shutdown.signal)
   logger.info('execution_worker_started', { workerId: config.workerId })
   try {
-    await worker.run(shutdown.signal)
+    await Promise.all([
+      worker.run(shutdown.signal),
+      environmentProvisioningWorker.run(shutdown.signal),
+    ])
   } finally {
     shutdown.abort()
     await readinessHeartbeat

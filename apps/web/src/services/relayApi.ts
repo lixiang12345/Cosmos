@@ -5,6 +5,8 @@ import {
   ContextEngineStatusSchema,
   ContextPackResponseSchema,
   ContextSearchResponseSchema,
+  EnvironmentMutationResponseSchema,
+  EnvironmentRevisionListResponseSchema,
   CreateSessionResponseSchema,
   EnvironmentDetailDtoSchema,
   EnvironmentListResponseSchema,
@@ -32,6 +34,7 @@ import {
   type ApprovalListResponse,
   type ApprovalStatus,
   type CreateSessionRequestInput,
+  type CreateEnvironmentRequestInput,
   type CreateSessionResponse,
   type CreateExpertRequestInput,
   type ContextEngineStatus,
@@ -41,6 +44,7 @@ import {
   type ContextSearchResponse,
   type EnvironmentDetailDto,
   type EnvironmentListResponse,
+  type EnvironmentRevisionListResponse,
   type ExpertDetailDto,
   type ExpertListResponse,
   type ExpertRevisionListResponse,
@@ -63,6 +67,7 @@ import {
   type SendSessionMessageResponse,
   type StartSessionResponse,
   type UpdateExpertRequestInput,
+  type UpdateEnvironmentRequestInput,
 } from '@relay/contracts'
 
 const DEFAULT_RELAY_API_BASE_URL = '/api'
@@ -1463,6 +1468,118 @@ export function getEnvironment(
   }, EnvironmentDetailDtoSchema, auth).then((environment) => {
     assertControlPlaneScope(environment, organizationId, spaceId, 'Environment', environmentId)
     return environment
+  })
+}
+
+export function createEnvironment(
+  organizationId: string,
+  spaceId: string,
+  input: CreateEnvironmentRequestInput,
+  idempotencyKey: string,
+  auth?: RelayApiAuthContext,
+): Promise<EnvironmentDetailDto> {
+  return request(environmentsPath(organizationId, spaceId), {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey,
+    },
+    body: JSON.stringify(input),
+  }, EnvironmentMutationResponseSchema, auth).then(({ environment }) => {
+    assertControlPlaneScope(environment, organizationId, spaceId, 'Environment')
+    return environment
+  })
+}
+
+export function updateEnvironment(
+  organizationId: string,
+  spaceId: string,
+  environmentId: string,
+  input: UpdateEnvironmentRequestInput,
+  version: number,
+  idempotencyKey: string,
+  auth?: RelayApiAuthContext,
+): Promise<EnvironmentDetailDto> {
+  return request(`${environmentsPath(organizationId, spaceId)}/${encodeURIComponent(environmentId)}`, {
+    method: 'PATCH',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/merge-patch+json',
+      'If-Match': `"${version}"`,
+      'Idempotency-Key': idempotencyKey,
+    },
+    body: JSON.stringify(input),
+  }, EnvironmentMutationResponseSchema, auth).then(({ environment }) => {
+    assertControlPlaneScope(environment, organizationId, spaceId, 'Environment', environmentId)
+    return environment
+  })
+}
+
+function mutateEnvironmentStatus(
+  action: 'retry' | 'disable',
+  organizationId: string,
+  spaceId: string,
+  environmentId: string,
+  version: number,
+  idempotencyKey: string,
+  auth?: RelayApiAuthContext,
+) {
+  return request(`${environmentsPath(organizationId, spaceId)}/${encodeURIComponent(environmentId)}/${action}`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'If-Match': `"${version}"`,
+      'Idempotency-Key': idempotencyKey,
+    },
+  }, EnvironmentMutationResponseSchema, auth).then(({ environment }) => {
+    assertControlPlaneScope(environment, organizationId, spaceId, 'Environment', environmentId)
+    return environment
+  })
+}
+
+export const retryEnvironment = mutateEnvironmentStatus.bind(undefined, 'retry')
+export const disableEnvironment = mutateEnvironmentStatus.bind(undefined, 'disable')
+
+export function archiveEnvironment(
+  organizationId: string,
+  spaceId: string,
+  environmentId: string,
+  version: number,
+  idempotencyKey: string,
+  auth?: RelayApiAuthContext,
+): Promise<EnvironmentDetailDto> {
+  return request(`${environmentsPath(organizationId, spaceId)}/${encodeURIComponent(environmentId)}`, {
+    method: 'DELETE',
+    headers: {
+      Accept: 'application/json',
+      'If-Match': `"${version}"`,
+      'Idempotency-Key': idempotencyKey,
+    },
+  }, EnvironmentMutationResponseSchema, auth).then(({ environment }) => {
+    assertControlPlaneScope(environment, organizationId, spaceId, 'Environment', environmentId)
+    return environment
+  })
+}
+
+export function listEnvironmentRevisions(
+  organizationId: string,
+  spaceId: string,
+  environmentId: string,
+  auth?: RelayApiAuthContext,
+  signal?: AbortSignal,
+): Promise<EnvironmentRevisionListResponse> {
+  return request(`${environmentsPath(organizationId, spaceId)}/${encodeURIComponent(environmentId)}/revisions`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    signal,
+  }, EnvironmentRevisionListResponseSchema, auth).then((response) => {
+    if (response.items.some((revision) => revision.environmentId !== environmentId)) {
+      throw new RelayApiError('Relay API returned an Environment revision outside the requested scope.', {
+        code: 'INVALID_RESPONSE', status: 200,
+      })
+    }
+    return response
   })
 }
 

@@ -744,6 +744,7 @@ paths:
     post:
       tags: [Environments]
       operationId: createEnvironment
+      x-relay-implementation-status: implemented
       summary: Create and provision an Environment
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -759,17 +760,17 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                required: [environment, command]
-                properties:
-                  environment:
-                    $ref: '#/components/schemas/Environment'
-                  command:
-                    $ref: '#/components/schemas/Command'
+                $ref: '#/components/schemas/RuntimeEnvironmentMutationResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/RuntimeCatalogBadRequest'
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/RuntimeConflict'
+        '401':
+          $ref: '#/components/responses/RuntimeCatalogUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeCatalogForbidden'
+        '500':
+          $ref: '#/components/responses/RuntimeCatalogInternalError'
 
   /organizations/{organizationId}/spaces/{spaceId}/environments/{environmentId}:
     parameters:
@@ -816,6 +817,7 @@ paths:
     patch:
       tags: [Environments]
       operationId: updateEnvironment
+      x-relay-implementation-status: implemented
       summary: Create and provision a new immutable Environment revision
       parameters:
         - $ref: '#/components/parameters/IfMatch'
@@ -832,23 +834,50 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Command'
+                $ref: '#/components/schemas/RuntimeEnvironmentMutationResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/RuntimeCatalogBadRequest'
         '412':
-          $ref: '#/components/responses/PreconditionFailed'
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '401':
+          $ref: '#/components/responses/RuntimeCatalogUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeCatalogForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeCatalogNotFound'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
+        '500':
+          $ref: '#/components/responses/RuntimeCatalogInternalError'
     delete:
       tags: [Environments]
       operationId: deleteEnvironment
+      x-relay-implementation-status: implemented
       summary: Schedule deletion of an unreferenced Environment
       parameters:
         - $ref: '#/components/parameters/IfMatch'
         - $ref: '#/components/parameters/IdempotencyKey'
       responses:
-        '202':
-          $ref: '#/components/responses/CommandAccepted'
+        '200':
+          description: Environment archived
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeEnvironmentMutationResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeCatalogBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeCatalogUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeCatalogForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeCatalogNotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/RuntimeConflict'
+        '412':
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '500':
+          $ref: '#/components/responses/RuntimeCatalogInternalError'
 
   /organizations/{organizationId}/spaces/{spaceId}/sessions:
     parameters:
@@ -2167,6 +2196,7 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '412':
           $ref: '#/components/responses/PreconditionFailed'
+
     delete:
       tags: [Automations]
       operationId: deleteAutomation
@@ -2180,6 +2210,103 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
 
+  /organizations/{organizationId}/spaces/{spaceId}/environments/{environmentId}/retry:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/EnvironmentId'
+    post:
+      tags: [Environments]
+      operationId: retryEnvironment
+      x-relay-implementation-status: implemented
+      summary: Retry a failed Environment provisioning job
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202':
+          description: Retry accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeEnvironmentMutationResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeCatalogBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeCatalogUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeCatalogForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeCatalogNotFound'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
+        '412':
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '500':
+          $ref: '#/components/responses/RuntimeCatalogInternalError'
+
+  /organizations/{organizationId}/spaces/{spaceId}/environments/{environmentId}/disable:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/EnvironmentId'
+    post:
+      tags: [Environments]
+      operationId: disableEnvironment
+      x-relay-implementation-status: implemented
+      summary: Disable an Environment for new Sessions
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Environment disabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeEnvironmentMutationResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeCatalogBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeCatalogUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeCatalogForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeCatalogNotFound'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
+        '412':
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '500':
+          $ref: '#/components/responses/RuntimeCatalogInternalError'
+
+  /organizations/{organizationId}/spaces/{spaceId}/environments/{environmentId}/revisions:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/EnvironmentId'
+    get:
+      tags: [Environments]
+      operationId: listEnvironmentRevisions
+      x-relay-implementation-status: implemented
+      summary: List immutable Environment revisions
+      responses:
+        '200':
+          description: Environment revisions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeEnvironmentRevisionListResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeCatalogBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeCatalogUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeCatalogForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeCatalogNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeCatalogInternalError'
   /organizations/{organizationId}/spaces/{spaceId}/automations/{automationId}/activate:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -3442,7 +3569,7 @@ components:
       additionalProperties: false
     RuntimeEnvironmentActiveRevisionDetail:
       type: object
-      required: [id, environmentId, revision, status, defaultRepository, repositoryBindings, createdAt]
+      required: [id, environmentId, revision, status, defaultRepository, image, repositoryBindings, variableReferences, hooks, networkPolicy, sharing, daemonPoolId, checksum, createdAt]
       properties:
         id:
           $ref: '#/components/schemas/RuntimeIdentifier'
@@ -3456,6 +3583,10 @@ components:
           const: ready
         defaultRepository:
           $ref: '#/components/schemas/RuntimeEnvironmentDefaultRepository'
+        image:
+          type: string
+          minLength: 1
+          maxLength: 1000
         repositoryBindings:
           type: array
           minItems: 1
@@ -3463,6 +3594,28 @@ components:
           description: Contains exactly one binding with `isDefault=true`; it matches `defaultRepository`.
           items:
             $ref: '#/components/schemas/RuntimeEnvironmentRepositoryBinding'
+        variableReferences:
+          type: array
+          maxItems: 128
+          items:
+            $ref: '#/components/schemas/RuntimeEnvironmentVariableReference'
+        hooks:
+          type: array
+          maxItems: 32
+          items:
+            $ref: '#/components/schemas/RuntimeEnvironmentHook'
+        networkPolicy:
+          $ref: '#/components/schemas/RuntimeEnvironmentNetworkPolicy'
+        sharing:
+          type: string
+          enum: [private, space]
+        daemonPoolId:
+          oneOf:
+            - $ref: '#/components/schemas/RuntimeIdentifier'
+            - type: 'null'
+        checksum:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
         createdAt:
           $ref: '#/components/schemas/Timestamp'
       additionalProperties: false
@@ -3472,11 +3625,14 @@ components:
         - id
         - organizationId
         - spaceId
+        - type
         - name
         - description
+        - visibility
         - status
         - activeRevisionId
         - activeRevision
+        - provisioning
         - version
         - createdAt
         - updatedAt
@@ -3487,6 +3643,9 @@ components:
           $ref: '#/components/schemas/RuntimeIdentifier'
         spaceId:
           $ref: '#/components/schemas/RuntimeIdentifier'
+        type:
+          type: string
+          enum: [cloud, daemon]
         name:
           type: string
           minLength: 1
@@ -3494,6 +3653,9 @@ components:
         description:
           type: string
           maxLength: 10000
+        visibility:
+          type: string
+          enum: [private, space]
         status:
           $ref: '#/components/schemas/EnvironmentStatus'
         activeRevisionId:
@@ -3503,6 +3665,10 @@ components:
         activeRevision:
           oneOf:
             - $ref: '#/components/schemas/RuntimeEnvironmentActiveRevisionSummary'
+            - type: 'null'
+        provisioning:
+          oneOf:
+            - $ref: '#/components/schemas/RuntimeEnvironmentProvisioning'
             - type: 'null'
         version:
           type: integer
@@ -3518,11 +3684,16 @@ components:
         - id
         - organizationId
         - spaceId
+        - type
         - name
         - description
+        - visibility
         - status
         - activeRevisionId
         - activeRevision
+        - latestRevision
+        - provisioning
+        - provisioningHistory
         - version
         - createdAt
         - updatedAt
@@ -3533,6 +3704,9 @@ components:
           $ref: '#/components/schemas/RuntimeIdentifier'
         spaceId:
           $ref: '#/components/schemas/RuntimeIdentifier'
+        type:
+          type: string
+          enum: [cloud, daemon]
         name:
           type: string
           minLength: 1
@@ -3540,6 +3714,9 @@ components:
         description:
           type: string
           maxLength: 10000
+        visibility:
+          type: string
+          enum: [private, space]
         status:
           $ref: '#/components/schemas/EnvironmentStatus'
         activeRevisionId:
@@ -3550,6 +3727,17 @@ components:
           oneOf:
             - $ref: '#/components/schemas/RuntimeEnvironmentActiveRevisionDetail'
             - type: 'null'
+        latestRevision:
+          $ref: '#/components/schemas/RuntimeEnvironmentRevision'
+        provisioning:
+          oneOf:
+            - $ref: '#/components/schemas/RuntimeEnvironmentProvisioning'
+            - type: 'null'
+        provisioningHistory:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/RuntimeEnvironmentProvisioning'
         version:
           type: integer
           minimum: 1
@@ -3569,6 +3757,157 @@ components:
             $ref: '#/components/schemas/RuntimeEnvironmentSummary'
         page:
           $ref: '#/components/schemas/RuntimeCatalogPageMetadata'
+      additionalProperties: false
+    RuntimeEnvironmentMutationResponse:
+      type: object
+      required: [environment, replayed]
+      properties:
+        environment:
+          $ref: '#/components/schemas/RuntimeEnvironmentDetail'
+        replayed:
+          type: boolean
+      additionalProperties: false
+    RuntimeEnvironmentRevisionListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/RuntimeEnvironmentRevision'
+      additionalProperties: false
+    RuntimeEnvironmentVariableReference:
+      type: object
+      required: [name, secretId]
+      properties:
+        name:
+          type: string
+          pattern: '^[A-Za-z_][A-Za-z0-9_]*$'
+        secretId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+      additionalProperties: false
+    RuntimeEnvironmentHook:
+      type: object
+      required: [phase, command, timeoutSeconds]
+      properties:
+        phase:
+          type: string
+          enum: [setup, start, stop]
+        command:
+          type: string
+          minLength: 1
+          maxLength: 10000
+        timeoutSeconds:
+          type: integer
+          minimum: 1
+          maximum: 3600
+      additionalProperties: false
+    RuntimeEnvironmentNetworkPolicy:
+      type: object
+      required: [mode, allowedHosts]
+      properties:
+        mode:
+          type: string
+          enum: [restricted, allowlist, unrestricted]
+        allowedHosts:
+          type: array
+          maxItems: 256
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 253
+      additionalProperties: false
+    RuntimeEnvironmentRevision:
+      type: object
+      required: [id, environmentId, revision, status, image, repositoryBindings, variableReferences, hooks, networkPolicy, sharing, daemonPoolId, checksum, createdAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        environmentId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        revision:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          enum: [provisioning, ready, failed]
+        image:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        repositoryBindings:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items:
+            $ref: '#/components/schemas/RuntimeEnvironmentRepositoryBinding'
+        variableReferences:
+          type: array
+          maxItems: 128
+          items:
+            $ref: '#/components/schemas/RuntimeEnvironmentVariableReference'
+        hooks:
+          type: array
+          maxItems: 32
+          items:
+            $ref: '#/components/schemas/RuntimeEnvironmentHook'
+        networkPolicy:
+          $ref: '#/components/schemas/RuntimeEnvironmentNetworkPolicy'
+        sharing:
+          type: string
+          enum: [private, space]
+        daemonPoolId:
+          oneOf:
+            - $ref: '#/components/schemas/RuntimeIdentifier'
+            - type: 'null'
+        checksum:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+      additionalProperties: false
+    RuntimeEnvironmentProvisioning:
+      type: object
+      required: [jobId, revisionId, phase, progress, attempt, maxAttempts, error, createdAt, updatedAt]
+      properties:
+        jobId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        revisionId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        phase:
+          type: string
+          enum: [queued, validating, pulling_image, configuring, connecting_daemon, ready, failed]
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        attempt:
+          type: integer
+          minimum: 1
+        maxAttempts:
+          type: integer
+          minimum: 1
+        error:
+          oneOf:
+            - type: object
+              required: [code, message, retryable]
+              properties:
+                code:
+                  type: string
+                  maxLength: 128
+                message:
+                  type: string
+                  maxLength: 1000
+                retryable:
+                  type: boolean
+              additionalProperties: false
+            - type: 'null'
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        updatedAt:
+          $ref: '#/components/schemas/Timestamp'
       additionalProperties: false
     RuntimeCapabilities:
       type: object
@@ -4276,6 +4615,8 @@ components:
           $ref: '#/components/schemas/RuntimeIdentifier'
         environmentRevisionId:
           $ref: '#/components/schemas/RuntimeIdentifier'
+        executionSnapshotId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
         repositoryId:
           $ref: '#/components/schemas/RuntimeIdentifier'
         repository:
@@ -4324,8 +4665,9 @@ components:
             properties:
               expertRevisionId: {}
               environmentRevisionId: {}
+              executionSnapshotId: {}
               repositoryId: {}
-            required: [expertRevisionId, environmentRevisionId, repositoryId]
+            required: [expertRevisionId, environmentRevisionId, executionSnapshotId, repositoryId]
         - if:
             properties:
               configurationResolutionVersion:
@@ -4340,6 +4682,9 @@ components:
                 - properties:
                     environmentRevisionId: {}
                   required: [environmentRevisionId]
+                - properties:
+                    executionSnapshotId: {}
+                  required: [executionSnapshotId]
                 - properties:
                     repositoryId: {}
                   required: [repositoryId]
@@ -5252,95 +5597,10 @@ components:
       enum: [draft, published, disabled, archived]
     EnvironmentStatus:
       type: string
-      enum: [draft, provisioning, ready, updating, failed, disabled]
-    Environment:
-      allOf:
-        - $ref: '#/components/schemas/ResourceBase'
-        - type: object
-          required: [spaceId, type, name, slug, status]
-          properties:
-            spaceId:
-              type: string
-              format: uuid
-            type:
-              type: string
-              enum: [cloud, daemon]
-            name:
-              type: string
-            slug:
-              type: string
-            status:
-              $ref: '#/components/schemas/EnvironmentStatus'
-            activeRevisionId:
-              type: [string, 'null']
-              format: uuid
-            provisioning:
-              $ref: '#/components/schemas/EnvironmentProvisioning'
-            activeRevision:
-              oneOf:
-                - $ref: '#/components/schemas/EnvironmentRevision'
-                - type: 'null'
-    EnvironmentRevision:
-      type: object
-      required: [id, environmentId, revision, image, repositoryBindings, variableReferences, hooks, networkPolicy, sharing, checksum, createdAt]
-      properties:
-        id:
-          type: string
-          format: uuid
-        environmentId:
-          type: string
-          format: uuid
-        revision:
-          type: integer
-          minimum: 1
-        image:
-          type: string
-        repositoryBindings:
-          type: array
-          items:
-            $ref: '#/components/schemas/RepositoryBinding'
-        variableReferences:
-          type: array
-          items:
-            $ref: '#/components/schemas/VariableReference'
-        hooks:
-          type: array
-          items:
-            $ref: '#/components/schemas/EnvironmentHook'
-        networkPolicy:
-          $ref: '#/components/schemas/NetworkPolicy'
-        sharing:
-          type: string
-          enum: [private, space]
-        daemonPoolId:
-          type: [string, 'null']
-          format: uuid
-        enterpriseResourcePolicy:
-          oneOf:
-            - $ref: '#/components/schemas/JsonObject'
-            - type: 'null'
-        checksum:
-          type: string
-        createdAt:
-          $ref: '#/components/schemas/Timestamp'
-    EnvironmentProvisioning:
-      type: object
-      required: [phase, progress, message, updatedAt]
-      properties:
-        phase:
-          type: string
-          enum: [queued, pulling_image, configuring, ready, failed]
-        progress:
-          type: integer
-          minimum: 0
-          maximum: 100
-        message:
-          type: string
-        updatedAt:
-          $ref: '#/components/schemas/Timestamp'
+      enum: [draft, provisioning, ready, updating, failed, disabled, archived]
     EnvironmentCreate:
       type: object
-      required: [type, name, image]
+      required: [type, name, image, repositoryBindings, variableReferences, hooks, networkPolicy, sharing, daemonPoolId]
       properties:
         type:
           type: string
@@ -5348,122 +5608,87 @@ components:
         name:
           type: string
           minLength: 1
-          maxLength: 120
-        slug:
+          maxLength: 160
+        description:
           type: string
-          pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+          maxLength: 10000
+          default: ''
+        visibility:
+          type: string
+          enum: [private, space]
+          default: space
         image:
           type: string
           minLength: 1
         repositoryBindings:
           type: array
+          minItems: 1
+          maxItems: 64
           items:
-            $ref: '#/components/schemas/RepositoryBinding'
+            $ref: '#/components/schemas/RuntimeEnvironmentRepositoryBinding'
         variableReferences:
           type: array
+          maxItems: 128
           items:
-            $ref: '#/components/schemas/VariableReference'
+            $ref: '#/components/schemas/RuntimeEnvironmentVariableReference'
         hooks:
           type: array
+          maxItems: 32
           items:
-            $ref: '#/components/schemas/EnvironmentHook'
+            $ref: '#/components/schemas/RuntimeEnvironmentHook'
         networkPolicy:
-          $ref: '#/components/schemas/NetworkPolicy'
+          $ref: '#/components/schemas/RuntimeEnvironmentNetworkPolicy'
         sharing:
           type: string
           enum: [private, space]
           default: space
         daemonPoolId:
-          type: string
-          format: uuid
-        enterpriseResourcePolicy:
-          $ref: '#/components/schemas/JsonObject'
+          oneOf:
+            - $ref: '#/components/schemas/RuntimeIdentifier'
+            - type: 'null'
       additionalProperties: false
     EnvironmentPatch:
       type: object
+      minProperties: 1
       properties:
         name:
           type: string
           minLength: 1
-          maxLength: 120
+          maxLength: 160
+        description:
+          type: string
+          maxLength: 10000
+        visibility:
+          type: string
+          enum: [private, space]
         image:
           type: string
         repositoryBindings:
           type: array
+          minItems: 1
+          maxItems: 64
           items:
-            $ref: '#/components/schemas/RepositoryBinding'
+            $ref: '#/components/schemas/RuntimeEnvironmentRepositoryBinding'
         variableReferences:
           type: array
+          maxItems: 128
           items:
-            $ref: '#/components/schemas/VariableReference'
+            $ref: '#/components/schemas/RuntimeEnvironmentVariableReference'
         hooks:
           type: array
+          maxItems: 32
           items:
-            $ref: '#/components/schemas/EnvironmentHook'
+            $ref: '#/components/schemas/RuntimeEnvironmentHook'
         networkPolicy:
-          $ref: '#/components/schemas/NetworkPolicy'
+          $ref: '#/components/schemas/RuntimeEnvironmentNetworkPolicy'
         sharing:
           type: string
           enum: [private, space]
-        status:
-          type: string
-          enum: [ready, disabled]
-        enterpriseResourcePolicy:
+        daemonPoolId:
           oneOf:
-            - $ref: '#/components/schemas/JsonObject'
+            - $ref: '#/components/schemas/RuntimeIdentifier'
             - type: 'null'
       additionalProperties: false
-    RepositoryBinding:
-      type: object
-      required: [repositoryId, defaultBranch, mountPath]
-      properties:
-        repositoryId:
-          type: string
-          format: uuid
-        defaultBranch:
-          type: string
-        mountPath:
-          type: string
-        readOnly:
-          type: boolean
-          default: false
-    VariableReference:
-      type: object
-      required: [name, secretId]
-      properties:
-        name:
-          type: string
-          pattern: '^[A-Za-z_][A-Za-z0-9_]*$'
-        secretId:
-          type: string
-          format: uuid
-    EnvironmentHook:
-      type: object
-      required: [phase, command]
-      properties:
-        phase:
-          type: string
-          enum: [setup, start, stop]
-        command:
-          type: string
-          maxLength: 10000
-        timeoutSeconds:
-          type: integer
-          minimum: 1
-          maximum: 3600
-    NetworkPolicy:
-      type: object
-      required: [mode, allowedHosts]
-      properties:
-        mode:
-          type: string
-          enum: [restricted, allowlist, unrestricted]
-        allowedHosts:
-          type: array
-          uniqueItems: true
-          maxItems: 256
-          items:
-            type: string
 
     SessionStatus:
       type: string

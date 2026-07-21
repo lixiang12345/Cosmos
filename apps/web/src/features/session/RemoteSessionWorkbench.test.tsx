@@ -18,6 +18,7 @@ const session: SessionDto = {
   configurationResolutionVersion: 1,
   expertRevisionId: 'expert-revision-4',
   environmentRevisionId: 'environment-revision-7',
+  executionSnapshotId: 'execution-snapshot-7',
   repositoryId: 'repository-binding-2',
   repository: 'relay/checkout',
   baseBranch: 'main',

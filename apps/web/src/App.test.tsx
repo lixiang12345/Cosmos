@@ -81,8 +81,10 @@ const productionEnvironment: EnvironmentSummaryDto = {
   id: 'environment-production',
   organizationId: 'organization-production',
   spaceId: 'space-production',
+  type: 'cloud',
   name: 'Production runtime',
   description: 'Production execution environment.',
+  visibility: 'space',
   status: 'ready',
   activeRevisionId: 'environment-revision-production',
   activeRevision: {
@@ -93,6 +95,7 @@ const productionEnvironment: EnvironmentSummaryDto = {
     defaultRepository: productionDefaultRepository,
     createdAt: '2026-07-12T04:00:00.000Z',
   },
+  provisioning: null,
   version: 2,
   createdAt: '2026-07-12T03:00:00.000Z',
   updatedAt: '2026-07-12T04:00:00.000Z',
@@ -103,7 +106,22 @@ const productionEnvironmentDetail: EnvironmentDetailDto = {
   activeRevision: {
     ...productionEnvironment.activeRevision!,
     repositoryBindings: [productionDefaultRepository],
+    image: 'ghcr.io/relay/runtime:stable',
+    variableReferences: [],
+    hooks: [],
+    networkPolicy: { mode: 'restricted', allowedHosts: [] },
+    sharing: 'space',
+    daemonPoolId: null,
+    checksum: 'a'.repeat(64),
   },
+  latestRevision: {
+    id: 'environment-revision-production', environmentId: 'environment-production', revision: 3,
+    status: 'ready', repositoryBindings: [productionDefaultRepository],
+    image: 'ghcr.io/relay/runtime:stable', variableReferences: [], hooks: [],
+    networkPolicy: { mode: 'restricted', allowedHosts: [] }, sharing: 'space', daemonPoolId: null,
+    checksum: 'a'.repeat(64), createdAt: '2026-07-12T04:00:00.000Z',
+  },
+  provisioningHistory: [],
 }
 
 const productionExpert: ExpertSummaryDto = {
@@ -163,6 +181,7 @@ function makeApiSession(
     configurationResolutionVersion: 1,
     expertRevisionId: 'expert-revision-authoritative',
     environmentRevisionId: 'environment-revision-authoritative',
+    executionSnapshotId: 'execution-snapshot-authoritative',
     repositoryId: input.advancedOverrides?.repositoryId ?? 'repository-authoritative',
     repository: input.repository ?? 'authoritative/repository',
     baseBranch: input.advancedOverrides?.baseBranch ?? input.baseBranch ?? 'main',

@@ -1,11 +1,14 @@
 import type {
+  CreateEnvironmentRequest,
   CreateExpertRequest,
   EnvironmentDetailDto,
+  EnvironmentRevisionDto,
   EnvironmentSummaryDto,
   ExpertDetailDto,
   ExpertSummaryDto,
   ExpertDraftRevisionDto,
   ExpertPublishedRevisionDto,
+  UpdateEnvironmentRequest,
   UpdateExpertRequest,
 } from '@relay/contracts'
 
@@ -51,6 +54,31 @@ export type ExpertMutationResult = {
   replayed: boolean
 }
 
+export type CreateEnvironmentRecord = {
+  organizationId: string
+  spaceId: string
+  actorId: string
+  idempotencyKey: string
+  request: CreateEnvironmentRequest
+}
+
+export type UpdateEnvironmentRecord = {
+  organizationId: string
+  spaceId: string
+  environmentId: string
+  actorId: string
+  expectedVersion: number
+  idempotencyKey: string
+  request: UpdateEnvironmentRequest
+}
+
+export type EnvironmentVersionMutationRecord = Omit<UpdateEnvironmentRecord, 'request'>
+
+export type EnvironmentMutationResult = {
+  environment: EnvironmentDetailDto
+  replayed: boolean
+}
+
 export interface ConfigurationCatalogRepository {
   hasRepositoryAccess(
     organizationId: string,
@@ -93,6 +121,17 @@ export interface ConfigurationCatalogRepository {
     environmentId: string,
     actorId: string,
   ): Promise<EnvironmentDetailDto | null>
+  createEnvironment(record: CreateEnvironmentRecord): Promise<EnvironmentMutationResult>
+  updateEnvironment(record: UpdateEnvironmentRecord): Promise<EnvironmentMutationResult | null>
+  retryEnvironment(record: EnvironmentVersionMutationRecord): Promise<EnvironmentMutationResult | null>
+  disableEnvironment(record: EnvironmentVersionMutationRecord): Promise<EnvironmentMutationResult | null>
+  archiveEnvironment(record: EnvironmentVersionMutationRecord): Promise<EnvironmentMutationResult | null>
+  listEnvironmentRevisions(
+    organizationId: string,
+    spaceId: string,
+    environmentId: string,
+    actorId: string,
+  ): Promise<EnvironmentRevisionDto[] | null>
 }
 
 function emptyPage<T>(): ConfigurationCatalogPage<T> {
@@ -161,6 +200,59 @@ export class EmptyConfigurationCatalogRepository implements ConfigurationCatalog
   getEnvironment(...arguments_: Parameters<ConfigurationCatalogRepository['getEnvironment']>): Promise<null> {
     void arguments_
     return Promise.resolve(null)
+  }
+
+  createEnvironment(...arguments_: Parameters<ConfigurationCatalogRepository['createEnvironment']>): Promise<EnvironmentMutationResult> {
+    void arguments_
+    return Promise.reject(new Error('Environment mutations require a database-backed Catalog repository.'))
+  }
+
+  updateEnvironment(...arguments_: Parameters<ConfigurationCatalogRepository['updateEnvironment']>): Promise<null> {
+    void arguments_
+    return Promise.resolve(null)
+  }
+
+  retryEnvironment(...arguments_: Parameters<ConfigurationCatalogRepository['retryEnvironment']>): Promise<null> {
+    void arguments_
+    return Promise.resolve(null)
+  }
+
+  disableEnvironment(...arguments_: Parameters<ConfigurationCatalogRepository['disableEnvironment']>): Promise<null> {
+    void arguments_
+    return Promise.resolve(null)
+  }
+
+  archiveEnvironment(...arguments_: Parameters<ConfigurationCatalogRepository['archiveEnvironment']>): Promise<null> {
+    void arguments_
+    return Promise.resolve(null)
+  }
+
+  listEnvironmentRevisions(
+    ...arguments_: Parameters<ConfigurationCatalogRepository['listEnvironmentRevisions']>
+  ): Promise<null> {
+    void arguments_
+    return Promise.resolve(null)
+  }
+}
+
+export class EnvironmentVersionConflictError extends Error {
+  constructor(readonly expectedVersion: number, readonly actualVersion: number) {
+    super(`Environment version ${expectedVersion} does not match current version ${actualVersion}.`)
+    this.name = 'EnvironmentVersionConflictError'
+  }
+}
+
+export class EnvironmentStateConflictError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'EnvironmentStateConflictError'
+  }
+}
+
+export class EnvironmentIdempotencyConflictError extends Error {
+  constructor() {
+    super('The Idempotency-Key was already used with a different Environment request.')
+    this.name = 'EnvironmentIdempotencyConflictError'
   }
 }
 

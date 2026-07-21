@@ -86,6 +86,7 @@ type SessionRow = {
   expert_revision_id: string | null
   environment_id: string | null
   environment_revision_id: string | null
+  execution_snapshot_id: string | null
   repository_id: string | null
   configuration_resolution_version: 0 | 1
   repository: string
@@ -164,6 +165,7 @@ function mapSession(row: SessionRow): SessionDto {
     expertRevisionId: row.expert_revision_id ?? undefined,
     environmentId: row.environment_id ?? undefined,
     environmentRevisionId: row.environment_revision_id ?? undefined,
+    executionSnapshotId: row.execution_snapshot_id ?? undefined,
     repositoryId: row.repository_id ?? undefined,
     configurationResolutionVersion: row.configuration_resolution_version,
     repository: row.repository,
@@ -237,7 +239,7 @@ function responseToRetryResult(response: RetryTurnResponse, replayed: boolean): 
 const sessionColumns = `
   id, organization_id, space_id, title, summary, expert_id, expert_name,
   expert_version, expert_revision_id, environment_id, environment_revision_id,
-  repository_id, configuration_resolution_version, repository, base_branch,
+  execution_snapshot_id, repository_id, configuration_resolution_version, repository, base_branch,
   visibility, status, attachments, source, created_at, updated_at,
   last_activity_at, archived_at, version
 `
@@ -2582,18 +2584,45 @@ export class PostgresSessionRepository implements SessionRepository {
       timestamp: now.toISOString(),
     })
     const startRecords = createSessionRecords(record, session, { createId: this.createId })
+    if (session.configurationResolutionVersion === 1) {
+      if (!session.executionSnapshotId
+        || !session.environmentId
+        || !session.environmentRevisionId
+        || !session.repositoryId
+        || !configuration.environmentType
+        || !configuration.environmentImage
+        || !configuration.environmentNetworkPolicy
+        || !configuration.environmentChecksum) {
+        throw new Error('Resolved Session configuration is missing its execution snapshot fields.')
+      }
+      await client.query(`
+        INSERT INTO relay_execution_snapshots (
+          organization_id, space_id, id, environment_id, environment_revision_id,
+          environment_type, image, repository_id, repository, base_branch,
+          variable_references, network_policy, checksum, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14)
+      `, [
+        session.organizationId, session.spaceId, session.executionSnapshotId,
+        session.environmentId, session.environmentRevisionId, configuration.environmentType,
+        configuration.environmentImage, session.repositoryId, session.repository, session.baseBranch,
+        JSON.stringify(configuration.environmentVariableReferences ?? []),
+        JSON.stringify(configuration.environmentNetworkPolicy), configuration.environmentChecksum,
+        session.createdAt,
+      ])
+    }
     await client.query(`
       INSERT INTO relay_sessions (
         ${sessionColumns}, created_by
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-        $15, $16, $17, $18::jsonb, $19, $20, $21, $22, NULL, $23, $24
+        $15, $16, $17, $18, $19::jsonb, $20, $21, $22, $23, NULL, $24, $25
       )
     `, [
       session.id, session.organizationId, session.spaceId, session.title, session.summary,
       session.expertId, session.expertName, session.expertVersion ?? null,
       session.expertRevisionId ?? null, session.environmentId ?? null,
-      session.environmentRevisionId ?? null, session.repositoryId ?? null,
+      session.environmentRevisionId ?? null, session.executionSnapshotId ?? null,
+      session.repositoryId ?? null,
       session.configurationResolutionVersion, session.repository, session.baseBranch,
       session.visibility, session.status, JSON.stringify(session.attachments), session.source,
       session.createdAt, session.updatedAt, session.lastActivityAt, session.version, record.actorId,
@@ -3056,10 +3085,11 @@ export class PostgresSessionRepository implements SessionRepository {
     if (!expertRevisionRow || expertRevisionRow.status !== 'published') throw new ExpertNotPublishedError()
 
     const environment = await client.query<{
-      status: 'draft' | 'provisioning' | 'ready' | 'updating' | 'failed' | 'disabled'
+      type: 'cloud' | 'daemon'
+      status: 'draft' | 'provisioning' | 'ready' | 'updating' | 'failed' | 'disabled' | 'archived'
       active_revision_id: string | null
     }>(`
-      SELECT status, active_revision_id
+      SELECT type, status, active_revision_id
       FROM relay_environments
       WHERE organization_id = $1 AND space_id = $2 AND id = $3
       FOR UPDATE
@@ -3073,8 +3103,12 @@ export class PostgresSessionRepository implements SessionRepository {
       throw new EnvironmentNotReadyError()
     }
 
-    const environmentRevision = await client.query<{ status: 'draft' | 'ready' }>(`
-      SELECT status
+    const environmentRevision = await client.query<{
+      status: 'draft' | 'provisioning' | 'ready' | 'failed'
+      configuration: Record<string, unknown>
+      checksum: string
+    }>(`
+      SELECT status, configuration, checksum
       FROM relay_environment_revisions
       WHERE organization_id = $1 AND space_id = $2 AND environment_id = $3 AND id = $4
       FOR UPDATE
@@ -3084,7 +3118,8 @@ export class PostgresSessionRepository implements SessionRepository {
       expertRevisionRow.environment_id,
       expertRevisionRow.environment_revision_id,
     ])
-    if (environmentRevision.rows[0]?.status !== 'ready') throw new EnvironmentNotReadyError()
+    const environmentRevisionRow = environmentRevision.rows[0]
+    if (environmentRevisionRow?.status !== 'ready') throw new EnvironmentNotReadyError()
 
     const repositoryRows = await client.query<{
       repository_id: string
@@ -3122,6 +3157,18 @@ export class PostgresSessionRepository implements SessionRepository {
       expertRevisionId: expertRevisionRow.id,
       environmentId: expertRevisionRow.environment_id,
       environmentRevisionId: expertRevisionRow.environment_revision_id,
+      environmentType: environmentRow.type,
+      environmentImage: typeof environmentRevisionRow.configuration.image === 'string'
+        ? environmentRevisionRow.configuration.image
+        : '',
+      environmentVariableReferences: Array.isArray(environmentRevisionRow.configuration.variableReferences)
+        ? environmentRevisionRow.configuration.variableReferences as Array<{ name: string; secretId: string }>
+        : [],
+      environmentNetworkPolicy: environmentRevisionRow.configuration.networkPolicy as {
+        mode: string
+        allowedHosts: string[]
+      },
+      environmentChecksum: environmentRevisionRow.checksum,
       repositoryId: selectedRepository.id,
       repository: selectedRepository.repository,
       baseBranch: selectedRepository.baseBranch,

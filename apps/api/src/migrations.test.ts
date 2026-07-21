@@ -64,6 +64,10 @@ const migrationVersions = [
   '059_security_failure_audit.sql',
   '060_expert_lifecycle.sql',
   '061_expert_runtime_lock_guard.sql',
+  '062_environment_lifecycle.sql',
+  '063_environment_lifecycle_compatibility.sql',
+  '064_environment_manager_rls.sql',
+  '065_environment_child_manager_rls.sql',
 ]
 
 function poolWithVersions(versions: string[]) {

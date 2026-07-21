@@ -161,6 +161,7 @@ const SessionDtoBaseSchema = z.object({
   configurationResolutionVersion: SessionConfigurationResolutionVersionSchema.default(0),
   expertRevisionId: IdentifierSchema.optional(),
   environmentRevisionId: IdentifierSchema.optional(),
+  executionSnapshotId: IdentifierSchema.optional(),
   repositoryId: IdentifierSchema.optional(),
   repository: z.string().trim().min(1).max(512),
   baseBranch: z.string().trim().min(1).max(255),
@@ -178,6 +179,7 @@ const SessionDtoBaseSchema = z.object({
 const authoritativeConfigurationFields = [
   'expertRevisionId',
   'environmentRevisionId',
+  'executionSnapshotId',
   'repositoryId',
 ] as const
 

@@ -52,8 +52,10 @@ const environment: EnvironmentSummaryDto = {
   id: 'environment-platform',
   organizationId: 'organization-alpha',
   spaceId: 'space-alpha',
+  type: 'cloud',
   name: 'Platform runtime',
   description: 'Isolated platform runtime.',
+  visibility: 'space',
   status: 'ready',
   activeRevisionId: 'environment-revision-1',
   activeRevision: {
@@ -64,6 +66,7 @@ const environment: EnvironmentSummaryDto = {
     defaultRepository,
     createdAt: '2026-07-13T08:00:00.000Z',
   },
+  provisioning: null,
   version: 1,
   createdAt: '2026-07-13T07:00:00.000Z',
   updatedAt: '2026-07-13T08:00:00.000Z',

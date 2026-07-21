@@ -251,6 +251,7 @@ describe('session contracts', () => {
       configurationResolutionVersion: 1,
       expertRevisionId: 'expert-revision-3',
       environmentRevisionId: 'environment-revision-5',
+      executionSnapshotId: 'execution-snapshot-5',
       repositoryId: 'repository-checkout',
     } as const
 
@@ -258,6 +259,7 @@ describe('session contracts', () => {
       configurationResolutionVersion: 1,
       expertRevisionId: 'expert-revision-3',
       environmentRevisionId: 'environment-revision-5',
+      executionSnapshotId: 'execution-snapshot-5',
       repositoryId: 'repository-checkout',
     })
     expect(SessionDtoSchema.safeParse({

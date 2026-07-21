@@ -33,10 +33,13 @@ const environmentRow = {
   id: 'environment-production',
   organization_id: 'organization-relay',
   space_id: 'space-platform',
+  type: 'cloud',
   name: 'Production Environment',
   description: 'Production-safe repository access.',
+  visibility: 'space',
   status: 'ready',
   active_revision_id: 'environment-revision-1',
+  latest_revision_id: 'environment-revision-1',
   version: 3,
   created_at: new Date('2026-07-12T08:00:00.000Z'),
   updated_at: new Date('2026-07-12T10:30:00.000Z'),
@@ -45,10 +48,30 @@ const environmentRow = {
   revision_number: 1,
   revision_status: 'ready',
   revision_created_at: new Date('2026-07-12T08:30:00.000Z'),
+  active_revision_configuration: {
+    image: 'ghcr.io/relay/runtime:stable',
+    variableReferences: [],
+    hooks: [],
+    networkPolicy: { mode: 'restricted', allowedHosts: [] },
+    sharing: 'space',
+    daemonPoolId: null,
+  },
+  active_revision_checksum: 'a'.repeat(64),
   default_repository_id: 'repository-default',
   default_repository: 'relay/platform',
   default_base_branch: 'main',
   default_is_default: true,
+  provisioning_job_id: null,
+  provisioning_revision_id: null,
+  provisioning_phase: null,
+  provisioning_progress: null,
+  provisioning_attempt: null,
+  provisioning_max_attempts: null,
+  provisioning_error_code: null,
+  provisioning_error_message: null,
+  provisioning_error_retryable: null,
+  provisioning_created_at: null,
+  provisioning_updated_at: null,
 } as const
 
 function repositoryReturning(rows: unknown[]) {
@@ -182,17 +205,39 @@ describe('PostgresConfigurationCatalogRepository', () => {
     const detailRows = [
       {
         ...environmentRow,
-        binding_repository_id: 'repository-default',
-        binding_repository: 'relay/platform',
-        binding_base_branch: 'main',
-        binding_is_default: true,
+        latest_revision_environment_id: 'environment-production',
+        latest_revision_number: 1,
+        latest_revision_status: 'ready',
+        latest_revision_configuration: environmentRow.active_revision_configuration,
+        latest_revision_checksum: environmentRow.active_revision_checksum,
+        latest_revision_created_at: environmentRow.revision_created_at,
+        latest_binding_repository_id: 'repository-default',
+        latest_binding_repository: 'relay/platform',
+        latest_binding_base_branch: 'main',
+        latest_binding_is_default: true,
+        active_repository_bindings: [
+          { repositoryId: 'repository-default', repository: 'relay/platform', baseBranch: 'main', isDefault: true },
+          { repositoryId: 'repository-docs', repository: 'relay/docs', baseBranch: 'main', isDefault: false },
+        ],
+        provisioning_history: [],
       },
       {
         ...environmentRow,
-        binding_repository_id: 'repository-docs',
-        binding_repository: 'relay/docs',
-        binding_base_branch: 'main',
-        binding_is_default: false,
+        latest_revision_environment_id: 'environment-production',
+        latest_revision_number: 1,
+        latest_revision_status: 'ready',
+        latest_revision_configuration: environmentRow.active_revision_configuration,
+        latest_revision_checksum: environmentRow.active_revision_checksum,
+        latest_revision_created_at: environmentRow.revision_created_at,
+        latest_binding_repository_id: 'repository-docs',
+        latest_binding_repository: 'relay/docs',
+        latest_binding_base_branch: 'main',
+        latest_binding_is_default: false,
+        active_repository_bindings: [
+          { repositoryId: 'repository-default', repository: 'relay/platform', baseBranch: 'main', isDefault: true },
+          { repositoryId: 'repository-docs', repository: 'relay/docs', baseBranch: 'main', isDefault: false },
+        ],
+        provisioning_history: [],
       },
     ]
     const detailed = repositoryReturning(detailRows)
@@ -205,8 +250,8 @@ describe('PostgresConfigurationCatalogRepository', () => {
     ])
     const [sql] = detailed.query.mock.calls[0] as [string]
     expect(sql.match(/EXISTS \(/g)).toHaveLength(2)
-    expect(sql).not.toContain('active_revision.configuration')
-    expect(sql).toContain('repository_binding.repository_id AS binding_repository_id')
+    expect(sql).toContain('latest_revision.configuration AS latest_revision_configuration')
+    expect(sql).toContain('active_bindings.bindings AS active_repository_bindings')
     expect(sql).toContain("environment.status = 'ready'")
   })
 

@@ -1,7 +1,9 @@
 import {
   DEFAULT_AGENT_MODEL,
   SUPPORTED_AGENT_MODELS,
+  type CreateEnvironmentRequestInput,
   type EnvironmentDetailDto,
+  type EnvironmentRevisionDto,
   type EnvironmentStatus,
   type EnvironmentSummaryDto,
   type ExpertDetailDto,
@@ -24,6 +26,7 @@ import {
   LockKeyhole,
   Menu,
   FilePlus2,
+  ListRestart,
   Pencil,
   Plus,
   Power,
@@ -33,20 +36,27 @@ import {
   ServerCog,
   ShieldCheck,
   Trash2,
+  X,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { GlobalControls } from '../components/GlobalControls'
 import { IconButton } from '../components/ui'
 import { usePreferences, type Locale } from '../preferences'
 import {
   RelayApiError,
   archiveExpert,
+  archiveEnvironment,
+  createEnvironment,
   createExpert,
   disableExpert,
+  disableEnvironment,
   getEnvironment,
   getExpert,
   listExpertRevisions,
+  listEnvironmentRevisions,
   publishExpert,
+  retryEnvironment,
+  updateEnvironment,
   updateExpert,
   type RelayApiAuthContext,
 } from '../services/relayApi'
@@ -97,7 +107,7 @@ export type RemoteExpertEditorPageProps = RemoteCatalogRequestProps & {
 
 export type RemoteEnvironmentsPageProps = RemoteCatalogListState<EnvironmentSummaryDto>
   & RemoteCatalogRequestProps
-  & { onOpenNavigation?: () => void }
+  & { onOpenNavigation?: () => void; canManage?: boolean }
 
 type DetailStatus = 'idle' | 'loading' | 'ready' | 'not_found' | 'error'
 
@@ -221,15 +231,6 @@ function StatusLabel({ status }: { status: ExpertStatus | EnvironmentStatus }) {
     <span className={`cosmos-status cosmos-status--${status}`}>
       <i aria-hidden="true" />{text(locale, ...labels[status])}
     </span>
-  )
-}
-
-function ReadOnlyNote({ children }: { children: ReactNode }) {
-  return (
-    <div className="remote-catalog-note" role="note">
-      <ShieldCheck aria-hidden="true" />
-      <span>{children}</span>
-    </div>
   )
 }
 
@@ -776,9 +777,14 @@ export function RemoteEnvironmentsPage({
   auth,
   credentialVersion,
   onOpenNavigation,
+  canManage = false,
 }: RemoteEnvironmentsPageProps) {
   const { locale } = usePreferences()
   const [selectedId, setSelectedId] = useState<string>()
+  const [editorOpen, setEditorOpen] = useState(false)
+  const [editingExisting, setEditingExisting] = useState(false)
+  const [busy, setBusy] = useState<'retry' | 'disable' | 'archive'>()
+  const [mutationError, setMutationError] = useState<Error>()
   const state = listState(loading, ready, error)
   const selectedSummary = items.find((item) => item.id === selectedId) ?? items[0]
   const selectedEnvironmentId = state === 'ready' ? selectedSummary?.id : undefined
@@ -803,6 +809,50 @@ export function RemoteEnvironmentsPage({
   )
   const detail = useRemoteDetail(identity, load)
   const environment = detail.status === 'ready' ? detail.item : undefined
+  const revisionIdentity = useMemo(() => environment ? ({
+    environmentId: environment.id,
+    version: environment.version,
+    credentialVersion,
+  }) : undefined, [credentialVersion, environment])
+  const loadRevisions = useCallback((signal: AbortSignal) => {
+    if (!environment) throw new Error('No Environment selected.')
+    return listEnvironmentRevisions(organizationId, spaceId, environment.id, requestAuth, signal)
+  }, [environment, organizationId, requestAuth, spaceId])
+  const revisions = useRemoteDetail(revisionIdentity, loadRevisions)
+
+  useEffect(() => {
+    if (!environment || !['provisioning', 'updating'].includes(environment.status)) return
+    const timer = window.setInterval(() => {
+      detail.retry()
+      onRetry()
+    }, 3_000)
+    return () => window.clearInterval(timer)
+  }, [detail, environment, onRetry])
+
+  const refreshAfterMutation = useCallback((next: EnvironmentDetailDto) => {
+    setSelectedId(next.id)
+    detail.retry()
+    onRetry()
+  }, [detail, onRetry])
+
+  const runAction = async (action: 'retry' | 'disable' | 'archive') => {
+    if (!environment) return
+    setBusy(action)
+    setMutationError(undefined)
+    try {
+      const key = crypto.randomUUID()
+      const next = action === 'retry'
+        ? await retryEnvironment(organizationId, spaceId, environment.id, environment.version, key, requestAuth)
+        : action === 'disable'
+          ? await disableEnvironment(organizationId, spaceId, environment.id, environment.version, key, requestAuth)
+          : await archiveEnvironment(organizationId, spaceId, environment.id, environment.version, key, requestAuth)
+      refreshAfterMutation(next)
+    } catch (cause) {
+      setMutationError(cause instanceof Error ? cause : new Error('Environment mutation failed.'))
+    } finally {
+      setBusy(undefined)
+    }
+  }
 
   return (
     <main className="cosmos-page remote-catalog-page">
@@ -811,20 +861,15 @@ export function RemoteEnvironmentsPage({
         title={text(locale, '运行环境', 'Environments')}
         description={text(locale, '当前 Space 中由服务端管理的运行环境', 'Server-managed runtimes in this Space')}
         onOpenNavigation={onOpenNavigation}
-        readOnly
+        actions={canManage ? <button type="button" className="cosmos-button cosmos-button--primary" onClick={() => { setEditingExisting(false); setEditorOpen(true) }}><Plus aria-hidden="true" />{text(locale, '创建环境', 'Create Environment')}</button> : undefined}
       />
       <div className="cosmos-page__scroll">
-        <ReadOnlyNote>{text(
-          locale,
-          '当前仅开放查询；创建、编辑、变量与重新配置尚未接入生产 API。',
-          'Query is available. Create, edit, variables, and reprovisioning are not connected to the production API.',
-        )}</ReadOnlyNote>
         {state === 'loading' ? <LoadState status="loading" resource={text(locale, '运行环境', 'Environments')} onRetry={onRetry} /> : null}
         {state === 'error' ? <LoadState status="error" resource={text(locale, '运行环境', 'Environments')} error={error} onRetry={onRetry} /> : null}
-        {state === 'ready' && items.length === 0 ? (
-          <section className="cosmos-panel remote-catalog-empty"><Container aria-hidden="true" /><strong>{text(locale, '暂无运行环境', 'No Environments')}</strong></section>
+        {state === 'ready' && items.length === 0 && !editorOpen ? (
+          <section className="cosmos-panel remote-catalog-empty"><Container aria-hidden="true" /><strong>{text(locale, '暂无运行环境', 'No Environments')}</strong>{canManage ? <button type="button" className="cosmos-button cosmos-button--primary" onClick={() => { setEditingExisting(false); setEditorOpen(true) }}><Plus aria-hidden="true" />{text(locale, '创建环境', 'Create Environment')}</button> : null}</section>
         ) : null}
-        {state === 'ready' && items.length > 0 ? (
+        {state === 'ready' && (items.length > 0 || editorOpen) ? (
           <section className="remote-environment-layout">
             <aside className="cosmos-panel remote-environment-list" aria-label={text(locale, '运行环境列表', 'Environment list')}>
               <header className="cosmos-section-heading">
@@ -847,10 +892,30 @@ export function RemoteEnvironmentsPage({
               ))}
             </aside>
             <section className="cosmos-panel remote-environment-detail" aria-label={text(locale, '运行环境详情', 'Environment detail')}>
+              {editorOpen ? <EnvironmentEditor
+                environment={editingExisting ? environment : undefined}
+                organizationId={organizationId}
+                spaceId={spaceId}
+                auth={requestAuth}
+                onCancel={() => setEditorOpen(false)}
+                onSaved={(next) => { setEditorOpen(false); refreshAfterMutation(next) }}
+              /> : null}
+              {!editorOpen ? <>
               {detail.status === 'loading' ? <LoadState status="loading" resource={text(locale, '运行环境详情', 'Environment detail')} onRetry={detail.retry} /> : null}
               {detail.status === 'not_found' ? <LoadState status="not_found" resource={text(locale, '运行环境', 'Environment')} error={detail.error} onRetry={detail.retry} /> : null}
               {detail.status === 'error' ? <LoadState status="error" resource={text(locale, '运行环境详情', 'Environment detail')} error={detail.error} onRetry={detail.retry} /> : null}
-              {environment ? <EnvironmentDetail environment={environment} /> : null}
+              {environment ? <EnvironmentDetail
+                environment={environment}
+                revisions={revisions.status === 'ready' ? revisions.item?.items ?? [] : []}
+                canManage={canManage}
+                busy={busy}
+                error={mutationError}
+                onEdit={() => { setEditingExisting(true); setEditorOpen(true) }}
+                onRetry={() => void runAction('retry')}
+                onDisable={() => void runAction('disable')}
+                onArchive={() => void runAction('archive')}
+              /> : null}
+              </> : null}
             </section>
           </section>
         ) : null}
@@ -859,9 +924,200 @@ export function RemoteEnvironmentsPage({
   )
 }
 
-function EnvironmentDetail({ environment }: { environment: EnvironmentDetailDto }) {
+type EnvironmentEditorState = {
+  type: 'cloud' | 'daemon'
+  name: string
+  description: string
+  visibility: 'private' | 'space'
+  image: string
+  repositories: Array<{ repositoryId: string; repository: string; baseBranch: string; isDefault: boolean }>
+  variables: Array<{ name: string; secretId: string }>
+  hooks: Array<{ phase: 'setup' | 'start' | 'stop'; command: string; timeoutSeconds: number }>
+  networkMode: 'restricted' | 'allowlist' | 'unrestricted'
+  allowedHosts: string[]
+  daemonPoolId: string
+}
+
+function editorState(environment?: EnvironmentDetailDto): EnvironmentEditorState {
+  const revision = environment?.latestRevision
+  return {
+    type: environment?.type ?? 'cloud',
+    name: environment?.name ?? '',
+    description: environment?.description ?? '',
+    visibility: environment?.visibility ?? 'space',
+    image: revision?.image ?? '',
+    repositories: revision?.repositoryBindings.map((binding) => ({ ...binding }))
+      ?? [{ repositoryId: '', repository: '', baseBranch: 'main', isDefault: true }],
+    variables: revision?.variableReferences.map((reference) => ({ ...reference })) ?? [],
+    hooks: revision?.hooks.map((hook) => ({ ...hook })) ?? [],
+    networkMode: revision?.networkPolicy.mode ?? 'restricted',
+    allowedHosts: revision?.networkPolicy.allowedHosts.slice() ?? [],
+    daemonPoolId: revision?.daemonPoolId ?? '',
+  }
+}
+
+function EnvironmentEditor({
+  environment,
+  organizationId,
+  spaceId,
+  auth,
+  onCancel,
+  onSaved,
+}: {
+  environment?: EnvironmentDetailDto
+  organizationId: string
+  spaceId: string
+  auth: RelayApiAuthContext
+  onCancel: () => void
+  onSaved: (environment: EnvironmentDetailDto) => void
+}) {
   const { locale } = usePreferences()
+  const [state, setState] = useState(() => editorState(environment))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<Error>()
+  const patchState = <Key extends keyof EnvironmentEditorState>(key: Key, value: EnvironmentEditorState[Key]) => {
+    setState((current) => ({ ...current, [key]: value }))
+  }
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    setSaving(true)
+    setError(undefined)
+    const input: CreateEnvironmentRequestInput = {
+      type: state.type,
+      name: state.name,
+      description: state.description,
+      visibility: state.visibility,
+      image: state.image,
+      repositoryBindings: state.repositories,
+      variableReferences: state.variables,
+      hooks: state.hooks,
+      networkPolicy: {
+        mode: state.networkMode,
+        allowedHosts: state.networkMode === 'allowlist' ? state.allowedHosts.filter(Boolean) : [],
+      },
+      sharing: state.visibility,
+      daemonPoolId: state.type === 'daemon' ? state.daemonPoolId : null,
+    }
+    try {
+      let next: EnvironmentDetailDto
+      if (environment) {
+        const update = {
+          name: input.name,
+          description: input.description,
+          visibility: input.visibility,
+          image: input.image,
+          repositoryBindings: input.repositoryBindings,
+          variableReferences: input.variableReferences,
+          hooks: input.hooks,
+          networkPolicy: input.networkPolicy,
+          sharing: input.sharing,
+          daemonPoolId: input.daemonPoolId,
+        }
+        next = await updateEnvironment(
+          organizationId, spaceId, environment.id, update,
+          environment.version, crypto.randomUUID(), auth,
+        )
+      } else {
+        next = await createEnvironment(organizationId, spaceId, input, crypto.randomUUID(), auth)
+      }
+      onSaved(next)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause : new Error('Environment could not be saved.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return <form className="remote-environment-editor" onSubmit={(event) => void submit(event)}>
+    <header><div><span>{environment ? text(locale, '新配置版本', 'New configuration revision') : text(locale, '新环境', 'New Environment')}</span><h2>{environment ? environment.name : text(locale, '创建运行环境', 'Create Environment')}</h2></div><IconButton icon={X} label={text(locale, '关闭编辑器', 'Close editor')} onClick={onCancel} /></header>
+    {error ? <InlineError error={error} /> : null}
+    <div className="remote-environment-form-grid">
+      <label><span>{text(locale, '类型', 'Type')}</span><select value={state.type} disabled={Boolean(environment)} onChange={(event) => patchState('type', event.target.value as EnvironmentEditorState['type'])}><option value="cloud">Cloud</option><option value="daemon">Self-hosted / Daemon</option></select></label>
+      <label><span>{text(locale, '名称', 'Name')}</span><input required maxLength={160} value={state.name} onChange={(event) => patchState('name', event.target.value)} /></label>
+      <label className="remote-environment-form-wide"><span>{text(locale, '说明', 'Description')}</span><textarea maxLength={10_000} value={state.description} onChange={(event) => patchState('description', event.target.value)} /></label>
+      <label><span>{text(locale, '共享范围', 'Sharing')}</span><select value={state.visibility} onChange={(event) => patchState('visibility', event.target.value as EnvironmentEditorState['visibility'])}><option value="space">Space</option><option value="private">Private</option></select></label>
+      <label><span>{text(locale, '镜像', 'Image')}</span><input required maxLength={1_000} value={state.image} onChange={(event) => patchState('image', event.target.value)} /></label>
+      {state.type === 'daemon' ? <label className="remote-environment-form-wide"><span>{text(locale, 'Daemon Pool ID', 'Daemon pool ID')}</span><input required value={state.daemonPoolId} onChange={(event) => patchState('daemonPoolId', event.target.value)} /></label> : null}
+    </div>
+    <EnvironmentArrayEditor
+      title={text(locale, '仓库绑定', 'Repository bindings')}
+      rows={state.repositories}
+      onAdd={() => patchState('repositories', [...state.repositories, { repositoryId: '', repository: '', baseBranch: 'main', isDefault: false }])}
+      onRemove={(index) => patchState('repositories', state.repositories.filter((_, rowIndex) => rowIndex !== index))}
+      render={(row, index) => <>
+        <input required aria-label={text(locale, '仓库 ID', 'Repository ID')} value={row.repositoryId} onChange={(event) => patchState('repositories', state.repositories.map((item, rowIndex) => rowIndex === index ? { ...item, repositoryId: event.target.value } : item))} />
+        <input required aria-label={text(locale, '仓库', 'Repository')} value={row.repository} onChange={(event) => patchState('repositories', state.repositories.map((item, rowIndex) => rowIndex === index ? { ...item, repository: event.target.value } : item))} />
+        <input required aria-label={text(locale, '基础分支', 'Base branch')} value={row.baseBranch} onChange={(event) => patchState('repositories', state.repositories.map((item, rowIndex) => rowIndex === index ? { ...item, baseBranch: event.target.value } : item))} />
+        <label className="remote-environment-check"><input type="radio" name="default-repository" checked={row.isDefault} onChange={() => patchState('repositories', state.repositories.map((item, rowIndex) => ({ ...item, isDefault: rowIndex === index })))} /><span>{text(locale, '默认', 'Default')}</span></label>
+      </>}
+    />
+    <EnvironmentArrayEditor
+      title={text(locale, '变量引用', 'Variable references')}
+      rows={state.variables}
+      onAdd={() => patchState('variables', [...state.variables, { name: '', secretId: '' }])}
+      onRemove={(index) => patchState('variables', state.variables.filter((_, rowIndex) => rowIndex !== index))}
+      render={(row, index) => <>
+        <input required aria-label={text(locale, '变量名', 'Variable name')} value={row.name} onChange={(event) => patchState('variables', state.variables.map((item, rowIndex) => rowIndex === index ? { ...item, name: event.target.value } : item))} />
+        <input required aria-label="Secret reference ID" value={row.secretId} onChange={(event) => patchState('variables', state.variables.map((item, rowIndex) => rowIndex === index ? { ...item, secretId: event.target.value } : item))} />
+      </>}
+    />
+    <EnvironmentArrayEditor
+      title="Hooks"
+      rows={state.hooks}
+      onAdd={() => patchState('hooks', [...state.hooks, { phase: 'setup', command: '', timeoutSeconds: 300 }])}
+      onRemove={(index) => patchState('hooks', state.hooks.filter((_, rowIndex) => rowIndex !== index))}
+      render={(row, index) => <>
+        <select aria-label={text(locale, '阶段', 'Phase')} value={row.phase} onChange={(event) => patchState('hooks', state.hooks.map((item, rowIndex) => rowIndex === index ? { ...item, phase: event.target.value as typeof row.phase } : item))}><option value="setup">setup</option><option value="start">start</option><option value="stop">stop</option></select>
+        <input required aria-label={text(locale, '命令', 'Command')} value={row.command} onChange={(event) => patchState('hooks', state.hooks.map((item, rowIndex) => rowIndex === index ? { ...item, command: event.target.value } : item))} />
+        <input required type="number" min={1} max={3600} aria-label={text(locale, '超时秒数', 'Timeout seconds')} value={row.timeoutSeconds} onChange={(event) => patchState('hooks', state.hooks.map((item, rowIndex) => rowIndex === index ? { ...item, timeoutSeconds: Number(event.target.value) } : item))} />
+      </>}
+    />
+    <section className="remote-environment-network"><header><h3>{text(locale, '网络策略', 'Network policy')}</h3></header><select value={state.networkMode} onChange={(event) => patchState('networkMode', event.target.value as EnvironmentEditorState['networkMode'])}><option value="restricted">restricted</option><option value="allowlist">allowlist</option><option value="unrestricted">unrestricted</option></select>{state.networkMode === 'allowlist' ? <EnvironmentArrayEditor title={text(locale, '允许主机', 'Allowed hosts')} rows={state.allowedHosts} onAdd={() => patchState('allowedHosts', [...state.allowedHosts, ''])} onRemove={(index) => patchState('allowedHosts', state.allowedHosts.filter((_, rowIndex) => rowIndex !== index))} render={(host, index) => <input required aria-label={text(locale, '主机名', 'Host')} value={host} onChange={(event) => patchState('allowedHosts', state.allowedHosts.map((item, rowIndex) => rowIndex === index ? event.target.value : item))} />} /> : null}</section>
+    <footer><button type="button" className="cosmos-button cosmos-button--secondary" onClick={onCancel}>{text(locale, '取消', 'Cancel')}</button><button type="submit" className="cosmos-button cosmos-button--primary" disabled={saving}><Save aria-hidden="true" />{saving ? text(locale, '保存中…', 'Saving…') : text(locale, '保存并配置', 'Save and provision')}</button></footer>
+  </form>
+}
+
+function EnvironmentArrayEditor<Row>({ title, rows, onAdd, onRemove, render }: {
+  title: string
+  rows: Row[]
+  onAdd: () => void
+  onRemove: (index: number) => void
+  render: (row: Row, index: number) => ReactNode
+}) {
+  const { locale } = usePreferences()
+  return <section className="remote-environment-array"><header><h3>{title}</h3><IconButton icon={Plus} label={`${text(locale, '添加', 'Add')} ${title}`} onClick={onAdd} /></header>{rows.map((row, index) => <div className="remote-environment-array__row" key={index}>{render(row, index)}<IconButton icon={Trash2} label={`${text(locale, '删除', 'Remove')} ${title}`} onClick={() => onRemove(index)} /></div>)}</section>
+}
+
+function InlineError({ error }: { error: Error }) {
+  const { locale } = usePreferences()
+  return <div className="remote-expert-editor__error" role="alert"><AlertTriangle aria-hidden="true" /><span><strong>{text(locale, '操作未完成', 'Operation not completed')}</strong><small>{error.message}</small></span></div>
+}
+
+function EnvironmentDetail({
+  environment,
+  revisions,
+  canManage,
+  busy,
+  error,
+  onEdit,
+  onRetry,
+  onDisable,
+  onArchive,
+}: {
+  environment: EnvironmentDetailDto
+  revisions: EnvironmentRevisionDto[]
+  canManage: boolean
+  busy?: 'retry' | 'disable' | 'archive'
+  error?: Error
+  onEdit: () => void
+  onRetry: () => void
+  onDisable: () => void
+  onArchive: () => void
+}) {
+  const { locale } = usePreferences()
+  const [confirmArchive, setConfirmArchive] = useState(false)
   const revision = environment.activeRevision
+  const latest = environment.latestRevision
   return (
     <>
       <header className="remote-detail-panel__identity">
@@ -873,7 +1129,10 @@ function EnvironmentDetail({ environment }: { environment: EnvironmentDetailDto 
         <div><dt>{text(locale, '资源版本', 'Resource version')}</dt><dd>v{environment.version}</dd></div>
         <div><dt>{text(locale, '活动版本', 'Active revision')}</dt><dd>{revision ? `v${revision.revision}` : '—'}</dd></div>
         <div><dt>{text(locale, '更新时间', 'Updated')}</dt><dd>{formatDate(environment.updatedAt, locale)}</dd></div>
+        <div><dt>{text(locale, '类型', 'Type')}</dt><dd>{environment.type === 'cloud' ? 'Cloud' : 'Self-hosted / Daemon'}</dd></div>
       </dl>
+      {error ? <InlineError error={error} /> : null}
+      {environment.provisioning ? <section className="remote-detail-section remote-environment-provisioning"><header><ListRestart aria-hidden="true" /><h3>{text(locale, '配置状态', 'Provisioning')}</h3></header><div className="remote-environment-progress"><span style={{ width: `${environment.provisioning.progress}%` }} /></div><dl className="remote-detail-list"><div><dt>{text(locale, '阶段', 'Phase')}</dt><dd>{environment.provisioning.phase}</dd></div><div><dt>{text(locale, '尝试', 'Attempt')}</dt><dd>{environment.provisioning.attempt}/{environment.provisioning.maxAttempts}</dd></div>{environment.provisioning.error ? <div><dt>{text(locale, '错误', 'Error')}</dt><dd>{environment.provisioning.error.message}</dd></div> : null}</dl></section> : null}
       {revision ? (
         <>
           <section className="remote-detail-section">
@@ -899,6 +1158,9 @@ function EnvironmentDetail({ environment }: { environment: EnvironmentDetailDto 
       ) : (
         <div className="remote-detail-unavailable"><CircleOff aria-hidden="true" />{text(locale, '当前 Environment 没有活动版本。', 'This Environment has no active revision.')}</div>
       )}
+      <section className="remote-detail-section"><header><ShieldCheck aria-hidden="true" /><h3>{text(locale, '配置', 'Configuration')}</h3></header><dl className="remote-detail-list"><div><dt>{text(locale, '最新版本', 'Latest revision')}</dt><dd>v{latest.revision} · {latest.status}</dd></div><div><dt>{text(locale, '镜像', 'Image')}</dt><dd><code>{latest.image}</code></dd></div><div><dt>{text(locale, '网络', 'Network')}</dt><dd>{latest.networkPolicy.mode}</dd></div><div><dt>{text(locale, '变量引用', 'Variable references')}</dt><dd>{latest.variableReferences.length}</dd></div><div><dt>Hooks</dt><dd>{latest.hooks.length}</dd></div></dl></section>
+      {revisions.length > 0 ? <section className="remote-detail-section"><header><History aria-hidden="true" /><h3>{text(locale, '配置版本', 'Configuration revisions')}</h3></header><div className="remote-expert-revisions">{revisions.map((item, index) => { const previous = revisions[index + 1]; const changes = previous ? ['image', 'repositoryBindings', 'variableReferences', 'hooks', 'networkPolicy', 'sharing', 'daemonPoolId'].filter((field) => JSON.stringify(item[field as keyof EnvironmentRevisionDto]) !== JSON.stringify(previous[field as keyof EnvironmentRevisionDto])) : []; return <div key={item.id}><span><strong>v{item.revision}</strong><small>{changes.length ? changes.join(', ') : text(locale, '初始配置', 'Initial configuration')}</small></span><StatusLabel status={item.status} /></div> })}</div></section> : null}
+      {canManage && environment.status !== 'archived' ? <div className="remote-environment-actions"><button type="button" className="cosmos-button cosmos-button--secondary" disabled={Boolean(busy) || ['provisioning', 'updating'].includes(environment.status)} onClick={onEdit}><Pencil aria-hidden="true" />{text(locale, '新建配置版本', 'New revision')}</button>{environment.status === 'failed' ? <button type="button" className="cosmos-button cosmos-button--primary" disabled={Boolean(busy)} onClick={onRetry}><RefreshCw aria-hidden="true" />{busy === 'retry' ? text(locale, '重试中…', 'Retrying…') : text(locale, '重试', 'Retry')}</button> : null}<button type="button" className="cosmos-button cosmos-button--secondary" disabled={Boolean(busy) || environment.status === 'disabled'} onClick={onDisable}><Power aria-hidden="true" />{busy === 'disable' ? text(locale, '停用中…', 'Disabling…') : text(locale, '停用', 'Disable')}</button>{confirmArchive ? <><button type="button" className="cosmos-button cosmos-button--secondary" disabled={Boolean(busy)} onClick={() => setConfirmArchive(false)}>{text(locale, '取消', 'Cancel')}</button><button type="button" className="cosmos-button cosmos-button--ghost remote-expert-danger" disabled={Boolean(busy)} onClick={onArchive}><Trash2 aria-hidden="true" />{busy === 'archive' ? text(locale, '归档中…', 'Archiving…') : text(locale, '确认归档', 'Confirm archive')}</button></> : <button type="button" className="cosmos-button cosmos-button--ghost remote-expert-danger" disabled={Boolean(busy)} onClick={() => setConfirmArchive(true)}><Trash2 aria-hidden="true" />{text(locale, '归档', 'Archive')}</button>}</div> : null}
       <footer className="remote-detail-footer"><Clock3 aria-hidden="true" />{text(locale, '创建于', 'Created')} {formatDate(environment.createdAt, locale)}</footer>
     </>
   )

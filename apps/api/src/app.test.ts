@@ -160,8 +160,10 @@ const environmentDetail: EnvironmentDetailDto = {
   id: 'environment-platform',
   organizationId: 'relay',
   spaceId: 'platform',
+  type: 'cloud',
   name: 'Platform runtime',
   description: 'Isolated runtime for platform repositories.',
+  visibility: 'space',
   status: 'ready',
   activeRevisionId: 'environment-revision-platform',
   activeRevision: {
@@ -171,8 +173,32 @@ const environmentDetail: EnvironmentDetailDto = {
     status: 'ready',
     defaultRepository,
     repositoryBindings: [defaultRepository],
+    image: 'ghcr.io/relay/runtime:stable',
+    variableReferences: [],
+    hooks: [],
+    networkPolicy: { mode: 'restricted', allowedHosts: [] },
+    sharing: 'space',
+    daemonPoolId: null,
+    checksum: 'a'.repeat(64),
     createdAt: '2026-07-13T08:00:00.000Z',
   },
+  latestRevision: {
+    id: 'environment-revision-platform',
+    environmentId: 'environment-platform',
+    revision: 2,
+    status: 'ready',
+    repositoryBindings: [defaultRepository],
+    image: 'ghcr.io/relay/runtime:stable',
+    variableReferences: [],
+    hooks: [],
+    networkPolicy: { mode: 'restricted', allowedHosts: [] },
+    sharing: 'space',
+    daemonPoolId: null,
+    checksum: 'a'.repeat(64),
+    createdAt: '2026-07-13T08:00:00.000Z',
+  },
+  provisioning: null,
+  provisioningHistory: [],
   version: 3,
   createdAt: '2026-07-13T07:00:00.000Z',
   updatedAt: '2026-07-13T08:00:00.000Z',
@@ -199,8 +225,10 @@ function testConfigurationCatalog(
     id: environmentDetail.id,
     organizationId: environmentDetail.organizationId,
     spaceId: environmentDetail.spaceId,
+    type: environmentDetail.type,
     name: environmentDetail.name,
     description: environmentDetail.description,
+    visibility: environmentDetail.visibility,
     status: environmentDetail.status,
     activeRevisionId: environmentDetail.activeRevisionId,
     activeRevision: environmentDetail.activeRevision && {
@@ -211,6 +239,7 @@ function testConfigurationCatalog(
       defaultRepository: environmentDetail.activeRevision.defaultRepository,
       createdAt: environmentDetail.activeRevision.createdAt,
     },
+    provisioning: environmentDetail.provisioning,
     version: environmentDetail.version,
     createdAt: environmentDetail.createdAt,
     updatedAt: environmentDetail.updatedAt,
@@ -563,6 +592,82 @@ describe('Relay API', () => {
     expect(environment.statusCode).toBe(200)
     expect(environment.headers.etag).toBe('"3"')
     expect(EnvironmentDetailDtoSchema.parse(environment.json())).toEqual(environmentDetail)
+  })
+
+  it('enforces Environment mutation idempotency and CAS headers at the HTTP boundary', async () => {
+    const createEnvironment = vi.fn().mockResolvedValue({ environment: environmentDetail, replayed: false })
+    const updateEnvironment = vi.fn().mockResolvedValue({ environment: environmentDetail, replayed: false })
+    const retryEnvironment = vi.fn().mockResolvedValue({ environment: environmentDetail, replayed: false })
+    const catalog = Object.assign(testConfigurationCatalog(), {
+      createEnvironment,
+      updateEnvironment,
+      retryEnvironment,
+    })
+    const app = testApp(testRepository(), catalog)
+    const requestBody = {
+      type: 'cloud',
+      name: 'Platform runtime',
+      description: 'Isolated runtime for platform repositories.',
+      visibility: 'space',
+      image: 'ghcr.io/relay/runtime:stable',
+      repositoryBindings: [defaultRepository],
+      variableReferences: [],
+      hooks: [],
+      networkPolicy: { mode: 'restricted', allowedHosts: [] },
+      sharing: 'space',
+      daemonPoolId: null,
+    }
+
+    const missingKey = await app.inject({
+      method: 'POST',
+      url: '/api/v1/organizations/relay/spaces/platform/environments',
+      payload: requestBody,
+    })
+    expect(missingKey.statusCode).toBe(400)
+    expect(ApiErrorSchema.parse(missingKey.json()).code).toBe('IDEMPOTENCY_KEY_REQUIRED')
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v1/organizations/relay/spaces/platform/environments',
+      headers: { 'idempotency-key': 'create-environment-1' },
+      payload: requestBody,
+    })
+    expect(created.statusCode).toBe(202)
+    expect(created.headers['idempotency-replayed']).toBe('false')
+    expect(created.headers.etag).toBe('"3"')
+    expect(createEnvironment).toHaveBeenCalledWith(expect.objectContaining({
+      idempotencyKey: 'create-environment-1',
+      request: requestBody,
+    }))
+
+    const missingIfMatch = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/organizations/relay/spaces/platform/environments/${environmentDetail.id}`,
+      headers: { 'idempotency-key': 'update-environment-1', 'content-type': 'application/merge-patch+json' },
+      payload: JSON.stringify({ image: 'ghcr.io/relay/runtime:next' }),
+    })
+    expect(missingIfMatch.statusCode).toBe(428)
+
+    const updated = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/organizations/relay/spaces/platform/environments/${environmentDetail.id}`,
+      headers: {
+        'idempotency-key': 'update-environment-1',
+        'if-match': '"3"',
+        'content-type': 'application/merge-patch+json',
+      },
+      payload: JSON.stringify({ image: 'ghcr.io/relay/runtime:next' }),
+    })
+    expect(updated.statusCode).toBe(202)
+    expect(updateEnvironment).toHaveBeenCalledWith(expect.objectContaining({ expectedVersion: 3 }))
+
+    const retried = await app.inject({
+      method: 'POST',
+      url: `/api/v1/organizations/relay/spaces/platform/environments/${environmentDetail.id}/retry`,
+      headers: { 'idempotency-key': 'retry-environment-1', 'if-match': '"3"' },
+    })
+    expect(retried.statusCode).toBe(202)
+    expect(retryEnvironment).toHaveBeenCalledWith(expect.objectContaining({ expectedVersion: 3 }))
   })
 
   it('rejects invalid or cross-resource catalog pagination before reading data', async () => {

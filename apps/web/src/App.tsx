@@ -2058,6 +2058,7 @@ function RelayApp() {
               spaceId={activeSpace.id}
               auth={catalogAuth}
               credentialVersion={credentialVersion}
+              canManage={expertManagementEnabled}
               onOpenNavigation={openNavigation}
             />} />
         <Route path="/daemons" element={demoMode ? <DaemonsPage onOpenNavigation={openNavigation} /> : productionUnavailable} />

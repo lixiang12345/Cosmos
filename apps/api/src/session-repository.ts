@@ -200,6 +200,12 @@ export type ResolvedSessionConfiguration = {
   expertRevisionId?: string
   environmentId?: string
   environmentRevisionId?: string
+  executionSnapshotId?: string
+  environmentType?: 'cloud' | 'daemon'
+  environmentImage?: string
+  environmentVariableReferences?: Array<{ name: string; secretId: string }>
+  environmentNetworkPolicy?: { mode: string; allowedHosts: string[] }
+  environmentChecksum?: string
   repositoryId?: string
   repository: string
   baseBranch: string
@@ -422,9 +428,10 @@ export function createSessionDto(
   },
 ): SessionDto {
   const timestamp = options.timestamp ?? new Date().toISOString()
+  const id = options.id ?? randomUUID()
   const configuration = options.configuration
   return SessionDtoSchema.parse({
-    id: options.id ?? randomUUID(),
+    id,
     organizationId: record.organizationId,
     spaceId: record.spaceId,
     title: record.request.title,
@@ -436,6 +443,9 @@ export function createSessionDto(
     configurationResolutionVersion: configuration.configurationResolutionVersion,
     expertRevisionId: configuration.expertRevisionId,
     environmentRevisionId: configuration.environmentRevisionId,
+    executionSnapshotId: configuration.configurationResolutionVersion === 1
+      ? (configuration.executionSnapshotId ?? `${id}-snapshot`)
+      : undefined,
     repositoryId: configuration.repositoryId,
     repository: configuration.repository,
     baseBranch: configuration.baseBranch,

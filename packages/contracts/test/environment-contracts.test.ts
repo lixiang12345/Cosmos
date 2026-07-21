@@ -20,19 +20,55 @@ const activeRevision = {
   environmentId: 'environment-commerce',
   revision: 3,
   status: 'ready',
+  image: 'ghcr.io/relay/runtime:stable',
+  repositoryBindings: [defaultRepository],
+  variableReferences: [],
+  hooks: [],
+  networkPolicy: { mode: 'restricted', allowedHosts: [] },
+  sharing: 'space',
+  daemonPoolId: null,
+  checksum: 'a'.repeat(64),
   defaultRepository,
   createdAt: '2026-07-13T08:00:00.000Z',
+} as const
+
+const latestRevision = {
+  id: activeRevision.id,
+  environmentId: activeRevision.environmentId,
+  revision: activeRevision.revision,
+  status: activeRevision.status,
+  image: activeRevision.image,
+  repositoryBindings: activeRevision.repositoryBindings,
+  variableReferences: activeRevision.variableReferences,
+  hooks: activeRevision.hooks,
+  networkPolicy: activeRevision.networkPolicy,
+  sharing: activeRevision.sharing,
+  daemonPoolId: activeRevision.daemonPoolId,
+  checksum: activeRevision.checksum,
+  createdAt: activeRevision.createdAt,
+} as const
+
+const activeRevisionSummary = {
+  id: activeRevision.id,
+  environmentId: activeRevision.environmentId,
+  revision: activeRevision.revision,
+  status: activeRevision.status,
+  defaultRepository: activeRevision.defaultRepository,
+  createdAt: activeRevision.createdAt,
 } as const
 
 const environmentSummary = {
   id: 'environment-commerce',
   organizationId: 'organization-relay',
   spaceId: 'space-commerce',
+  type: 'cloud',
   name: 'Commerce runtime',
   description: 'Isolated runtime for commerce repositories.',
+  visibility: 'space',
   status: 'ready',
   activeRevisionId: activeRevision.id,
-  activeRevision,
+  activeRevision: activeRevisionSummary,
+  provisioning: null,
   version: 1,
   createdAt: '2026-07-13T07:00:00.000Z',
   updatedAt: '2026-07-13T08:00:00.000Z',
@@ -41,7 +77,7 @@ const environmentSummary = {
 describe('Environment contracts', () => {
   it('accepts supported type, status, and visibility projections', () => {
     for (const type of ['cloud', 'daemon']) expect(EnvironmentTypeSchema.parse(type)).toBe(type)
-    for (const status of ['draft', 'provisioning', 'ready', 'updating', 'failed', 'disabled']) {
+    for (const status of ['draft', 'provisioning', 'ready', 'updating', 'failed', 'disabled', 'archived']) {
       expect(EnvironmentStatusSchema.parse(status)).toBe(status)
     }
     for (const visibility of ['private', 'space']) {
@@ -60,8 +96,10 @@ describe('Environment contracts', () => {
       id: environmentSummary.id,
       organizationId: environmentSummary.organizationId,
       spaceId: environmentSummary.spaceId,
+      type: environmentSummary.type,
       name: environmentSummary.name,
       description: environmentSummary.description,
+      visibility: environmentSummary.visibility,
       status: environmentSummary.status,
       activeRevisionId: environmentSummary.activeRevisionId,
       activeRevision: {
@@ -72,6 +110,7 @@ describe('Environment contracts', () => {
         defaultRepository: activeRevision.defaultRepository,
         createdAt: activeRevision.createdAt,
       },
+      provisioning: null,
       version: environmentSummary.version,
       createdAt: environmentSummary.createdAt,
       updatedAt: environmentSummary.updatedAt,
@@ -94,6 +133,8 @@ describe('Environment contracts', () => {
           },
         ],
       },
+      latestRevision,
+      provisioningHistory: [],
     }
 
     expect(EnvironmentDetailDtoSchema.parse(detail)).toEqual(detail)

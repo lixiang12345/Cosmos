@@ -11,6 +11,7 @@ import {
   ContextEngineStatusRequestSchema,
   ContextPackRequestSchema,
   ContextSearchRequestSchema,
+  CreateEnvironmentRequestSchema,
   CreateExpertRequestSchema,
   CreateArtifactRequestSchema,
   CreateShareGrantRequestSchema,
@@ -18,6 +19,8 @@ import {
   CreateSessionResponseSchema,
   EnvironmentDetailDtoSchema,
   EnvironmentListResponseSchema,
+  EnvironmentMutationResponseSchema,
+  EnvironmentRevisionListResponseSchema,
   ExpertDetailDtoSchema,
   ExpertListResponseSchema,
   ExpertRevisionListResponseSchema,
@@ -42,6 +45,7 @@ import {
   ToolCallListResponseSchema,
   UpdateArtifactRequestSchema,
   UpdateExpertRequestSchema,
+  UpdateEnvironmentRequestSchema,
   type ApiError,
   type SessionEventDto,
   type SessionEventPage,
@@ -83,6 +87,9 @@ import {
 } from './context-engine-gateway.js'
 import {
   EmptyConfigurationCatalogRepository,
+  EnvironmentIdempotencyConflictError,
+  EnvironmentStateConflictError,
+  EnvironmentVersionConflictError,
   ExpertConfigurationValidationError,
   ExpertIdempotencyConflictError,
   ExpertStateConflictError,
@@ -659,6 +666,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     origin: options.corsOrigin ?? false,
     exposedHeaders: [
       'ETag',
+      'Idempotency-Replayed',
       'X-Request-ID',
       'RateLimit-Limit',
       'RateLimit-Remaining',
@@ -738,7 +746,9 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   }))
 
   app.setErrorHandler((error, request, reply) => {
-    if (error instanceof IdempotencyConflictError || error instanceof ExpertIdempotencyConflictError) {
+    if (error instanceof IdempotencyConflictError
+      || error instanceof ExpertIdempotencyConflictError
+      || error instanceof EnvironmentIdempotencyConflictError) {
       return sendApiError(reply, 409, request, {
         code: 'IDEMPOTENCY_KEY_REUSED',
         message: error.message,
@@ -784,6 +794,26 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
           expectedVersion: error.expectedVersion,
           currentVersion: error.actualVersion,
         },
+      })
+    }
+
+    if (error instanceof EnvironmentVersionConflictError) {
+      return sendApiError(reply, 412, request, {
+        code: 'PRECONDITION_FAILED',
+        message: error.message,
+        retryable: false,
+        details: {
+          expectedVersion: error.expectedVersion,
+          currentVersion: error.actualVersion,
+        },
+      })
+    }
+
+    if (error instanceof EnvironmentStateConflictError) {
+      return sendApiError(reply, 409, request, {
+        code: 'ENVIRONMENT_STATE_CONFLICT',
+        message: error.message,
+        retryable: false,
       })
     }
 
@@ -1159,10 +1189,20 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       || access.organizationRole === 'organization_admin'
   }
 
+  const canManageEnvironments = canManageExperts
+
   function denyExpertMutation(request: FastifyRequest, reply: FastifyReply) {
     return sendApiError(reply, 403, request, {
       code: 'PERMISSION_DENIED',
       message: 'Only Space Managers and Organization Administrators can manage Experts.',
+      retryable: false,
+    })
+  }
+
+  function denyEnvironmentMutation(request: FastifyRequest, reply: FastifyReply) {
+    return sendApiError(reply, 403, request, {
+      code: 'PERMISSION_DENIED',
+      message: 'Only Space Managers and Organization Administrators can manage Environments.',
       retryable: false,
     })
   }
@@ -1721,6 +1761,187 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       const environment = EnvironmentDetailDtoSchema.parse(candidate)
       reply.header('ETag', resourceEtag(environment))
       return environment
+    },
+  )
+
+  app.post<{ Params: SpaceParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/environments',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageEnvironments(authorization.access)) return denyEnvironmentMutation(request, reply)
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED',
+          message: 'A valid Idempotency-Key header is required.',
+          retryable: false,
+          fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      const parsed = CreateEnvironmentRequestSchema.safeParse(request.body)
+      if (!parsed.success) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED',
+          message: 'The Environment request is invalid.',
+          retryable: false,
+          fieldErrors: validationFieldErrors(parsed.error.issues),
+        })
+      }
+      const result = await configurationCatalogRepository.createEnvironment({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        actorId: authorization.actor.id,
+        idempotencyKey,
+        request: parsed.data,
+      })
+      const response = EnvironmentMutationResponseSchema.parse(result)
+      reply.header('Idempotency-Replayed', String(response.replayed))
+      reply.header('Location', `/api/v1/organizations/${authorization.organizationId}/spaces/${authorization.spaceId}/environments/${response.environment.id}`)
+      reply.header('ETag', resourceEtag(response.environment))
+      return reply.code(202).send(response)
+    },
+  )
+
+  app.patch<{ Params: EnvironmentParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/environments/:environmentId',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageEnvironments(authorization.access)) return denyEnvironmentMutation(request, reply)
+      const environmentId = parseSpaceId(request.params.environmentId)
+      if (!environmentId) return sendResourceNotFound(reply, request)
+      const expectedVersion = requireIfMatchVersion(request, reply, 'Environment')
+      if (expectedVersion === null) return
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
+          fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      const parsed = UpdateEnvironmentRequestSchema.safeParse(request.body)
+      if (!parsed.success) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED', message: 'The Environment update is invalid.', retryable: false,
+          fieldErrors: validationFieldErrors(parsed.error.issues),
+        })
+      }
+      const result = await configurationCatalogRepository.updateEnvironment({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        environmentId,
+        actorId: authorization.actor.id,
+        expectedVersion,
+        idempotencyKey,
+        request: parsed.data,
+      })
+      if (!result) return sendResourceNotFound(reply, request)
+      const response = EnvironmentMutationResponseSchema.parse(result)
+      reply.header('Idempotency-Replayed', String(response.replayed))
+      reply.header('ETag', resourceEtag(response.environment))
+      return reply.code(202).send(response)
+    },
+  )
+
+  for (const action of ['retry', 'disable'] as const) {
+    app.post<{ Params: EnvironmentParams }>(
+      `/api/v1/organizations/:organizationId/spaces/:spaceId/environments/:environmentId/${action}`,
+      async (request, reply) => {
+        const authorization = await authorizeCatalogSpace(request, reply, request.params)
+        if (!authorization) return
+        if (!canManageEnvironments(authorization.access)) return denyEnvironmentMutation(request, reply)
+        const environmentId = parseSpaceId(request.params.environmentId)
+        if (!environmentId) return sendResourceNotFound(reply, request)
+        const expectedVersion = requireIfMatchVersion(request, reply, 'Environment')
+        if (expectedVersion === null) return
+        const idempotencyKey = readIdempotencyKey(request)
+        if (!idempotencyKey) {
+          return sendApiError(reply, 400, request, {
+            code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
+            fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+          })
+        }
+        if (request.body !== undefined) {
+          return sendApiError(reply, 400, request, {
+            code: 'VALIDATION_FAILED', message: `${action} does not accept a request body.`, retryable: false,
+            fieldErrors: { body: ['Send the request without a body.'] },
+          })
+        }
+        const mutate = action === 'retry'
+          ? configurationCatalogRepository.retryEnvironment.bind(configurationCatalogRepository)
+          : configurationCatalogRepository.disableEnvironment.bind(configurationCatalogRepository)
+        const result = await mutate({
+          organizationId: authorization.organizationId,
+          spaceId: authorization.spaceId,
+          environmentId,
+          actorId: authorization.actor.id,
+          expectedVersion,
+          idempotencyKey,
+        })
+        if (!result) return sendResourceNotFound(reply, request)
+        const response = EnvironmentMutationResponseSchema.parse(result)
+        reply.header('Idempotency-Replayed', String(response.replayed))
+        reply.header('ETag', resourceEtag(response.environment))
+        return reply.code(action === 'retry' ? 202 : 200).send(response)
+      },
+    )
+  }
+
+  app.delete<{ Params: EnvironmentParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/environments/:environmentId',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageEnvironments(authorization.access)) return denyEnvironmentMutation(request, reply)
+      const environmentId = parseSpaceId(request.params.environmentId)
+      if (!environmentId) return sendResourceNotFound(reply, request)
+      const expectedVersion = requireIfMatchVersion(request, reply, 'Environment')
+      if (expectedVersion === null) return
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
+          fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      if (request.body !== undefined) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED', message: 'Archiving an Environment does not accept a request body.', retryable: false,
+          fieldErrors: { body: ['Send the request without a body.'] },
+        })
+      }
+      const result = await configurationCatalogRepository.archiveEnvironment({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        environmentId,
+        actorId: authorization.actor.id,
+        expectedVersion,
+        idempotencyKey,
+      })
+      if (!result) return sendResourceNotFound(reply, request)
+      const response = EnvironmentMutationResponseSchema.parse(result)
+      reply.header('Idempotency-Replayed', String(response.replayed))
+      reply.header('ETag', resourceEtag(response.environment))
+      return response
+    },
+  )
+
+  app.get<{ Params: EnvironmentParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/environments/:environmentId/revisions',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      const environmentId = parseSpaceId(request.params.environmentId)
+      if (!environmentId) return sendResourceNotFound(reply, request)
+      const items = await configurationCatalogRepository.listEnvironmentRevisions(
+        authorization.organizationId,
+        authorization.spaceId,
+        environmentId,
+        authorization.actor.id,
+      )
+      if (!items) return sendResourceNotFound(reply, request)
+      return EnvironmentRevisionListResponseSchema.parse({ items })
     },
   )
 
