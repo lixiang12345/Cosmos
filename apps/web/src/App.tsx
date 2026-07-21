@@ -1,4 +1,4 @@
-import { DEFAULT_AGENT_MODEL, type ContextPackResponse, type SessionDto, type SessionEventDto, type SessionMessageDto } from '@relay/contracts'
+import { DEFAULT_AGENT_MODEL, type ContextPackResponse, type EnvironmentSummaryDto, type SessionDto, type SessionEventDto, type SessionMessageDto } from '@relay/contracts'
 import { AlertTriangle, CheckCircle2, Home, LoaderCircle, Menu, RefreshCw, X } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
@@ -59,6 +59,7 @@ const ExpertsPage = lazy(() => import('./pages/ExpertsPage').then((module) => ({
 const ExpertEditorPage = lazy(() => import('./pages/ExpertsPage').then((module) => ({ default: module.ExpertEditorPage })))
 const RemoteExpertsPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteExpertsPage })))
 const RemoteExpertDetailPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteExpertDetailPage })))
+const RemoteExpertEditorPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteExpertEditorPage })))
 const RemoteEnvironmentsPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteEnvironmentsPage })))
 const RemoteFilesPage = lazy(() => import('./pages/RemoteFilesPage').then((module) => ({ default: module.RemoteFilesPage })))
 const RemoteWorkersPage = lazy(() => import('./pages/RemoteWorkersPage').then((module) => ({ default: module.RemoteWorkersPage })))
@@ -863,6 +864,8 @@ function RemoteExpertRoute({
   onBack,
   onStartSession,
   sessionCreationEnabled,
+  canManage,
+  onEdit,
 }: {
   organizationId: string
   spaceId: string
@@ -874,6 +877,8 @@ function RemoteExpertRoute({
   onBack: () => void
   onStartSession: (expertId: string) => void
   sessionCreationEnabled: boolean
+  canManage: boolean
+  onEdit: (expertId: string) => void
 }) {
   const { expertId } = useParams()
   const auth = useMemo(
@@ -892,13 +897,58 @@ function RemoteExpertRoute({
       onBack={onBack}
       onStartSession={onStartSession}
       sessionCreationEnabled={sessionCreationEnabled}
+      canManage={canManage}
+      onEdit={() => onEdit(expertId)}
     />
   )
 }
 
-function ExpertEditRedirect() {
+function RemoteExpertEditorRoute({
+  organizationId,
+  spaceId,
+  accessToken,
+  credentialVersion,
+  requestIdentity,
+  handleUnauthorized,
+  environments,
+  onOpenNavigation,
+  onBack,
+  onCreated,
+  onArchived,
+  onCatalogChange,
+}: {
+  organizationId: string
+  spaceId: string
+  accessToken?: string
+  credentialVersion: number
+  requestIdentity: string
+  handleUnauthorized: (failedAccessToken: string | undefined) => Promise<void>
+  environments: EnvironmentSummaryDto[]
+  onOpenNavigation: () => void
+  onBack: (expertId?: string) => void
+  onCreated: (expertId: string) => void
+  onArchived: () => void
+  onCatalogChange: () => void
+}) {
   const { expertId } = useParams()
-  return <Navigate to={expertId ? `/experts/${expertId}` : '/experts'} replace />
+  const auth = useMemo(
+    () => ({ accessToken, requestIdentity, onUnauthorized: handleUnauthorized }),
+    [accessToken, handleUnauthorized, requestIdentity],
+  )
+  return <RemoteExpertEditorPage
+    key={`${organizationId}:${spaceId}:${expertId ?? 'new'}:${requestIdentity}`}
+    organizationId={organizationId}
+    spaceId={spaceId}
+    expertId={expertId}
+    environments={environments}
+    auth={auth}
+    credentialVersion={credentialVersion}
+    onOpenNavigation={onOpenNavigation}
+    onBack={() => onBack(expertId)}
+    onCreated={onCreated}
+    onArchived={onArchived}
+    onCatalogChange={onCatalogChange}
+  />
 }
 
 function RelayApp() {
@@ -908,6 +958,9 @@ function RelayApp() {
   const organizationId = organization.id
   const requestIdentity = `${workspace.me.actor.id}\u0000${credentialVersion}`
   const sessionCreationEnabled = canCreateSessionInWorkspace(workspace)
+  const expertManagementEnabled = organization.role === 'organization_owner'
+    || organization.role === 'organization_admin'
+    || workspace.space.role === 'space_manager'
   const [runs, setRuns] = useState<Run[]>(() => demoMode ? getDemoRuns() : [])
   const [runsIdentity, setRunsIdentity] = useState(() => demoMode ? 'demo' : '')
   const runsIdentityRef = useRef(runsIdentity)
@@ -1979,15 +2032,20 @@ function RelayApp() {
               onOpenDetail={(expertId) => navigate(`/experts/${expertId}`)}
               onStartSession={openNewTask}
               sessionCreationEnabled={sessionCreationEnabled}
+              canManage={expertManagementEnabled}
+              onCreate={() => navigate('/experts/new')}
             />
           )
         } />
         <Route path="/experts/:expertId" element={demoMode
           ? <ExpertEditorRoute store={scopedExpertStore} onStoreChange={mergeScopedExpertStore} onOpenNavigation={openNavigation} onBack={() => navigate('/experts')} onStartSession={openNewTask} onNotify={setToast} />
-          : <RemoteExpertRoute organizationId={organizationId} spaceId={activeSpace.id} accessToken={accessToken} credentialVersion={credentialVersion} requestIdentity={requestIdentity} handleUnauthorized={handleUnauthorized} onOpenNavigation={openNavigation} onBack={() => navigate('/experts')} onStartSession={openNewTask} sessionCreationEnabled={sessionCreationEnabled} />} />
+          : <RemoteExpertRoute organizationId={organizationId} spaceId={activeSpace.id} accessToken={accessToken} credentialVersion={credentialVersion} requestIdentity={requestIdentity} handleUnauthorized={handleUnauthorized} onOpenNavigation={openNavigation} onBack={() => navigate('/experts')} onStartSession={openNewTask} sessionCreationEnabled={sessionCreationEnabled} canManage={expertManagementEnabled} onEdit={(expertId) => navigate(`/experts/${expertId}/edit`)} />} />
+        <Route path="/experts/new" element={demoMode
+          ? <Navigate to="/experts" replace />
+          : expertManagementEnabled ? <RemoteExpertEditorRoute organizationId={organizationId} spaceId={activeSpace.id} accessToken={accessToken} credentialVersion={credentialVersion} requestIdentity={requestIdentity} handleUnauthorized={handleUnauthorized} environments={catalog.environments.items} onOpenNavigation={openNavigation} onBack={() => navigate('/experts')} onCreated={(expertId) => navigate(`/experts/${expertId}/edit`, { replace: true })} onArchived={() => navigate('/experts', { replace: true })} onCatalogChange={catalog.experts.retry} /> : <Navigate to="/experts" replace />} />
         <Route path="/experts/:expertId/edit" element={demoMode
           ? <ExpertEditorRoute store={scopedExpertStore} onStoreChange={mergeScopedExpertStore} onOpenNavigation={openNavigation} onBack={() => navigate('/experts')} onStartSession={openNewTask} onNotify={setToast} />
-          : <ExpertEditRedirect />} />
+          : expertManagementEnabled ? <RemoteExpertEditorRoute organizationId={organizationId} spaceId={activeSpace.id} accessToken={accessToken} credentialVersion={credentialVersion} requestIdentity={requestIdentity} handleUnauthorized={handleUnauthorized} environments={catalog.environments.items} onOpenNavigation={openNavigation} onBack={(expertId) => navigate(expertId ? `/experts/${expertId}` : '/experts')} onCreated={(expertId) => navigate(`/experts/${expertId}/edit`, { replace: true })} onArchived={() => navigate('/experts', { replace: true })} onCatalogChange={catalog.experts.retry} /> : <Navigate to="/experts" replace />} />
         <Route path="/environments" element={demoMode
           ? <EnvironmentsPage onOpenNavigation={openNavigation} />
           : <RemoteEnvironmentsPage

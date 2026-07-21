@@ -199,7 +199,11 @@ const expertDetail: ExpertDetailDto = {
   publishedRevision: {
     ...expertRevisionSummary,
     instructions: 'Inspect the repository, implement the change, and verify it.',
+    capabilities: ['code-search', 'read-code', 'git'],
+    launchGuidance: 'Describe the requested implementation and its verification evidence.',
   },
+  draftRevisionId: null,
+  draftRevision: null,
 }
 
 const defaultRepository = {

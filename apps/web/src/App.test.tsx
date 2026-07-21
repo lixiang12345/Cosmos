@@ -137,7 +137,11 @@ const productionExpertDetail: ExpertDetailDto = {
   publishedRevision: {
     ...productionExpert.publishedRevisionSummary!,
     instructions: 'Implement only the requested change and verify the result.',
+    capabilities: ['code-search', 'read-code', 'git'],
+    launchGuidance: 'Describe the requested production change and the expected verification.',
   },
+  draftRevisionId: null,
+  draftRevision: null,
 }
 
 function makeApiSession(

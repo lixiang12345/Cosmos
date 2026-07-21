@@ -11,6 +11,7 @@ import {
   ContextEngineStatusRequestSchema,
   ContextPackRequestSchema,
   ContextSearchRequestSchema,
+  CreateExpertRequestSchema,
   CreateArtifactRequestSchema,
   CreateShareGrantRequestSchema,
   CreateSessionRequestSchema,
@@ -19,6 +20,7 @@ import {
   EnvironmentListResponseSchema,
   ExpertDetailDtoSchema,
   ExpertListResponseSchema,
+  ExpertRevisionListResponseSchema,
   FileDtoSchema,
   FileListResponseSchema,
   FileVersionListResponseSchema,
@@ -39,6 +41,7 @@ import {
   StartSessionResponseSchema,
   ToolCallListResponseSchema,
   UpdateArtifactRequestSchema,
+  UpdateExpertRequestSchema,
   type ApiError,
   type SessionEventDto,
   type SessionEventPage,
@@ -80,6 +83,10 @@ import {
 } from './context-engine-gateway.js'
 import {
   EmptyConfigurationCatalogRepository,
+  ExpertConfigurationValidationError,
+  ExpertIdempotencyConflictError,
+  ExpertStateConflictError,
+  ExpertVersionConflictError,
   type ConfigurationCatalogRepository,
 } from './configuration-catalog-repository.js'
 import {
@@ -731,7 +738,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   }))
 
   app.setErrorHandler((error, request, reply) => {
-    if (error instanceof IdempotencyConflictError) {
+    if (error instanceof IdempotencyConflictError || error instanceof ExpertIdempotencyConflictError) {
       return sendApiError(reply, 409, request, {
         code: 'IDEMPOTENCY_KEY_REUSED',
         message: error.message,
@@ -764,6 +771,18 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         details: {
           expectedVersion: error.expectedVersion,
           currentVersion: error.currentVersion,
+        },
+      })
+    }
+
+    if (error instanceof ExpertVersionConflictError) {
+      return sendApiError(reply, 412, request, {
+        code: 'PRECONDITION_FAILED',
+        message: error.message,
+        retryable: false,
+        details: {
+          expectedVersion: error.expectedVersion,
+          currentVersion: error.actualVersion,
         },
       })
     }
@@ -834,6 +853,25 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         code: 'ARTIFACT_CONFLICT',
         message: error.message,
         retryable: false,
+      })
+    }
+
+    if (error instanceof ExpertStateConflictError) {
+      return sendApiError(reply, 409, request, {
+        code: 'EXPERT_STATE_CONFLICT',
+        message: error.message,
+        retryable: false,
+      })
+    }
+
+    if (error instanceof ExpertConfigurationValidationError) {
+      return sendApiError(reply, 422, request, {
+        code: 'VALIDATION_FAILED',
+        message: error.message,
+        retryable: false,
+        fieldErrors: Object.fromEntries(Object.entries(error.fieldErrors).map(([field, messages]) => (
+          [`body.${field}`, messages]
+        ))),
       })
     }
 
@@ -1113,6 +1151,20 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       return null
     }
     return authorizeSpace(request, reply, params)
+  }
+
+  function canManageExperts(access: { organizationRole: string; spaceRole: string }) {
+    return access.spaceRole === 'space_manager'
+      || access.organizationRole === 'organization_owner'
+      || access.organizationRole === 'organization_admin'
+  }
+
+  function denyExpertMutation(request: FastifyRequest, reply: FastifyReply) {
+    return sendApiError(reply, 403, request, {
+      code: 'PERMISSION_DENIED',
+      message: 'Only Space Managers and Organization Administrators can manage Experts.',
+      retryable: false,
+    })
   }
 
   async function authorizeContextSpace(
@@ -1408,6 +1460,45 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     },
   )
 
+  app.post<{ Params: SpaceParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/experts',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageExperts(authorization.access)) return denyExpertMutation(request, reply)
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED',
+          message: 'A valid Idempotency-Key header is required.',
+          retryable: false,
+          fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      const parsed = CreateExpertRequestSchema.safeParse(request.body)
+      if (!parsed.success) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED',
+          message: 'The Expert request is invalid.',
+          retryable: false,
+          fieldErrors: validationFieldErrors(parsed.error.issues),
+        })
+      }
+      const result = await configurationCatalogRepository.createExpert({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        actorId: authorization.actor.id,
+        idempotencyKey,
+        request: parsed.data,
+      })
+      const expert = ExpertDetailDtoSchema.parse(result.expert)
+      reply.header('Idempotency-Replayed', String(result.replayed))
+      reply.header('Location', `/api/v1/organizations/${authorization.organizationId}/spaces/${authorization.spaceId}/experts/${expert.id}`)
+      reply.header('ETag', resourceEtag(expert))
+      return reply.code(201).send(expert)
+    },
+  )
+
   app.get<{ Params: ExpertParams }>(
     '/api/v1/organizations/:organizationId/spaces/:spaceId/experts/:expertId',
     async (request, reply) => {
@@ -1425,6 +1516,164 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       const expert = ExpertDetailDtoSchema.parse(candidate)
       reply.header('ETag', resourceEtag(expert))
       return expert
+    },
+  )
+
+  app.patch<{ Params: ExpertParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/experts/:expertId',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageExperts(authorization.access)) return denyExpertMutation(request, reply)
+      const expertId = parseSpaceId(request.params.expertId)
+      if (!expertId) return sendResourceNotFound(reply, request)
+      const expectedVersion = requireIfMatchVersion(request, reply, 'Expert')
+      if (expectedVersion === null) return
+      const parsed = UpdateExpertRequestSchema.safeParse(request.body)
+      if (!parsed.success) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED',
+          message: 'The Expert update is invalid.',
+          retryable: false,
+          fieldErrors: validationFieldErrors(parsed.error.issues),
+        })
+      }
+      const candidate = await configurationCatalogRepository.updateExpert({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        expertId,
+        actorId: authorization.actor.id,
+        expectedVersion,
+        request: parsed.data,
+      })
+      if (!candidate) return sendResourceNotFound(reply, request)
+      const expert = ExpertDetailDtoSchema.parse(candidate)
+      reply.header('ETag', resourceEtag(expert))
+      return expert
+    },
+  )
+
+  app.post<{ Params: ExpertParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/experts/:expertId/publish',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageExperts(authorization.access)) return denyExpertMutation(request, reply)
+      const expertId = parseSpaceId(request.params.expertId)
+      if (!expertId) return sendResourceNotFound(reply, request)
+      const expectedVersion = requireIfMatchVersion(request, reply, 'Expert')
+      if (expectedVersion === null) return
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED',
+          message: 'A valid Idempotency-Key header is required.',
+          retryable: false,
+          fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      if (request.body !== undefined) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED',
+          message: 'Publishing an Expert does not accept a request body.',
+          retryable: false,
+          fieldErrors: { body: ['Send the request without a body.'] },
+        })
+      }
+      const result = await configurationCatalogRepository.publishExpert({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        expertId,
+        actorId: authorization.actor.id,
+        expectedVersion,
+        idempotencyKey,
+      })
+      if (!result) return sendResourceNotFound(reply, request)
+      const expert = ExpertDetailDtoSchema.parse(result.expert)
+      reply.header('Idempotency-Replayed', String(result.replayed))
+      reply.header('ETag', resourceEtag(expert))
+      return expert
+    },
+  )
+
+  app.post<{ Params: ExpertParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/experts/:expertId/disable',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageExperts(authorization.access)) return denyExpertMutation(request, reply)
+      const expertId = parseSpaceId(request.params.expertId)
+      if (!expertId) return sendResourceNotFound(reply, request)
+      const expectedVersion = requireIfMatchVersion(request, reply, 'Expert')
+      if (expectedVersion === null) return
+      if (request.body !== undefined) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED',
+          message: 'Disabling an Expert does not accept a request body.',
+          retryable: false,
+          fieldErrors: { body: ['Send the request without a body.'] },
+        })
+      }
+      const candidate = await configurationCatalogRepository.disableExpert({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        expertId,
+        actorId: authorization.actor.id,
+        expectedVersion,
+      })
+      if (!candidate) return sendResourceNotFound(reply, request)
+      const expert = ExpertDetailDtoSchema.parse(candidate)
+      reply.header('ETag', resourceEtag(expert))
+      return expert
+    },
+  )
+
+  app.delete<{ Params: ExpertParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/experts/:expertId',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageExperts(authorization.access)) return denyExpertMutation(request, reply)
+      const expertId = parseSpaceId(request.params.expertId)
+      if (!expertId) return sendResourceNotFound(reply, request)
+      const expectedVersion = requireIfMatchVersion(request, reply, 'Expert')
+      if (expectedVersion === null) return
+      if (request.body !== undefined) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED',
+          message: 'Archiving an Expert does not accept a request body.',
+          retryable: false,
+          fieldErrors: { body: ['Send the request without a body.'] },
+        })
+      }
+      const candidate = await configurationCatalogRepository.archiveExpert({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        expertId,
+        actorId: authorization.actor.id,
+        expectedVersion,
+      })
+      if (!candidate) return sendResourceNotFound(reply, request)
+      reply.header('ETag', resourceEtag(candidate))
+      return reply.code(204).send()
+    },
+  )
+
+  app.get<{ Params: ExpertParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/experts/:expertId/revisions',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      const expertId = parseSpaceId(request.params.expertId)
+      if (!expertId) return sendResourceNotFound(reply, request)
+      const items = await configurationCatalogRepository.listExpertRevisions(
+        authorization.organizationId,
+        authorization.spaceId,
+        expertId,
+        authorization.actor.id,
+      )
+      if (!items) return sendResourceNotFound(reply, request)
+      return ExpertRevisionListResponseSchema.parse({ items })
     },
   )
 

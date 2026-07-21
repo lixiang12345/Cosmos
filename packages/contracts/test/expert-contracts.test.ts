@@ -41,6 +41,15 @@ const expertSummary = {
 const publishedRevision = {
   ...publishedRevisionSummary,
   instructions: 'Inspect evidence, make a minimal fix, and verify it.',
+  capabilities: ['code-search', 'read-code', 'git'],
+  launchGuidance: 'Describe the incident, affected service, and available evidence.',
+} as const
+
+const expertDetail = {
+  ...expertSummary,
+  publishedRevision,
+  draftRevisionId: null,
+  draftRevision: null,
 } as const
 
 describe('Expert control-plane contracts', () => {
@@ -111,13 +120,8 @@ describe('Expert control-plane contracts', () => {
   })
 
   it('accepts detail data while keeping instructions out of summaries', () => {
-    const detail = {
-      ...expertSummary,
-      publishedRevision,
-    }
-
-    expect(ExpertDetailDtoSchema.parse(detail)).toEqual(detail)
-    expect(ExpertSummaryDtoSchema.safeParse(detail).success).toBe(false)
+    expect(ExpertDetailDtoSchema.parse(expertDetail)).toEqual(expertDetail)
+    expect(ExpertSummaryDtoSchema.safeParse(expertDetail).success).toBe(false)
   })
 
   it('rejects unvalidated raw configuration from summaries and details', () => {
@@ -137,12 +141,12 @@ describe('Expert control-plane contracts', () => {
       publishedRevisionId: 'expert-revision-other',
     }).success).toBe(false)
     expect(ExpertDetailDtoSchema.safeParse({
-      ...expertSummary,
+      ...expertDetail,
       publishedRevision: { ...publishedRevision, expertId: 'expert-other' },
     }).success).toBe(false)
 
     expect(ExpertDetailDtoSchema.safeParse({
-      ...expertSummary,
+      ...expertDetail,
       publishedRevision: { ...publishedRevision, model: 'different-model' },
     }).success).toBe(false)
     expect(ExpertDetailDtoSchema.safeParse({

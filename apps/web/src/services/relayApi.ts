@@ -10,6 +10,7 @@ import {
   EnvironmentListResponseSchema,
   ExpertDetailDtoSchema,
   ExpertListResponseSchema,
+  ExpertRevisionListResponseSchema,
   FileDtoSchema,
   FileListResponseSchema,
   FileVersionListResponseSchema,
@@ -32,6 +33,7 @@ import {
   type ApprovalStatus,
   type CreateSessionRequestInput,
   type CreateSessionResponse,
+  type CreateExpertRequestInput,
   type ContextEngineStatus,
   type ContextPackRequestInput,
   type ContextPackResponse,
@@ -41,6 +43,7 @@ import {
   type EnvironmentListResponse,
   type ExpertDetailDto,
   type ExpertListResponse,
+  type ExpertRevisionListResponse,
   type FileDto,
   type FileListResponse,
   type FileScope,
@@ -59,6 +62,7 @@ import {
   type SessionWorkerListResponse,
   type SendSessionMessageResponse,
   type StartSessionResponse,
+  type UpdateExpertRequestInput,
 } from '@relay/contracts'
 
 const DEFAULT_RELAY_API_BASE_URL = '/api'
@@ -1303,6 +1307,126 @@ export function getExpert(
   }, ExpertDetailDtoSchema, auth).then((expert) => {
     assertControlPlaneScope(expert, organizationId, spaceId, 'Expert', expertId)
     return expert
+  })
+}
+
+export function createExpert(
+  organizationId: string,
+  spaceId: string,
+  input: CreateExpertRequestInput,
+  idempotencyKey: string,
+  auth?: RelayApiAuthContext,
+): Promise<ExpertDetailDto> {
+  return request(expertsPath(organizationId, spaceId), {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey,
+    },
+    body: JSON.stringify(input),
+  }, ExpertDetailDtoSchema, auth).then((expert) => {
+    assertControlPlaneScope(expert, organizationId, spaceId, 'Expert')
+    return expert
+  })
+}
+
+export function updateExpert(
+  organizationId: string,
+  spaceId: string,
+  expertId: string,
+  input: UpdateExpertRequestInput,
+  version: number,
+  auth?: RelayApiAuthContext,
+): Promise<ExpertDetailDto> {
+  return request(`${expertsPath(organizationId, spaceId)}/${encodeURIComponent(expertId)}`, {
+    method: 'PATCH',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/merge-patch+json',
+      'If-Match': `"${version}"`,
+    },
+    body: JSON.stringify(input),
+  }, ExpertDetailDtoSchema, auth).then((expert) => {
+    assertControlPlaneScope(expert, organizationId, spaceId, 'Expert', expertId)
+    return expert
+  })
+}
+
+export function publishExpert(
+  organizationId: string,
+  spaceId: string,
+  expertId: string,
+  version: number,
+  idempotencyKey: string,
+  auth?: RelayApiAuthContext,
+): Promise<ExpertDetailDto> {
+  return request(`${expertsPath(organizationId, spaceId)}/${encodeURIComponent(expertId)}/publish`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': `"${version}"`,
+    },
+  }, ExpertDetailDtoSchema, auth).then((expert) => {
+    assertControlPlaneScope(expert, organizationId, spaceId, 'Expert', expertId)
+    return expert
+  })
+}
+
+export function disableExpert(
+  organizationId: string,
+  spaceId: string,
+  expertId: string,
+  version: number,
+  auth?: RelayApiAuthContext,
+): Promise<ExpertDetailDto> {
+  return request(`${expertsPath(organizationId, spaceId)}/${encodeURIComponent(expertId)}/disable`, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'If-Match': `"${version}"` },
+  }, ExpertDetailDtoSchema, auth).then((expert) => {
+    assertControlPlaneScope(expert, organizationId, spaceId, 'Expert', expertId)
+    return expert
+  })
+}
+
+const VoidResponseSchema: ResponseSchema<void> = {
+  safeParse: (value) => value === undefined
+    ? { success: true, data: undefined }
+    : { success: false },
+}
+
+export function archiveExpert(
+  organizationId: string,
+  spaceId: string,
+  expertId: string,
+  version: number,
+  auth?: RelayApiAuthContext,
+): Promise<void> {
+  return request(`${expertsPath(organizationId, spaceId)}/${encodeURIComponent(expertId)}`, {
+    method: 'DELETE',
+    headers: { Accept: 'application/json', 'If-Match': `"${version}"` },
+  }, VoidResponseSchema, auth)
+}
+
+export function listExpertRevisions(
+  organizationId: string,
+  spaceId: string,
+  expertId: string,
+  auth?: RelayApiAuthContext,
+  signal?: AbortSignal,
+): Promise<ExpertRevisionListResponse> {
+  return request(`${expertsPath(organizationId, spaceId)}/${encodeURIComponent(expertId)}/revisions`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    signal,
+  }, ExpertRevisionListResponseSchema, auth).then((response) => {
+    if (response.items.some((revision) => revision.expertId !== expertId)) {
+      throw new RelayApiError('Relay API returned an Expert revision outside the requested scope.', {
+        code: 'INVALID_RESPONSE', status: 200,
+      })
+    }
+    return response
   })
 }
 

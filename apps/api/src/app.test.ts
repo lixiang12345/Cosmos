@@ -20,9 +20,10 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.js'
 import { createDevelopmentAuthenticator } from './auth.js'
-import type {
-  ConfigurationCatalogListOptions,
-  ConfigurationCatalogRepository,
+import {
+  EmptyConfigurationCatalogRepository,
+  type ConfigurationCatalogListOptions,
+  type ConfigurationCatalogRepository,
 } from './configuration-catalog-repository.js'
 import {
   AuthorizationChangedError,
@@ -137,8 +138,12 @@ const expertDetail: ExpertDetailDto = {
     allowRepositoryOverride: true,
     allowBaseBranchOverride: true,
     instructions: 'Inspect the repository, implement the change, and verify it.',
+    capabilities: ['code-search', 'git'],
+    launchGuidance: 'Describe the change and acceptance criteria.',
     createdAt: '2026-07-13T08:00:00.000Z',
   },
+  draftRevisionId: null,
+  draftRevision: null,
   version: 4,
   createdAt: '2026-07-13T07:00:00.000Z',
   updatedAt: '2026-07-13T08:00:00.000Z',
@@ -210,11 +215,16 @@ function testConfigurationCatalog(
     createdAt: environmentDetail.createdAt,
     updatedAt: environmentDetail.updatedAt,
   }
-  return {
+  return Object.assign(new EmptyConfigurationCatalogRepository(), {
     async hasRepositoryAccess() {
       return true
     },
-    async listExperts(_organizationId, _spaceId, _actorId, options = {}) {
+    async listExperts(
+      _organizationId: string,
+      _spaceId: string,
+      _actorId: string,
+      options: ConfigurationCatalogListOptions = {},
+    ) {
       onListExperts?.(options)
       return {
         items: [expertSummary],
@@ -235,7 +245,7 @@ function testConfigurationCatalog(
     async getEnvironment() {
       return environmentDetail
     },
-  }
+  })
 }
 
 function testRepository(options: InMemorySessionRepositoryOptions = {}) {

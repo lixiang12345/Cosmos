@@ -62,6 +62,8 @@ const migrationVersions = [
   '057_worker_workspace_file_reads.sql',
   '058_validate_worker_workspace_file_reads.sql',
   '059_security_failure_audit.sql',
+  '060_expert_lifecycle.sql',
+  '061_expert_runtime_lock_guard.sql',
 ]
 
 function poolWithVersions(versions: string[]) {

@@ -109,7 +109,7 @@ describe('PostgresConfigurationCatalogRepository', () => {
     expect(sql).toContain("expert.status = 'published'")
     expect(sql).toContain("access.organization_role <> 'viewer' AND access.space_role <> 'viewer'")
     expect(sql).toContain('ORDER BY expert.updated_at DESC, expert.id DESC')
-    expect(sql).not.toContain('published_revision.configuration')
+    expect(sql).not.toMatch(/published_revision\.configuration\s+AS/u)
   })
 
   it('uses a stable keyset cursor and distinguishes missing membership from an empty catalog', async () => {
@@ -157,7 +157,7 @@ describe('PostgresConfigurationCatalogRepository', () => {
 
     const [sql] = query.mock.calls[0] as [string]
     expect(sql.match(/EXISTS \(/g)).toHaveLength(2)
-    expect(sql).not.toContain('published_revision.configuration')
+    expect(sql).not.toMatch(/published_revision\.configuration\s+AS/u)
     expect(sql).toContain('expert.id = $4')
   })
 

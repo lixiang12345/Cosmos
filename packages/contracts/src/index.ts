@@ -143,26 +143,34 @@ export {
 export { ApiErrorSchema, type ApiError } from './api-error.js'
 
 export {
+  CreateExpertRequestSchema,
   ExpertDetailDtoSchema,
   ExpertDraftRevisionDtoSchema,
   ExpertKindSchema,
   ExpertListResponseSchema,
+  ExpertRevisionListResponseSchema,
   ExpertPublishedRevisionDtoSchema,
   ExpertPublishedRevisionSummarySchema,
   ExpertRevisionStatusSchema,
   ExpertStatusSchema,
   ExpertSummaryDtoSchema,
   ExpertVisibilitySchema,
+  UpdateExpertRequestSchema,
+  type CreateExpertRequest,
+  type CreateExpertRequestInput,
   type ExpertDetailDto,
   type ExpertDraftRevisionDto,
   type ExpertKind,
   type ExpertListResponse,
+  type ExpertRevisionListResponse,
   type ExpertPublishedRevisionDto,
   type ExpertPublishedRevisionSummary,
   type ExpertRevisionStatus,
   type ExpertStatus,
   type ExpertSummaryDto,
   type ExpertVisibility,
+  type UpdateExpertRequest,
+  type UpdateExpertRequestInput,
 } from './expert.js'
 
 export {

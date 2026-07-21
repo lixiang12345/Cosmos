@@ -1,7 +1,13 @@
 import { z } from 'zod'
+import { SupportedAgentModelSchema } from './model.js'
 
 const IdentifierSchema = z.string().trim().min(1).max(128)
 const TimestampSchema = z.string().datetime({ offset: true })
+const CapabilitySchema = z.string().trim().min(1).max(128)
+const CapabilitiesSchema = z.array(CapabilitySchema).max(32)
+  .refine((capabilities) => new Set(capabilities).size === capabilities.length, {
+    message: 'Expert capabilities must be unique',
+  })
 
 export const ExpertStatusSchema = z.enum(['draft', 'published', 'disabled', 'archived'])
 export type ExpertStatus = z.infer<typeof ExpertStatusSchema>
@@ -37,6 +43,8 @@ export type ExpertPublishedRevisionSummary = z.infer<typeof ExpertPublishedRevis
 const expertRevisionFields = {
   ...expertRevisionExecutionFields,
   instructions: z.string().max(100_000),
+  capabilities: CapabilitiesSchema,
+  launchGuidance: z.string().max(10_000),
 }
 
 export const ExpertPublishedRevisionDtoSchema = z.object({
@@ -137,6 +145,8 @@ export type ExpertSummaryDto = z.infer<typeof ExpertSummaryDtoSchema>
 export const ExpertDetailDtoSchema = z.object({
   ...expertSummaryFields,
   publishedRevision: ExpertPublishedRevisionDtoSchema.nullable(),
+  draftRevisionId: IdentifierSchema.nullable(),
+  draftRevision: ExpertDraftRevisionDtoSchema.nullable(),
 }).strict().superRefine((expert, context) => {
   for (const [pointer, revision, field] of [
     [expert.publishedRevisionId, expert.publishedRevisionSummary, 'publishedRevisionSummary'],
@@ -145,6 +155,14 @@ export const ExpertDetailDtoSchema = z.object({
     for (const issue of revisionPointerIssues(expert.id, pointer, revision, field)) {
       context.addIssue({ code: 'custom', ...issue })
     }
+  }
+  for (const issue of revisionPointerIssues(
+    expert.id,
+    expert.draftRevisionId,
+    expert.draftRevision,
+    'draftRevision',
+  )) {
+    context.addIssue({ code: 'custom', ...issue })
   }
   if (expert.status === 'published' && expert.publishedRevision === null) {
     context.addIssue({
@@ -178,6 +196,47 @@ export const ExpertDetailDtoSchema = z.object({
 })
 
 export type ExpertDetailDto = z.infer<typeof ExpertDetailDtoSchema>
+
+const expertMutableRevisionFields = {
+  instructions: z.string().max(100_000),
+  model: SupportedAgentModelSchema,
+  environmentId: IdentifierSchema,
+  environmentRevisionId: IdentifierSchema,
+  allowRepositoryOverride: z.boolean(),
+  allowBaseBranchOverride: z.boolean(),
+  capabilities: CapabilitiesSchema,
+  launchGuidance: z.string().max(10_000),
+}
+
+export const CreateExpertRequestSchema = z.object({
+  name: z.string().trim().min(1).max(160),
+  description: z.string().max(2_000).default(''),
+  visibility: ExpertVisibilitySchema.default('space'),
+  ...expertMutableRevisionFields,
+}).strict()
+
+export type CreateExpertRequest = z.infer<typeof CreateExpertRequestSchema>
+export type CreateExpertRequestInput = z.input<typeof CreateExpertRequestSchema>
+
+export const UpdateExpertRequestSchema = z.object({
+  name: z.string().trim().min(1).max(160).optional(),
+  description: z.string().max(2_000).optional(),
+  visibility: ExpertVisibilitySchema.optional(),
+  ...Object.fromEntries(Object.entries(expertMutableRevisionFields).map(([key, schema]) => (
+    [key, schema.optional()]
+  ))) as { [Key in keyof typeof expertMutableRevisionFields]: z.ZodOptional<(typeof expertMutableRevisionFields)[Key]> },
+}).strict().refine((expert) => Object.keys(expert).length > 0, {
+  message: 'At least one Expert field must be provided',
+})
+
+export type UpdateExpertRequest = z.infer<typeof UpdateExpertRequestSchema>
+export type UpdateExpertRequestInput = z.input<typeof UpdateExpertRequestSchema>
+
+export const ExpertRevisionListResponseSchema = z.object({
+  items: z.array(z.union([ExpertDraftRevisionDtoSchema, ExpertPublishedRevisionDtoSchema])).max(100),
+}).strict()
+
+export type ExpertRevisionListResponse = z.infer<typeof ExpertRevisionListResponseSchema>
 
 export const ExpertListResponseSchema = z.object({
   items: z.array(ExpertSummaryDtoSchema).max(100),

@@ -332,9 +332,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/Space'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/RuntimeBadRequest'
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/RuntimeConflict'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '422':
+          $ref: '#/components/responses/RuntimeUnprocessable'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
 
   /organizations/{organizationId}/spaces/{spaceId}:
     parameters:
@@ -445,6 +453,7 @@ paths:
     post:
       tags: [Experts]
       operationId: createExpert
+      x-relay-implementation-status: implemented
       summary: Create a Custom Expert draft or managed-template customization
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -453,7 +462,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ExpertCreate'
+              $ref: '#/components/schemas/RuntimeExpertCreate'
       responses:
         '201':
           description: Expert created
@@ -465,11 +474,19 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Expert'
+                $ref: '#/components/schemas/RuntimeExpertDetail'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/RuntimeBadRequest'
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/RuntimeConflict'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '422':
+          $ref: '#/components/responses/RuntimeUnprocessable'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
 
   /organizations/{organizationId}/spaces/{spaceId}/experts/{expertId}:
     parameters:
@@ -515,6 +532,7 @@ paths:
     patch:
       tags: [Experts]
       operationId: updateExpertDraft
+      x-relay-implementation-status: implemented
       summary: Update the mutable draft revision
       description: Managed-template base instructions cannot be changed by this operation.
       parameters:
@@ -524,7 +542,7 @@ paths:
         content:
           application/merge-patch+json:
             schema:
-              $ref: '#/components/schemas/ExpertPatch'
+              $ref: '#/components/schemas/RuntimeExpertPatch'
       responses:
         '200':
           description: Updated Expert draft
@@ -534,16 +552,29 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Expert'
+                $ref: '#/components/schemas/RuntimeExpertDetail'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/RuntimeBadRequest'
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/RuntimeConflict'
         '412':
-          $ref: '#/components/responses/PreconditionFailed'
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '422':
+          $ref: '#/components/responses/RuntimeUnprocessable'
+        '428':
+          $ref: '#/components/responses/RuntimePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
     delete:
       tags: [Experts]
       operationId: archiveExpert
+      x-relay-implementation-status: implemented
       summary: Archive an Expert
       parameters:
         - $ref: '#/components/parameters/IfMatch'
@@ -551,9 +582,19 @@ paths:
         '204':
           description: Expert archived
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/RuntimeConflict'
         '412':
-          $ref: '#/components/responses/PreconditionFailed'
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '428':
+          $ref: '#/components/responses/RuntimePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
 
   /organizations/{organizationId}/spaces/{spaceId}/experts/{expertId}/publish:
     parameters:
@@ -563,23 +604,73 @@ paths:
     post:
       tags: [Experts]
       operationId: publishExpert
+      x-relay-implementation-status: implemented
       summary: Validate and publish the current draft as an immutable revision
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/IfMatch'
       responses:
-        '201':
-          description: Published revision
+        '200':
+          description: Published Expert
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ExpertRevision'
+                $ref: '#/components/schemas/RuntimeExpertDetail'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/RuntimeBadRequest'
         '409':
-          $ref: '#/components/responses/Conflict'
+          $ref: '#/components/responses/RuntimeConflict'
         '412':
-          $ref: '#/components/responses/PreconditionFailed'
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '422':
+          $ref: '#/components/responses/RuntimeUnprocessable'
+        '428':
+          $ref: '#/components/responses/RuntimePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+
+  /organizations/{organizationId}/spaces/{spaceId}/experts/{expertId}/disable:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/ExpertId'
+    post:
+      tags: [Experts]
+      operationId: disableExpert
+      x-relay-implementation-status: implemented
+      summary: Disable an Expert while preserving its published revision
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Disabled Expert
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeExpertDetail'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
+        '412':
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '428':
+          $ref: '#/components/responses/RuntimePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
 
   /organizations/{organizationId}/spaces/{spaceId}/experts/{expertId}/revisions:
     parameters:
@@ -589,6 +680,7 @@ paths:
     get:
       tags: [Experts]
       operationId: listExpertRevisions
+      x-relay-implementation-status: implemented
       summary: List immutable Expert revisions
       parameters:
         - $ref: '#/components/parameters/Cursor'
@@ -599,17 +691,15 @@ paths:
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: '#/components/schemas/Page'
-                  - type: object
-                    required: [items]
-                    properties:
-                      items:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/ExpertRevision'
+                $ref: '#/components/schemas/RuntimeExpertRevisionListResponse'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/RuntimeNotFound'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
 
   /organizations/{organizationId}/spaces/{spaceId}/environments:
     parameters:
@@ -2993,7 +3083,7 @@ components:
         createdAt:
           $ref: '#/components/schemas/Timestamp'
       additionalProperties: false
-    RuntimeExpertPublishedRevision:
+    RuntimeExpertRevision:
       type: object
       required:
         - id
@@ -3007,6 +3097,8 @@ components:
         - allowBaseBranchOverride
         - createdAt
         - instructions
+        - capabilities
+        - launchGuidance
       properties:
         id:
           $ref: '#/components/schemas/RuntimeIdentifier'
@@ -3017,7 +3109,7 @@ components:
           minimum: 1
         status:
           type: string
-          const: published
+          enum: [draft, published]
         model:
           type: string
           minLength: 1
@@ -3035,7 +3127,34 @@ components:
         instructions:
           type: string
           maxLength: 100000
+        capabilities:
+          type: array
+          maxItems: 32
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+        launchGuidance:
+          type: string
+          maxLength: 10000
       additionalProperties: false
+    RuntimeExpertPublishedRevision:
+      allOf:
+        - $ref: '#/components/schemas/RuntimeExpertRevision'
+        - type: object
+          properties:
+            status:
+              type: string
+              const: published
+    RuntimeExpertDraftRevision:
+      allOf:
+        - $ref: '#/components/schemas/RuntimeExpertRevision'
+        - type: object
+          properties:
+            status:
+              type: string
+              const: draft
     RuntimeExpertSummary:
       type: object
       required:
@@ -3099,6 +3218,8 @@ components:
         - publishedRevisionId
         - publishedRevisionSummary
         - publishedRevision
+        - draftRevisionId
+        - draftRevision
         - version
         - createdAt
         - updatedAt
@@ -3133,6 +3254,14 @@ components:
           oneOf:
             - $ref: '#/components/schemas/RuntimeExpertPublishedRevision'
             - type: 'null'
+        draftRevisionId:
+          oneOf:
+            - $ref: '#/components/schemas/RuntimeIdentifier'
+            - type: 'null'
+        draftRevision:
+          oneOf:
+            - $ref: '#/components/schemas/RuntimeExpertDraftRevision'
+            - type: 'null'
         version:
           type: integer
           minimum: 1
@@ -3152,6 +3281,109 @@ components:
             $ref: '#/components/schemas/RuntimeExpertSummary'
         page:
           $ref: '#/components/schemas/RuntimeCatalogPageMetadata'
+      additionalProperties: false
+    RuntimeExpertRevisionListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            oneOf:
+              - $ref: '#/components/schemas/RuntimeExpertDraftRevision'
+              - $ref: '#/components/schemas/RuntimeExpertPublishedRevision'
+      additionalProperties: false
+    RuntimeExpertCreate:
+      type: object
+      required:
+        - name
+        - instructions
+        - model
+        - environmentId
+        - environmentRevisionId
+        - allowRepositoryOverride
+        - allowBaseBranchOverride
+        - capabilities
+        - launchGuidance
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 160
+        description:
+          type: string
+          maxLength: 2000
+          default: ''
+        visibility:
+          type: string
+          enum: [private, space]
+          default: space
+        instructions:
+          type: string
+          maxLength: 100000
+        model:
+          type: string
+          enum: [gpt-5.6-sol, claude-fable-5, claude-opus-4-8, claude-sonnet-5, grok-4.5]
+        environmentId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        environmentRevisionId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        allowRepositoryOverride:
+          type: boolean
+        allowBaseBranchOverride:
+          type: boolean
+        capabilities:
+          type: array
+          maxItems: 32
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+        launchGuidance:
+          type: string
+          maxLength: 10000
+      additionalProperties: false
+    RuntimeExpertPatch:
+      minProperties: 1
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 160
+        description:
+          type: string
+          maxLength: 2000
+        visibility:
+          type: string
+          enum: [private, space]
+        instructions:
+          type: string
+          maxLength: 100000
+        model:
+          type: string
+          enum: [gpt-5.6-sol, claude-fable-5, claude-opus-4-8, claude-sonnet-5, grok-4.5]
+        environmentId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        environmentRevisionId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        allowRepositoryOverride:
+          type: boolean
+        allowBaseBranchOverride:
+          type: boolean
+        capabilities:
+          type: array
+          maxItems: 32
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+        launchGuidance:
+          type: string
+          maxLength: 10000
       additionalProperties: false
 
     RuntimeEnvironmentRepositoryBinding:
@@ -5018,222 +5250,6 @@ components:
     ExpertStatus:
       type: string
       enum: [draft, published, disabled, archived]
-    ExpertKind:
-      type: string
-      enum: [managed_template, custom, built_in]
-    Expert:
-      allOf:
-        - $ref: '#/components/schemas/ResourceBase'
-        - type: object
-          required: [spaceId, kind, name, description, status, visibility]
-          properties:
-            spaceId:
-              type: string
-              format: uuid
-            kind:
-              $ref: '#/components/schemas/ExpertKind'
-            name:
-              type: string
-            description:
-              type: string
-            status:
-              $ref: '#/components/schemas/ExpertStatus'
-            visibility:
-              type: string
-              enum: [private, space]
-            publishedRevisionId:
-              type: [string, 'null']
-              format: uuid
-            draftRevisionId:
-              type: [string, 'null']
-              format: uuid
-            upstreamTemplateId:
-              type: [string, 'null']
-            draftRevision:
-              oneOf:
-                - $ref: '#/components/schemas/ExpertRevision'
-                - type: 'null'
-    ExpertRevision:
-      type: object
-      required:
-        - id
-        - expertId
-        - revision
-        - organizationInstructions
-        - model
-        - capabilities
-        - toolPolicy
-        - launchGuidance
-        - workerDefinitions
-        - triggerDefinitions
-        - approvalPolicy
-        - checksum
-        - createdAt
-      properties:
-        id:
-          type: string
-          format: uuid
-        expertId:
-          type: string
-          format: uuid
-        revision:
-          type: integer
-          minimum: 1
-        baseRevisionId:
-          type: [string, 'null']
-          format: uuid
-        managedInstructions:
-          type: [string, 'null']
-          readOnly: true
-        organizationInstructions:
-          type: string
-          maxLength: 100000
-        model:
-          type: string
-        capabilities:
-          type: array
-          uniqueItems: true
-          items:
-            type: string
-        toolPolicy:
-          $ref: '#/components/schemas/JsonObject'
-        environmentId:
-          type: [string, 'null']
-          format: uuid
-        environmentRevisionId:
-          type: [string, 'null']
-          format: uuid
-        launchGuidance:
-          type: string
-          maxLength: 10000
-        workerDefinitions:
-          type: array
-          items:
-            $ref: '#/components/schemas/WorkerDefinition'
-        triggerDefinitions:
-          type: array
-          items:
-            $ref: '#/components/schemas/TriggerDefinition'
-        approvalPolicy:
-          $ref: '#/components/schemas/JsonObject'
-        checksum:
-          type: string
-        publishedAt:
-          type: [string, 'null']
-          format: date-time
-        publishedBy:
-          type: [string, 'null']
-          format: uuid
-        createdAt:
-          $ref: '#/components/schemas/Timestamp'
-    ExpertCreate:
-      type: object
-      required: [kind, name]
-      properties:
-        kind:
-          type: string
-          enum: [managed_template, custom]
-        upstreamTemplateId:
-          type: string
-        name:
-          type: string
-          minLength: 1
-          maxLength: 120
-        description:
-          type: string
-          maxLength: 2000
-        visibility:
-          type: string
-          enum: [private, space]
-          default: space
-        draft:
-          $ref: '#/components/schemas/ExpertDraftInput'
-      additionalProperties: false
-    ExpertPatch:
-      type: object
-      properties:
-        name:
-          type: string
-          minLength: 1
-          maxLength: 120
-        description:
-          type: string
-          maxLength: 2000
-        visibility:
-          type: string
-          enum: [private, space]
-        status:
-          type: string
-          enum: [published, disabled]
-        draft:
-          $ref: '#/components/schemas/ExpertDraftInput'
-      additionalProperties: false
-    ExpertDraftInput:
-      type: object
-      properties:
-        organizationInstructions:
-          type: string
-          maxLength: 100000
-        model:
-          type: string
-        capabilities:
-          type: array
-          uniqueItems: true
-          items:
-            type: string
-        toolPolicy:
-          $ref: '#/components/schemas/JsonObject'
-        environmentId:
-          type: [string, 'null']
-          format: uuid
-        launchGuidance:
-          type: string
-          maxLength: 10000
-        workerDefinitions:
-          type: array
-          items:
-            $ref: '#/components/schemas/WorkerDefinition'
-        triggerDefinitions:
-          type: array
-          items:
-            $ref: '#/components/schemas/TriggerDefinition'
-        approvalPolicy:
-          $ref: '#/components/schemas/JsonObject'
-      additionalProperties: false
-    WorkerDefinition:
-      type: object
-      required: [id, name, instructions, concurrency]
-      properties:
-        id:
-          type: string
-        name:
-          type: string
-        expertId:
-          type: [string, 'null']
-          format: uuid
-        instructions:
-          type: string
-        concurrency:
-          type: integer
-          minimum: 1
-          maximum: 32
-    TriggerDefinition:
-      type: object
-      required: [id, source, eventType, enabled, filter]
-      properties:
-        id:
-          type: string
-        source:
-          $ref: '#/components/schemas/EventSource'
-        eventType:
-          type: string
-        enabled:
-          type: boolean
-        filter:
-          $ref: '#/components/schemas/JsonObject'
-        autoArchive:
-          type: boolean
-
     EnvironmentStatus:
       type: string
       enum: [draft, provisioning, ready, updating, failed, disabled]
