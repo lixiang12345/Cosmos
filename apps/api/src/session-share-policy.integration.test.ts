@@ -7,6 +7,7 @@ import type { AuthenticatedActor } from './auth.js'
 import { PostgresSessionRepository } from './postgres-session-repository.js'
 import { PostgresSessionTimelineRepository } from './postgres-session-timeline-repository.js'
 import { seedSessionConfiguration } from './session-configuration-test-fixture.js'
+import { encodeSessionTimelineCursor } from './session-timeline-pagination.js'
 import {
   AuthorizationChangedError,
   ShareGrantConflictError,
@@ -239,11 +240,53 @@ describeWithDatabase('Session ShareGrant policy', () => {
       sessionTimelineRepository: timeline,
       authenticate: async (authorization) => tokens.get(authorization?.replace(/^Bearer /, '') ?? '')!,
       executionReadinessCheck: async () => true,
+      sessionEventStream: {
+        heartbeatMs: 10,
+        pollMs: 5,
+        maxDurationMs: 300_000,
+      },
     })
     await app.ready()
     const base = `/api/v1/organizations/share-org/spaces/share-space/sessions/${created.session.id}`
     const owner = { authorization: 'Bearer owner' }
     const viewer = { authorization: 'Bearer viewer' }
+
+    const expectStreamToClose = async (
+      streamBase: string,
+      actor: { authorization: string },
+      revoke: () => Promise<void>,
+    ) => {
+      const currentSequence = await pool.query<{ last_event_sequence: string }>(
+        'SELECT last_event_sequence::text FROM relay_sessions WHERE organization_id = $1 AND space_id = $2 AND id = $3',
+        ['share-org', 'share-space', streamBase.split('/').at(-1)],
+      )
+      const cursor = encodeSessionTimelineCursor({
+        organizationId: 'share-org',
+        spaceId: 'share-space',
+        sessionId: streamBase.split('/').at(-1)!,
+        sequence: Number(currentSequence.rows[0]?.last_event_sequence ?? 0),
+      })
+      const response = await app.inject({
+        method: 'GET',
+        url: `${streamBase}/events/stream`,
+        headers: { ...actor, 'last-event-id': cursor },
+        payloadAsStream: true,
+      })
+      expect(response.statusCode).toBe(200)
+      const chunks: Buffer[] = []
+      response.stream().on('data', (chunk: Buffer | string) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+      })
+      const closed = new Promise<void>((resolve) => response.raw.res.once('close', () => resolve()))
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      await revoke()
+      await expect(Promise.race([
+        closed,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('SSE revoke close timeout')), 500)),
+      ])).resolves.toBeUndefined()
+      return Buffer.concat(chunks).toString('utf8')
+    }
+
     try {
       const missingKey = await app.inject({
         method: 'POST', url: `${base}/shares`, headers: owner,
@@ -294,16 +337,65 @@ describeWithDatabase('Session ShareGrant policy', () => {
       })
       expect(stale.statusCode).toBe(412)
 
-      const revokedResponse = await app.inject({
-        method: 'DELETE', url: `${base}/shares/${grant.id}`,
-        headers: { ...owner, 'idempotency-key': 'http-revoke', 'if-match': '"1"' },
-      })
-      expect(revokedResponse.statusCode).toBe(200)
-      expect(revokedResponse.headers.etag).toBe('"2"')
-      expect(ShareGrantDtoSchema.parse(revokedResponse.json())).toMatchObject({
-        id: grant.id, version: 2, revokedBy: 'share-owner',
-      })
+      const shareStreamBody = await expectStreamToClose(
+        base,
+        viewer,
+        async () => {
+          const revokedResponse = await app.inject({
+            method: 'DELETE', url: `${base}/shares/${grant.id}`,
+            headers: { ...owner, 'idempotency-key': 'http-revoke', 'if-match': '"1"' },
+          })
+          expect(revokedResponse.statusCode).toBe(200)
+          expect(revokedResponse.headers.etag).toBe('"2"')
+          expect(ShareGrantDtoSchema.parse(revokedResponse.json())).toMatchObject({
+            id: grant.id, version: 2, revokedBy: 'share-owner',
+          })
+          await repository.send({
+            ...context('share-owner', 'sse-post-revoke-send'),
+            idempotencyKey: 'sse-post-revoke-send',
+            request: { content: 'Private event after ShareGrant revoke', attachments: [] },
+          })
+        },
+      )
+      expect(shareStreamBody).toContain('event: reconnect')
+      expect(shareStreamBody).not.toContain('Private event after ShareGrant revoke')
       expect((await app.inject({ method: 'GET', url: base, headers: viewer })).statusCode).toBe(404)
+
+      const membershipSession = await repository.create({
+        organizationId: 'share-org',
+        spaceId: 'share-space',
+        actorId: 'share-owner',
+        actorKind: 'user',
+        requestId: 'sse-membership-session-create',
+        idempotencyKey: 'sse-membership-session-create',
+        request: {
+          expertId: 'expert-pr-author',
+          title: 'Membership stream',
+          visibility: 'space',
+          start: true,
+          message: { content: 'Membership stream initial', attachments: [] },
+        },
+      })
+      const membershipBase = `/api/v1/organizations/share-org/spaces/share-space/sessions/${membershipSession.session.id}`
+      const membershipStreamBody = await expectStreamToClose(
+        membershipBase,
+        viewer,
+        async () => {
+          await pool.query(
+            'DELETE FROM relay_space_memberships WHERE organization_id = $1 AND space_id = $2 AND actor_id = $3',
+            ['share-org', 'share-space', 'share-viewer'],
+          )
+          await repository.send({
+            ...context('share-owner', 'sse-membership-post-revoke-send'),
+            sessionId: membershipSession.session.id,
+            idempotencyKey: 'sse-membership-post-revoke-send',
+            request: { content: 'Private event after membership revoke', attachments: [] },
+          })
+        },
+      )
+      expect(membershipStreamBody).toContain('event: reconnect')
+      expect(membershipStreamBody).not.toContain('Private event after membership revoke')
+      expect((await app.inject({ method: 'GET', url: membershipBase, headers: viewer })).statusCode).toBe(404)
     } finally {
       await app.close()
     }

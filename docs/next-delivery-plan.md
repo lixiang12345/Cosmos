@@ -227,6 +227,19 @@ Space Admin 可以在统一、克制的 Cosmos 风格控制面中：
 - 生产托管数据库 PITR 开关、加密跨账号归档、最早恢复点和季度真实恢复记录必须由目标环境/IaC 与变更系统提供；仓库 CI 只能证明脚本和恢复契约可执行。
 - 下一条生产硬化切片转向 SSE 实时撤权，确保 membership/ShareGrant 被撤销后长连接在有界时间内停止私有事件投递。
 
+## 生产硬化-5：SSE 实时撤权（已完成）
+
+### 交付结果
+
+- SSE 首次建流、连续分页和无事件轮询都通过当前 PostgreSQL timeline policy 查询；每次查询重新检查 Organization membership、Space membership、Private visibility、ShareGrant active 状态和 Group membership，不依赖已签发 token 中的角色或旧授权快照。
+- ShareGrant 通过受保护的 HTTP revoke 后，现有流在下一次有界轮询返回 concealment 并关闭；Space membership 被移除后同样关闭，后续重连走统一 404 concealment，不发送撤权后的私有事件。
+- 新增真实 PostgreSQL SSE 集成证据，覆盖 HTTP ShareGrant revoke、membership 删除、撤权后 owner 写入新事件以及连接关闭上限；已有 heartbeat token 失效、连续 backlog 重认证和连接预算测试继续保留。
+- Web SSE consumer 将服务端 `reconnect` 作为恢复信号；一旦重连得到 404/401/403，清空私有 timeline 并进入 concealment 状态，不把断开的连接继续显示为已授权。
+
+### 明确延期
+
+- 当前撤权传播依赖每轮/每批 timeline 查询，生产默认 `pollMs=1000`；跨区域 pub/sub policy invalidation、全局 SSE 连接配额、撤权 p95 指标和告警仍需目标环境的通知/SLO 切片。
+
 ## M4 排序
 
 后续按以下顺序推进：
@@ -234,7 +247,7 @@ Space Admin 可以在统一、克制的 Cosmos 风格控制面中：
 1. **Automation 权威模型（M4-A 已完成）**：已交付 Trigger 唯一资源、Event 去重/脱敏/匹配、ServiceAccount Session dispatch 与同源 Run History；上述延期项在后续 Automation hardening 收口。
 2. **Space 管理（M4-B 已完成）**：已交付 Default、默认 Expert/Environment、删除迁移预览和真实 scope 切换；实际迁移执行保持 capability-gated。
 3. **Advisor 受控执行（M4-C 已完成）**：plan/diff/confirm、受控工具、失败恢复和审计；OAuth/Secret 只返回人工步骤，不伪造完成。
-4. **生产硬化（进行中）**：对象存储、orphan GC、Organization 配额/共享限流和 PITR/恢复门禁代码切片已完成；下一项是 SSE 实时撤权，再推进通知/SLO、负载与故障演练。
+4. **生产硬化（进行中）**：对象存储、orphan GC、Organization 配额/共享限流、PITR/恢复门禁和 SSE 实时撤权已完成；下一项是通知/SLO，再推进负载与故障演练。
 
 Pinned Sessions、Artifact 高级搜索和高级启动覆盖属于 P2，在上述 P1 控制面闭环之后处理。
 
