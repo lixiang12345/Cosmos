@@ -1,0 +1,49 @@
+groups:
+  - name: relay-api-slo
+    interval: 30s
+    rules:
+      - record: relay:http_requests:rate5m
+        expr: sum by (cluster, environment, service) (rate(relay_http_requests_total{route!="/api/health",route!="/api/metrics"}[5m]))
+      - record: relay:http_5xx:ratio5m
+        expr: sum by (cluster, environment, service) (rate(relay_http_requests_total{status_class="5xx",route!="/api/health",route!="/api/metrics"}[5m])) / clamp_min(relay:http_requests:rate5m, 0.001)
+      - record: relay:http_5xx:ratio1h
+        expr: sum by (cluster, environment, service) (rate(relay_http_requests_total{status_class="5xx",route!="/api/health",route!="/api/metrics"}[1h])) / clamp_min(sum by (cluster, environment, service) (rate(relay_http_requests_total{route!="/api/health",route!="/api/metrics"}[1h])), 0.001)
+      - alert: RelayApiTargetDown
+        expr: up{job="relay-api"} == 0
+        for: 2m
+        labels:
+          severity: page
+          service: relay-api
+        annotations:
+          summary: Relay API metrics target is unavailable
+          runbook: docs/observability-slo-runbook.md#relayapitargetdown
+      - alert: RelayApiAvailabilityFastBurn
+        expr: relay:http_requests:rate5m > 0.1 and relay:http_5xx:ratio5m > 0.0144 and relay:http_5xx:ratio1h > 0.0144
+        for: 5m
+        labels:
+          severity: page
+          service: relay-api
+          slo: availability
+        annotations:
+          summary: Relay API is rapidly consuming the 99.9% availability error budget
+          runbook: docs/observability-slo-runbook.md#relayapiavailabilityfastburn
+      - alert: RelayApiLatencyP95High
+        expr: histogram_quantile(0.95, sum by (cluster, environment, service, le) (rate(relay_http_request_duration_ms_bucket{route!="/api/health",route!="/api/metrics"}[10m]))) > 500
+        for: 10m
+        labels:
+          severity: ticket
+          service: relay-api
+          slo: latency
+        annotations:
+          summary: Relay API p95 latency exceeds 500 milliseconds
+          runbook: docs/observability-slo-runbook.md#relayapilatencyp95high
+      - alert: RelaySseConnectionCapacityHigh
+        expr: max by (cluster, environment, service, instance) (relay_sse_connections_active) / clamp_min(max by (cluster, environment, service, instance) (relay_sse_connections_limit), 1) > 0.9
+        for: 10m
+        labels:
+          severity: ticket
+          service: relay-api
+          slo: sse-capacity
+        annotations:
+          summary: Relay SSE connections exceed 90% of the configured per-instance limit
+          runbook: docs/observability-slo-runbook.md#relaysseconnectioncapacityhigh

@@ -111,6 +111,7 @@ const app = createApp({
     workerReadinessRepository.hasRecentHeartbeat({ maxAgeMs: config.workerReadinessMaxAgeMs })
   ) : undefined,
   sessionEventStream: config.sessionEventStream,
+  metricsScrapeToken: config.metricsScrapeToken,
 })
 
 let closing = false

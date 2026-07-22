@@ -1,5 +1,6 @@
 import cors from '@fastify/cors'
 import helmet from '@fastify/helmet'
+import { timingSafeEqual } from 'node:crypto'
 import {
   ApiErrorSchema,
   AdvisorPlanDecisionRequestSchema,
@@ -149,6 +150,7 @@ import {
 } from './file-repository.js'
 import { ObjectStorageError } from './object-storage.js'
 import type { OrganizationQuotaRepository } from './organization-quota-repository.js'
+import { RelayMetrics } from './metrics.js'
 import {
   InvalidFilePaginationError,
   encodeFileCursor,
@@ -349,6 +351,8 @@ export type CreateAppOptions = {
   executionEnabled?: boolean
   executionReadinessCheck?: () => Promise<boolean>
   sessionEventStream?: SessionEventStreamOptions
+  metrics?: RelayMetrics
+  metricsScrapeToken?: string
 }
 
 function validationFieldErrors(issues: readonly ValidationIssue[]): Record<string, string[]> {
@@ -667,6 +671,8 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     },
   )
   const sessionRepository = options.sessionRepository ?? new InMemorySessionRepository()
+  const metrics = options.metrics ?? (options.metricsScrapeToken ? new RelayMetrics() : undefined)
+  const metricsScrapeToken = options.metricsScrapeToken
   const sessionTimelineRepository = options.sessionTimelineRepository
   const artifactRepository = options.artifactRepository ?? new EmptyArtifactRepository()
   const fileRepository = options.fileRepository ?? new EmptyFileRepository()
@@ -702,6 +708,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     maxConnectionsPerSession: positiveInteger(options.sessionEventStream?.maxConnectionsPerSession, 50, 1_000),
     retryAfterSeconds: positiveInteger(options.sessionEventStream?.retryAfterSeconds, 5, 3_600),
   }
+  metrics?.setSseConnectionLimit(eventStream.maxConnections)
   const eventStreamLimiter = createSessionEventStreamLimiter(eventStream)
   const requestRateLimitOptions = options.rateLimit === false
     ? null
@@ -748,6 +755,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     reply.header('X-Request-ID', request.id)
     const path = request.raw.url?.split('?', 1)[0]
     const isPublicHealthRequest = (request.method === 'GET' || request.method === 'HEAD') && path === '/api/health'
+    const isMetricsRequest = request.method === 'GET' && path === '/api/metrics'
     if (request.method === 'OPTIONS' || isPublicHealthRequest) return
     reply.header('Cache-Control', 'private, no-store')
     reply.header('Vary', 'Authorization')
@@ -765,7 +773,17 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         }, { audit: rate.firstDenied })
       }
     }
+    if (isMetricsRequest) return
     actorsByRequest.set(request, await authenticate(request.headers.authorization))
+  })
+
+  app.addHook('onResponse', async (request, reply) => {
+    metrics?.recordRequest(
+      request.method,
+      request.routeOptions.url || '<unmatched>',
+      reply.statusCode,
+      reply.elapsedTime,
+    )
   })
 
   app.addHook('onSend', async (request, _reply, payload) => {
@@ -1294,6 +1312,24 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   })
 
   app.get('/api/health', async () => ({ status: 'ok' as const }))
+
+  app.get('/api/metrics', async (request, reply) => {
+    reply.header('Cache-Control', 'no-store')
+    if (!metrics || !metricsScrapeToken) return sendResourceNotFound(reply, request)
+    const authorization = request.headers.authorization
+    const expected = Buffer.from(`Bearer ${metricsScrapeToken}`)
+    const actual = Buffer.from(typeof authorization === 'string' ? authorization : '')
+    if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
+      reply.header('WWW-Authenticate', 'Bearer realm="relay-metrics"')
+      return sendApiError(reply, 401, request, {
+        code: 'AUTHENTICATION_REQUIRED',
+        message: 'A valid metrics scrape credential is required.',
+        retryable: false,
+      })
+    }
+    reply.type('text/plain; version=0.0.4; charset=utf-8')
+    return metrics.renderPrometheus()
+  })
 
   app.get('/api/ready', async (request, reply) => {
     try {
@@ -3849,6 +3885,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
 
         reply.hijack()
         hijacked = true
+        metrics?.sseConnectionOpened()
         reply.raw.writeHead(200, {
           'Cache-Control': 'private, no-cache, no-store, no-transform',
           Connection: 'keep-alive',
@@ -3910,6 +3947,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         request.raw.off('aborted', abortStream)
         reply.raw.off('close', abortStream)
         releaseConnection()
+        if (hijacked) metrics?.sseConnectionClosed()
         if (hijacked && !reply.raw.destroyed && !reply.raw.writableEnded) reply.raw.end()
       }
     },

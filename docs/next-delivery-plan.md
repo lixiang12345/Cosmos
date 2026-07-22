@@ -240,6 +240,26 @@ Space Admin 可以在统一、克制的 Cosmos 风格控制面中：
 
 - 当前撤权传播依赖每轮/每批 timeline 查询，生产默认 `pollMs=1000`；跨区域 pub/sub policy invalidation、全局 SSE 连接配额、撤权 p95 指标和告警仍需目标环境的通知/SLO 切片。
 
+## 生产硬化-6：通知与 SLO 代码门禁（已完成代码切片）
+
+### 交付结果
+
+- 新增受保护的 `GET /api/metrics` Prometheus exposition；没有 `METRICS_SCRAPE_TOKEN` 时 conceal 为 404，错误 bearer 返回 401，token 只从服务端环境/Secret Manager 注入且不进入输出、日志或 label。
+- API 记录固定 method、Fastify route template、status class 的 request counter、固定 request-duration histogram，以及成对维护的 SSE active/configured-limit gauge；不使用 actor、tenant、Session、resource ID 等高基数或私密 label。
+- `ops/observability/relay-alerts.yaml` 提供按 cluster/environment/service 聚合的 99.9% availability fast-burn、target down、p95 latency 和单实例 SSE capacity 规则；结构与禁止高基数 label 由代码测试门禁。
+- `docs/observability-slo-runbook.md` 定义 scrape token、安全聚合、page/ticket 路由、15 分钟 ACK/升级、合成通知演练和四类告警处置步骤。
+
+### 验证证据
+
+- Contracts 60、API 28 files / 223 tests、Web 20 files / 207 tests 与生产构建通过；OpenAPI lint 通过；PostgreSQL integration 29 files / 149 tests 通过。
+- Docker rebuild 后 API、Worker、Web、PostgreSQL 均 healthy，health/ready 200，日志 fatal/panic/unhandled 扫描为空。
+- 隔离非 root API 容器验证 metrics 未配置 404、无/错误 token 401、正确的临时 token 200；响应包含低基数 HTTP counter 与 SSE limit 且不回显 token。
+
+### 明确延期
+
+- 仓库不能证明目标环境已部署 Prometheus/Alertmanager、dashboard、receiver 和 24x7 on-call；上线前仍须执行 `promtool check rules`、合成 page 送达/ACK/升级演练，并保存不含凭据的证据。
+- 当前指标覆盖 API HTTP 与 SSE 容量；DB pool、queue age、worker lease、provider/object-store error、outbox/audit lag 和业务旅程指标在下一负载/故障与 worker telemetry 切片继续补齐。
+
 ## M4 排序
 
 后续按以下顺序推进：
@@ -247,7 +267,7 @@ Space Admin 可以在统一、克制的 Cosmos 风格控制面中：
 1. **Automation 权威模型（M4-A 已完成）**：已交付 Trigger 唯一资源、Event 去重/脱敏/匹配、ServiceAccount Session dispatch 与同源 Run History；上述延期项在后续 Automation hardening 收口。
 2. **Space 管理（M4-B 已完成）**：已交付 Default、默认 Expert/Environment、删除迁移预览和真实 scope 切换；实际迁移执行保持 capability-gated。
 3. **Advisor 受控执行（M4-C 已完成）**：plan/diff/confirm、受控工具、失败恢复和审计；OAuth/Secret 只返回人工步骤，不伪造完成。
-4. **生产硬化（进行中）**：对象存储、orphan GC、Organization 配额/共享限流、PITR/恢复门禁和 SSE 实时撤权已完成；下一项是通知/SLO，再推进负载与故障演练。
+4. **生产硬化（进行中）**：对象存储、orphan GC、Organization 配额/共享限流、PITR/恢复门禁、SSE 实时撤权和通知/SLO 代码门禁已完成；下一项是负载与故障演练及 worker telemetry。
 
 Pinned Sessions、Artifact 高级搜索和高级启动覆盖属于 P2，在上述 P1 控制面闭环之后处理。
 

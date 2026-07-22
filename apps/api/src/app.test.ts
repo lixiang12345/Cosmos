@@ -373,6 +373,47 @@ describe('Relay API', () => {
     expect(response.json()).toEqual({ status: 'ok' })
   })
 
+  it('serves low-cardinality Prometheus metrics only with the server-side scrape token', async () => {
+    const token = 'metrics-token-for-tests-0123456789'
+    const app = createApp({ metricsScrapeToken: token })
+    openApps.push(app)
+
+    expect((await app.inject({ method: 'GET', url: '/api/metrics' })).statusCode).toBe(401)
+    expect((await app.inject({
+      method: 'GET', url: '/api/metrics', headers: { authorization: 'Bearer wrong-token' },
+    })).statusCode).toBe(401)
+
+    await app.inject({ method: 'GET', url: '/api/health' })
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/metrics',
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.headers['content-type']).toContain('text/plain')
+    expect(response.body).toContain('# TYPE relay_http_requests_total counter')
+    expect(response.body).toContain('route="/api/health"')
+    expect(response.body).toContain('# TYPE relay_sse_connections_active gauge')
+    expect(response.body).not.toContain(token)
+
+    const disabled = createApp()
+    openApps.push(disabled)
+    expect((await disabled.inject({ method: 'GET', url: '/api/metrics' })).statusCode).toBe(404)
+
+    const limited = createApp({
+      metricsScrapeToken: token,
+      rateLimit: { max: 1, timeWindowMs: 60_000, cache: 100 },
+    })
+    openApps.push(limited)
+    expect((await limited.inject({
+      method: 'GET', url: '/api/metrics', headers: { authorization: `Bearer ${token}` },
+    })).statusCode).toBe(200)
+    expect((await limited.inject({
+      method: 'GET', url: '/api/metrics', headers: { authorization: `Bearer ${token}` },
+    })).statusCode).toBe(429)
+  })
+
   it('sets API security and correlation headers without forcing HSTS in development', async () => {
     const development = createApp()
     const production = createApp({ securityHeaders: { hsts: true } })

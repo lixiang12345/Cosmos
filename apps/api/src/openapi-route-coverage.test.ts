@@ -6,7 +6,11 @@ import { createApp } from './app.js'
 
 const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete'] as const
 const OPENAPI_PATH = fileURLToPath(new URL('../../../docs/api-contract.yaml', import.meta.url))
-const INFRASTRUCTURE_OPERATION_COUNT = 2
+const INFRASTRUCTURE_OPERATIONS = [
+  { method: 'GET' as const, url: '/api/health' },
+  { method: 'GET' as const, url: '/api/ready' },
+  { method: 'GET' as const, url: '/api/metrics' },
+]
 
 type HttpMethod = (typeof HTTP_METHODS)[number]
 type Reference = { $ref: string }
@@ -73,10 +77,11 @@ describe('OpenAPI runtime route coverage', () => {
       ).toBe(true)
     }
 
-    expect(app.hasRoute({ method: 'GET', url: '/api/health' })).toBe(true)
-    expect(app.hasRoute({ method: 'GET', url: '/api/ready' })).toBe(true)
+    for (const operation of INFRASTRUCTURE_OPERATIONS) {
+      expect(app.hasRoute(operation)).toBe(true)
+    }
     expect(registeredOperationCount(app.printRoutes({ commonPrefix: false, includeHooks: false })))
-      .toBe(operations.length + INFRASTRUCTURE_OPERATION_COUNT)
+      .toBe(operations.length + INFRASTRUCTURE_OPERATIONS.length)
   })
 
   it('uses opaque Session identifiers and the runtime JSON error envelope for implemented operations', () => {

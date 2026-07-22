@@ -14,6 +14,7 @@ export type ApiConfig = {
   }
   securityAuditHmacKey?: string
   securityAuditHmacKeyId?: string
+  metricsScrapeToken?: string
   objectStorage?: ObjectStorageConfig
   contextEngine?: {
     baseUrl: string
@@ -170,6 +171,15 @@ function parseSecurityAuditHmacKeyId(value: string | undefined, environment: str
     throw new Error('SECURITY_AUDIT_HMAC_KEY_ID must be a 1 to 64 character stable key identifier.')
   }
   return keyId
+}
+
+function parseMetricsScrapeToken(value: string | undefined) {
+  const token = value?.trim()
+  if (!token) return undefined
+  if (!/^[\x21-\x7e]{32,256}$/.test(token)) {
+    throw new Error('METRICS_SCRAPE_TOKEN must contain 32 to 256 visible ASCII characters.')
+  }
+  return token
 }
 
 function parseContextEngineConfig(env: NodeJS.ProcessEnv, environment: string) {
@@ -355,6 +365,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       environment,
       securityAuditHmacKey !== undefined,
     ),
+    metricsScrapeToken: parseMetricsScrapeToken(env.METRICS_SCRAPE_TOKEN),
     objectStorage: loadObjectStorageConfig(env, environment),
     contextEngine: parseContextEngineConfig(env, environment),
     rateLimit: {

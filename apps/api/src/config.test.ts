@@ -22,6 +22,7 @@ describe('API configuration', () => {
       securityHeaders: { hsts: false },
       securityAuditHmacKey: undefined,
       securityAuditHmacKeyId: undefined,
+      metricsScrapeToken: undefined,
       rateLimit: { max: 600, timeWindowMs: 60_000, cache: 10_000 },
       databaseConnectionTimeoutMs: 5_000,
       databaseQueryTimeoutMs: 20_000,
@@ -262,6 +263,18 @@ describe('API configuration', () => {
     for (const [name, value] of invalidValues) {
       expect(() => loadConfig({ AUTH_MODE: 'development', [name]: value })).toThrow(name)
     }
+  })
+
+  it('accepts only a bounded server-side metrics scrape token', () => {
+    const token = 'm'.repeat(32)
+    expect(loadConfig({ AUTH_MODE: 'development', METRICS_SCRAPE_TOKEN: token }).metricsScrapeToken)
+      .toBe(token)
+    expect(loadConfig({ AUTH_MODE: 'development', METRICS_SCRAPE_TOKEN: ' ' }).metricsScrapeToken)
+      .toBeUndefined()
+    expect(() => loadConfig({ AUTH_MODE: 'development', METRICS_SCRAPE_TOKEN: 'too-short' }))
+      .toThrow('METRICS_SCRAPE_TOKEN')
+    expect(() => loadConfig({ AUTH_MODE: 'development', METRICS_SCRAPE_TOKEN: 'm'.repeat(257) }))
+      .toThrow('METRICS_SCRAPE_TOKEN')
   })
 
   it('rejects invalid ports', () => {
