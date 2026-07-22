@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.js'
 import { createDevelopmentAuthenticator } from './auth.js'
 import type { FileRepository } from './file-repository.js'
+import { ObjectStorageError } from './object-storage.js'
 import { InMemorySessionRepository } from './session-repository.js'
 
 const organizationId = 'relay'
@@ -174,6 +175,22 @@ describe('File API', () => {
     })
     expect(invalid.statusCode).toBe(400)
     expect(invalid.json()).toMatchObject({ code: 'VALIDATION_FAILED' })
+    await app.close()
+  })
+
+  it('returns a safe retryable response when object content is unavailable', async () => {
+    const app = application(repository({
+      async getContent() { throw new ObjectStorageError('bucket/key/provider detail') },
+    }))
+    const response = await app.inject({ method: 'GET', url: `${basePath}/${fileId}/content` })
+
+    expect(response.statusCode).toBe(503)
+    expect(response.json()).toMatchObject({
+      code: 'OBJECT_STORAGE_UNAVAILABLE',
+      message: 'File content storage is temporarily unavailable.',
+      retryable: true,
+    })
+    expect(JSON.stringify(response.json())).not.toContain('bucket/key/provider')
     await app.close()
   })
 

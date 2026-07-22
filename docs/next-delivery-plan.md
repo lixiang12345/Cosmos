@@ -37,7 +37,7 @@ Environment 已具备 Cloud/Daemon 类型、immutable revision、provisioning wo
 | Automation 外部入口 | 当前是受认证 manager/internal test Event ingress；仅保存脱敏 payload/headers | 外部 webhook 验签、原文密文存储、异步 router worker 与 replay/dead-letter 尚未完成 |
 | Automation 生命周期 | `autoArchive` 已持久化；Trigger 使用 CAS 直接更新并回到 paused | 自动归档执行、delete/archive，以及随 Expert draft revision 发布切换仍未完成 |
 | Space 删除迁移 | 已计算源/目标与 Sessions/Experts/Environments/Automations/Files 影响，并阻止 Default Space 迁移 | 逐资源迁移执行、恢复/回滚与最终 archive/delete 仍 capability-gated |
-| Files | Worker 内部 append 与只读浏览已存在，provider 写入和对象存储未完成 | 代码修改闭环不能对外承诺 |
+| Files | Worker 内部 append 与只读浏览已存在；FileVersion 已支持 checksum 校验的 S3-compatible object backend 与 inline 历史兼容 | 生产 bucket/IAM/retention、orphan GC 和对象备份恢复证据仍未完成 |
 | Agent execution | 基础对话和只读 Workspace tools 可用，coding sandbox/外部写工具未开放 | 不能把执行结果当成完整代码交付能力 |
 | Advisor model provider | 控制面 plan/diff/confirm 闭环已完成；本地配置的兼容 provider `/models` 可访问，但 `/chat/completions` 对当前客户端返回 403 | Worker 会安全记录 `provider_http_error`；不会伪造 plan 或执行成功，需 provider 放行后再做在线模型 smoke |
 | Production hardening | 高可用、PITR、容量和负载恢复证据未完成 | 仍不适合直接承载公网客户数据 |
@@ -156,6 +156,25 @@ Space Admin 可以在统一、克制的 Cosmos 风格控制面中：
 - 真实模型 provider 放行前，不承诺在线 Advisor 自动生成 plan；控制面和 Web 在 provider unavailable 时继续显示安全失败。
 - `environment.*`、`expert.*`、`automation.*` 等更高风险 Advisor 操作需单独 capability、schema、迁移与人工确认设计。
 
+## 生产硬化-1：FileVersion 对象存储（已完成代码切片）
+
+### 交付结果
+
+- Migration `071_object_storage_file_versions.sql` 为 FileVersion 增加 `storage_backend` 与 opaque `object_key`；历史 inline `bytea` 行保持可读，新 object 行不在 PostgreSQL 保存内容副本。
+- S3-compatible adapter 使用条件创建、SHA-256 checksum、大小/hash 读取校验和安全的 provider 错误；对象 key 只含 tenant hash 与版本 ID，不含客户路径。
+- File 读取先完成现有 tenant/RBAC/ShareGrant 授权，再拉取对象；对象缺失、校验失败或 provider 不可用返回可重试 `503 OBJECT_STORAGE_UNAVAILABLE`，不泄露 bucket/key/provider 原文。
+- staging/production API 与 Worker 缺少完整 Object Storage 配置会 fail-closed；development/test 可继续使用 inline 兼容路径。
+
+### 验证证据
+
+- API 26 files / 217 tests、Web 20 files / 207 tests 通过；PostgreSQL integration 27 files / 145 tests 通过，其中 File 专项 7 tests 覆盖 migration、metadata-only object 写入、授权读取、完整性校验、配额与不可变账本。
+- `@aws-sdk/client-s3` 依赖通过 frozen lockfile/supply-chain policy；S3-compatible 运行态接入保留为部署配置，不把本地 credential 写入仓库。
+
+### 明确延期
+
+- 生产 bucket/IAM/KMS、生命周期/retention、orphan object GC、跨区域复制和对象备份恢复演练。
+- 现有 Worker 仍只通过受控 File repository 读对象；coding sandbox、外部写工具和大输出对象化另有 capability 边界。
+
 ## M4 排序
 
 后续按以下顺序推进：
@@ -163,7 +182,7 @@ Space Admin 可以在统一、克制的 Cosmos 风格控制面中：
 1. **Automation 权威模型（M4-A 已完成）**：已交付 Trigger 唯一资源、Event 去重/脱敏/匹配、ServiceAccount Session dispatch 与同源 Run History；上述延期项在后续 Automation hardening 收口。
 2. **Space 管理（M4-B 已完成）**：已交付 Default、默认 Expert/Environment、删除迁移预览和真实 scope 切换；实际迁移执行保持 capability-gated。
 3. **Advisor 受控执行（M4-C 已完成）**：plan/diff/confirm、受控工具、失败恢复和审计；OAuth/Secret 只返回人工步骤，不伪造完成。
-4. **生产硬化（下一步）**：对象存储、配额、PITR/恢复、限流、实时撤权、通知/SLO、负载与故障演练。
+4. **生产硬化（进行中）**：对象存储代码切片已完成；下一项是生产 bucket/IAM/retention 与 orphan GC，再推进配额、PITR/恢复、限流、实时撤权、通知/SLO、负载与故障演练。
 
 Pinned Sessions、Artifact 高级搜索和高级启动覆盖属于 P2，在上述 P1 控制面闭环之后处理。
 

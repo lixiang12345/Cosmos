@@ -73,6 +73,7 @@ const migrationVersions = [
   '068_space_authority.sql',
   '069_space_insert_compatibility.sql',
   '070_advisor_controlled_execution.sql',
+  '071_object_storage_file_versions.sql',
 ]
 
 function poolWithVersions(versions: string[]) {

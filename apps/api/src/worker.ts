@@ -11,6 +11,7 @@ import { PostgresFileRepository } from './postgres-file-repository.js'
 import { assertRuntimeDatabaseRole, createRuntimePool } from './postgres-runtime-database.js'
 import { PostgresToolCoordinatorRepository } from './postgres-tool-coordinator-repository.js'
 import { PostgresWorkerReadinessRepository } from './postgres-worker-readiness-repository.js'
+import { S3ObjectStore } from './object-storage.js'
 import { loadWorkerConfig } from './worker-config.js'
 import { maintainWorkerReadiness } from './worker-readiness-heartbeat.js'
 
@@ -38,6 +39,7 @@ try {
   await assertRuntimeDatabaseRole(pool, 'relay_worker_runtime')
   await assertMigrationsCurrent(pool)
   const provider = new OpenAiCompatibleChatCompletionsProvider(config.provider)
+  const objectStore = config.objectStorage ? new S3ObjectStore(config.objectStorage) : undefined
   const repository = new PostgresExecutionRepository(pool)
   const environmentProvisioningWorker = new EnvironmentProvisioningWorker({
     repository: new PostgresEnvironmentProvisioningRepository(pool),
@@ -51,7 +53,7 @@ try {
   })
   const toolBroker = new GovernedConversationToolBroker(
     new PostgresToolCoordinatorRepository(pool),
-    new PostgresFileRepository(pool),
+    new PostgresFileRepository(pool, objectStore),
     new PostgresAdvisorPlanRepository(pool),
   )
   const readinessRepository = new PostgresWorkerReadinessRepository(pool)

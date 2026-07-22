@@ -96,6 +96,14 @@ export {
   type PostgresFileWriterRepositoryOptions,
 } from './postgres-file-repository.js'
 export {
+  InMemoryObjectStore,
+  ObjectStorageError,
+  S3ObjectStore,
+  type ObjectStore,
+  type S3ObjectStoreOptions,
+} from './object-storage.js'
+export { loadObjectStorageConfig, type ObjectStorageConfig } from './object-storage-config.js'
+export {
   AuthenticationError,
   createDevelopmentAuthenticator,
   createJwtAuthenticator,

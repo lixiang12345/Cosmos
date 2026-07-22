@@ -3,6 +3,7 @@ import { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { runMigrations } from './migrations.js'
 import { PostgresFileRepository, PostgresFileWriterRepository } from './postgres-file-repository.js'
+import { InMemoryObjectStore } from './object-storage.js'
 import { PostgresSessionRepository } from './postgres-session-repository.js'
 import { PostgresSessionTimelineRepository } from './postgres-session-timeline-repository.js'
 import { seedSessionConfiguration } from './session-configuration-test-fixture.js'
@@ -301,5 +302,31 @@ describeWithDatabase('Postgres File repositories', () => {
       UPDATE relay_files SET path = 'moved.md', version = version + 1
       WHERE scope = 'organization'
     `)).rejects.toMatchObject({ code: '55000' })
+  })
+
+  it('stores object-backed versions without duplicating content in PostgreSQL', async () => {
+    const objectStore = new InMemoryObjectStore()
+    const objectWriter = new PostgresFileWriterRepository(workerPool, {
+      objectStore,
+      createId: (() => {
+        let next = 0
+        return () => `object-file-runtime-${++next}`
+      })(),
+    })
+    const objectReader = new PostgresFileRepository(apiPool, objectStore)
+    const appended = await objectWriter.append(record('workspace', 'reports/object.md', 'stored outside the database'))
+    const metadata = await migrationPool.query<{
+      content: Buffer | null
+      storage_backend: string
+      object_key: string | null
+    }>(`
+      SELECT content, storage_backend, object_key
+      FROM relay_file_versions WHERE id = $1
+    `, [appended.fileVersion.id])
+    expect(metadata.rows[0]).toMatchObject({ content: null, storage_backend: 'object' })
+    expect(metadata.rows[0]?.object_key).toMatch(/^organizations\/[a-f0-9]{64}\/file-versions\//)
+    expect(metadata.rows[0]?.object_key).not.toContain('reports/object.md')
+    await expect(objectReader.getContent('file-org', 'file-space', appended.file.id, 'file-owner'))
+      .resolves.toMatchObject({ content: Buffer.from('stored outside the database') })
   })
 })

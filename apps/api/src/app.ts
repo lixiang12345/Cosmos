@@ -147,6 +147,7 @@ import {
   EmptyFileRepository,
   type FileRepository,
 } from './file-repository.js'
+import { ObjectStorageError } from './object-storage.js'
 import {
   InvalidFilePaginationError,
   encodeFileCursor,
@@ -811,6 +812,14 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   }))
 
   app.setErrorHandler((error, request, reply) => {
+    if (error instanceof ObjectStorageError) {
+      return sendApiError(reply, 503, request, {
+        code: 'OBJECT_STORAGE_UNAVAILABLE',
+        message: 'File content storage is temporarily unavailable.',
+        retryable: true,
+      })
+    }
+
     if (error instanceof IdempotencyConflictError
       || error instanceof ExpertIdempotencyConflictError
       || error instanceof EnvironmentIdempotencyConflictError

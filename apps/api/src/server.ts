@@ -19,6 +19,7 @@ import { PostgresSpaceRepository } from './postgres-space-repository.js'
 import { PostgresToolApprovalRepository } from './postgres-tool-approval-repository.js'
 import { PostgresServiceAccountPolicyRepository } from './service-account-policy-repository.js'
 import { PostgresWorkerReadinessRepository } from './postgres-worker-readiness-repository.js'
+import { S3ObjectStore } from './object-storage.js'
 import { InMemorySessionRepository } from './session-repository.js'
 
 const config = loadConfig()
@@ -60,6 +61,7 @@ const workerReadinessRepository = pool ? new PostgresWorkerReadinessRepository(p
 const contextEngineGateway = config.contextEngine
   ? new HttpContextEngineGateway(config.contextEngine)
   : undefined
+const objectStore = config.objectStorage ? new S3ObjectStore(config.objectStorage) : undefined
 const app = createApp({
   logger: true,
   corsOrigin: config.corsOrigin,
@@ -90,7 +92,7 @@ const app = createApp({
   advisorPlanRepository: pool ? new PostgresAdvisorPlanRepository(pool) : undefined,
   automationRepository: pool ? new PostgresAutomationRepository(pool) : undefined,
   spaceRepository: pool ? new PostgresSpaceRepository(pool) : undefined,
-  fileRepository: pool ? new PostgresFileRepository(pool) : undefined,
+  fileRepository: pool ? new PostgresFileRepository(pool, objectStore) : undefined,
   toolApprovalRepository: pool ? new PostgresToolApprovalRepository(pool) : undefined,
   serviceAccountPolicyRepository: pool ? new PostgresServiceAccountPolicyRepository(pool) : undefined,
   configurationCatalogRepository: pool

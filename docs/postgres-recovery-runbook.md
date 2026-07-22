@@ -55,3 +55,7 @@ pnpm db:restore
 5. 保留旧实例直到业务 owner 签署，随后按保留策略下线。复盘实际 RPO/RTO 并修正 Runbook。
 
 禁止把逻辑 dump 的成功等同于灾备完成：必须有可读取的远端副本、可重复的隔离恢复、应用级验证和有时限的演练证据。
+
+## FileVersion 对象存储配置
+
+生产 API 和 Worker 还必须从 Secret Manager 注入 `OBJECT_STORAGE_ENDPOINT`、`OBJECT_STORAGE_REGION`、`OBJECT_STORAGE_BUCKET`、`OBJECT_STORAGE_ACCESS_KEY_ID` 和 `OBJECT_STORAGE_SECRET_ACCESS_KEY`；可选的 `OBJECT_STORAGE_FORCE_PATH_STYLE=true` 仅用于 S3-compatible 开发端点。服务在 staging/production 缺少任一项时拒绝启动。对象 key 不含客户路径，恢复演练必须同时核验对象 checksum、FileVersion metadata 和授权下载。

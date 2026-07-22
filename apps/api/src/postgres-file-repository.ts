@@ -23,6 +23,7 @@ import {
 } from './file-repository.js'
 import { setLocalApiDatabaseContext } from './postgres-runtime-database.js'
 import { AuthorizationChangedError } from './session-repository.js'
+import { ObjectStorageError, type ObjectStore } from './object-storage.js'
 
 type TimestampValue = Date | string
 
@@ -57,9 +58,11 @@ type FileVersionRow = {
   source_session_id: string
   source_turn_id: string
   created_at: TimestampValue
+  storage_backend: 'inline' | 'object'
+  object_key: string | null
 }
 
-type FileContentRow = FileVersionRow & { content: Buffer }
+type FileContentRow = FileVersionRow & { content: Buffer | null }
 
 const fileColumns = `
   organization_id, space_id, id, scope, owner_user_id, session_id, path,
@@ -69,7 +72,8 @@ const fileColumns = `
 
 const fileVersionColumns = `
   organization_id, space_id, file_id, id, version, content_hash, size,
-  created_by_tool_call_id, source_session_id, source_turn_id, created_at
+  created_by_tool_call_id, source_session_id, source_turn_id, created_at,
+  storage_backend, object_key
 `
 
 function timestamp(value: TimestampValue) {
@@ -225,7 +229,7 @@ async function readableFile(
 }
 
 export class PostgresFileRepository implements FileRepository {
-  constructor(private readonly pool: Pool) {}
+  constructor(private readonly pool: Pool, private readonly objectStore?: ObjectStore) {}
 
   async list(
     organizationId: string,
@@ -352,7 +356,7 @@ export class PostgresFileRepository implements FileRepository {
     actorId: string,
     version?: number,
   ): Promise<FileContent | null> {
-    return transaction(
+    const stored = await transaction(
       this.pool,
       { organizationId, spaceId: requestedSpaceId, actorId },
       async (client) => {
@@ -366,9 +370,30 @@ export class PostgresFileRepository implements FileRepository {
         `, [organizationId, fileId, version ?? file.version])
         if (!result.rows[0]) return null
         const row = result.rows[0]
-        return { file, version: mapFileVersion(row), content: row.content }
+        return {
+          file,
+          version: mapFileVersion(row),
+          content: row.content,
+          storageBackend: row.storage_backend,
+          objectKey: row.object_key,
+        }
       },
     )
+    if (!stored) return null
+    let content = stored.content
+    if (stored.storageBackend === 'object') {
+      if (!this.objectStore || !stored.objectKey) {
+        throw new ObjectStorageError('Object-backed File content is unavailable.')
+      }
+      content = await this.objectStore.get(stored.objectKey)
+      if (!content) throw new ObjectStorageError('Object-backed File content is missing.')
+    }
+    if (!content) throw new ObjectStorageError('Inline File content is missing.')
+    const hash = createHash('sha256').update(content).digest('hex')
+    if (content.byteLength !== stored.version.size || hash !== stored.version.contentHash) {
+      throw new ObjectStorageError('Stored File content failed integrity verification.')
+    }
+    return { file: stored.file, version: stored.version, content }
   }
 }
 
@@ -377,6 +402,7 @@ export type PostgresFileWriterRepositoryOptions = {
   now?: () => Date
   maxVersionBytes?: number
   maxOrganizationBytes?: number
+  objectStore?: ObjectStore
 }
 
 export class PostgresFileWriterRepository implements FileWriterRepository {
@@ -384,12 +410,14 @@ export class PostgresFileWriterRepository implements FileWriterRepository {
   private readonly now: () => Date
   private readonly maxVersionBytes: number
   private readonly maxOrganizationBytes: number
+  private readonly objectStore?: ObjectStore
 
   constructor(private readonly pool: Pool, options: PostgresFileWriterRepositoryOptions = {}) {
     this.createId = options.createId ?? randomUUID
     this.now = options.now ?? (() => new Date())
     this.maxVersionBytes = options.maxVersionBytes ?? 1_048_576
     this.maxOrganizationBytes = options.maxOrganizationBytes ?? 100 * 1_048_576
+    this.objectStore = options.objectStore
     if (this.maxVersionBytes < 1 || this.maxVersionBytes > 1_048_576) {
       throw new Error('maxVersionBytes must be between 1 and 1048576.')
     }
@@ -408,14 +436,31 @@ export class PostgresFileWriterRepository implements FileWriterRepository {
     if (record.content.byteLength > this.maxVersionBytes) {
       throw new FileValidationError('content', `File content cannot exceed ${this.maxVersionBytes} bytes.`)
     }
-    return transaction(this.pool, null, (client) => this.appendInTransaction(client, {
-      ...record, path: path.data, mimeType,
-    }))
+    const fileVersionId = this.createId()
+    const storage = this.objectStore ? {
+      backend: 'object' as const,
+      objectKey: `organizations/${createHash('sha256').update(record.organizationId).digest('hex')}/file-versions/${fileVersionId}`,
+    } : { backend: 'inline' as const, objectKey: null }
+    if (this.objectStore && storage.objectKey) {
+      await this.objectStore.put(storage.objectKey, record.content, mimeType)
+    }
+    try {
+      return await transaction(this.pool, null, (client) => this.appendInTransaction(client, {
+        ...record, path: path.data, mimeType,
+      }, fileVersionId, storage))
+    } catch (error) {
+      if (this.objectStore && storage.objectKey) {
+        try { await this.objectStore.delete(storage.objectKey) } catch { /* inaccessible orphan; GC can reap it */ }
+      }
+      throw error
+    }
   }
 
   private async appendInTransaction(
     client: PoolClient,
     record: AppendFileVersionRecord,
+    fileVersionId: string,
+    storage: { backend: 'inline' | 'object'; objectKey: string | null },
   ): Promise<AppendFileVersionResult> {
     if (record.actorKind !== 'user') throw new AuthorizationChangedError()
     const access = await client.query<{
@@ -504,20 +549,21 @@ export class PostgresFileWriterRepository implements FileWriterRepository {
       ])
     }
     const nextVersion = (previous?.version ?? 0) + 1
-    const fileVersionId = this.createId()
     const contentHash = createHash('sha256').update(record.content).digest('hex')
     await client.query(`
       INSERT INTO relay_file_versions (
         organization_id, space_id, file_id, id, version, content,
         content_hash, size, created_by_tool_call_id, source_space_id,
-        source_session_id, source_turn_id, created_at
+        source_session_id, source_turn_id, created_at, storage_backend, object_key
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
       )
     `, [
       record.organizationId, fileSpaceId, fileId, fileVersionId, nextVersion,
-      record.content, contentHash, record.content.byteLength, record.toolCallId,
+      storage.backend === 'inline' ? record.content : null,
+      contentHash, record.content.byteLength, record.toolCallId,
       record.spaceId, record.sessionId, record.turnId, occurredAt,
+      storage.backend, storage.objectKey,
     ])
     const updated = await client.query<FileRow>(`
       UPDATE relay_files

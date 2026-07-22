@@ -2,6 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { loadConfig, loadMigrationConfig } from './config.js'
 
 const securityAuditHmacKey = '01'.repeat(32)
+const objectStorage = {
+  OBJECT_STORAGE_ENDPOINT: 'https://objects.example.test',
+  OBJECT_STORAGE_REGION: 'us-east-1',
+  OBJECT_STORAGE_BUCKET: 'relay-production',
+  OBJECT_STORAGE_ACCESS_KEY_ID: 'access-id',
+  OBJECT_STORAGE_SECRET_ACCESS_KEY: 'secret-value',
+}
 
 describe('API configuration', () => {
   it('supports an explicitly selected loopback-only development identity', () => {
@@ -122,6 +129,7 @@ describe('API configuration', () => {
       OIDC_JWKS_URI: 'https://identity.test/.well-known/jwks.json',
       SECURITY_AUDIT_HMAC_KEY: securityAuditHmacKey,
       SECURITY_AUDIT_HMAC_KEY_ID: 'production-v1',
+      ...objectStorage,
     }
     for (const corsOrigin of ['*', 'http://relay.example', 'https://relay.example/path', 'https://relay.example/']) {
       expect(() => loadConfig({ ...production, CORS_ORIGIN: corsOrigin })).toThrow('exact HTTPS origin')
@@ -152,6 +160,7 @@ describe('API configuration', () => {
       OIDC_JWKS_URI: 'https://identity.test/.well-known/jwks.json',
       SECURITY_AUDIT_HMAC_KEY: securityAuditHmacKey,
       SECURITY_AUDIT_HMAC_KEY_ID: 'production-v1',
+      ...objectStorage,
     }
     expect(loadConfig(production).migrateOnStart).toBe(false)
     expect(loadConfig(production).executionEnabled).toBe(false)
@@ -168,6 +177,7 @@ describe('API configuration', () => {
       OIDC_ISSUER: 'https://identity.test/',
       OIDC_AUDIENCE: 'relay-api',
       OIDC_JWKS_URI: 'https://identity.test/.well-known/jwks.json',
+      ...objectStorage,
     }
     expect(() => loadConfig(production)).toThrow('SECURITY_AUDIT_HMAC_KEY is required')
     expect(() => loadConfig({

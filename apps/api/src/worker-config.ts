@@ -4,6 +4,7 @@ import {
   SUPPORTED_AGENT_MODELS,
   type SupportedAgentModel,
 } from '@relay/contracts'
+import { loadObjectStorageConfig, type ObjectStorageConfig } from './object-storage-config.js'
 
 export type WorkerConfig = {
   databaseUrl: string
@@ -16,6 +17,7 @@ export type WorkerConfig = {
   readinessMaxAgeMs: number
   pollIntervalMs: number
   recoveryBatchSize: number
+  objectStorage?: ObjectStorageConfig
   provider: {
     baseUrl: string
     apiKey?: string
@@ -134,6 +136,7 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
     readinessMaxAgeMs,
     pollIntervalMs: boundedInteger(env, 'WORKER_POLL_INTERVAL_MS', 500, 50, 60_000),
     recoveryBatchSize: boundedInteger(env, 'WORKER_RECOVERY_BATCH_SIZE', 20, 1, 100),
+    objectStorage: loadObjectStorageConfig(env, env.NODE_ENV?.trim() || 'development'),
     provider: {
       baseUrl: required(env, 'AGENT_PROVIDER_BASE_URL'),
       apiKey: credentials.fallback,

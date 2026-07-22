@@ -1,3 +1,5 @@
+import { loadObjectStorageConfig, type ObjectStorageConfig } from './object-storage-config.js'
+
 export type ApiConfig = {
   host: string
   port: number
@@ -12,6 +14,7 @@ export type ApiConfig = {
   }
   securityAuditHmacKey?: string
   securityAuditHmacKeyId?: string
+  objectStorage?: ObjectStorageConfig
   contextEngine?: {
     baseUrl: string
     apiKey: string
@@ -352,6 +355,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       environment,
       securityAuditHmacKey !== undefined,
     ),
+    objectStorage: loadObjectStorageConfig(env, environment),
     contextEngine: parseContextEngineConfig(env, environment),
     rateLimit: {
       max: parseInteger(env.API_RATE_LIMIT_MAX, 'API_RATE_LIMIT_MAX', 600, 1, 100_000),
