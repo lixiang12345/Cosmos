@@ -1,5 +1,11 @@
 import {
   ApiErrorSchema,
+  AutomationEventListResponseSchema,
+  AutomationEventReceiptSchema,
+  AutomationListResponseSchema,
+  AutomationMutationResponseSchema,
+  AutomationRunListResponseSchema,
+  AutomationTestResultSchema,
   ApprovalDtoSchema,
   ApprovalListResponseSchema,
   ContextEngineStatusSchema,
@@ -29,11 +35,18 @@ import {
   SendSessionMessageResponseSchema,
   StartSessionResponseSchema,
   type ApiError,
+  type AutomationDto,
+  type AutomationEventListResponse,
+  type AutomationEventReceipt,
+  type AutomationListResponse,
+  type AutomationRunListResponse,
+  type AutomationTestResult,
   type ApprovalDecisionRequestInput,
   type ApprovalDto,
   type ApprovalListResponse,
   type ApprovalStatus,
   type CreateSessionRequestInput,
+  type CreateAutomationRequestInput,
   type CreateEnvironmentRequestInput,
   type CreateSessionResponse,
   type CreateExpertRequestInput,
@@ -54,6 +67,7 @@ import {
   type FileVersionListResponse,
   type MeResponse,
   type MessageCreateInput,
+  type ReceiveAutomationEventRequestInput,
   type RuntimeCapabilities,
   type RetryTurnResponse,
   type SessionDto,
@@ -67,6 +81,8 @@ import {
   type SendSessionMessageResponse,
   type StartSessionResponse,
   type UpdateExpertRequestInput,
+  type TestAutomationRequest,
+  type UpdateAutomationRequestInput,
   type UpdateEnvironmentRequestInput,
 } from '@relay/contracts'
 
@@ -431,6 +447,18 @@ function environmentsPath(organizationId: string, spaceId: string) {
   return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/environments`
 }
 
+function automationsPath(organizationId: string, spaceId: string) {
+  return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/automations`
+}
+
+function automationEventsPath(organizationId: string, spaceId: string) {
+  return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/automation-events`
+}
+
+function automationRunsPath(organizationId: string, spaceId: string) {
+  return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/automation-runs`
+}
+
 function contextEnginePath(organizationId: string, spaceId: string) {
   return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/context-engine`
 }
@@ -535,7 +563,7 @@ function assertControlPlaneScope(
   resource: TenantScopedResource,
   organizationId: string,
   spaceId: string,
-  resourceType: 'Expert' | 'Environment',
+  resourceType: 'Expert' | 'Environment' | 'Automation',
   resourceId?: string,
 ) {
   if (
@@ -1581,6 +1609,145 @@ export function listEnvironmentRevisions(
     }
     return response
   })
+}
+
+export function listAutomations(
+  organizationId: string,
+  spaceId: string,
+  auth?: RelayApiAuthContext,
+  signal?: AbortSignal,
+): Promise<AutomationListResponse> {
+  return request(automationsPath(organizationId, spaceId), {
+    method: 'GET', headers: { Accept: 'application/json' }, signal,
+  }, AutomationListResponseSchema, auth).then((response) => {
+    for (const automation of response.items) {
+      assertControlPlaneScope(automation, organizationId, spaceId, 'Automation')
+    }
+    return response
+  })
+}
+
+export function createAutomation(
+  organizationId: string,
+  spaceId: string,
+  input: CreateAutomationRequestInput,
+  idempotencyKey: string,
+  auth?: RelayApiAuthContext,
+): Promise<AutomationDto> {
+  return request(automationsPath(organizationId, spaceId), {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json', 'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey,
+    },
+    body: JSON.stringify(input),
+  }, AutomationMutationResponseSchema, auth).then(({ automation }) => {
+    assertControlPlaneScope(automation, organizationId, spaceId, 'Automation')
+    return automation
+  })
+}
+
+export function updateAutomation(
+  organizationId: string,
+  spaceId: string,
+  automationId: string,
+  input: UpdateAutomationRequestInput,
+  version: number,
+  idempotencyKey: string,
+  auth?: RelayApiAuthContext,
+): Promise<AutomationDto> {
+  return request(`${automationsPath(organizationId, spaceId)}/${encodeURIComponent(automationId)}`, {
+    method: 'PATCH',
+    headers: {
+      Accept: 'application/json', 'Content-Type': 'application/merge-patch+json',
+      'If-Match': `"${version}"`, 'Idempotency-Key': idempotencyKey,
+    },
+    body: JSON.stringify(input),
+  }, AutomationMutationResponseSchema, auth).then(({ automation }) => {
+    assertControlPlaneScope(automation, organizationId, spaceId, 'Automation', automationId)
+    return automation
+  })
+}
+
+export function testAutomation(
+  organizationId: string,
+  spaceId: string,
+  automationId: string,
+  input: TestAutomationRequest,
+  version: number,
+  idempotencyKey: string,
+  auth?: RelayApiAuthContext,
+): Promise<AutomationTestResult> {
+  return request(`${automationsPath(organizationId, spaceId)}/${encodeURIComponent(automationId)}/test`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json', 'Content-Type': 'application/json',
+      'If-Match': `"${version}"`, 'Idempotency-Key': idempotencyKey,
+    },
+    body: JSON.stringify(input),
+  }, AutomationTestResultSchema, auth).then((response) => {
+    assertControlPlaneScope(response.automation, organizationId, spaceId, 'Automation', automationId)
+    return response
+  })
+}
+
+function mutateAutomationStatus(
+  action: 'enable' | 'pause',
+  organizationId: string,
+  spaceId: string,
+  automationId: string,
+  version: number,
+  idempotencyKey: string,
+  auth?: RelayApiAuthContext,
+): Promise<AutomationDto> {
+  return request(`${automationsPath(organizationId, spaceId)}/${encodeURIComponent(automationId)}/${action}`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json', 'If-Match': `"${version}"`,
+      'Idempotency-Key': idempotencyKey,
+    },
+  }, AutomationMutationResponseSchema, auth).then(({ automation }) => {
+    assertControlPlaneScope(automation, organizationId, spaceId, 'Automation', automationId)
+    return automation
+  })
+}
+
+export const enableAutomation = mutateAutomationStatus.bind(undefined, 'enable')
+export const pauseAutomation = mutateAutomationStatus.bind(undefined, 'pause')
+
+export function listAutomationEvents(
+  organizationId: string,
+  spaceId: string,
+  auth?: RelayApiAuthContext,
+  signal?: AbortSignal,
+): Promise<AutomationEventListResponse> {
+  return request(automationEventsPath(organizationId, spaceId), {
+    method: 'GET', headers: { Accept: 'application/json' }, signal,
+  }, AutomationEventListResponseSchema, auth)
+}
+
+export function receiveAutomationEvent(
+  organizationId: string,
+  spaceId: string,
+  input: ReceiveAutomationEventRequestInput,
+  auth?: RelayApiAuthContext,
+): Promise<AutomationEventReceipt> {
+  return request(automationEventsPath(organizationId, spaceId), {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  }, AutomationEventReceiptSchema, auth)
+}
+
+export function listAutomationRuns(
+  organizationId: string,
+  spaceId: string,
+  auth?: RelayApiAuthContext,
+  signal?: AbortSignal,
+): Promise<AutomationRunListResponse> {
+  return request(automationRunsPath(organizationId, spaceId), {
+    method: 'GET', headers: { Accept: 'application/json' }, signal,
+  }, AutomationRunListResponseSchema, auth)
 }
 
 export function getMe(auth?: RelayApiAuthContext): Promise<MeResponse> {

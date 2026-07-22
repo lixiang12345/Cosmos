@@ -6,6 +6,7 @@ import { HttpContextEngineGateway } from './context-engine-gateway.js'
 import { bootstrapDevelopmentDatabase } from './development-database-bootstrap.js'
 import { assertMigrationsCurrent, runMigrations } from './migrations.js'
 import { PostgresArtifactRepository } from './postgres-artifact-repository.js'
+import { PostgresAutomationRepository } from './postgres-automation-repository.js'
 import { PostgresConfigurationCatalogRepository } from './postgres-configuration-catalog-repository.js'
 import { PostgresFileRepository } from './postgres-file-repository.js'
 import { assertRuntimeDatabaseRole, createRuntimePool } from './postgres-runtime-database.js'
@@ -84,6 +85,7 @@ const app = createApp({
   sessionTimelineRepository: pool ? new PostgresSessionTimelineRepository(pool) : undefined,
   sessionWorkerRepository: pool ? new PostgresSessionWorkerRepository(pool) : undefined,
   artifactRepository: pool ? new PostgresArtifactRepository(pool) : undefined,
+  automationRepository: pool ? new PostgresAutomationRepository(pool) : undefined,
   fileRepository: pool ? new PostgresFileRepository(pool) : undefined,
   toolApprovalRepository: pool ? new PostgresToolApprovalRepository(pool) : undefined,
   serviceAccountPolicyRepository: pool ? new PostgresServiceAccountPolicyRepository(pool) : undefined,

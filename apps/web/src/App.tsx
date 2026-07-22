@@ -64,6 +64,9 @@ const RemoteEnvironmentsPage = lazy(() => import('./pages/RemoteCatalogPages').t
 const RemoteFilesPage = lazy(() => import('./pages/RemoteFilesPage').then((module) => ({ default: module.RemoteFilesPage })))
 const RemoteWorkersPage = lazy(() => import('./pages/RemoteWorkersPage').then((module) => ({ default: module.RemoteWorkersPage })))
 const RemoteApprovalsPage = lazy(() => import('./pages/RemoteApprovalsPage').then((module) => ({ default: module.RemoteApprovalsPage })))
+const RemoteAutomationsPage = lazy(() => import('./pages/RemoteAutomationPages').then((module) => ({ default: module.RemoteAutomationsPage })))
+const RemoteAutomationEventLogPage = lazy(() => import('./pages/RemoteAutomationPages').then((module) => ({ default: module.RemoteAutomationEventLogPage })))
+const RemoteAutomationRunHistoryPage = lazy(() => import('./pages/RemoteAutomationPages').then((module) => ({ default: module.RemoteAutomationRunHistoryPage })))
 const CosmosHomePage = lazy(() => import('./pages/CosmosOperationsPages').then((module) => ({ default: module.CosmosHomePage })))
 const ContextWorkspacePage = lazy(() => import('./pages/ContextWorkspacePage').then((module) => ({ default: module.ContextWorkspacePage })))
 const CosmosFilesPage = lazy(() => import('./pages/CosmosOperationsPages').then((module) => ({ default: module.CosmosFilesPage })))
@@ -2006,9 +2009,9 @@ function RelayApp() {
               onOpenNavigation={openNavigation}
               onOpenSession={openSession}
             />} />
-        <Route path="/automations" element={demoMode ? <CosmosAutomationsPage onOpenNavigation={openNavigation} /> : productionUnavailable} />
-        <Route path="/automations/events" element={demoMode ? <CosmosEventLogPage onOpenNavigation={openNavigation} onSessionCreated={materializeAutomationSession} /> : productionUnavailable} />
-        <Route path="/automations/history" element={demoMode ? <CosmosRunHistoryPage runs={scopedRuns} onOpenNavigation={openNavigation} onOpenSession={openSession} /> : productionUnavailable} />
+        <Route path="/automations" element={demoMode ? <CosmosAutomationsPage onOpenNavigation={openNavigation} /> : <RemoteAutomationsPage organizationId={organizationId} spaceId={activeSpace.id} auth={catalogAuth} credentialVersion={credentialVersion} canManage={expertManagementEnabled} onOpenNavigation={openNavigation} />} />
+        <Route path="/automations/events" element={demoMode ? <CosmosEventLogPage onOpenNavigation={openNavigation} onSessionCreated={materializeAutomationSession} /> : <RemoteAutomationEventLogPage organizationId={organizationId} spaceId={activeSpace.id} auth={catalogAuth} credentialVersion={credentialVersion} canManage={expertManagementEnabled} onOpenNavigation={openNavigation} />} />
+        <Route path="/automations/history" element={demoMode ? <CosmosRunHistoryPage runs={scopedRuns} onOpenNavigation={openNavigation} onOpenSession={openSession} /> : <RemoteAutomationRunHistoryPage organizationId={organizationId} spaceId={activeSpace.id} auth={catalogAuth} credentialVersion={credentialVersion} onOpenNavigation={openNavigation} onOpenSession={openSession} />} />
         <Route path="/experts" element={
           demoMode ? (
             <ExpertsPage

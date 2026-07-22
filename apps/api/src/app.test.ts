@@ -1,5 +1,7 @@
 import {
   ApiErrorSchema,
+  AutomationDtoSchema,
+  AutomationEventDtoSchema,
   CreateSessionRequestSchema,
   CreateSessionResponseSchema,
   EnvironmentDetailDtoSchema,
@@ -19,6 +21,7 @@ import {
 } from '@relay/contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.js'
+import type { AutomationRepository } from './automation-repository.js'
 import { createDevelopmentAuthenticator } from './auth.js'
 import {
   EmptyConfigurationCatalogRepository,
@@ -105,6 +108,16 @@ const testAuthoritativeCatalog = [
   catalogEntry('relay', 'platform'),
   catalogEntry('other', 'platform'),
 ]
+
+const automationDto = AutomationDtoSchema.parse({
+  id: 'automation-platform', organizationId: 'relay', spaceId: 'platform',
+  expertId: 'expert-pr-author', expertRevisionId: 'expert-revision-platform',
+  triggerId: 'automation-platform', name: 'Pull request triage', source: 'github',
+  eventType: 'pull_request.opened', filter: { '==': [{ var: 'action' }, 'opened'] },
+  status: 'paused', autoArchive: false, serviceAccountId: 'service-account-automation',
+  lastTestedAt: null, lastMatchedAt: null, matchCount: 0, version: 1,
+  createdAt: '2026-07-22T00:00:00.000Z', updatedAt: '2026-07-22T00:00:00.000Z',
+})
 
 const expertDetail: ExpertDetailDto = {
   id: 'expert-pr-author',
@@ -1846,5 +1859,56 @@ describe('Relay API', () => {
     expect(otherSpace.statusCode).toBe(201)
     expect(otherSpace.headers['idempotency-replayed']).toBe('false')
     expect((await repository.listBySpace('relay', 'commerce', 'user-local-admin')).items).toHaveLength(1)
+  })
+
+  it('serves the production Automation control-plane routes through the shared contracts', async () => {
+    const event = AutomationEventDtoSchema.parse({
+      id: 'event-platform', organizationId: 'relay', spaceId: 'platform', source: 'github',
+      eventType: 'pull_request.opened', externalId: 'provider-1', headers: {}, payload: {},
+      payloadHash: 'a'.repeat(64), status: 'ignored', automationId: null, sessionId: null,
+      matchExplanation: 'No active Trigger matched the source and event type.',
+      errorCode: null, errorMessage: null, receivedAt: '2026-07-22T00:00:00.000Z', processedAt: '2026-07-22T00:00:00.000Z',
+    })
+    const automationRepository: AutomationRepository = {
+      listAutomations: vi.fn().mockResolvedValue([automationDto]),
+      createAutomation: vi.fn().mockResolvedValue({ automation: automationDto, replayed: false }),
+      updateAutomation: vi.fn().mockResolvedValue({ automation: automationDto, replayed: false }),
+      setAutomationStatus: vi.fn().mockResolvedValue({ automation: { ...automationDto, status: 'active', version: 2 }, replayed: false }),
+      testAutomation: vi.fn().mockResolvedValue({ automation: { ...automationDto, lastTestedAt: '2026-07-22T00:00:00.000Z', version: 2 }, matched: true, explanation: 'matched' }),
+      listEvents: vi.fn().mockResolvedValue([event]),
+      receiveEvent: vi.fn().mockResolvedValue({ event, duplicate: false, match: null }),
+      completeDispatch: vi.fn().mockResolvedValue(null),
+      failDispatch: vi.fn().mockResolvedValue(null),
+      listRuns: vi.fn().mockResolvedValue([]),
+    }
+    const app = createApp({
+      sessionRepository: testRepository(),
+      automationRepository,
+      authenticate: createDevelopmentAuthenticator('user-local-admin'),
+      executionReadinessCheck: async () => true,
+    })
+    openApps.push(app)
+    const listed = await app.inject({ method: 'GET', url: '/api/v1/organizations/relay/spaces/platform/automations' })
+    expect(listed.statusCode).toBe(200)
+    expect(listed.json().items[0]).toMatchObject({ id: automationDto.id })
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v1/organizations/relay/spaces/platform/automations',
+      headers: { 'idempotency-key': 'automation-route-create' },
+      payload: { expertId: automationDto.expertId, name: automationDto.name, source: 'github', eventType: automationDto.eventType, serviceAccountId: automationDto.serviceAccountId },
+    })
+    expect(created.statusCode).toBe(201)
+    expect(created.headers.location).toContain(`/automations/${automationDto.id}`)
+    const tested = await app.inject({
+      method: 'POST',
+      url: `/api/v1/organizations/relay/spaces/platform/automations/${automationDto.id}/test`,
+      headers: { 'idempotency-key': 'automation-route-test', 'if-match': '"1"' },
+      payload: { payload: { action: 'opened' } },
+    })
+    expect(tested.statusCode).toBe(200)
+    expect(tested.json()).toMatchObject({ matched: true })
+    const events = await app.inject({ method: 'GET', url: '/api/v1/organizations/relay/spaces/platform/automation-events' })
+    expect(events.statusCode).toBe(200)
+    expect(events.json().items).toHaveLength(1)
   })
 })

@@ -168,7 +168,7 @@ const SessionDtoBaseSchema = z.object({
   visibility: SessionVisibilitySchema,
   status: SessionStatusSchema,
   attachments: z.array(z.string().trim().min(1).max(2_048)).max(10),
-  source: z.literal('manual'),
+  source: z.enum(['manual', 'automation']),
   createdAt: TimestampSchema,
   updatedAt: TimestampSchema,
   lastActivityAt: TimestampSchema,

@@ -12044,6 +12044,310 @@ button:disabled {
   }
 }
 
+.remote-automation-page .cosmos-page__content {
+  display: grid;
+  gap: 20px;
+}
+
+.remote-automation-page .cosmos-section-heading {
+  align-items: end;
+}
+
+.remote-automation-list {
+  display: grid;
+  gap: 12px;
+}
+
+.remote-automation-card {
+  padding: 20px;
+}
+
+.remote-automation-card > header,
+.remote-automation-editor > header,
+.remote-event-injector > .cosmos-section-heading,
+.remote-event-list > header,
+.remote-event-detail > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.remote-automation-card__title {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.remote-automation-card__title > svg {
+  flex: 0 0 auto;
+  margin-top: 3px;
+}
+
+.remote-automation-card h2,
+.remote-automation-editor h2,
+.remote-event-detail h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.remote-automation-card p,
+.remote-automation-editor p,
+.remote-event-detail p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+}
+
+.remote-automation-status,
+.remote-event-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--row-line);
+  border-radius: 999px;
+  padding: 4px 8px;
+  white-space: nowrap;
+  font-size: .75rem;
+}
+
+.remote-automation-status--active,
+.remote-event-status--dispatched {
+  color: var(--brand);
+}
+
+.remote-automation-status--error,
+.remote-event-status--failed {
+  color: var(--danger);
+}
+
+.remote-automation-card dl,
+.remote-event-detail dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin: 20px 0 0;
+  background: var(--row-line);
+  border: 1px solid var(--row-line);
+}
+
+.remote-automation-card dl > div,
+.remote-event-detail dl > div {
+  min-width: 0;
+  padding: 10px;
+  background: var(--surface);
+}
+
+.remote-automation-card dt,
+.remote-event-detail dt {
+  color: var(--text-muted);
+  font-size: .75rem;
+}
+
+.remote-automation-card dd,
+.remote-event-detail dd {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.remote-automation-card dd code {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-automation-editor,
+.remote-event-injector {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  background: var(--surface);
+  border: 1px solid var(--row-line);
+  border-radius: 12px;
+}
+
+.remote-automation-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.remote-automation-form-grid label,
+.remote-event-injector label {
+  display: grid;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: .8rem;
+}
+
+.remote-automation-form-grid label > input,
+.remote-automation-form-grid label > select,
+.remote-automation-form-grid label > textarea,
+.remote-event-injector input,
+.remote-event-injector textarea {
+  width: 100%;
+  min-width: 0;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--row-line);
+  border-radius: 7px;
+  padding: 9px 10px;
+  font: inherit;
+}
+
+.remote-automation-form-wide {
+  grid-column: 1 / -1;
+}
+
+.remote-automation-form-grid small {
+  color: var(--text-muted);
+}
+
+.remote-automation-check {
+  display: flex !important;
+  align-items: center;
+  grid-column: 1 / -1;
+}
+
+.remote-automation-check input {
+  accent-color: var(--text);
+}
+
+.remote-event-source-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.remote-event-source-picker button {
+  padding: 8px 11px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--row-line);
+  border-radius: 7px;
+}
+
+.remote-event-source-picker button[aria-pressed="true"] {
+  color: var(--surface);
+  background: var(--text);
+}
+
+.remote-event-layout {
+  display: grid;
+  grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr);
+  gap: 16px;
+}
+
+.remote-event-list,
+.remote-event-detail,
+.remote-run-history-table {
+  min-width: 0;
+  padding: 16px;
+}
+
+.remote-event-list > header {
+  margin-bottom: 12px;
+}
+
+.remote-event-list h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.remote-event-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  width: 100%;
+  gap: 10px;
+  padding: 12px 8px;
+  color: var(--text);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--row-line);
+}
+
+.remote-event-row > span:nth-child(2) {
+  min-width: 0;
+}
+
+.remote-event-row strong,
+.remote-event-row small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-event-row small {
+  margin-top: 3px;
+  color: var(--text-muted);
+}
+
+.remote-event-row--active {
+  background: var(--surface-hover);
+}
+
+.remote-event-detail h3 {
+  margin: 20px 0 8px;
+  font-size: .85rem;
+}
+
+.remote-payload-viewer {
+  max-height: 360px;
+  overflow: auto;
+  padding: 12px;
+  color: var(--text);
+  background: var(--surface-hover);
+  border: 1px solid var(--row-line);
+  border-radius: 7px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.remote-run-history-table {
+  overflow-x: auto;
+}
+
+.remote-run-history-table table {
+  min-width: 700px;
+}
+
+.remote-run-history-table td small {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-muted);
+}
+
+@media (max-width: 760px) {
+  .remote-automation-form-grid,
+  .remote-automation-card dl,
+  .remote-event-detail dl,
+  .remote-event-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .remote-automation-form-wide {
+    grid-column: auto;
+  }
+
+  .remote-automation-card > header,
+  .remote-automation-editor > header,
+  .remote-event-injector > .cosmos-section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .remote-event-row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .remote-event-row > svg:last-child {
+    display: none;
+  }
+}
+
 .auth-screen {
   min-height: 100dvh;
   display: grid;

@@ -1,10 +1,10 @@
 # Relay 后端需求与领域模型
 
 > 状态：MVP 实施基线  
-> 版本：1.2（2026-07-13）
+> 版本：1.3（2026-07-22）
 > 依据：`docs/cosmos-evidence-matrix.md`（2026-07-12）  
 > API 契约：`docs/api-contract.yaml`  
-> 目标：为 Relay 的 Home、Sessions、Experts、Environments、Files、Artifacts、Workers 与 Automations 原型提供可演进、可审计的多租户后端边界。
+> 目标：为 Relay 的 Home、Sessions、Experts、Environments、Files、Artifacts、Workers 与 Automations 提供可演进、可审计的多租户后端边界。
 
 ## 1. 设计原则
 
@@ -27,10 +27,11 @@
 | 身份发现与授权 | `GET /api/v1/me` 返回 authenticated actor 及其真实 Organization/Space membership；Session repository 重检 membership；Private Session 支持动态 User/Group ShareGrant；ServiceAccount 的 create/send/archive 使用 audience + exact Expert/Session binding；API/Worker 使用分离的 NOLOGIN/NOBYPASSRLS 角色和 FORCE RLS，API 查询设置 transaction-local actor/org/space context | 无合规访问、实时撤权通知或公开 ServiceAccount binding 管理 API |
 | Session、Tool 与 File API | tenant-scoped Session 全生命周期、ShareGrant、Artifact、ToolCall 查询和 Approval 查询/决策，以及 File list/get/content/versions；列表使用 filter-bound keyset cursor；File 公共表面只读且危险 MIME 强制附件；共享 Zod 请求/响应/错误验证；Private/Workspace 资源按 creator/grant conceal | Pin 尚未拆为 actor 偏好资源；无公开 File 写 API |
 | Catalog API | tenant-scoped Expert/Environment list/get/write；Environment create/update/retry/disable/archive 与 Expert lifecycle 均使用 manager RBAC/FORCE RLS、幂等、CAS、审计和 immutable revision | service account 暂时拒绝；无通用 Catalog operation policy |
-| 权威配置与持久化 | PostgreSQL 已建立 Expert/Environment identity、immutable revision、provisioning lease/fencing、append-only audit/outbox、ExecutionSnapshot、Repository binding、ShareGrant、SessionWorker、Artifact、File/FileVersion、ToolCall/Approval/SideEffect 与复合 tenant FK；39 张租户表 FORCE RLS | File 内容仍为有界 `bytea`；大表 migration 的生产规模锁等待仍需演练 |
+| Automation API | tenant-scoped Trigger list/create/update/test/enable/pause、Event list/receive 与 Run History；manager RBAC、ServiceAccount exact Expert binding、CAS、幂等、脱敏审计和外部 ID 去重由服务端强制 | 外部 webhook 验签/密文原文、独立 router worker、replay/dead-letter、autoArchive 执行和 Trigger archive/delete 尚未实现 |
+| 权威配置与持久化 | PostgreSQL 已建立 Expert/Environment identity、immutable revision、Automation Trigger/Event、provisioning lease/fencing、append-only audit/outbox、ExecutionSnapshot、Repository binding、ShareGrant、SessionWorker、Artifact、File/FileVersion、ToolCall/Approval/SideEffect 与复合 tenant FK；43 张租户表 FORCE RLS | File 内容仍为有界 `bytea`；大表 migration 的生产规模锁等待仍需演练 |
 | 基础执行 | 独立 Worker 以数据库权威租约 claim protocol-1 Command；heartbeat/fencing、有限重试、过期恢复、撤权取消与 immutable Attempt history 已有 PostgreSQL 并发测试；对话 provider 可在同一租约内调用受控的 Workspace File list/read Tool Broker，每次调用经 ToolCall coordinator、严格参数/大小/文本校验及脱敏 ledger；内部 coordinator 另支持精确 input hash 审批、双人批准和外部副作用状态账本 | provider 尚未开放文件写入、外部写入或 SessionWorker 委派；无 coding sandbox、审批暂停/恢复编排、dead-letter 与负载/soak 证据 |
 | 写入幂等 | Organization + authenticated actor + method + canonical path + key 作用域；create/start/send/archive/restore/pause/resume/cancel/retry/share 写在授权后重放，同 key/同 body 返回原结果，不同 body 返回 409；PostgreSQL advisory lock、Session 行锁与强 `If-Match` CAS 处理并发 | 未运行过期记录清理作业；尚未统一所有写 endpoint 的幂等中间件 |
-| 测试 | API/repository/config/JWT 单元测试；配置 `TEST_DATABASE_URL` 时运行 PostgreSQL 并发幂等、权威配置、Catalog/Session/SessionWorker/File/ToolCall/Approval 分页与可见性、不可变账本/配额/脱敏、metadata/执行控制/ShareGrant/ServiceAccount、Worker hierarchy/version/state、provider→ToolCall→File→provider 续接、审批并发 CAS/职责分离/精确输入绑定、未知副作用阻断、受限角色/FORCE RLS/上下文防泄漏、跨 tenant/Private 隔离、Session FIFO、Worker 就绪边界和 `001 -> 058` 新库/升级测试；Session activity indexes 使用独立 concurrent migrations | 数据库测试会在无环境变量时 skip；无生产规模在线 schema、备份恢复或负载测试 |
+| 测试 | API/repository/config/JWT 单元测试；配置 `TEST_DATABASE_URL` 时运行 PostgreSQL 并发幂等、权威配置、Catalog/Automation/Session/SessionWorker/File/ToolCall/Approval 分页与可见性、Event 去重/脱敏/ServiceAccount dispatch、不可变账本/配额、metadata/执行控制/ShareGrant、Worker hierarchy/version/state、provider→ToolCall→File→provider 续接、审批并发 CAS/职责分离/精确输入绑定、未知副作用阻断、受限角色/FORCE RLS/上下文防泄漏、跨 tenant/Private 隔离、Session FIFO、Worker 就绪边界和 `001 -> 067` 新库/升级测试；Session activity indexes 使用独立 concurrent migrations | 数据库测试会在无环境变量时 skip；无生产规模在线 schema、备份恢复或负载测试 |
 
 这是“PostgreSQL 权威数据与基础对话执行纵向切片”，不是本文 Phase 1 已完成，也不具备处理客户私密数据的完整生产安全边界。
 
@@ -267,10 +268,11 @@ Expert Trigger 的只读聚合身份和可管理投影。
 
 约束：
 
-- `Automation.id` 稳定映射到一个 Expert Trigger；PATCH Automation 实际创建新 Expert Draft Revision 并在发布后切换投影。
+- `Automation.id` 稳定映射到一个 Expert Trigger；当前实现以 `relay_expert_triggers` 为 CAS versioned 权威资源，PATCH 后回到 paused。随 Expert Draft Revision 发布切换是目标能力，尚未实现。
 - 新 Trigger 默认 paused；测试事件成功后显式启用。
 - Filter 使用受限 JSONLogic 方言，限制深度、操作符和执行时间，不允许任意代码。
 - 自动化创建 Session 时使用固定 ServiceAccount，权限不得高于 Expert 和 Space policy。
+- `autoArchive` 当前仅持久化，Session 终态后的执行器尚未实现；Trigger delete/archive 也未开放。
 
 ### 4.13 Event
 
@@ -280,9 +282,9 @@ Expert Trigger 的只读聚合身份和可管理投影。
 
 约束：
 
-- 接收时先验签和持久化，再异步匹配；响应不等待 Agent 启动。
+- 当前受认证的 manager/internal test ingress 在请求事务内完成脱敏持久化、匹配和 Session dispatch；外部 provider ingress 必须先验签和持久化，再由独立 router 异步匹配，尚未开放。
 - `(organization_id, source, external_id)` 唯一；重复事件返回原处理结果。
-- 原始 headers/payload 加密存储，展示时按 provider schema 脱敏。
+- 当前只保存经过通用敏感 key 脱敏的 headers/payload 与 hash；原始 headers/payload 加密存储和 provider-specific schema 脱敏尚未实现。
 - 一个 Event 最多通过一个 Automation 创建一个 Session；需要 fan-out 时由显式规则组建模。
 
 ### 4.14 Subscription

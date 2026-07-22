@@ -2,19 +2,19 @@
 
 > 文档状态：当前执行基线
 >
-> 更新日期：2026-07-21
+> 更新日期：2026-07-22
 >
-> 基线提交：随本次 Environment 生命周期交付更新
+> 基线提交：随本次 Automation 权威模型交付更新
 
 ## 结论
 
-Environment 生命周期与配置写入已完成。下一条垂直切片是 **Automation 权威模型**：把确定性 Web prototype 收敛为服务端唯一事实链，确保 Trigger、Event、Run 与 Session 创建之间具备租户隔离、幂等与审计关系。
+Automation 权威模型的第一条可交付闭环已完成。下一条垂直切片是 **Space 管理**：让 Space picker、Default Space、默认 Expert/Environment 与删除迁移预览使用服务端唯一事实源，并保持 Organization/Space 隔离、RBAC、CAS、幂等与审计。
 
 ```text
-Environment revision → Expert published revision → Session execution snapshot
+Organization → Space defaults → Expert published revision + Environment ready revision → Session execution snapshot
 ```
 
-Environment 已具备 Cloud/Daemon 类型、immutable revision、provisioning worker、retry/disable/archive、CAS/幂等、RBAC/RLS、审计/outbox、Expert 发布约束与 Session execution snapshot。没有 provider credential 或在线 Daemon pool 时，worker 返回安全的 unavailable failure，不会伪造 ready。
+Environment 已具备 Cloud/Daemon 类型、immutable revision、provisioning worker、retry/disable/archive、CAS/幂等、RBAC/RLS、审计/outbox、Expert 发布约束与 Session execution snapshot。Automation 已具备权威 Trigger、受限 Filter、test/enable/pause、Event 去重与脱敏、ServiceAccount Session dispatch、Event Log 和 Run History 同源投影。没有 provider credential 或在线 Daemon pool 时，worker 返回安全的 unavailable failure，不会伪造 ready。
 
 ## 当前基线
 
@@ -25,6 +25,7 @@ Environment 已具备 Cloud/Daemon 类型、immutable revision、provisioning wo
 - Session 创建、启动、续聊、归档、恢复、分享、Artifact、Worker、Tool Call、Approval 的受控服务端链路。
 - Expert 的 Custom/Managed 生命周期、immutable revision、发布后的 draft clone、`If-Match` 和幂等写入。
 - Environment 的创建、更新、retry、disable、archive、immutable revision、provisioning timeline 与 Session execution snapshot。
+- Automation 的创建、更新、测试、启停、Event 接收/去重/匹配、ServiceAccount Session 创建、Event Log 与 Run History。
 - 黑白主题、中文/英文、桌面/390px 小屏的主要页面验收。
 
 仍是缺口或受限能力：
@@ -32,7 +33,8 @@ Environment 已具备 Cloud/Daemon 类型、immutable revision、provisioning wo
 | 领域 | 当前状态 | 影响 |
 | --- | --- | --- |
 | Environment provider | 控制面和 worker 编排已完成；Compose 未配置 Cloud provider credential 或在线 Daemon pool | 新 Environment 会真实进入 failed/unavailable，可配置 provider 后 retry |
-| Automation | UI 为确定性 prototype，没有权威服务端模型 | Trigger、Event Log、Run History 不能形成唯一事实链 |
+| Automation 外部入口 | 当前是受认证 manager/internal test Event ingress；仅保存脱敏 payload/headers | 外部 webhook 验签、原文密文存储、异步 router worker 与 replay/dead-letter 尚未完成 |
+| Automation 生命周期 | `autoArchive` 已持久化；Trigger 使用 CAS 直接更新并回到 paused | 自动归档执行、delete/archive，以及随 Expert draft revision 发布切换仍未完成 |
 | Files | Worker 内部 append 与只读浏览已存在，provider 写入和对象存储未完成 | 代码修改闭环不能对外承诺 |
 | Agent execution | 基础对话和只读 Workspace tools 可用，coding sandbox/外部写工具未开放 | 不能把执行结果当成完整代码交付能力 |
 | Production hardening | 高可用、PITR、容量和负载恢复证据未完成 | 仍不适合直接承载公网客户数据 |
@@ -83,12 +85,36 @@ Space Admin 可以在统一、克制的 Cosmos 风格控制面中：
 - API/OpenAPI/Contracts 一致，`pnpm check`、`pnpm openapi:lint`、PostgreSQL integration、Docker health 和浏览器 smoke 全部通过。
 - 不记录 Secret 明文、完整私密 prompt、Authorization header 或 provider 响应原文。
 
+## M4-A：Automation 权威模型（已完成）
+
+### 交付结果
+
+- Contracts/API/OpenAPI 对齐权威 Trigger、受限 JSONLogic、Event、Run History 与 Automation 来源 Session。
+- PostgreSQL migrations `066`-`067` 建立 Trigger、Event、append-only audit/outbox、FORCE RLS、外部 Event ID 去重和旧开发 fixture 兼容修复。
+- 创建默认 paused；成功 Test event 后才能 enable；更新与启停使用 `If-Match`、`Idempotency-Key`、manager RBAC、CAS 和审计。
+- Event 在服务端脱敏后持久化，匹配 active Trigger，并通过绑定的精确 ServiceAccount/Expert policy 创建唯一 Session；重复 external ID 重放原 Event，不创建第二个 Session。
+- 生产 `/automations`、`/automations/events`、`/automations/history` 从同一服务端事实链读取，并覆盖加载、空、错误、权限、创建、编辑、测试、启停、去重、失败和打开 Session 状态。
+
+### 验证证据
+
+- Contracts 54 tests、API 210 tests、Web 202 tests 通过。
+- PostgreSQL integration 25 files / 139 tests 通过，覆盖跨 tenant、member 写拒绝、幂等、CAS、Event 去重、ServiceAccount binding 和 Event → Session 关系。
+- `pnpm check`、`pnpm openapi:lint`、Docker rebuild/health 为交付门禁。
+- 浏览器真实闭环验证创建、测试、启用、Event dispatch、重复 Event 去重、Event Log/Run History 同源；桌面与 `390×844` 无横向溢出。Session 后续 Agent execution 若 provider 失败会显示真实 failed，不把 Event dispatch 冒充模型执行成功。
+
+### 明确延期
+
+- 外部 provider webhook 验签、原始 headers/payload 密文存储和 provider-specific schema 脱敏。
+- 独立异步 Event router worker、replay/dead-letter、Subscription fan-in；当前匹配与 Session dispatch 在受认证 API 请求内完成。
+- `autoArchive` 执行器与 Trigger delete/archive；当前只持久化 auto-archive 设置。
+- Trigger update 随 Expert draft revision 发布切换；当前 `relay_expert_triggers` 是 CAS versioned 权威资源，更新后回到 paused。
+
 ## M4 排序
 
-Environment 完成后按以下顺序推进：
+后续按以下顺序推进：
 
-1. **Automation 权威模型**：Expert Trigger 唯一写模型，Event payload/headers/idempotency/match explanation 可追溯，重复 Event 不重复创建 Session。
-2. **Space 管理**：Default、默认 Expert/Environment、删除迁移预览和真实 scope 切换。
+1. **Automation 权威模型（M4-A 已完成）**：已交付 Trigger 唯一资源、Event 去重/脱敏/匹配、ServiceAccount Session dispatch 与同源 Run History；上述延期项在后续 Automation hardening 收口。
+2. **Space 管理（下一步）**：Default、默认 Expert/Environment、删除迁移预览和真实 scope 切换。
 3. **Advisor 受控执行**：plan/diff/confirm、受控工具、失败恢复和审计；OAuth/Secret 只返回人工步骤，不伪造完成。
 4. **生产硬化**：对象存储、配额、PITR/恢复、限流、实时撤权、通知/SLO、负载与故障演练。
 

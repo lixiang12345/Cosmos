@@ -879,6 +879,310 @@ paths:
         '500':
           $ref: '#/components/responses/RuntimeCatalogInternalError'
 
+  /organizations/{organizationId}/spaces/{spaceId}/automations:
+    parameters:
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
+    get:
+      tags: [Automations]
+      operationId: listAutomations
+      x-relay-implementation-status: implemented
+      summary: List authoritative Expert Triggers in the Space
+      responses:
+        '200':
+          description: Automation projections
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeAutomationListResponse'
+        '401':
+          $ref: '#/components/responses/RuntimeCatalogUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeCatalogForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeCatalogNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeCatalogInternalError'
+    post:
+      tags: [Automations]
+      operationId: createAutomation
+      x-relay-implementation-status: implemented
+      summary: Create a paused authoritative Expert Trigger
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeAutomationCreate'
+      responses:
+        '201':
+          description: Trigger created in paused state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeAutomationMutationResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeCatalogBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeCatalogUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeCatalogForbidden'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
+        '500':
+          $ref: '#/components/responses/RuntimeCatalogInternalError'
+
+  /organizations/{organizationId}/spaces/{spaceId}/automations/{automationId}:
+    parameters:
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
+      - name: automationId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+    patch:
+      tags: [Automations]
+      operationId: updateAutomation
+      x-relay-implementation-status: implemented
+      summary: Update Trigger configuration and return it to paused state
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: '#/components/schemas/RuntimeAutomationPatch'
+      responses:
+        '200':
+          description: Trigger updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeAutomationMutationResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeCatalogBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeCatalogUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeCatalogForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeCatalogNotFound'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
+        '412':
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '500':
+          $ref: '#/components/responses/RuntimeCatalogInternalError'
+
+  /organizations/{organizationId}/spaces/{spaceId}/automations/{automationId}/test:
+    parameters:
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
+      - name: automationId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+    post:
+      tags: [Automations]
+      operationId: testAutomation
+      x-relay-implementation-status: implemented
+      summary: Evaluate a test payload with the restricted Trigger filter
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeAutomationTestRequest'
+      responses:
+        '200':
+          description: Match explanation and updated Trigger
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeAutomationTestResult'
+        '400':
+          $ref: '#/components/responses/RuntimeCatalogBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeCatalogUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeCatalogForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeCatalogNotFound'
+        '412':
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '500':
+          $ref: '#/components/responses/RuntimeCatalogInternalError'
+
+  /organizations/{organizationId}/spaces/{spaceId}/automations/{automationId}/enable:
+    parameters:
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
+      - name: automationId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+    post:
+      tags: [Automations]
+      operationId: enableAutomation
+      x-relay-implementation-status: implemented
+      summary: Enable a Trigger after a successful test
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Trigger enabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeAutomationMutationResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeCatalogBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeCatalogUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeCatalogForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeCatalogNotFound'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
+        '412':
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '500':
+          $ref: '#/components/responses/RuntimeCatalogInternalError'
+
+  /organizations/{organizationId}/spaces/{spaceId}/automations/{automationId}/pause:
+    parameters:
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
+      - name: automationId
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+    post:
+      tags: [Automations]
+      operationId: pauseAutomation
+      x-relay-implementation-status: implemented
+      summary: Pause an active Trigger
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Trigger paused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeAutomationMutationResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeCatalogBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeCatalogUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeCatalogForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeCatalogNotFound'
+        '412':
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '500':
+          $ref: '#/components/responses/RuntimeCatalogInternalError'
+
+  /organizations/{organizationId}/spaces/{spaceId}/automation-events:
+    parameters:
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
+    get:
+      tags: [Events]
+      operationId: listAutomationEvents
+      x-relay-implementation-status: implemented
+      summary: List redacted immutable Automation Events
+      responses:
+        '200':
+          description: Event Log projection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeAutomationEventListResponse'
+        '401':
+          $ref: '#/components/responses/RuntimeCatalogUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeCatalogForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeCatalogNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeCatalogInternalError'
+    post:
+      tags: [Events]
+      operationId: receiveAutomationEvent
+      x-relay-implementation-status: implemented
+      summary: Receive, deduplicate, match, and dispatch an authenticated internal Event
+      description: External provider webhook verification remains capability-gated. This endpoint is restricted to Automation managers.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeAutomationEventReceive'
+      responses:
+        '200':
+          description: Duplicate Event replayed without creating another Session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeAutomationEventReceipt'
+        '202':
+          description: Event accepted and processed into a safe terminal dispatch state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeAutomationEventReceipt'
+        '400':
+          $ref: '#/components/responses/RuntimeCatalogBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeCatalogUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeCatalogForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeCatalogNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeCatalogInternalError'
+
+  /organizations/{organizationId}/spaces/{spaceId}/automation-runs:
+    parameters:
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
+    get:
+      tags: [Automations]
+      operationId: listAutomationRuns
+      x-relay-implementation-status: implemented
+      summary: List Sessions created by dispatched Automation Events
+      responses:
+        '200':
+          description: Run History projected from Event and Session records
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeAutomationRunListResponse'
+        '401':
+          $ref: '#/components/responses/RuntimeCatalogUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeCatalogForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeCatalogNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeCatalogInternalError'
+
   /organizations/{organizationId}/spaces/{spaceId}/sessions:
     parameters:
       - $ref: '#/components/parameters/RuntimeOrganizationId'
@@ -2089,127 +2393,6 @@ paths:
         '500':
           $ref: '#/components/responses/RuntimeInternalError'
 
-  /organizations/{organizationId}/spaces/{spaceId}/automations:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/SpaceId'
-    get:
-      tags: [Automations]
-      operationId: listAutomations
-      summary: List the management projection of Expert Triggers
-      parameters:
-        - $ref: '#/components/parameters/Cursor'
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Search'
-        - name: expertId
-          in: query
-          schema:
-            type: string
-            format: uuid
-        - name: status
-          in: query
-          schema:
-            $ref: '#/components/schemas/AutomationStatus'
-      responses:
-        '200':
-          description: Automation page
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/Page'
-                  - type: object
-                    required: [items]
-                    properties:
-                      items:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/Automation'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-    post:
-      tags: [Automations]
-      operationId: createAutomation
-      summary: Add a paused Trigger to an Expert draft and publish its projection
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AutomationCreate'
-      responses:
-        '201':
-          description: Paused Automation created
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Automation'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '409':
-          $ref: '#/components/responses/Conflict'
-
-  /organizations/{organizationId}/spaces/{spaceId}/automations/{automationId}:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/SpaceId'
-      - $ref: '#/components/parameters/AutomationId'
-    get:
-      tags: [Automations]
-      operationId: getAutomation
-      summary: Get an Automation projection
-      responses:
-        '200':
-          description: Automation
-          headers:
-            ETag:
-              $ref: '#/components/headers/ETag'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Automation'
-        '404':
-          $ref: '#/components/responses/NotFound'
-    patch:
-      tags: [Automations]
-      operationId: updateAutomation
-      summary: Update the underlying Expert Trigger through a new Expert revision
-      parameters:
-        - $ref: '#/components/parameters/IfMatch'
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/merge-patch+json:
-            schema:
-              $ref: '#/components/schemas/AutomationPatch'
-      responses:
-        '200':
-          description: Updated Automation projection
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Automation'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '412':
-          $ref: '#/components/responses/PreconditionFailed'
-
-    delete:
-      tags: [Automations]
-      operationId: deleteAutomation
-      summary: Remove the underlying Trigger through a new Expert revision
-      parameters:
-        - $ref: '#/components/parameters/IfMatch'
-        - $ref: '#/components/parameters/IdempotencyKey'
-      responses:
-        '204':
-          description: Trigger removed
-        '409':
-          $ref: '#/components/responses/Conflict'
-
   /organizations/{organizationId}/spaces/{spaceId}/environments/{environmentId}/retry:
     parameters:
       - $ref: '#/components/parameters/OrganizationId'
@@ -2322,28 +2505,6 @@ paths:
       responses:
         '200':
           description: Active Automation
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Automation'
-        '409':
-          $ref: '#/components/responses/Conflict'
-
-  /organizations/{organizationId}/spaces/{spaceId}/automations/{automationId}/pause:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/SpaceId'
-      - $ref: '#/components/parameters/AutomationId'
-    post:
-      tags: [Automations]
-      operationId: pauseAutomation
-      summary: Pause an Automation
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/IfMatch'
-      responses:
-        '200':
-          description: Paused Automation
           content:
             application/json:
               schema:
@@ -4560,6 +4721,300 @@ components:
               type: boolean
           additionalProperties: false
       additionalProperties: false
+    RuntimeAutomationSource:
+      type: string
+      enum: [github, slack, webhook, schedule]
+    RuntimeAutomationStatus:
+      type: string
+      enum: [draft, paused, active, error]
+    RuntimeAutomationFilter:
+      type: object
+      description: Restricted JSONLogic using only var, ==, !=, in, and, and or with bounded depth and node count.
+      additionalProperties: true
+    RuntimeAutomationCreate:
+      type: object
+      required: [expertId, name, source, eventType, serviceAccountId]
+      properties:
+        expertId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 160
+        source:
+          $ref: '#/components/schemas/RuntimeAutomationSource'
+        eventType:
+          type: string
+          minLength: 1
+          maxLength: 256
+        filter:
+          $ref: '#/components/schemas/RuntimeAutomationFilter'
+        autoArchive:
+          type: boolean
+          default: false
+        serviceAccountId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+      additionalProperties: false
+    RuntimeAutomationPatch:
+      type: object
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 160
+        eventType:
+          type: string
+          minLength: 1
+          maxLength: 256
+        filter:
+          $ref: '#/components/schemas/RuntimeAutomationFilter'
+        autoArchive:
+          type: boolean
+        serviceAccountId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+      additionalProperties: false
+    RuntimeAutomation:
+      type: object
+      required: [id, organizationId, spaceId, expertId, expertRevisionId, triggerId, name, source, eventType, filter, status, autoArchive, serviceAccountId, lastTestedAt, lastMatchedAt, matchCount, version, createdAt, updatedAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        spaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        expertId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        expertRevisionId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        triggerId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 160
+        source:
+          $ref: '#/components/schemas/RuntimeAutomationSource'
+        eventType:
+          type: string
+          minLength: 1
+          maxLength: 256
+        filter:
+          $ref: '#/components/schemas/RuntimeAutomationFilter'
+        status:
+          $ref: '#/components/schemas/RuntimeAutomationStatus'
+        autoArchive:
+          type: boolean
+        serviceAccountId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        lastTestedAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        lastMatchedAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        matchCount:
+          type: integer
+          minimum: 0
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        updatedAt:
+          $ref: '#/components/schemas/Timestamp'
+      additionalProperties: false
+    RuntimeAutomationMutationResponse:
+      type: object
+      required: [automation, replayed]
+      properties:
+        automation:
+          $ref: '#/components/schemas/RuntimeAutomation'
+        replayed:
+          type: boolean
+      additionalProperties: false
+    RuntimeAutomationListResponse:
+      type: object
+      required: [items, projectionUpdatedAt]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/RuntimeAutomation'
+        projectionUpdatedAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+      additionalProperties: false
+    RuntimeAutomationTestRequest:
+      type: object
+      required: [payload]
+      properties:
+        eventType:
+          type: string
+          minLength: 1
+          maxLength: 256
+        payload:
+          type: object
+          additionalProperties: true
+      additionalProperties: false
+    RuntimeAutomationTestResult:
+      type: object
+      required: [automation, matched, explanation]
+      properties:
+        automation:
+          $ref: '#/components/schemas/RuntimeAutomation'
+        matched:
+          type: boolean
+        explanation:
+          type: string
+          minLength: 1
+          maxLength: 2000
+      additionalProperties: false
+    RuntimeAutomationEventReceive:
+      type: object
+      required: [source, eventType, externalId, payload]
+      properties:
+        source:
+          $ref: '#/components/schemas/RuntimeAutomationSource'
+        eventType:
+          type: string
+          minLength: 1
+          maxLength: 256
+        externalId:
+          type: string
+          minLength: 1
+          maxLength: 512
+        headers:
+          type: object
+          additionalProperties: true
+        payload:
+          type: object
+          additionalProperties: true
+      additionalProperties: false
+    RuntimeAutomationEvent:
+      type: object
+      required: [id, organizationId, spaceId, source, eventType, externalId, headers, payload, payloadHash, status, automationId, sessionId, matchExplanation, errorCode, errorMessage, receivedAt, processedAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        spaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        source:
+          $ref: '#/components/schemas/RuntimeAutomationSource'
+        eventType:
+          type: string
+          minLength: 1
+          maxLength: 256
+        externalId:
+          type: string
+          minLength: 1
+          maxLength: 512
+        headers:
+          type: object
+          description: Redacted projection; secret-bearing keys are replaced before persistence.
+          additionalProperties: true
+        payload:
+          type: object
+          description: Redacted bounded projection used by Event Log and the initial Session message.
+          additionalProperties: true
+        payloadHash:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        status:
+          type: string
+          enum: [received, matched, ignored, dispatching, dispatched, failed]
+        automationId:
+          oneOf:
+            - $ref: '#/components/schemas/RuntimeIdentifier'
+            - type: 'null'
+        sessionId:
+          oneOf:
+            - $ref: '#/components/schemas/RuntimeIdentifier'
+            - type: 'null'
+        matchExplanation:
+          type: string
+          maxLength: 2000
+        errorCode:
+          type: [string, 'null']
+          maxLength: 128
+        errorMessage:
+          type: [string, 'null']
+          maxLength: 2000
+        receivedAt:
+          $ref: '#/components/schemas/Timestamp'
+        processedAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+      additionalProperties: false
+    RuntimeAutomationEventReceipt:
+      type: object
+      required: [event, duplicate]
+      properties:
+        event:
+          $ref: '#/components/schemas/RuntimeAutomationEvent'
+        duplicate:
+          type: boolean
+      additionalProperties: false
+    RuntimeAutomationEventListResponse:
+      type: object
+      required: [items, projectionUpdatedAt]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/RuntimeAutomationEvent'
+        projectionUpdatedAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+      additionalProperties: false
+    RuntimeAutomationRun:
+      type: object
+      required: [automationId, automationName, eventId, source, eventType, receivedAt, session]
+      properties:
+        automationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        automationName:
+          type: string
+          minLength: 1
+          maxLength: 160
+        eventId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        source:
+          $ref: '#/components/schemas/RuntimeAutomationSource'
+        eventType:
+          type: string
+          minLength: 1
+          maxLength: 256
+        receivedAt:
+          $ref: '#/components/schemas/Timestamp'
+        session:
+          $ref: '#/components/schemas/RuntimeSession'
+      additionalProperties: false
+    RuntimeAutomationRunListResponse:
+      type: object
+      required: [items, projectionUpdatedAt]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/RuntimeAutomationRun'
+        projectionUpdatedAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+      additionalProperties: false
+
     RuntimeSession:
       type: object
       required:
@@ -4640,7 +5095,7 @@ components:
             maxLength: 2048
         source:
           type: string
-          const: manual
+          enum: [manual, automation]
         createdAt:
           $ref: '#/components/schemas/Timestamp'
         updatedAt:
@@ -6014,36 +6469,6 @@ components:
             lastTestedAt:
               type: [string, 'null']
               format: date-time
-    AutomationCreate:
-      type: object
-      required: [expertId, source, eventType]
-      properties:
-        expertId:
-          type: string
-          format: uuid
-        source:
-          $ref: '#/components/schemas/EventSource'
-        eventType:
-          type: string
-          minLength: 1
-        filter:
-          $ref: '#/components/schemas/JsonObject'
-        autoArchive:
-          type: boolean
-          default: false
-      additionalProperties: false
-    AutomationPatch:
-      type: object
-      properties:
-        eventType:
-          type: string
-          minLength: 1
-        filter:
-          $ref: '#/components/schemas/JsonObject'
-        autoArchive:
-          type: boolean
-      additionalProperties: false
-
     EventStatus:
       type: string
       enum: [received, matched, ignored, dispatching, dispatched, failed]

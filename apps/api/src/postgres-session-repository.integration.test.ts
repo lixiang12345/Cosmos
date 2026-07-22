@@ -69,6 +69,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
       ALTER TABLE relay_approval_assignments DISABLE TRIGGER relay_approval_assignments_reject_truncate;
       ALTER TABLE relay_approval_decisions DISABLE TRIGGER relay_approval_decisions_reject_truncate;
       ALTER TABLE relay_session_workers DISABLE TRIGGER relay_session_workers_reject_truncate;
+      ALTER TABLE relay_automation_audit_events DISABLE TRIGGER relay_automation_audit_events_reject_truncate;
     `)
     try {
       await pool.query(`
@@ -89,6 +90,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
         ALTER TABLE relay_approval_assignments ENABLE TRIGGER relay_approval_assignments_reject_truncate;
         ALTER TABLE relay_approval_decisions ENABLE TRIGGER relay_approval_decisions_reject_truncate;
         ALTER TABLE relay_session_workers ENABLE TRIGGER relay_session_workers_reject_truncate;
+        ALTER TABLE relay_automation_audit_events ENABLE TRIGGER relay_automation_audit_events_reject_truncate;
       `)
     }
     const spaces = [

@@ -1,5 +1,17 @@
 export { createApp, type CreateAppOptions } from './app.js'
 export {
+  AutomationIdempotencyConflictError,
+  AutomationStateConflictError,
+  AutomationValidationError,
+  AutomationVersionConflictError,
+  EmptyAutomationRepository,
+  type AutomationRepository,
+} from './automation-repository.js'
+export {
+  PostgresAutomationRepository,
+  type PostgresAutomationRepositoryOptions,
+} from './postgres-automation-repository.js'
+export {
   ContextEngineGatewayError,
   HttpContextEngineGateway,
   type ContextEngineGateway,

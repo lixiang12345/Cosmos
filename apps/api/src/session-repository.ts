@@ -36,6 +36,7 @@ export type CreateSessionRecord = {
   requestId: string
   idempotencyKey: string
   request: CreateSessionRequest
+  source?: 'manual' | 'automation'
   executionAvailability?: 'available' | 'disabled' | 'worker_unavailable'
 }
 
@@ -452,7 +453,7 @@ export function createSessionDto(
     visibility: record.request.visibility,
     status: record.request.start ? 'queued' : 'draft',
     attachments: record.request.message.attachments,
-    source: 'manual',
+    source: record.source ?? 'manual',
     createdAt: timestamp,
     updatedAt: timestamp,
     lastActivityAt: timestamp,

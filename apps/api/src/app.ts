@@ -2,6 +2,12 @@ import cors from '@fastify/cors'
 import helmet from '@fastify/helmet'
 import {
   ApiErrorSchema,
+  AutomationEventListResponseSchema,
+  AutomationEventReceiptSchema,
+  AutomationListResponseSchema,
+  AutomationMutationResponseSchema,
+  AutomationRunListResponseSchema,
+  AutomationTestResultSchema,
   ApprovalDecisionRequestSchema,
   ApprovalDtoSchema,
   ApprovalListResponseSchema,
@@ -11,6 +17,7 @@ import {
   ContextEngineStatusRequestSchema,
   ContextPackRequestSchema,
   ContextSearchRequestSchema,
+  CreateAutomationRequestSchema,
   CreateEnvironmentRequestSchema,
   CreateExpertRequestSchema,
   CreateArtifactRequestSchema,
@@ -30,6 +37,7 @@ import {
   MeResponseSchema,
   MessageCreateSchema,
   RenameSessionRequestSchema,
+  ReceiveAutomationEventRequestSchema,
   RetryTurnResponseSchema,
   RuntimeCapabilitiesSchema,
   SessionDtoSchema,
@@ -42,8 +50,10 @@ import {
   SessionMessagePageSchema,
   SendSessionMessageResponseSchema,
   StartSessionResponseSchema,
+  TestAutomationRequestSchema,
   ToolCallListResponseSchema,
   UpdateArtifactRequestSchema,
+  UpdateAutomationRequestSchema,
   UpdateExpertRequestSchema,
   UpdateEnvironmentRequestSchema,
   type ApiError,
@@ -63,6 +73,15 @@ import {
   EmptyArtifactRepository,
   type ArtifactRepository,
 } from './artifact-repository.js'
+import { automationEventMessage } from './automation-filter.js'
+import {
+  AutomationIdempotencyConflictError,
+  AutomationStateConflictError,
+  AutomationValidationError,
+  AutomationVersionConflictError,
+  EmptyAutomationRepository,
+  type AutomationRepository,
+} from './automation-repository.js'
 import {
   InvalidArtifactPaginationError,
   encodeArtifactCursor,
@@ -240,6 +259,10 @@ type EnvironmentParams = SpaceParams & {
   environmentId: string
 }
 
+type AutomationParams = SpaceParams & {
+  automationId: string
+}
+
 type CatalogQuery = {
   cursor?: string
   limit?: string
@@ -255,6 +278,7 @@ type ValidationIssue = {
 }
 
 export type CreateAppOptions = {
+  automationRepository?: AutomationRepository
   sessionRepository?: SessionRepository
   sessionTimelineRepository?: SessionTimelineRepository
   artifactRepository?: ArtifactRepository
@@ -612,6 +636,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     ?? new DenyServiceAccountPolicyRepository()
   const configurationCatalogRepository = options.configurationCatalogRepository
     ?? new EmptyConfigurationCatalogRepository()
+  const automationRepository = options.automationRepository ?? new EmptyAutomationRepository()
   const contextEngineGateway = options.contextEngineGateway
   const authenticate = options.authenticate ?? rejectAuthentication
   const executionEnabled = options.executionEnabled ?? true
@@ -748,7 +773,8 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof IdempotencyConflictError
       || error instanceof ExpertIdempotencyConflictError
-      || error instanceof EnvironmentIdempotencyConflictError) {
+      || error instanceof EnvironmentIdempotencyConflictError
+      || error instanceof AutomationIdempotencyConflictError) {
       return sendApiError(reply, 409, request, {
         code: 'IDEMPOTENCY_KEY_REUSED',
         message: error.message,
@@ -806,6 +832,34 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
           expectedVersion: error.expectedVersion,
           currentVersion: error.actualVersion,
         },
+      })
+    }
+
+    if (error instanceof AutomationVersionConflictError) {
+      return sendApiError(reply, 412, request, {
+        code: 'PRECONDITION_FAILED',
+        message: error.message,
+        retryable: false,
+        details: {
+          expectedVersion: error.expectedVersion,
+          currentVersion: error.actualVersion,
+        },
+      })
+    }
+
+    if (error instanceof AutomationStateConflictError) {
+      return sendApiError(reply, 409, request, {
+        code: 'AUTOMATION_STATE_CONFLICT',
+        message: error.message,
+        retryable: false,
+      })
+    }
+
+    if (error instanceof AutomationValidationError) {
+      return sendApiError(reply, 409, request, {
+        code: 'AUTOMATION_CONFIGURATION_INVALID',
+        message: error.message,
+        retryable: false,
       })
     }
 
@@ -1190,6 +1244,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   }
 
   const canManageEnvironments = canManageExperts
+  const canManageAutomations = canManageExperts
 
   function denyExpertMutation(request: FastifyRequest, reply: FastifyReply) {
     return sendApiError(reply, 403, request, {
@@ -1203,6 +1258,14 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     return sendApiError(reply, 403, request, {
       code: 'PERMISSION_DENIED',
       message: 'Only Space Managers and Organization Administrators can manage Environments.',
+      retryable: false,
+    })
+  }
+
+  function denyAutomationMutation(request: FastifyRequest, reply: FastifyReply) {
+    return sendApiError(reply, 403, request, {
+      code: 'PERMISSION_DENIED',
+      message: 'Only Space Managers and Organization Administrators can manage Automations and Events.',
       retryable: false,
     })
   }
@@ -1942,6 +2005,305 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       )
       if (!items) return sendResourceNotFound(reply, request)
       return EnvironmentRevisionListResponseSchema.parse({ items })
+    },
+  )
+
+  app.get<{ Params: SpaceParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/automations',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      const items = await automationRepository.listAutomations(
+        authorization.organizationId, authorization.spaceId, authorization.actor.id,
+      )
+      return AutomationListResponseSchema.parse({
+        items,
+        projectionUpdatedAt: items[0]?.updatedAt ?? null,
+      })
+    },
+  )
+
+  app.post<{ Params: SpaceParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/automations',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageAutomations(authorization.access)) return denyAutomationMutation(request, reply)
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
+          fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      const parsed = CreateAutomationRequestSchema.safeParse(request.body)
+      if (!parsed.success) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED', message: 'The Automation request is invalid.', retryable: false,
+          fieldErrors: validationFieldErrors(parsed.error.issues),
+        })
+      }
+      const result = await automationRepository.createAutomation({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        actorId: authorization.actor.id,
+        requestId: request.id,
+        idempotencyKey,
+        request: parsed.data,
+      })
+      const response = AutomationMutationResponseSchema.parse(result)
+      reply.header('Idempotency-Replayed', String(response.replayed))
+      reply.header('Location', `/api/v1/organizations/${authorization.organizationId}/spaces/${authorization.spaceId}/automations/${response.automation.id}`)
+      reply.header('ETag', resourceEtag(response.automation))
+      return reply.code(201).send(response)
+    },
+  )
+
+  app.patch<{ Params: AutomationParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/automations/:automationId',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageAutomations(authorization.access)) return denyAutomationMutation(request, reply)
+      const automationId = parseSpaceId(request.params.automationId)
+      if (!automationId) return sendResourceNotFound(reply, request)
+      const expectedVersion = requireIfMatchVersion(request, reply, 'Automation')
+      if (expectedVersion === null) return
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
+          fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      const parsed = UpdateAutomationRequestSchema.safeParse(request.body)
+      if (!parsed.success) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED', message: 'The Automation update is invalid.', retryable: false,
+          fieldErrors: validationFieldErrors(parsed.error.issues),
+        })
+      }
+      const result = await automationRepository.updateAutomation({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        automationId,
+        actorId: authorization.actor.id,
+        requestId: request.id,
+        expectedVersion,
+        idempotencyKey,
+        request: parsed.data,
+      })
+      if (!result) return sendResourceNotFound(reply, request)
+      const response = AutomationMutationResponseSchema.parse(result)
+      reply.header('Idempotency-Replayed', String(response.replayed))
+      reply.header('ETag', resourceEtag(response.automation))
+      return response
+    },
+  )
+
+  app.post<{ Params: AutomationParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/automations/:automationId/test',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageAutomations(authorization.access)) return denyAutomationMutation(request, reply)
+      const automationId = parseSpaceId(request.params.automationId)
+      if (!automationId) return sendResourceNotFound(reply, request)
+      const expectedVersion = requireIfMatchVersion(request, reply, 'Automation')
+      if (expectedVersion === null) return
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
+          fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      const parsed = TestAutomationRequestSchema.safeParse(request.body)
+      if (!parsed.success) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED', message: 'The Automation test event is invalid.', retryable: false,
+          fieldErrors: validationFieldErrors(parsed.error.issues),
+        })
+      }
+      const result = await automationRepository.testAutomation({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        automationId,
+        actorId: authorization.actor.id,
+        requestId: request.id,
+        expectedVersion,
+        idempotencyKey,
+        request: parsed.data,
+      })
+      if (!result) return sendResourceNotFound(reply, request)
+      const response = AutomationTestResultSchema.parse(result)
+      reply.header('ETag', resourceEtag(response.automation))
+      return response
+    },
+  )
+
+  for (const action of ['enable', 'pause'] as const) {
+    app.post<{ Params: AutomationParams }>(
+      `/api/v1/organizations/:organizationId/spaces/:spaceId/automations/:automationId/${action}`,
+      async (request, reply) => {
+        const authorization = await authorizeCatalogSpace(request, reply, request.params)
+        if (!authorization) return
+        if (!canManageAutomations(authorization.access)) return denyAutomationMutation(request, reply)
+        const automationId = parseSpaceId(request.params.automationId)
+        if (!automationId) return sendResourceNotFound(reply, request)
+        const expectedVersion = requireIfMatchVersion(request, reply, 'Automation')
+        if (expectedVersion === null) return
+        const idempotencyKey = readIdempotencyKey(request)
+        if (!idempotencyKey) {
+          return sendApiError(reply, 400, request, {
+            code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
+            fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+          })
+        }
+        if (request.body !== undefined) {
+          return sendApiError(reply, 400, request, {
+            code: 'VALIDATION_FAILED', message: `${action} does not accept a request body.`, retryable: false,
+            fieldErrors: { body: ['Send the request without a body.'] },
+          })
+        }
+        const result = await automationRepository.setAutomationStatus({
+          organizationId: authorization.organizationId,
+          spaceId: authorization.spaceId,
+          automationId,
+          actorId: authorization.actor.id,
+          requestId: request.id,
+          expectedVersion,
+          idempotencyKey,
+          status: action === 'enable' ? 'active' : 'paused',
+        })
+        if (!result) return sendResourceNotFound(reply, request)
+        const response = AutomationMutationResponseSchema.parse(result)
+        reply.header('Idempotency-Replayed', String(response.replayed))
+        reply.header('ETag', resourceEtag(response.automation))
+        return response
+      },
+    )
+  }
+
+  app.get<{ Params: SpaceParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/automation-events',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageAutomations(authorization.access)) return denyAutomationMutation(request, reply)
+      const items = await automationRepository.listEvents(
+        authorization.organizationId, authorization.spaceId, authorization.actor.id,
+      )
+      return AutomationEventListResponseSchema.parse({
+        items,
+        projectionUpdatedAt: items[0]?.processedAt ?? items[0]?.receivedAt ?? null,
+      })
+    },
+  )
+
+  app.post<{ Params: SpaceParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/automation-events',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageAutomations(authorization.access)) return denyAutomationMutation(request, reply)
+      const parsed = ReceiveAutomationEventRequestSchema.safeParse(request.body)
+      if (!parsed.success) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED', message: 'The Automation Event is invalid.', retryable: false,
+          fieldErrors: validationFieldErrors(parsed.error.issues),
+        })
+      }
+      let receipt = await automationRepository.receiveEvent({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        actorId: authorization.actor.id,
+        requestId: request.id,
+        request: parsed.data,
+      })
+      if (!receipt.duplicate && receipt.match) {
+        try {
+          let executionAvailability: 'available' | 'disabled' | 'worker_unavailable' = 'available'
+          if (!executionEnabled) executionAvailability = 'disabled'
+          else if (!await executionAvailable(request)) executionAvailability = 'worker_unavailable'
+          const created = await sessionRepository.create({
+            organizationId: authorization.organizationId,
+            spaceId: authorization.spaceId,
+            actorId: receipt.match.automation.serviceAccountId,
+            actorKind: 'service_account',
+            actorAudience: receipt.match.serviceAccountAudience,
+            requestId: request.id,
+            idempotencyKey: `automation-event:${receipt.event.id}`,
+            source: 'automation',
+            executionAvailability,
+            request: CreateSessionRequestSchema.parse({
+              expertId: receipt.match.automation.expertId,
+              title: `[${receipt.event.source}] ${receipt.event.eventType}`.slice(0, 240),
+              visibility: 'space',
+              start: true,
+              message: {
+                content: automationEventMessage({
+                  source: receipt.event.source,
+                  eventType: receipt.event.eventType,
+                  externalId: receipt.event.externalId,
+                  payload: receipt.event.payload,
+                }),
+                attachments: [],
+              },
+            }),
+          })
+          const event = await automationRepository.completeDispatch({
+            organizationId: authorization.organizationId,
+            spaceId: authorization.spaceId,
+            actorId: authorization.actor.id,
+            requestId: request.id,
+            eventId: receipt.event.id,
+            sessionId: created.session.id,
+          })
+          if (event) receipt = { ...receipt, event }
+        } catch (error) {
+          const expected = error instanceof ExecutionUnavailableError
+            || error instanceof EnvironmentNotReadyError
+            || error instanceof ExpertNotPublishedError
+            || error instanceof SessionConfigurationNotFoundError
+            || error instanceof SessionConfigurationValidationError
+            || error instanceof AuthorizationChangedError
+          if (!expected) request.log.error({ err: error, eventId: receipt.event.id }, 'Automation Event dispatch failed')
+          const event = await automationRepository.failDispatch({
+            organizationId: authorization.organizationId,
+            spaceId: authorization.spaceId,
+            actorId: authorization.actor.id,
+            requestId: request.id,
+            eventId: receipt.event.id,
+            code: expected ? 'automation_session_unavailable' : 'automation_dispatch_failed',
+            message: expected && error instanceof Error
+              ? error.message
+              : 'The Automation Event could not create a Session.',
+          })
+          if (event) receipt = { ...receipt, event }
+        }
+      }
+      const response = AutomationEventReceiptSchema.parse({
+        event: receipt.event,
+        duplicate: receipt.duplicate,
+      })
+      reply.header('Idempotency-Replayed', String(receipt.duplicate))
+      return reply.code(receipt.duplicate ? 200 : 202).send(response)
+    },
+  )
+
+  app.get<{ Params: SpaceParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/automation-runs',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      const items = await automationRepository.listRuns(
+        authorization.organizationId, authorization.spaceId, authorization.actor.id,
+      )
+      return AutomationRunListResponseSchema.parse({
+        items,
+        projectionUpdatedAt: items[0]?.receivedAt ?? null,
+      })
     },
   )
 

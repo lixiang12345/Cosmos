@@ -68,6 +68,8 @@ const migrationVersions = [
   '063_environment_lifecycle_compatibility.sql',
   '064_environment_manager_rls.sql',
   '065_environment_child_manager_rls.sql',
+  '066_automation_authority.sql',
+  '067_environment_seed_compatibility.sql',
 ]
 
 function poolWithVersions(versions: string[]) {

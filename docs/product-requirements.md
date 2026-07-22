@@ -1,8 +1,8 @@
 # Relay 产品需求规格
 
 > 文档状态：研发基线（Draft for implementation）  
-> 版本：1.2
-> 日期：2026-07-13
+> 版本：1.3
+> 日期：2026-07-22
 > 事实基线：[cosmos-evidence-matrix.md](./cosmos-evidence-matrix.md)  
 > 适用范围：Relay Cosmos 风格原型及其后续产品化实现
 
@@ -81,18 +81,18 @@ Relay 是面向研发团队的 Agent 工作系统。用户选择一个可复用 
 - 不允许前端直接修改共享 Files，也不把永久删除 Session 作为普通用户操作。
 - 不为未被证实的 Cosmos 页面结构做“官方原版”声明。
 
-### 3.3 当前交付基线（2026-07-13）
+### 3.3 当前交付基线（2026-07-22）
 
 | 能力 | 状态 | 当前真实边界 | 进入生产前的必要条件 |
 | --- | --- | --- | --- |
 | Web 产品壳层 | **Partial** | React 页面、主题/语言和响应式导航可用；生产模式开放 canonical Session timeline、draft create/start、幂等后续消息与只读 Catalog，按 Organization/Space role 和 execution capability 控制写入口；未服务化路由和本地伪成功操作仅保留在显式 demo 模式 | 逐域连接真实权限、审计和服务端数据；继续用 capability 开放其余运行控制 |
 | Session 创建/列表/续聊 | **Partial** | Web 已调用真实 API；API 支持 OIDC、membership、Private User/Group ShareGrant、列表分页/筛选、完整 metadata/execution controls；服务端固定 revision，原子写入并完整幂等重放；Worker 按 Session FIFO 执行 | Web 仍需接入全部执行/分享控制；ExecutionSnapshot 和 coding/tool 执行面 |
-| PostgreSQL 持久化 | **Implemented (limited)** | 持久化权威 revision、Environment provisioning、ExecutionSnapshot、Session 聚合、SessionWorker、Artifact、File/FileVersion、ToolCall/Approval/SideEffect、失败/拒绝安全审计与幂等记录；39 张应用表 FORCE RLS，API/Worker 分离受限角色，transaction-local context 与跨 tenant 负向测试已实现 | 对象存储、数据库高可用、容量、在线迁移与回滚演练；生产 PITR/远端备份仍需部署证据 |
+| PostgreSQL 持久化 | **Implemented (limited)** | 持久化权威 revision、Environment provisioning、Automation Trigger/Event、ExecutionSnapshot、Session 聚合、SessionWorker、Artifact、File/FileVersion、ToolCall/Approval/SideEffect、失败/拒绝安全审计与幂等记录；43 张应用表 FORCE RLS，API/Worker 分离受限角色，transaction-local context 与跨 tenant 负向测试已实现 | 对象存储、数据库高可用、容量、在线迁移与回滚演练；生产 PITR/远端备份仍需部署证据 |
 | Expert、Environment 控制面 | **Implemented** | 生产 Web 使用 tenant-scoped Catalog API；Expert/Environment lifecycle、immutable revision、RBAC/RLS、CAS、幂等、审计、provisioning worker 与 Session execution snapshot 已实现 | Cloud provider credential/Daemon pool 接入与通用 operation policy |
 | Files | **Implemented (limited)** | User/Organization 与 Session Workspace 生产页面使用服务端只读树、搜索、预览、下载和不可变版本；Workspace scope 精确绑定 Session，并可带内存态预填消息返回会话请求修改；公共 API 无写入口，Worker 内部 append 写 Event/Audit/Outbox；内容暂存 PostgreSQL 且有 1 MiB/version、100 MiB/Organization 默认上限 | provider 到文件写入编排、对象存储、配额策略配置和大规模容量证据 |
 | Workers | **Implemented (limited)** | SessionWorker 是 Session-local 子执行而非第二个 Session；Worker runtime 内部 writer 强制父子同租户/同 Session、最大深度、顺序、状态跳转和乐观版本；生产 `/sessions/:sessionId/workers` 只读页按父节点优先分页并重检 Private/ShareGrant 可见性 | provider 委派编排、并发配额/调度、实时事件与取消/恢复控制 |
 | Approval | **Implemented (limited)** | 生产页面使用服务端 pending/assigned/all 查询，展示风险、原因、证据、到期时间和双人进度；决策使用 If-Match、幂等键、assignment/角色与职责分离，批准仅释放精确 ToolCall input hash；拒绝/失败进入 HMAC 脱敏安全账本 | 自动过期作业、治理动作审批、通知/SLO 和外部审计归档 |
-| Automation | **Prototype** | 界面和本地控制面仅用于确定性演示，没有服务端权威模型 | 实现 API、RBAC、审计、失败恢复并移除生产假操作 |
+| Automation | **Implemented (limited)** | 生产 Web 使用 tenant-scoped API；Trigger 是唯一 CAS 权威资源，支持创建/编辑/Test/enable/pause；Event 使用外部 ID 去重、通用敏感 key 脱敏并通过受限 ServiceAccount 创建唯一 Session；Event Log 与 Run History 同源，权限/失败态不伪造成功 | 外部 webhook 验签与密文原文、独立异步 router/replay/dead-letter、autoArchive 执行、Trigger delete/archive 和 Expert draft revision 发布切换 |
 | Agent 执行 | **Implemented (limited)** | 独立 Worker 通过 PostgreSQL lease/fencing/FIFO 领取 protocol-1 Turn；对话 provider 只接受固定五模型并按模型族路由凭据；受控 Tool Broker 只开放当前 Session Workspace 文件列举/UTF-8 文本读取，并通过 ToolCall coordinator 持久化调用状态、hash 与脱敏事件；coordinator 另实现精确审批与外部副作用状态账本；持久化 Attempt、Agent Message 和可恢复 SessionEvent | coding sandbox、文件/外部写工具、审批后恢复模型回合、SessionWorker 委派、配额调度、dead-letter 与负载/恢复证据 |
 | 安全与合规 | **Partial** | 生产配置强制数据库、OIDC 与 CORS；已有 membership/RBAC、Private ShareGrant、ServiceAccount exact operation policy、FORCE RLS/受限数据库角色、append-only success audit 和跨 tenant 负向测试 | 补齐 Secret 管理、合规访问、拒绝/失败审计、实时撤权与生产安全复核，并完成 [数据模型、权限与 Session 生命周期](./data-model-permissions-session-lifecycle.md) 和 [生产架构基线](./production-architecture.md) 的 P0 门槛 |
 

@@ -16,6 +16,7 @@ const developmentSpaces = [
 ] as const
 
 export async function bootstrapDevelopmentDatabase(pool: Pool, actorId: string) {
+  const automationServiceAccountId = 'service-account-automation-local'
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
@@ -30,6 +31,17 @@ export async function bootstrapDevelopmentDatabase(pool: Pool, actorId: string) 
       ON CONFLICT (organization_id, actor_id)
       DO UPDATE SET role = EXCLUDED.role
     `, [actorId])
+    await client.query(`
+      INSERT INTO relay_organization_memberships (organization_id, actor_id, role)
+      VALUES ('relay', $1, 'member')
+      ON CONFLICT (organization_id, actor_id) DO UPDATE SET role = EXCLUDED.role
+    `, [automationServiceAccountId])
+    await client.query(`
+      INSERT INTO relay_service_accounts (organization_id, id, audience, status)
+      VALUES ('relay', $1, 'relay-automation-local', 'active')
+      ON CONFLICT (organization_id, id) DO UPDATE
+      SET audience = EXCLUDED.audience, status = 'active', revoked_at = NULL
+    `, [automationServiceAccountId])
 
     for (const space of developmentSpaces) {
       const environmentId = `environment-${space.id}`
@@ -62,7 +74,7 @@ export async function bootstrapDevelopmentDatabase(pool: Pool, actorId: string) 
         INSERT INTO relay_environment_revisions (
           organization_id, space_id, environment_id, id, revision, status,
           configuration, created_by
-        ) VALUES ('relay', $1, $2, $3, 1, 'draft', '{"runtime":"docker-compose"}'::jsonb, $4)
+        ) VALUES ('relay', $1, $2, $3, 1, 'draft', '{"runtime":"docker-compose","image":"ghcr.io/relay/runtime:stable","variableReferences":[],"hooks":[],"networkPolicy":{"mode":"restricted","allowedHosts":[]},"sharing":"space","daemonPoolId":null}'::jsonb, $4)
         ON CONFLICT (organization_id, space_id, environment_id, id) DO NOTHING
       `, [space.id, environmentId, environmentRevisionId, actorId])
       await client.query(`
@@ -153,6 +165,23 @@ export async function bootstrapDevelopmentDatabase(pool: Pool, actorId: string) 
           AND status = 'draft'
           AND published_revision_id IS NULL
       `, [space.id, expertId, expertRevisionId])
+      await client.query(`
+        INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
+        VALUES ('relay', $1, $2, 'member')
+        ON CONFLICT (organization_id, space_id, actor_id) DO UPDATE SET role = EXCLUDED.role
+      `, [space.id, automationServiceAccountId])
+      await client.query(`
+        INSERT INTO relay_service_account_bindings (
+          organization_id, space_id, service_account_id, id,
+          scope, resource_type, resource_id
+        ) VALUES ('relay', $1, $2, $3, 'session.create', 'expert', $4)
+        ON CONFLICT (organization_id, space_id, service_account_id, id) DO NOTHING
+      `, [
+        space.id,
+        automationServiceAccountId,
+        `binding-automation-${space.id}`,
+        expertId,
+      ])
     }
 
     await client.query('COMMIT')
