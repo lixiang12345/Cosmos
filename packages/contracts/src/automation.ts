@@ -8,7 +8,7 @@ const EventTypeSchema = z.string().trim().min(1).max(256)
 export const AutomationSourceSchema = z.enum(['github', 'slack', 'webhook', 'schedule'])
 export type AutomationSource = z.infer<typeof AutomationSourceSchema>
 
-export const AutomationStatusSchema = z.enum(['draft', 'paused', 'active', 'error'])
+export const AutomationStatusSchema = z.enum(['draft', 'paused', 'active', 'error', 'archived'])
 export type AutomationStatus = z.infer<typeof AutomationStatusSchema>
 
 export const AutomationEventStatusSchema = z.enum([
@@ -101,6 +101,7 @@ export const AutomationDtoSchema = z.object({
   serviceAccountId: IdentifierSchema,
   lastTestedAt: TimestampSchema.nullable(),
   lastMatchedAt: TimestampSchema.nullable(),
+  archivedAt: TimestampSchema.nullable(),
   matchCount: z.number().int().nonnegative(),
   version: z.number().int().positive(),
   createdAt: TimestampSchema,
@@ -108,6 +109,9 @@ export const AutomationDtoSchema = z.object({
 }).strict().superRefine((automation, context) => {
   if (automation.id !== automation.triggerId) {
     context.addIssue({ code: 'custom', path: ['triggerId'], message: 'Automation id must be the authoritative Trigger id.' })
+  }
+  if ((automation.status === 'archived') !== (automation.archivedAt !== null)) {
+    context.addIssue({ code: 'custom', path: ['archivedAt'], message: 'Only archived Automations may have an archivedAt timestamp.' })
   }
 })
 export type AutomationDto = z.infer<typeof AutomationDtoSchema>

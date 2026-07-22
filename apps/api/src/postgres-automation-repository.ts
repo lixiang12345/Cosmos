@@ -42,12 +42,13 @@ type AutomationRow = {
   source: 'github' | 'slack' | 'webhook' | 'schedule'
   event_type: string
   filter: unknown
-  status: 'draft' | 'paused' | 'active' | 'error'
+  status: 'draft' | 'paused' | 'active' | 'error' | 'archived'
   auto_archive: boolean
   service_account_id: string
   service_account_audience?: string
   last_tested_at: TimestampValue | null
   last_matched_at: TimestampValue | null
+  archived_at: TimestampValue | null
   match_count: string | number
   version: number
   created_at: TimestampValue
@@ -79,7 +80,7 @@ const automationColumns = `
   trigger.expert_revision_id, trigger.name, trigger.source, trigger.event_type,
   trigger.filter, trigger.status, trigger.auto_archive, trigger.service_account_id,
   trigger.last_tested_at, trigger.last_matched_at, trigger.match_count,
-  trigger.version, trigger.created_at, trigger.updated_at
+  trigger.archived_at, trigger.version, trigger.created_at, trigger.updated_at
 `
 
 const eventColumns = `
@@ -127,6 +128,7 @@ function mapAutomation(row: AutomationRow): AutomationDto {
     serviceAccountId: row.service_account_id,
     lastTestedAt: nullableTimestamp(row.last_tested_at),
     lastMatchedAt: nullableTimestamp(row.last_matched_at),
+    archivedAt: nullableTimestamp(row.archived_at),
     matchCount: Number(row.match_count),
     version: row.version,
     createdAt: timestamp(row.created_at),
@@ -175,7 +177,7 @@ export class PostgresAutomationRepository implements AutomationRepository {
 
   private async prepareIdempotency(
     client: PoolClient,
-    input: AutomationScope & { method: 'POST' | 'PATCH'; canonicalPath: string; idempotencyKey: string; request: unknown },
+    input: AutomationScope & { method: 'POST' | 'PATCH' | 'DELETE'; canonicalPath: string; idempotencyKey: string; request: unknown },
   ) {
     const keyHash = hash(input.idempotencyKey)
     const requestHash = hash(canonicalJson(input.request))
@@ -203,7 +205,7 @@ export class PostgresAutomationRepository implements AutomationRepository {
   private async saveIdempotency(
     client: PoolClient,
     input: AutomationScope & {
-      method: 'POST' | 'PATCH'
+      method: 'POST' | 'PATCH' | 'DELETE'
       canonicalPath: string
       keyHash: string
       requestHash: string
@@ -368,6 +370,9 @@ export class PostgresAutomationRepository implements AutomationRepository {
     if (row.version !== record.expectedVersion) {
       throw new AutomationVersionConflictError(record.expectedVersion, row.version)
     }
+    if (row.status === 'archived') {
+      throw new AutomationStateConflictError('Archived Automation Triggers are immutable.')
+    }
     return row
   }
 
@@ -451,6 +456,47 @@ export class PostgresAutomationRepository implements AutomationRepository {
       const response = AutomationMutationResponseSchema.parse({ automation, replayed: false })
       await this.saveIdempotency(client, {
         ...record, method: 'POST', canonicalPath, keyHash: idempotency.keyHash,
+        requestHash: idempotency.requestHash, responseBody: response, statusCode: 200,
+      })
+      return { automation, replayed: false }
+    })
+  }
+
+  async archiveAutomation(record: AutomationMutationRecord): Promise<AutomationMutationResult | null> {
+    return withApiDatabaseContext(this.pool, record, async (client) => {
+      const canonicalPath = `/v1/organizations/${record.organizationId}/spaces/${record.spaceId}/automations/${record.automationId}`
+      const idempotency = await this.prepareIdempotency(client, {
+        ...record, method: 'DELETE', canonicalPath,
+        request: { expectedVersion: record.expectedVersion },
+      })
+      if (idempotency.replay) {
+        const response = AutomationMutationResponseSchema.parse(idempotency.replay)
+        return { automation: response.automation, replayed: true }
+      }
+      const current = await this.lockAutomation(client, record)
+      if (!current) return null
+      const updated = await client.query<AutomationRow>(`
+        UPDATE relay_expert_triggers SET status = 'archived', archived_at = $4,
+          version = version + 1, updated_at = $4
+        WHERE organization_id = $1 AND space_id = $2 AND id = $3
+        RETURNING ${automationColumns.replaceAll('trigger.', '')}
+      `, [record.organizationId, record.spaceId, record.automationId, idempotency.now.toISOString()])
+      const automation = mapAutomation(updated.rows[0]!)
+      await this.appendAudit(client, {
+        ...record, automationId: automation.id, action: 'automation.archive',
+        resourceVersion: automation.version, idempotencyKeyHash: idempotency.keyHash,
+      })
+      await client.query(`
+        INSERT INTO relay_automation_outbox_events (
+          organization_id, space_id, id, automation_id, event_type, payload, occurred_at
+        ) VALUES ($1, $2, $3, $4, 'automation.archived', '{}'::jsonb, $5)
+      `, [
+        record.organizationId, record.spaceId, this.createId(), automation.id,
+        idempotency.now.toISOString(),
+      ])
+      const response = AutomationMutationResponseSchema.parse({ automation, replayed: false })
+      await this.saveIdempotency(client, {
+        ...record, method: 'DELETE', canonicalPath, keyHash: idempotency.keyHash,
         requestHash: idempotency.requestHash, responseBody: response, statusCode: 200,
       })
       return { automation, replayed: false }

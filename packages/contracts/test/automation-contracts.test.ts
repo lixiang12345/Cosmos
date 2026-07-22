@@ -35,8 +35,23 @@ describe('Automation contracts', () => {
       id: 'trigger-1', triggerId: 'trigger-2', organizationId: 'org', spaceId: 'space',
       expertId: 'expert', expertRevisionId: 'revision', name: 'Trigger', source: 'github',
       eventType: 'pull_request.opened', filter: {}, status: 'paused', autoArchive: false,
-      serviceAccountId: 'service-account', lastTestedAt: null, lastMatchedAt: null,
+      serviceAccountId: 'service-account', lastTestedAt: null, lastMatchedAt: null, archivedAt: null,
       matchCount: 0, version: 1, createdAt: '2026-07-22T00:00:00.000Z', updatedAt: '2026-07-22T00:00:00.000Z',
     })).toThrow()
+  })
+
+  it('requires an archive timestamp exactly for terminal archived Triggers', () => {
+    const base = {
+      id: 'trigger-1', triggerId: 'trigger-1', organizationId: 'org', spaceId: 'space',
+      expertId: 'expert', expertRevisionId: 'revision', name: 'Trigger', source: 'github' as const,
+      eventType: 'pull_request.opened', filter: {}, autoArchive: false,
+      serviceAccountId: 'service-account', lastTestedAt: null, lastMatchedAt: null,
+      matchCount: 0, version: 2, createdAt: '2026-07-22T00:00:00.000Z', updatedAt: '2026-07-22T01:00:00.000Z',
+    }
+    expect(AutomationDtoSchema.parse({
+      ...base, status: 'archived', archivedAt: '2026-07-22T01:00:00.000Z',
+    }).status).toBe('archived')
+    expect(() => AutomationDtoSchema.parse({ ...base, status: 'archived', archivedAt: null })).toThrow()
+    expect(() => AutomationDtoSchema.parse({ ...base, status: 'paused', archivedAt: '2026-07-22T01:00:00.000Z' })).toThrow()
   })
 })

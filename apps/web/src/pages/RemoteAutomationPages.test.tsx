@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PREFERENCE_STORAGE_KEYS, PreferencesProvider } from '../preferences'
 import {
   createAutomation,
+  archiveAutomation,
   enableAutomation,
   listAutomationEvents,
   listAutomationRuns,
@@ -31,6 +32,7 @@ import {
 vi.mock('../services/relayApi', async (importOriginal) => ({
   ...await importOriginal<typeof import('../services/relayApi')>(),
   createAutomation: vi.fn(),
+  archiveAutomation: vi.fn(),
   enableAutomation: vi.fn(),
   listAutomationEvents: vi.fn(),
   listAutomationRuns: vi.fn(),
@@ -90,6 +92,7 @@ const automation: AutomationDto = {
   serviceAccountId: 'service-account-automation-local',
   lastTestedAt: null,
   lastMatchedAt: null,
+  archivedAt: null,
   matchCount: 0,
   version: 1,
   createdAt: now,
@@ -301,6 +304,32 @@ describe('Remote Automation pages', () => {
       expect.stringMatching(/^automation-pause-/),
       auth,
     )
+  })
+
+  it('requires confirmation, archives the Trigger, and removes mutable actions', async () => {
+    const user = userEvent.setup()
+    const archived = { ...automation, status: 'archived' as const, archivedAt: now, version: 2, updatedAt: now }
+    vi.mocked(archiveAutomation).mockResolvedValueOnce(archived)
+    renderPage(<RemoteAutomationsPage {...commonProps} canManage />)
+
+    await user.click(await screen.findByRole('button', { name: '归档' }))
+    expect(screen.getByRole('button', { name: '确认归档' })).toBeInTheDocument()
+    expect(archiveAutomation).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: '确认归档' }))
+
+    await waitFor(() => expect(archiveAutomation).toHaveBeenCalledWith(
+      organizationId,
+      spaceId,
+      automation.id,
+      automation.version,
+      expect.stringMatching(/^automation-archive-/),
+      auth,
+    ))
+    expect(await screen.findByRole('status')).toHaveTextContent('Trigger 已归档且不可恢复。')
+    expect(screen.getAllByText('已归档').length).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '测试事件' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '启用' })).not.toBeInTheDocument()
   })
 
   it('receives, deduplicates, and exposes failed Events without hiding details', async () => {

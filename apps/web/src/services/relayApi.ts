@@ -1896,6 +1896,27 @@ export function updateAutomation(
   })
 }
 
+export function archiveAutomation(
+  organizationId: string,
+  spaceId: string,
+  automationId: string,
+  version: number,
+  idempotencyKey: string,
+  auth?: RelayApiAuthContext,
+): Promise<AutomationDto> {
+  return request(`${automationsPath(organizationId, spaceId)}/${encodeURIComponent(automationId)}`, {
+    method: 'DELETE',
+    headers: {
+      Accept: 'application/json',
+      'If-Match': `"${version}"`,
+      'Idempotency-Key': idempotencyKey,
+    },
+  }, AutomationMutationResponseSchema, auth).then(({ automation }) => {
+    assertControlPlaneScope(automation, organizationId, spaceId, 'Automation', automationId)
+    return automation
+  })
+}
+
 export function testAutomation(
   organizationId: string,
   spaceId: string,

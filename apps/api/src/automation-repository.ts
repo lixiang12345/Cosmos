@@ -64,6 +64,7 @@ export interface AutomationRepository {
   createAutomation(record: CreateAutomationRecord): Promise<AutomationMutationResult>
   updateAutomation(record: UpdateAutomationRecord): Promise<AutomationMutationResult | null>
   setAutomationStatus(record: SetAutomationStatusRecord): Promise<AutomationMutationResult | null>
+  archiveAutomation(record: AutomationMutationRecord): Promise<AutomationMutationResult | null>
   testAutomation(record: TestAutomationRecord): Promise<AutomationTestResult | null>
   listEvents(organizationId: string, spaceId: string, actorId: string): Promise<AutomationEventDto[]>
   receiveEvent(record: ReceiveAutomationEventRecord): Promise<AutomationEventMatchResult>
@@ -109,6 +110,7 @@ export class EmptyAutomationRepository implements AutomationRepository {
   }
   updateAutomation(): Promise<null> { return Promise.resolve(null) }
   setAutomationStatus(): Promise<null> { return Promise.resolve(null) }
+  archiveAutomation(): Promise<null> { return Promise.resolve(null) }
   testAutomation(): Promise<null> { return Promise.resolve(null) }
   receiveEvent(): Promise<AutomationEventMatchResult> {
     return Promise.reject(new Error('Automation Events require a database-backed repository.'))

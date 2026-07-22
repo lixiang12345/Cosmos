@@ -124,7 +124,7 @@ const automationDto = AutomationDtoSchema.parse({
   triggerId: 'automation-platform', name: 'Pull request triage', source: 'github',
   eventType: 'pull_request.opened', filter: { '==': [{ var: 'action' }, 'opened'] },
   status: 'paused', autoArchive: false, serviceAccountId: 'service-account-automation',
-  lastTestedAt: null, lastMatchedAt: null, matchCount: 0, version: 1,
+  lastTestedAt: null, lastMatchedAt: null, archivedAt: null, matchCount: 0, version: 1,
   createdAt: '2026-07-22T00:00:00.000Z', updatedAt: '2026-07-22T00:00:00.000Z',
 })
 
@@ -2131,6 +2131,7 @@ describe('Relay API', () => {
       createAutomation: vi.fn().mockResolvedValue({ automation: automationDto, replayed: false }),
       updateAutomation: vi.fn().mockResolvedValue({ automation: automationDto, replayed: false }),
       setAutomationStatus: vi.fn().mockResolvedValue({ automation: { ...automationDto, status: 'active', version: 2 }, replayed: false }),
+      archiveAutomation: vi.fn().mockResolvedValue({ automation: { ...automationDto, status: 'archived', archivedAt: '2026-07-22T01:00:00.000Z', version: 2 }, replayed: false }),
       testAutomation: vi.fn().mockResolvedValue({ automation: { ...automationDto, lastTestedAt: '2026-07-22T00:00:00.000Z', version: 2 }, matched: true, explanation: 'matched' }),
       listEvents: vi.fn().mockResolvedValue([event]),
       receiveEvent: vi.fn().mockResolvedValue({ event, duplicate: false, match: null }),
@@ -2164,6 +2165,14 @@ describe('Relay API', () => {
     })
     expect(tested.statusCode).toBe(200)
     expect(tested.json()).toMatchObject({ matched: true })
+    const archived = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/organizations/relay/spaces/platform/automations/${automationDto.id}`,
+      headers: { 'idempotency-key': 'automation-route-archive', 'if-match': '"1"' },
+    })
+    expect(archived.statusCode).toBe(200)
+    expect(archived.headers.etag).toBe('"2"')
+    expect(archived.json()).toMatchObject({ automation: { status: 'archived' }, replayed: false })
     const events = await app.inject({ method: 'GET', url: '/api/v1/organizations/relay/spaces/platform/automation-events' })
     expect(events.statusCode).toBe(200)
     expect(events.json().items).toHaveLength(1)

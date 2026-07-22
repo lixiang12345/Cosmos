@@ -206,4 +206,74 @@ describeWithDatabase('Automation authority under the restricted API runtime role
     await expect(repository.listEvents('automation-org', 'automation-space', 'automation-member'))
       .resolves.toEqual([])
   })
+
+  it('archives a Trigger idempotently, stops matching, and protects the terminal row', async () => {
+    const created = await repository.createAutomation({
+      organizationId: 'automation-org', spaceId: 'automation-space', actorId: 'automation-owner',
+      requestId: 'request-create-archive', idempotencyKey: 'automation-create-archive',
+      request: {
+        expertId: 'expert-published', name: 'Slack archive lifecycle', source: 'slack',
+        eventType: 'message.posted', filter: { '==': [{ var: 'channel' }, 'platform'] },
+        autoArchive: false, serviceAccountId: 'automation-service',
+      },
+    })
+    const tested = await repository.testAutomation({
+      organizationId: 'automation-org', spaceId: 'automation-space', actorId: 'automation-owner',
+      requestId: 'request-test-archive', automationId: created.automation.id,
+      expectedVersion: created.automation.version, idempotencyKey: 'automation-test-archive',
+      request: { payload: { channel: 'platform' } },
+    })
+    const enabled = await repository.setAutomationStatus({
+      organizationId: 'automation-org', spaceId: 'automation-space', actorId: 'automation-owner',
+      requestId: 'request-enable-archive', automationId: created.automation.id,
+      expectedVersion: tested!.automation.version, idempotencyKey: 'automation-enable-archive',
+      status: 'active',
+    })
+    const archiveRecord = {
+      organizationId: 'automation-org', spaceId: 'automation-space', actorId: 'automation-owner',
+      requestId: 'request-archive', automationId: created.automation.id,
+      expectedVersion: enabled!.automation.version, idempotencyKey: 'automation-archive',
+    }
+    const archived = await repository.archiveAutomation(archiveRecord)
+    expect(archived).toMatchObject({
+      replayed: false,
+      automation: { status: 'archived', version: enabled!.automation.version + 1 },
+    })
+    expect(archived!.automation.archivedAt).toBe(archived!.automation.updatedAt)
+    await expect(repository.archiveAutomation({ ...archiveRecord, requestId: 'request-archive-replay' }))
+      .resolves.toMatchObject({ replayed: true, automation: { id: created.automation.id, status: 'archived' } })
+
+    const ignored = await repository.receiveEvent({
+      organizationId: 'automation-org', spaceId: 'automation-space', actorId: 'automation-owner',
+      requestId: 'request-event-after-archive',
+      request: {
+        source: 'slack', eventType: 'message.posted', externalId: 'provider-event-after-archive',
+        headers: {}, payload: { channel: 'platform' },
+      },
+    })
+    expect(ignored).toMatchObject({ duplicate: false, event: { status: 'ignored', automationId: null }, match: null })
+
+    const facts = await migrationPool.query<{ audits: string; outbox: string }>(`
+      SELECT
+        (SELECT count(*) FROM relay_automation_audit_events
+          WHERE automation_id = $1 AND action = 'automation.archive')::text AS audits,
+        (SELECT count(*) FROM relay_automation_outbox_events
+          WHERE automation_id = $1 AND event_type = 'automation.archived')::text AS outbox
+    `, [created.automation.id])
+    expect(facts.rows[0]).toEqual({ audits: '1', outbox: '1' })
+
+    await expect(repository.updateAutomation({
+      ...archiveRecord, requestId: 'request-update-archived',
+      expectedVersion: archived!.automation.version, idempotencyKey: 'automation-update-archived',
+      request: { name: 'Forbidden rename' },
+    })).rejects.toBeInstanceOf(AutomationStateConflictError)
+    await expect(migrationPool.query(
+      'UPDATE relay_expert_triggers SET name = name || \' changed\' WHERE id = $1',
+      [created.automation.id],
+    )).rejects.toMatchObject({ code: '55000' })
+    await expect(migrationPool.query(
+      'DELETE FROM relay_expert_triggers WHERE id = $1',
+      [created.automation.id],
+    )).rejects.toMatchObject({ code: '55000' })
+  })
 })

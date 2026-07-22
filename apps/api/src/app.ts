@@ -2553,6 +2553,46 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     },
   )
 
+  app.delete<{ Params: AutomationParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/automations/:automationId',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageAutomations(authorization.access)) return denyAutomationMutation(request, reply)
+      const automationId = parseSpaceId(request.params.automationId)
+      if (!automationId) return sendResourceNotFound(reply, request)
+      const expectedVersion = requireIfMatchVersion(request, reply, 'Automation')
+      if (expectedVersion === null) return
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
+          fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      if (request.body !== undefined) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED', message: 'Archiving an Automation does not accept a request body.', retryable: false,
+          fieldErrors: { body: ['Send the request without a body.'] },
+        })
+      }
+      const result = await automationRepository.archiveAutomation({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        automationId,
+        actorId: authorization.actor.id,
+        requestId: request.id,
+        expectedVersion,
+        idempotencyKey,
+      })
+      if (!result) return sendResourceNotFound(reply, request)
+      const response = AutomationMutationResponseSchema.parse(result)
+      reply.header('Idempotency-Replayed', String(response.replayed))
+      reply.header('ETag', resourceEtag(response.automation))
+      return response
+    },
+  )
+
   app.post<{ Params: AutomationParams }>(
     '/api/v1/organizations/:organizationId/spaces/:spaceId/automations/:automationId/test',
     async (request, reply) => {

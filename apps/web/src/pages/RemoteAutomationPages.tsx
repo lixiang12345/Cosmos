@@ -8,6 +8,7 @@ import type {
 import {
   Activity,
   AlertTriangle,
+  Archive,
   CheckCircle2,
   ChevronRight,
   CirclePause,
@@ -36,6 +37,7 @@ import {
   receiveAutomationEvent,
   testAutomation,
   updateAutomation,
+  archiveAutomation,
   type RelayApiAuthContext,
 } from '../services/relayApi'
 
@@ -90,7 +92,7 @@ function idempotencyKey(prefix: string) {
 
 function statusLabel(locale: Locale, status: AutomationDto['status']) {
   const copy: Record<AutomationDto['status'], [string, string]> = {
-    draft: ['草稿', 'Draft'], paused: ['已暂停', 'Paused'], active: ['已启用', 'Active'], error: ['错误', 'Error'],
+    draft: ['草稿', 'Draft'], paused: ['已暂停', 'Paused'], active: ['已启用', 'Active'], error: ['错误', 'Error'], archived: ['已归档', 'Archived'],
   }
   return label(locale, ...copy[status])
 }
@@ -99,6 +101,7 @@ function statusIcon(status: AutomationDto['status']) {
   if (status === 'active') return <CheckCircle2 aria-hidden="true" />
   if (status === 'error') return <XCircle aria-hidden="true" />
   if (status === 'paused') return <CirclePause aria-hidden="true" />
+  if (status === 'archived') return <Archive aria-hidden="true" />
   return <AlertTriangle aria-hidden="true" />
 }
 
@@ -208,6 +211,9 @@ function AutomationCard({
   onEdit,
   onTest,
   onToggle,
+  onArchive,
+  onCancelArchive,
+  confirmArchive,
 }: {
   automation: AutomationDto
   expertName: string
@@ -216,12 +222,15 @@ function AutomationCard({
   onEdit: () => void
   onTest: () => void
   onToggle: () => void
+  onArchive: () => void
+  onCancelArchive: () => void
+  confirmArchive: boolean
 }) {
   const { locale } = usePreferences()
   return <article className="cosmos-panel remote-automation-card">
     <header><div className="remote-automation-card__title"><Workflow aria-hidden="true" /><div><h2>{automation.name}</h2><p>{expertName} · {automation.source} · <code>{automation.eventType}</code></p></div></div><span className={`remote-automation-status remote-automation-status--${automation.status}`}>{statusIcon(automation.status)}{statusLabel(locale, automation.status)}</span></header>
-    <dl><div><dt>{label(locale, 'Filter', 'Filter')}</dt><dd><code>{JSON.stringify(automation.filter)}</code></dd></div><div><dt>{label(locale, '匹配次数', 'Matches')}</dt><dd>{automation.matchCount}</dd></div><div><dt>{label(locale, '最后测试', 'Last test')}</dt><dd>{automation.lastTestedAt ? formatDate(automation.lastTestedAt, locale) : label(locale, '尚未测试', 'Not tested')}</dd></div></dl>
-    {canManage ? <footer className="cosmos-form-actions"><button type="button" className="cosmos-button cosmos-button--secondary" disabled={busy} onClick={onEdit}>{label(locale, '编辑', 'Edit')}</button><button type="button" className="cosmos-button cosmos-button--secondary" disabled={busy} onClick={onTest}><TestTube2 aria-hidden="true" />{label(locale, '测试事件', 'Test event')}</button>{automation.status === 'active' ? <button type="button" className="cosmos-button cosmos-button--ghost" disabled={busy} onClick={onToggle}><Pause aria-hidden="true" />{label(locale, '暂停', 'Pause')}</button> : <button type="button" className="cosmos-button cosmos-button--primary" disabled={busy || !automation.lastTestedAt} onClick={onToggle}><Play aria-hidden="true" />{label(locale, '启用', 'Enable')}</button>}</footer> : null}
+    <dl><div><dt>{label(locale, 'Filter', 'Filter')}</dt><dd><code>{JSON.stringify(automation.filter)}</code></dd></div><div><dt>{label(locale, '匹配次数', 'Matches')}</dt><dd>{automation.matchCount}</dd></div><div><dt>{automation.archivedAt ? label(locale, '归档时间', 'Archived') : label(locale, '最后测试', 'Last test')}</dt><dd>{automation.archivedAt ? formatDate(automation.archivedAt, locale) : automation.lastTestedAt ? formatDate(automation.lastTestedAt, locale) : label(locale, '尚未测试', 'Not tested')}</dd></div></dl>
+    {canManage ? <footer className="cosmos-form-actions">{automation.status !== 'archived' ? <><button type="button" className="cosmos-button cosmos-button--secondary" disabled={busy} onClick={onEdit}>{label(locale, '编辑', 'Edit')}</button><button type="button" className="cosmos-button cosmos-button--secondary" disabled={busy} onClick={onTest}><TestTube2 aria-hidden="true" />{label(locale, '测试事件', 'Test event')}</button>{automation.status === 'active' ? <button type="button" className="cosmos-button cosmos-button--ghost" disabled={busy} onClick={onToggle}><Pause aria-hidden="true" />{label(locale, '暂停', 'Pause')}</button> : <button type="button" className="cosmos-button cosmos-button--primary" disabled={busy || !automation.lastTestedAt} onClick={onToggle}><Play aria-hidden="true" />{label(locale, '启用', 'Enable')}</button>}</> : null}{automation.status === 'archived' ? <span>{label(locale, '已归档', 'Archived')}</span> : confirmArchive ? <><button type="button" className="cosmos-button cosmos-button--secondary" disabled={busy} onClick={onCancelArchive}>{label(locale, '取消', 'Cancel')}</button><button type="button" className="cosmos-button cosmos-button--ghost remote-expert-danger" disabled={busy} onClick={onArchive}><Archive aria-hidden="true" />{label(locale, '确认归档', 'Confirm archive')}</button></> : <button type="button" className="cosmos-button cosmos-button--ghost remote-expert-danger" disabled={busy} onClick={onArchive}><Archive aria-hidden="true" />{label(locale, '归档', 'Archive')}</button>}</footer> : null}
   </article>
 }
 
@@ -232,6 +241,7 @@ export function RemoteAutomationsPage(props: CommonProps) {
   const [editing, setEditing] = useState<AutomationDto>()
   const [busyId, setBusyId] = useState<string>()
   const [notice, setNotice] = useState('')
+  const [confirmArchiveId, setConfirmArchiveId] = useState<string>()
   const save = async (draft: AutomationFormState) => {
     setBusyId('form')
     try {
@@ -266,7 +276,20 @@ export function RemoteAutomationsPage(props: CommonProps) {
       setAutomations((items) => items.map((item) => item.id === next.id ? next : item))
     } catch (cause) { setNotice(cause instanceof Error ? cause.message : label(locale, '无法改变 Trigger 状态。', 'Unable to change Trigger state.')) } finally { setBusyId(undefined) }
   }
-  return <main className="cosmos-page remote-automation-page"><PageHeader title={label(locale, '自动化', 'Automations')} description={label(locale, 'Expert Trigger 的服务端权威投影', 'Server-authoritative projections of Expert Triggers')} onOpenNavigation={props.onOpenNavigation} /><div className="cosmos-page__content">{notice ? <p className="cosmos-notice" role="status">{notice}</p> : null}{error ? <p className="cosmos-field-error" role="alert">{error.message}</p> : null}<section className="cosmos-section-heading"><div><p>Expert + Trigger</p><h2>{label(locale, '已配置自动化', 'Configured automations')}</h2></div>{props.canManage ? <button type="button" className="cosmos-button cosmos-button--primary" onClick={() => { setEditing(undefined); setForm(emptyForm(experts)) }}><Plus aria-hidden="true" />{label(locale, '创建自动化', 'Create Automation')}</button> : null}</section>{form ? <AutomationForm experts={experts} initial={form} editing={editing} busy={busyId === 'form'} onCancel={() => { setForm(null); setEditing(undefined) }} onSave={save} /> : null}{loading ? <p className="cosmos-empty-state"><LoaderCircle className="spin" aria-hidden="true" />{label(locale, '加载中…', 'Loading…')}</p> : !automations.length ? <p className="cosmos-empty-state">{label(locale, '当前 Space 尚未配置自动化。', 'No Automations are configured in this Space.')}</p> : <div className="remote-automation-list">{automations.map((automation) => <AutomationCard key={automation.id} automation={automation} expertName={experts.find((expert) => expert.id === automation.expertId)?.name ?? automation.expertId} canManage={Boolean(props.canManage)} busy={busyId === automation.id} onEdit={() => { setEditing(automation); setForm({ expertId: automation.expertId, name: automation.name, source: automation.source, eventType: automation.eventType, filter: JSON.stringify(automation.filter, null, 2), serviceAccountId: automation.serviceAccountId, autoArchive: automation.autoArchive }) }} onTest={() => void runTest(automation)} onToggle={() => void toggle(automation)} />)}</div>}{!loading ? <button type="button" className="cosmos-button cosmos-button--ghost" onClick={reload}><RefreshCw aria-hidden="true" />{label(locale, '刷新', 'Refresh')}</button> : null}</div></main>
+  const archive = async (automation: AutomationDto) => {
+    if (confirmArchiveId !== automation.id) {
+      setConfirmArchiveId(automation.id)
+      return
+    }
+    setBusyId(automation.id)
+    try {
+      const next = await archiveAutomation(props.organizationId, props.spaceId, automation.id, automation.version, idempotencyKey('automation-archive'), props.auth)
+      setAutomations((items) => items.map((item) => item.id === next.id ? next : item))
+      setConfirmArchiveId(undefined)
+      setNotice(label(locale, 'Trigger 已归档且不可恢复。', 'Trigger archived and cannot be restored.'))
+    } catch (cause) { setNotice(cause instanceof Error ? cause.message : label(locale, '无法归档 Trigger。', 'Unable to archive Trigger.')) } finally { setBusyId(undefined) }
+  }
+  return <main className="cosmos-page remote-automation-page"><PageHeader title={label(locale, '自动化', 'Automations')} description={label(locale, 'Expert Trigger 的服务端权威投影', 'Server-authoritative projections of Expert Triggers')} onOpenNavigation={props.onOpenNavigation} /><div className="cosmos-page__content">{notice ? <p className="cosmos-notice" role="status">{notice}</p> : null}{error ? <p className="cosmos-field-error" role="alert">{error.message}</p> : null}<section className="cosmos-section-heading"><div><p>Expert + Trigger</p><h2>{label(locale, '已配置自动化', 'Configured automations')}</h2></div>{props.canManage ? <button type="button" className="cosmos-button cosmos-button--primary" onClick={() => { setEditing(undefined); setForm(emptyForm(experts)) }}><Plus aria-hidden="true" />{label(locale, '创建自动化', 'Create Automation')}</button> : null}</section>{form ? <AutomationForm experts={experts} initial={form} editing={editing} busy={busyId === 'form'} onCancel={() => { setForm(null); setEditing(undefined) }} onSave={save} /> : null}{loading ? <p className="cosmos-empty-state"><LoaderCircle className="spin" aria-hidden="true" />{label(locale, '加载中…', 'Loading…')}</p> : !automations.length ? <p className="cosmos-empty-state">{label(locale, '当前 Space 尚未配置自动化。', 'No Automations are configured in this Space.')}</p> : <div className="remote-automation-list">{automations.map((automation) => <AutomationCard key={automation.id} automation={automation} expertName={experts.find((expert) => expert.id === automation.expertId)?.name ?? automation.expertId} canManage={Boolean(props.canManage)} busy={busyId === automation.id} confirmArchive={confirmArchiveId === automation.id} onCancelArchive={() => setConfirmArchiveId(undefined)} onEdit={() => { setEditing(automation); setForm({ expertId: automation.expertId, name: automation.name, source: automation.source, eventType: automation.eventType, filter: JSON.stringify(automation.filter, null, 2), serviceAccountId: automation.serviceAccountId, autoArchive: automation.autoArchive }) }} onTest={() => void runTest(automation)} onToggle={() => void toggle(automation)} onArchive={() => void archive(automation)} />)}</div>}{!loading ? <button type="button" className="cosmos-button cosmos-button--ghost" onClick={reload}><RefreshCw aria-hidden="true" />{label(locale, '刷新', 'Refresh')}</button> : null}</div></main>
 }
 
 export function RemoteAutomationEventLogPage(props: CommonProps) {

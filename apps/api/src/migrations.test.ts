@@ -78,6 +78,7 @@ const migrationVersions = [
   '073_organization_quotas_and_rate_limits.sql',
   '074_observer_runtime_metrics.sql',
   '075_automation_auto_archive.sql',
+  '076_automation_trigger_archive.sql',
 ]
 
 function poolWithVersions(versions: string[]) {

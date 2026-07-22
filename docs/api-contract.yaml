@@ -1054,6 +1054,35 @@ paths:
           $ref: '#/components/responses/RuntimePreconditionFailed'
         '500':
           $ref: '#/components/responses/RuntimeCatalogInternalError'
+    delete:
+      tags: [Automations]
+      operationId: archiveAutomation
+      x-relay-implementation-status: implemented
+      summary: Terminally archive an authoritative Trigger without deleting its history
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Trigger archived and retained for Event, Session, audit, and outbox history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeAutomationMutationResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeCatalogBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeCatalogUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeCatalogForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeCatalogNotFound'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
+        '412':
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '500':
+          $ref: '#/components/responses/RuntimeCatalogInternalError'
 
   /organizations/{organizationId}/spaces/{spaceId}/automations/{automationId}/test:
     parameters:
@@ -4962,7 +4991,7 @@ components:
       enum: [github, slack, webhook, schedule]
     RuntimeAutomationStatus:
       type: string
-      enum: [draft, paused, active, error]
+      enum: [draft, paused, active, error, archived]
     RuntimeAutomationFilter:
       type: object
       description: Restricted JSONLogic using only var, ==, !=, in, and, and or with bounded depth and node count.
@@ -5105,7 +5134,7 @@ components:
 
     RuntimeAutomation:
       type: object
-      required: [id, organizationId, spaceId, expertId, expertRevisionId, triggerId, name, source, eventType, filter, status, autoArchive, serviceAccountId, lastTestedAt, lastMatchedAt, matchCount, version, createdAt, updatedAt]
+      required: [id, organizationId, spaceId, expertId, expertRevisionId, triggerId, name, source, eventType, filter, status, autoArchive, serviceAccountId, lastTestedAt, lastMatchedAt, archivedAt, matchCount, version, createdAt, updatedAt]
       properties:
         id:
           $ref: '#/components/schemas/RuntimeIdentifier'
@@ -5142,6 +5171,10 @@ components:
             - $ref: '#/components/schemas/Timestamp'
             - type: 'null'
         lastMatchedAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        archivedAt:
           oneOf:
             - $ref: '#/components/schemas/Timestamp'
             - type: 'null'
