@@ -53,25 +53,50 @@ type NavItem = {
   icon?: typeof Sparkles
 }
 
+type NavSection = {
+  label: { zh: string; en: string }
+  items: NavItem[]
+}
+
 const coreResourceItems: NavItem[] = [
   { to: '/experts', label: { zh: '专家', en: 'Experts' }, icon: Sparkles },
   { to: '/environments', label: { zh: '环境', en: 'Environments' }, icon: CloudCog },
 ]
 
-const prototypeConfigurationItems: NavItem[] = [
-  ...coreResourceItems,
-  { to: '/daemons', label: { zh: '守护进程', en: 'Daemons' }, icon: ServerCog },
-  { to: '/integrations', label: { zh: '集成', en: 'Integrations' }, icon: Plug },
-  { to: '/mcp', label: { zh: 'MCP 注册表', en: 'MCP Registry' }, icon: Boxes },
-  { to: '/webhooks', label: { zh: 'Webhooks', en: 'Webhooks' }, icon: Webhook },
-  { to: '/secrets', label: { zh: '密钥', en: 'Secrets' }, icon: KeyRound },
-  { to: '/repositories', label: { zh: '仓库', en: 'Repositories' }, icon: FolderGit2 },
-  { to: '/spaces', label: { zh: '空间', en: 'Spaces' }, icon: Globe2 },
-  { to: '/settings', label: { zh: '设置', en: 'Settings' }, icon: Settings2 },
+// Configuration follows the live Cosmos product IA: Foundation (Experts,
+// Environments) and Capabilities (Integrations, MCP, Webhooks, Secrets). The
+// Cosmos-specific control surfaces that the prototype does not enumerate stay
+// grouped under Workspace so their pages remain reachable without masquerading
+// as part of the documented Configuration set.
+const configurationSections: NavSection[] = [
+  {
+    label: { zh: '基础', en: 'Foundation' },
+    items: [
+      ...coreResourceItems,
+      { to: '/daemons', label: { zh: '守护进程', en: 'Daemons' }, icon: ServerCog },
+    ],
+  },
+  {
+    label: { zh: '能力', en: 'Capabilities' },
+    items: [
+      { to: '/integrations', label: { zh: '集成', en: 'Integrations' }, icon: Plug },
+      { to: '/mcp', label: { zh: 'MCP 注册表', en: 'MCP Registry' }, icon: Boxes },
+      { to: '/webhooks', label: { zh: 'Webhooks', en: 'Webhooks' }, icon: Webhook },
+      { to: '/secrets', label: { zh: '密钥', en: 'Secrets' }, icon: KeyRound },
+    ],
+  },
+  {
+    label: { zh: '工作区', en: 'Workspace' },
+    items: [
+      { to: '/repositories', label: { zh: '仓库', en: 'Repositories' }, icon: FolderGit2 },
+      { to: '/spaces', label: { zh: '空间', en: 'Spaces' }, icon: Globe2 },
+      { to: '/settings', label: { zh: '设置', en: 'Settings' }, icon: Settings2 },
+    ],
+  },
 ]
 
 const automationItems: NavItem[] = [
-  { to: '/automations', label: { zh: '概览', en: 'Overview' }, icon: Workflow },
+  { to: '/automations', label: { zh: '自动化', en: 'Automations' }, icon: Workflow },
   { to: '/automations/events', label: { zh: '事件日志', en: 'Event Log' }, icon: LayoutGrid },
   { to: '/automations/history', label: { zh: '运行历史', en: 'Run History' }, icon: History },
 ]
@@ -197,9 +222,58 @@ export function Sidebar({
           </button>
         </div> : null}
 
+        {/* Navigation order follows the live Cosmos product IA:
+            Sessions -> Files -> Configuration -> Automations, with pinned and
+            recent Sessions anchored at the foot of the rail. */}
         <nav className="sidebar__nav sidebar__nav--cosmos" aria-label={t('nav.mainLabel')}>
           <SidebarLink item={{ to: '/sessions', label: { zh: '会话', en: 'Sessions' }, icon: MessageCircle }} onNavigate={onClose} />
           <SidebarLink item={{ to: '/context', label: { zh: '上下文', en: 'Context' }, icon: Network }} onNavigate={onClose} />
+
+          <div className="sidebar__configuration sidebar__files">
+            <button type="button" className="sidebar-configuration-toggle" aria-label={copy.files} data-tooltip={copy.files} aria-expanded={filesOpen} onClick={() => toggleNavigationGroup(setFilesOpen)}>
+              <FileText aria-hidden="true" />
+              <span>{copy.files}</span>
+              {filesOpen ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
+            </button>
+            {filesOpen ? (
+              <div className="sidebar-configuration-list">
+                {fileItems.map((item) => <SidebarLink key={item.to} item={item} nested onNavigate={onClose} />)}
+              </div>
+            ) : null}
+          </div>
+
+          {prototypeNavigation ? <div className="sidebar__configuration">
+            <button type="button" className="sidebar-configuration-toggle" aria-label={copy.configuration} data-tooltip={copy.configuration} aria-expanded={configurationOpen} onClick={() => toggleNavigationGroup(setConfigurationOpen)}>
+              <SlidersHorizontal aria-hidden="true" />
+              <span>{copy.configuration}</span>
+              {configurationOpen ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
+            </button>
+            {configurationOpen ? (
+              <div className="sidebar-configuration-list">
+                {configurationSections.map((section) => (
+                  <div key={section.label.en} className="sidebar-configuration-section">
+                    <p className="sidebar-configuration-section__label">{section.label[locale]}</p>
+                    {section.items.map((item) => <SidebarLink key={item.to} item={item} nested onNavigate={onClose} />)}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div> : <div className="sidebar__core-resources">
+            {coreResourceItems.map((item) => <SidebarLink key={item.to} item={item} onNavigate={onClose} />)}
+          </div>}
+
+          {prototypeNavigation ? <div className="sidebar__configuration sidebar__automations">
+            <button type="button" className="sidebar-configuration-toggle" aria-label={copy.automations} data-tooltip={copy.automations} aria-expanded={automationsOpen} onClick={() => toggleNavigationGroup(setAutomationsOpen)}>
+              <Workflow aria-hidden="true" />
+              <span>{copy.automations}</span>
+              {automationsOpen ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
+            </button>
+            {automationsOpen ? (
+              <div className="sidebar-configuration-list">
+                {automationItems.map((item) => <SidebarLink key={item.to} item={item} nested onNavigate={onClose} />)}
+              </div>
+            ) : null}
+          </div> : null}
 
           {pinnedRuns.length ? <div className="sidebar__group sidebar__favorites">
             <div className="sidebar__group-heading"><p className="sidebar__group-label">{copy.pinned}</p><Pin aria-hidden="true" /></div>
@@ -216,47 +290,6 @@ export function Sidebar({
               return <NavLink key={run.id} to={`/sessions/${run.id}`} className={`recent-run${active ? ' recent-run--active' : ''}`} onClick={onClose}><span className="recent-run__title">{run.title}</span><StatusBadge status={run.status} /></NavLink>
             })}
           </div>
-
-          <div className="sidebar__configuration sidebar__files">
-            <button type="button" className="sidebar-configuration-toggle" aria-label={copy.files} data-tooltip={copy.files} aria-expanded={filesOpen} onClick={() => toggleNavigationGroup(setFilesOpen)}>
-              <FileText aria-hidden="true" />
-              <span>{copy.files}</span>
-              {filesOpen ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
-            </button>
-            {filesOpen ? (
-              <div className="sidebar-configuration-list">
-                {fileItems.map((item) => <SidebarLink key={item.to} item={item} nested onNavigate={onClose} />)}
-              </div>
-            ) : null}
-          </div>
-
-          {prototypeNavigation ? <div className="sidebar__configuration sidebar__automations">
-            <button type="button" className="sidebar-configuration-toggle" aria-label={copy.automations} data-tooltip={copy.automations} aria-expanded={automationsOpen} onClick={() => toggleNavigationGroup(setAutomationsOpen)}>
-              <Workflow aria-hidden="true" />
-              <span>{copy.automations}</span>
-              {automationsOpen ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
-            </button>
-            {automationsOpen ? (
-              <div className="sidebar-configuration-list">
-                {automationItems.map((item) => <SidebarLink key={item.to} item={item} nested onNavigate={onClose} />)}
-              </div>
-            ) : null}
-          </div> : null}
-
-          {prototypeNavigation ? <div className="sidebar__configuration">
-            <button type="button" className="sidebar-configuration-toggle" aria-label={copy.configuration} data-tooltip={copy.configuration} aria-expanded={configurationOpen} onClick={() => toggleNavigationGroup(setConfigurationOpen)}>
-              <SlidersHorizontal aria-hidden="true" />
-              <span>{copy.configuration}</span>
-              {configurationOpen ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
-            </button>
-            {configurationOpen ? (
-              <div className="sidebar-configuration-list">
-                {prototypeConfigurationItems.map((item) => <SidebarLink key={item.to} item={item} nested onNavigate={onClose} />)}
-              </div>
-            ) : null}
-          </div> : <div className="sidebar__core-resources">
-            {coreResourceItems.map((item) => <SidebarLink key={item.to} item={item} onNavigate={onClose} />)}
-          </div>}
 
         </nav>
 

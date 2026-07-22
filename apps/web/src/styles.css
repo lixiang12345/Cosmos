@@ -9182,6 +9182,20 @@ button:disabled {
   border-left: 1px solid var(--line);
 }
 
+.sidebar-configuration-section + .sidebar-configuration-section {
+  margin-top: 6px;
+}
+
+.sidebar-configuration-section__label {
+  margin: 4px 0 2px;
+  padding-left: 11px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
 .sidebar--cosmos .sidebar-link--nested {
   height: 32px;
   padding-left: 11px;
