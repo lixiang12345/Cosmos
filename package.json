@@ -21,6 +21,7 @@
     "db:migrate": "pnpm --filter @relay/api migrate",
     "db:backup": "sh ops/postgres/backup.sh",
     "db:restore": "sh ops/postgres/restore.sh",
+    "db:pitr-preflight": "sh ops/postgres/pitr-preflight.sh",
     "object-storage:gc": "pnpm --filter @relay/api object-storage:gc",
     "test:integration": "pnpm --filter @relay/api test:integration",
     "build": "pnpm --filter @relay/contracts build && pnpm --filter @relay/api build && pnpm --filter @relay/web build",

@@ -16,6 +16,23 @@
 3. 为每份备份生成唯一绝对路径；脚本拒绝覆盖已有文件。
 4. 恢复只指向预先创建的隔离数据库。脚本要求连接后的真实数据库名精确匹配 `EXPECTED_DATABASE_NAME`，并要求显式确认值 `restore-approved`。
 
+## PITR 上线预检
+
+自建 PostgreSQL 使用 WAL 连续归档时，在发布和每次恢复演练前运行配置检查，并通过显式 WAL switch 验证归档端到端可用：
+
+```bash
+export DATABASE_URL='postgresql://...'
+export EXPECTED_DATABASE_NAME='relay_production'
+export PITR_MODE=archive
+export TARGET_RPO_SECONDS=300
+export PITR_TRIGGER_WAL_SWITCH=verify-approved
+pnpm db:pitr-preflight
+```
+
+脚本要求 PostgreSQL 17+、`wal_level=replica|logical`、`full_page_writes=on`、启用 `archive_mode`、配置 `archive_command`/`archive_library`，且 `archive_timeout` 不超过目标 RPO。显式验证会强制切换一个 WAL segment，并等待 `pg_stat_archiver` 确认该 segment 已归档；命令不打印连接串、归档命令或对象路径。
+
+托管数据库由平台 API/控制台证明 PITR 开启时，使用 `PITR_MODE=managed`，并从变更系统注入非 Secret 的 `PITR_MANAGED_PROVIDER`、`PITR_MANAGED_EVIDENCE_ID` 与 `PITR_RETENTION_SECONDS`。该模式验证数据库 WAL 基础配置和证据字段完整性，但不能替代云平台导出的保留期、最早恢复点和一次真实时间点恢复记录。
+
 ## 创建并转移备份
 
 ```bash
@@ -33,12 +50,14 @@ pnpm db:backup
 ```bash
 export RESTORE_DATABASE_URL='postgresql://.../relay_restore_2026q3'
 export EXPECTED_DATABASE_NAME='relay_restore_2026q3'
+export EXPECTED_MIGRATION_VERSION='073_organization_quotas_and_rate_limits.sql'
+export EXPECTED_MIGRATION_COUNT='75'
 export BACKUP_PATH='/secure-staging/relay-20260713T160000Z.dump'
 export ALLOW_DESTRUCTIVE_RESTORE='restore-approved'
 pnpm db:restore
 ```
 
-脚本先验证 SHA-256、custom archive 目录和目标库名，再以单事务、`--clean --if-exists` 恢复。失败会回滚恢复事务并返回非零状态。完成后至少验证：
+脚本先验证 SHA-256、custom archive 目录和目标库名，再以单事务、`--clean --if-exists` 恢复。失败会回滚恢复事务并返回非零状态。恢复后脚本还会验证 release 对应的精确 migration 数量/版本、六张关键表、五张 tenant 表的 FORCE RLS、API/Worker ACL、每个 Organization 的 quota 和 FileVersion inline/object 存储约束。`EXPECTED_MIGRATION_*` 必须来自待部署 release 清单，不得从未知备份自行推导。完成后还应验证：
 
 1. `relay_schema_migrations` 与源库版本和数量一致，应用 migration readiness 对 pending/unknown 版本均通过，API/Worker runtime 角色 ACL 可用。
 2. Organization、Session、Message、FileVersion、ToolCall、AuditEvent 的计数与抽样 hash 符合演练清单。

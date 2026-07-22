@@ -113,11 +113,19 @@ jobs:
             --env DATABASE_URL="$TEST_DATABASE_URL" \
             --env BACKUP_PATH=/workspace/dist/recovery/relay-ci.dump \
             postgres:17-alpine sh /workspace/ops/postgres/backup.sh
+          expected_migration_count=$(docker run --rm --network host postgres:17-alpine \
+            psql "$TEST_DATABASE_URL" --no-psqlrc --tuples-only --no-align \
+            --command='SELECT count(*) FROM relay_schema_migrations')
+          expected_migration_version=$(docker run --rm --network host postgres:17-alpine \
+            psql "$TEST_DATABASE_URL" --no-psqlrc --tuples-only --no-align \
+            --command='SELECT max(version) FROM relay_schema_migrations')
           docker run --rm \
             --network host \
             --volume "$PWD:/workspace" \
             --env RESTORE_DATABASE_URL=postgresql://relay_ci:relay_ci@127.0.0.1:5432/relay_restore_test \
             --env EXPECTED_DATABASE_NAME=relay_restore_test \
+            --env EXPECTED_MIGRATION_COUNT="$expected_migration_count" \
+            --env EXPECTED_MIGRATION_VERSION="$expected_migration_version" \
             --env ALLOW_DESTRUCTIVE_RESTORE=restore-approved \
             --env BACKUP_PATH=/workspace/dist/recovery/relay-ci.dump \
             postgres:17-alpine sh /workspace/ops/postgres/restore.sh
@@ -135,6 +143,43 @@ jobs:
           test "$source_migrations" -gt 0
           test "$restored_migrations" = "$source_migrations"
           test "$restored_runtime_access" = t
+
+      - name: Verify PostgreSQL continuous WAL archive preflight
+        run: |
+          cleanup_pitr() {
+            docker rm --force relay-pitr-preflight >/dev/null 2>&1 || true
+          }
+          trap cleanup_pitr EXIT
+          cleanup_pitr
+          docker run --detach \
+            --name relay-pitr-preflight \
+            --env POSTGRES_DB=relay_pitr_test \
+            --env POSTGRES_USER=relay_pitr \
+            --env POSTGRES_PASSWORD=relay_pitr \
+            postgres:17-alpine \
+            -c wal_level=replica \
+            -c archive_mode=on \
+            -c "archive_command=test ! -f /var/lib/postgresql/data/archive_%f && cp %p /var/lib/postgresql/data/archive_%f" \
+            -c archive_timeout=30s
+          pitr_ready=false
+          for _ in {1..30}; do
+            if docker exec relay-pitr-preflight pg_isready \
+              --username relay_pitr --dbname relay_pitr_test >/dev/null 2>&1; then
+              pitr_ready=true
+              break
+            fi
+            sleep 1
+          done
+          test "$pitr_ready" = true
+          docker run --rm \
+            --network container:relay-pitr-preflight \
+            --volume "$PWD:/workspace" \
+            --env DATABASE_URL=postgresql://relay_pitr:relay_pitr@127.0.0.1:5432/relay_pitr_test \
+            --env EXPECTED_DATABASE_NAME=relay_pitr_test \
+            --env PITR_MODE=archive \
+            --env TARGET_RPO_SECONDS=300 \
+            --env PITR_TRIGGER_WAL_SWITCH=verify-approved \
+            postgres:17-alpine sh /workspace/ops/postgres/pitr-preflight.sh
 
       - name: Build Worker container
         run: >-

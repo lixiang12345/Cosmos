@@ -213,6 +213,20 @@ Space Admin 可以在统一、克制的 Cosmos 风格控制面中：
 
 - quota 的 billing/商业管理 UI、跨区域限流 broker、Edge/WAF 全局规则和容量压测仍需目标生产环境配置与证据。
 
+## 生产硬化-4：PITR 与恢复门禁（已完成代码切片）
+
+### 交付结果
+
+- 新增 `pnpm db:pitr-preflight`：自建 PostgreSQL 校验版本、WAL/full-page-write、archive 配置、RPO 内 `archive_timeout`，并可经显式批准强制 WAL switch、等待 `pg_stat_archiver` 证明端到端归档成功。
+- 托管 PITR 模式要求注入 provider、证据 ID 和 retention，保留云平台证据边界；仓库检查不会把“声明已配置”冒充真实时间点恢复。
+- 隔离恢复从“存在 migration”升级为精确 release migration 数量/版本、关键表、FORCE RLS、API/Worker ACL、Organization quota 完整性和 FileVersion inline/object 约束验证。
+- Required checks 在真实 PostgreSQL 17 上执行逻辑备份/隔离恢复，并启动启用连续归档的独立 PostgreSQL 实例完成 live WAL archive preflight。
+
+### 明确延期
+
+- 生产托管数据库 PITR 开关、加密跨账号归档、最早恢复点和季度真实恢复记录必须由目标环境/IaC 与变更系统提供；仓库 CI 只能证明脚本和恢复契约可执行。
+- 下一条生产硬化切片转向 SSE 实时撤权，确保 membership/ShareGrant 被撤销后长连接在有界时间内停止私有事件投递。
+
 ## M4 排序
 
 后续按以下顺序推进：
@@ -220,7 +234,7 @@ Space Admin 可以在统一、克制的 Cosmos 风格控制面中：
 1. **Automation 权威模型（M4-A 已完成）**：已交付 Trigger 唯一资源、Event 去重/脱敏/匹配、ServiceAccount Session dispatch 与同源 Run History；上述延期项在后续 Automation hardening 收口。
 2. **Space 管理（M4-B 已完成）**：已交付 Default、默认 Expert/Environment、删除迁移预览和真实 scope 切换；实际迁移执行保持 capability-gated。
 3. **Advisor 受控执行（M4-C 已完成）**：plan/diff/confirm、受控工具、失败恢复和审计；OAuth/Secret 只返回人工步骤，不伪造完成。
-4. **生产硬化（进行中）**：对象存储、orphan GC、Organization 配额与共享限流代码切片已完成；下一项是 PITR/恢复与实时撤权，再推进通知/SLO、负载与故障演练。
+4. **生产硬化（进行中）**：对象存储、orphan GC、Organization 配额/共享限流和 PITR/恢复门禁代码切片已完成；下一项是 SSE 实时撤权，再推进通知/SLO、负载与故障演练。
 
 Pinned Sessions、Artifact 高级搜索和高级启动覆盖属于 P2，在上述 P1 控制面闭环之后处理。
 

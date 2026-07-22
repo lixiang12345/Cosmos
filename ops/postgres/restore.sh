@@ -22,6 +22,15 @@ sha256_file() {
 : "${RESTORE_DATABASE_URL:?RESTORE_DATABASE_URL is required.}"
 : "${BACKUP_PATH:?BACKUP_PATH is required and must be an absolute path.}"
 : "${EXPECTED_DATABASE_NAME:?EXPECTED_DATABASE_NAME is required.}"
+: "${EXPECTED_MIGRATION_VERSION:?EXPECTED_MIGRATION_VERSION is required.}"
+: "${EXPECTED_MIGRATION_COUNT:?EXPECTED_MIGRATION_COUNT is required.}"
+
+case "$EXPECTED_MIGRATION_COUNT" in
+  '' | *[!0-9]* | 0)
+    echo 'EXPECTED_MIGRATION_COUNT must be a positive integer.' >&2
+    exit 1
+    ;;
+esac
 
 if [ "${ALLOW_DESTRUCTIVE_RESTORE:-}" != 'restore-approved' ]; then
   echo 'Set ALLOW_DESTRUCTIVE_RESTORE=restore-approved after reviewing the target database.' >&2
@@ -79,16 +88,84 @@ pg_restore \
   --exit-on-error \
   "$BACKUP_PATH"
 
-migration_count=$(psql \
+verification=$(psql \
   --dbname="$RESTORE_DATABASE_URL" \
   --no-psqlrc \
   --tuples-only \
   --no-align \
   --set=ON_ERROR_STOP=1 \
-  --command='SELECT count(*) FROM relay_schema_migrations')
-if [ "$migration_count" -lt 1 ]; then
-  echo 'Restore verification failed: no Relay migrations were restored.' >&2
+  --field-separator='|' \
+  --command="
+    WITH required_tables(name, force_rls) AS (
+      VALUES
+        ('relay_organizations', true),
+        ('relay_sessions', true),
+        ('relay_file_versions', true),
+        ('relay_organization_quotas', true),
+        ('relay_organization_rate_limit_windows', true),
+        ('relay_object_storage_gc_runs', false)
+    ), table_state AS (
+      SELECT
+        count(c.oid) FILTER (WHERE n.nspname = 'public') AS present_count,
+        count(c.oid) FILTER (
+          WHERE n.nspname = 'public'
+            AND required_tables.force_rls
+            AND c.relrowsecurity
+            AND c.relforcerowsecurity
+        ) AS forced_rls_count
+      FROM required_tables
+      LEFT JOIN pg_catalog.pg_class c
+        ON c.relname = required_tables.name AND c.relkind = 'r'
+      LEFT JOIN pg_catalog.pg_namespace n
+        ON n.oid = c.relnamespace
+    )
+    SELECT
+      (SELECT count(*) FROM relay_schema_migrations),
+      (SELECT max(version) FROM relay_schema_migrations),
+      table_state.present_count,
+      table_state.forced_rls_count,
+      has_table_privilege('relay_api_runtime', 'relay_sessions', 'SELECT')
+        AND has_table_privilege('relay_api_runtime', 'relay_file_versions', 'SELECT')
+        AND has_table_privilege('relay_api_runtime', 'relay_organization_quotas', 'SELECT'),
+      has_table_privilege('relay_worker_runtime', 'relay_organization_quotas', 'SELECT'),
+      (SELECT count(*) FROM relay_organizations organization
+        LEFT JOIN relay_organization_quotas quota ON quota.organization_id = organization.id
+        WHERE quota.organization_id IS NULL),
+      (SELECT count(*) FROM relay_file_versions
+        WHERE (storage_backend = 'inline' AND (content IS NULL OR object_key IS NOT NULL))
+          OR (storage_backend = 'object' AND (content IS NOT NULL OR object_key IS NULL)))
+    FROM table_state
+  ")
+
+old_ifs=$IFS
+IFS='|'
+set -- $verification
+IFS=$old_ifs
+migration_count=${1:-}
+latest_migration=${2:-}
+required_table_count=${3:-}
+forced_rls_count=${4:-}
+api_runtime_access=${5:-}
+worker_runtime_access=${6:-}
+organizations_without_quota=${7:-}
+invalid_file_versions=${8:-}
+
+if [ "$migration_count" != "$EXPECTED_MIGRATION_COUNT" ] \
+  || [ "$latest_migration" != "$EXPECTED_MIGRATION_VERSION" ]; then
+  echo 'Restore verification failed: migration set does not match the application release.' >&2
+  exit 1
+fi
+if [ "$required_table_count" != '6' ] || [ "$forced_rls_count" != '5' ]; then
+  echo 'Restore verification failed: required tables or FORCE RLS protections are missing.' >&2
+  exit 1
+fi
+if [ "$api_runtime_access" != 't' ] || [ "$worker_runtime_access" != 't' ]; then
+  echo 'Restore verification failed: runtime role privileges are incomplete.' >&2
+  exit 1
+fi
+if [ "$organizations_without_quota" != '0' ] || [ "$invalid_file_versions" != '0' ]; then
+  echo 'Restore verification failed: restored quota or FileVersion invariants are invalid.' >&2
   exit 1
 fi
 
-echo "Restore verified for database $actual_database_name ($migration_count migrations)"
+echo "Restore verified for database $actual_database_name ($migration_count migrations; RLS, ACL, quota, and FileVersion invariants passed)"
