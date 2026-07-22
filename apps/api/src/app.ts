@@ -148,6 +148,7 @@ import {
   type FileRepository,
 } from './file-repository.js'
 import { ObjectStorageError } from './object-storage.js'
+import type { OrganizationQuotaRepository } from './organization-quota-repository.js'
 import {
   InvalidFilePaginationError,
   encodeFileCursor,
@@ -343,6 +344,7 @@ export type CreateAppOptions = {
     cache: number
   }
   securityAuditRepository?: SecurityAuditRepository
+  organizationQuotaRepository?: OrganizationQuotaRepository
   authenticate?: AuthenticateRequest
   executionEnabled?: boolean
   executionReadinessCheck?: () => Promise<boolean>
@@ -707,6 +709,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   const requestRateLimiter = requestRateLimitOptions
     ? createRequestRateLimiter(requestRateLimitOptions)
     : null
+  const organizationQuotaRepository = options.organizationQuotaRepository
   const actorsByRequest = new WeakMap<FastifyRequest, AuthenticatedActor>()
 
   void app.register(helmet, {
@@ -803,6 +806,40 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       request.log.error({ err: auditError }, 'Security audit append failed')
     }
     return payload
+  })
+
+  app.addHook('preHandler', async (request, reply) => {
+    if (!organizationQuotaRepository) return
+    const params = request.params as Record<string, unknown> | undefined
+    const organizationId = typeof params?.organizationId === 'string' ? params.organizationId : undefined
+    const actor = actorsByRequest.get(request)
+    if (!organizationId || !actor) return
+    let rate: Awaited<ReturnType<OrganizationQuotaRepository['consumeApiRequest']>>
+    try {
+      rate = await organizationQuotaRepository.consumeApiRequest({
+        organizationId,
+        actorId: actor.id,
+      })
+    } catch (error) {
+      request.log.error({ err: error }, 'Organization quota check failed')
+      return sendApiError(reply, 503, request, {
+        code: 'DEPENDENCY_UNAVAILABLE',
+        message: 'Organization quota service is temporarily unavailable.',
+        retryable: true,
+      })
+    }
+    if (!rate) return
+    reply.header('RateLimit-Limit', rate.limit)
+    reply.header('RateLimit-Remaining', rate.remaining)
+    reply.header('RateLimit-Reset', rate.retryAfterSeconds)
+    if (!rate.allowed) {
+      reply.header('Retry-After', rate.retryAfterSeconds)
+      return sendApiError(reply, 429, request, {
+        code: 'RATE_LIMITED',
+        message: 'The Organization API request quota was exceeded.',
+        retryable: true,
+      }, { audit: rate.firstDenied })
+    }
   })
 
   app.setNotFoundHandler((request, reply) => sendApiError(reply, 404, request, {

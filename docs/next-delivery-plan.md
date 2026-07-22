@@ -194,6 +194,25 @@ Space Admin 可以在统一、克制的 Cosmos 风格控制面中：
 - 真实云 bucket/IAM/KMS/跨区域复制的部署和季度恢复演练必须在目标环境执行，仓库代码不能替代云侧证据。
 - 下一条生产硬化切片转向 Organization 配额权威模型与限流共享状态。
 
+## 生产硬化-3：Organization 配额与共享限流（已完成）
+
+### 交付结果
+
+- Migration `073_organization_quotas_and_rate_limits.sql` 为每个 Organization 建立默认 File storage 上限、API 窗口/请求上限和单行共享窗口；新 Organization 自动创建默认 quota。
+- FileVersion writer 读取数据库 quota 权威值并在 advisory lock 下计算使用量；测试 override 仅用于受控 fixture，生产不依赖进程常量。
+- API 保留第一层 per-instance IP burst limiter，并在鉴权后的 scoped route 使用 PostgreSQL Organization window 原子 upsert；跨 API 实例共享计数、窗口滚动、429 headers 和首次越界安全审计一致。
+- quota/window 表使用 FORCE RLS；API 只可访问当前 membership，Worker 只读 quota，普通控制面不允许修改商业/运维 quota。
+- limiter 数据库不可用时 fail-closed 返回可重试 503；未知 Organization 不产生计数，继续由既有授权层返回统一 concealment。
+
+### 验证证据
+
+- API 26 files / 218 tests、Web 20 files / 207 tests 通过；PostgreSQL integration 29 files / 149 tests 通过。
+- 专项覆盖 Organization window 原子计数、首次/重复拒绝、窗口滚动、outsider concealment、DB File quota、RLS 和安全表保护数量（50 tenant tables）。
+
+### 明确延期
+
+- quota 的 billing/商业管理 UI、跨区域限流 broker、Edge/WAF 全局规则和容量压测仍需目标生产环境配置与证据。
+
 ## M4 排序
 
 后续按以下顺序推进：
@@ -201,7 +220,7 @@ Space Admin 可以在统一、克制的 Cosmos 风格控制面中：
 1. **Automation 权威模型（M4-A 已完成）**：已交付 Trigger 唯一资源、Event 去重/脱敏/匹配、ServiceAccount Session dispatch 与同源 Run History；上述延期项在后续 Automation hardening 收口。
 2. **Space 管理（M4-B 已完成）**：已交付 Default、默认 Expert/Environment、删除迁移预览和真实 scope 切换；实际迁移执行保持 capability-gated。
 3. **Advisor 受控执行（M4-C 已完成）**：plan/diff/confirm、受控工具、失败恢复和审计；OAuth/Secret 只返回人工步骤，不伪造完成。
-4. **生产硬化（进行中）**：对象存储与 orphan GC 代码切片已完成；下一项是 Organization 配额权威模型与共享限流，再推进 PITR/恢复、实时撤权、通知/SLO、负载与故障演练。
+4. **生产硬化（进行中）**：对象存储、orphan GC、Organization 配额与共享限流代码切片已完成；下一项是 PITR/恢复与实时撤权，再推进通知/SLO、负载与故障演练。
 
 Pinned Sessions、Artifact 高级搜索和高级启动覆盖属于 P2，在上述 P1 控制面闭环之后处理。
 

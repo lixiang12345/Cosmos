@@ -285,6 +285,22 @@ describeWithDatabase('Postgres File repositories', () => {
   })
 
   it('enforces Organization quota and database immutability', async () => {
+    await migrationPool.query(`
+      UPDATE relay_organization_quotas
+      SET file_storage_bytes_limit = 1048576
+      WHERE organization_id = 'file-org'
+    `)
+    await expect(writer.append({
+      ...record('workspace', 'quota/authority.bin', 'ignored'),
+      mimeType: 'application/octet-stream',
+      content: Buffer.alloc(1_048_576),
+    })).rejects.toBeInstanceOf(FileQuotaExceededError)
+    await migrationPool.query(`
+      UPDATE relay_organization_quotas
+      SET file_storage_bytes_limit = 104857600
+      WHERE organization_id = 'file-org'
+    `)
+
     const limited = new PostgresFileWriterRepository(workerPool, {
       maxVersionBytes: 16,
       maxOrganizationBytes: 40,

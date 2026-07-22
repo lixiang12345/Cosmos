@@ -19,6 +19,7 @@ import { PostgresSpaceRepository } from './postgres-space-repository.js'
 import { PostgresToolApprovalRepository } from './postgres-tool-approval-repository.js'
 import { PostgresServiceAccountPolicyRepository } from './service-account-policy-repository.js'
 import { PostgresWorkerReadinessRepository } from './postgres-worker-readiness-repository.js'
+import { PostgresOrganizationQuotaRepository } from './organization-quota-repository.js'
 import { S3ObjectStore } from './object-storage.js'
 import { InMemorySessionRepository } from './session-repository.js'
 
@@ -62,6 +63,7 @@ const contextEngineGateway = config.contextEngine
   ? new HttpContextEngineGateway(config.contextEngine)
   : undefined
 const objectStore = config.objectStorage ? new S3ObjectStore(config.objectStorage) : undefined
+const organizationQuotaRepository = pool ? new PostgresOrganizationQuotaRepository(pool) : undefined
 const app = createApp({
   logger: true,
   corsOrigin: config.corsOrigin,
@@ -78,6 +80,7 @@ const app = createApp({
       hmacKeyId: config.securityAuditHmacKeyId,
     })
     : undefined,
+  organizationQuotaRepository,
   sessionRepository: pool
     ? new PostgresSessionRepository(pool, {
       executionMaxAttempts: config.executionMaxAttempts,

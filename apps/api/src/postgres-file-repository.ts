@@ -409,19 +409,19 @@ export class PostgresFileWriterRepository implements FileWriterRepository {
   private readonly createId: () => string
   private readonly now: () => Date
   private readonly maxVersionBytes: number
-  private readonly maxOrganizationBytes: number
+  private readonly maxOrganizationBytes?: number
   private readonly objectStore?: ObjectStore
 
   constructor(private readonly pool: Pool, options: PostgresFileWriterRepositoryOptions = {}) {
     this.createId = options.createId ?? randomUUID
     this.now = options.now ?? (() => new Date())
     this.maxVersionBytes = options.maxVersionBytes ?? 1_048_576
-    this.maxOrganizationBytes = options.maxOrganizationBytes ?? 100 * 1_048_576
+    this.maxOrganizationBytes = options.maxOrganizationBytes
     this.objectStore = options.objectStore
     if (this.maxVersionBytes < 1 || this.maxVersionBytes > 1_048_576) {
       throw new Error('maxVersionBytes must be between 1 and 1048576.')
     }
-    if (this.maxOrganizationBytes < this.maxVersionBytes) {
+    if (this.maxOrganizationBytes !== undefined && this.maxOrganizationBytes < this.maxVersionBytes) {
       throw new Error('maxOrganizationBytes must be at least maxVersionBytes.')
     }
   }
@@ -509,8 +509,17 @@ export class PostgresFileWriterRepository implements FileWriterRepository {
       SELECT COALESCE(sum(size), 0)::text AS bytes
       FROM relay_file_versions WHERE organization_id = $1
     `, [record.organizationId])
-    if (Number(quota.rows[0]?.bytes ?? 0) + record.content.byteLength > this.maxOrganizationBytes) {
-      throw new FileQuotaExceededError(this.maxOrganizationBytes)
+    const authority = await client.query<{ file_storage_bytes_limit: string }>(`
+      SELECT file_storage_bytes_limit::text
+      FROM relay_organization_quotas WHERE organization_id = $1
+    `, [record.organizationId])
+    const limitBytes = this.maxOrganizationBytes
+      ?? Number(authority.rows[0]?.file_storage_bytes_limit)
+    if (!Number.isSafeInteger(limitBytes) || limitBytes < this.maxVersionBytes) {
+      throw new Error('The Organization File storage quota is unavailable.')
+    }
+    if (Number(quota.rows[0]?.bytes ?? 0) + record.content.byteLength > limitBytes) {
+      throw new FileQuotaExceededError(limitBytes)
     }
 
     const ownerUserId = record.scope === 'user' ? record.actorId : null

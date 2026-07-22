@@ -110,6 +110,11 @@ export {
   type ObjectStorageGcResult,
 } from './object-storage-gc.js'
 export {
+  PostgresOrganizationQuotaRepository,
+  type OrganizationQuotaRepository,
+  type SharedRateLimitResult,
+} from './organization-quota-repository.js'
+export {
   AuthenticationError,
   createDevelopmentAuthenticator,
   createJwtAuthenticator,

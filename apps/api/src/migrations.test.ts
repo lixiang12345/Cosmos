@@ -75,6 +75,7 @@ const migrationVersions = [
   '070_advisor_controlled_execution.sql',
   '071_object_storage_file_versions.sql',
   '072_object_storage_gc_runs.sql',
+  '073_organization_quotas_and_rate_limits.sql',
 ]
 
 function poolWithVersions(versions: string[]) {

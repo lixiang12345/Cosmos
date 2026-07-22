@@ -428,6 +428,49 @@ describe('Relay API', () => {
     }))
   })
 
+  it('enforces the shared Organization request quota after authentication', async () => {
+    const appendSecurityAudit = vi.fn().mockResolvedValue(undefined)
+    const consumeApiRequest = vi.fn()
+      .mockResolvedValueOnce({ allowed: true, firstDenied: false, limit: 1, remaining: 0, retryAfterSeconds: 30 })
+      .mockResolvedValueOnce({ allowed: false, firstDenied: true, limit: 1, remaining: 0, retryAfterSeconds: 29 })
+    const app = createApp({
+      authenticate: createDevelopmentAuthenticator('user-local-admin'),
+      sessionRepository: testRepository(),
+      rateLimit: false,
+      organizationQuotaRepository: { consumeApiRequest },
+      securityAuditRepository: { append: appendSecurityAudit },
+    })
+    openApps.push(app)
+    const url = '/api/v1/organizations/relay/spaces/platform/sessions'
+
+    expect((await app.inject({ method: 'GET', url })).statusCode).toBe(200)
+    const limited = await app.inject({ method: 'GET', url })
+    expect(limited.statusCode).toBe(429)
+    expect(limited.json()).toMatchObject({ code: 'RATE_LIMITED', retryable: true })
+    expect(limited.headers).toMatchObject({
+      'ratelimit-limit': '1', 'ratelimit-remaining': '0', 'retry-after': '29',
+    })
+    expect(consumeApiRequest).toHaveBeenLastCalledWith({
+      organizationId: 'relay', actorId: 'user-local-admin',
+    })
+    expect(appendSecurityAudit).toHaveBeenCalledWith(expect.objectContaining({
+      errorCode: 'RATE_LIMITED', organizationId: 'relay', statusCode: 429,
+    }))
+
+    const unavailable = createApp({
+      authenticate: createDevelopmentAuthenticator('user-local-admin'),
+      sessionRepository: testRepository(),
+      rateLimit: false,
+      organizationQuotaRepository: {
+        consumeApiRequest: vi.fn().mockRejectedValue(new Error('database unavailable')),
+      },
+    })
+    openApps.push(unavailable)
+    const failed = await unavailable.inject({ method: 'GET', url })
+    expect(failed.statusCode).toBe(503)
+    expect(failed.json()).toMatchObject({ code: 'DEPENDENCY_UNAVAILABLE', retryable: true })
+  })
+
   it('submits sanitized error context to the security audit repository', async () => {
     const append = vi.fn().mockResolvedValue(undefined)
     const app = createApp({
