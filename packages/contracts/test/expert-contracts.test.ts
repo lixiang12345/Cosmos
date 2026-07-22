@@ -27,6 +27,7 @@ const expertSummary = {
   id: 'expert-incident-investigator',
   organizationId: 'organization-relay',
   spaceId: 'space-platform',
+  kind: 'custom' as const,
   name: 'Incident Investigator',
   description: 'Investigates production incidents.',
   visibility: 'space',

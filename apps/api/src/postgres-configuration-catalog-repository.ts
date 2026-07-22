@@ -91,6 +91,7 @@ type PageRow = {
 type ExpertRow = PageRow & {
   organization_id: string
   space_id: string
+  kind: 'managed_template' | 'custom' | 'built_in'
   name: string
   description: string
   visibility: 'private' | 'space'
@@ -181,6 +182,7 @@ const expertSummaryColumns = `
   expert.id,
   expert.organization_id,
   expert.space_id,
+  expert.kind,
   expert.name,
   expert.description,
   expert.visibility,
@@ -558,6 +560,7 @@ function mapExpertSummary(row: ExpertRow): ExpertSummaryDto {
     id: row.id,
     organizationId: row.organization_id,
     spaceId: row.space_id,
+    kind: row.kind,
     name: row.name,
     description: row.description,
     visibility: row.visibility,

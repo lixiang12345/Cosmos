@@ -1,4 +1,5 @@
-import { FilePrefixSchema, type FileDto } from '@relay/contracts'
+import { AdvisorPlanProposalSchema, FilePrefixSchema, type FileDto } from '@relay/contracts'
+import type { AdvisorPlanRepository } from './advisor-plan-repository.js'
 import type {
   ConversationAgentToolCall,
   ConversationAgentToolDefinition,
@@ -34,7 +35,7 @@ export interface ConversationToolBroker {
 const MAX_WORKSPACE_FILE_BYTES = 65_536
 const MAX_TOOL_RESULT_CHARACTERS = 95_000
 
-const definitions = [
+const workspaceDefinitions = [
   {
     name: 'workspace_files_list',
     description: 'List readable files in the current Session workspace. Use this before reading a file when its id is unknown.',
@@ -62,6 +63,61 @@ const definitions = [
     },
   },
 ] as const satisfies readonly ConversationAgentToolDefinition[]
+
+const advisorDefinition = {
+  name: 'advisor_plan_propose',
+  description: 'Propose a bounded Relay control-plane plan for explicit human confirmation. This tool never applies the change. Use manual_action steps for OAuth or Secret work and never request Secret values or OAuth tokens.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      summary: { type: 'string', minLength: 1, maxLength: 2000 },
+      dependencies: { type: 'array', maxItems: 10, items: { type: 'string', minLength: 1, maxLength: 1000 } },
+      risks: { type: 'array', maxItems: 10, items: { type: 'string', minLength: 1, maxLength: 1000 } },
+      steps: {
+        type: 'array', minItems: 1, maxItems: 10,
+        items: {
+          oneOf: [
+            {
+              type: 'object', additionalProperties: false,
+              properties: {
+                kind: { const: 'control_plane' }, operation: { const: 'space.update' },
+                changes: {
+                  type: 'object', additionalProperties: false, minProperties: 1,
+                  properties: {
+                    description: { type: 'string', maxLength: 2000 },
+                    defaultExpertId: { type: ['string', 'null'], maxLength: 128 },
+                    defaultEnvironmentId: { type: ['string', 'null'], maxLength: 128 },
+                  },
+                },
+                rationale: { type: 'string', minLength: 1, maxLength: 1000 },
+              },
+              required: ['kind', 'operation', 'changes', 'rationale'],
+            },
+            {
+              type: 'object', additionalProperties: false,
+              properties: {
+                kind: { const: 'control_plane' }, operation: { const: 'organization.set_default_space' },
+                rationale: { type: 'string', minLength: 1, maxLength: 1000 },
+              },
+              required: ['kind', 'operation', 'rationale'],
+            },
+            {
+              type: 'object', additionalProperties: false,
+              properties: {
+                kind: { const: 'manual_action' }, action: { enum: ['oauth', 'secret'] },
+                label: { type: 'string', minLength: 1, maxLength: 240 },
+                instructions: { type: 'string', minLength: 1, maxLength: 2000 },
+              },
+              required: ['kind', 'action', 'label', 'instructions'],
+            },
+          ],
+        },
+      },
+    },
+    required: ['summary', 'steps'],
+    additionalProperties: false,
+  },
+} as const satisfies ConversationAgentToolDefinition
 
 type ToolOutcome = {
   status: 'succeeded' | 'failed'
@@ -145,12 +201,17 @@ function failure(code: string, message: string): ToolOutcome {
 }
 
 export class GovernedConversationToolBroker implements ConversationToolBroker {
-  readonly definitions = definitions
+  readonly definitions: readonly ConversationAgentToolDefinition[]
 
   constructor(
     private readonly coordinator: ToolCoordinatorRepository,
     private readonly files: FileRepository,
-  ) {}
+    private readonly advisorPlans?: AdvisorPlanRepository,
+  ) {
+    this.definitions = advisorPlans
+      ? [...workspaceDefinitions, advisorDefinition]
+      : workspaceDefinitions
+  }
 
   async execute(
     context: ConversationToolContext,
@@ -172,12 +233,18 @@ export class GovernedConversationToolBroker implements ConversationToolBroker {
       requestedByKind: context.requestedByKind,
       requestId: `${requestPrefix}:create`,
       toolName: call.name,
-      operation: call.name === 'workspace_files_list' ? 'list' : 'read',
+      operation: call.name === 'workspace_files_list'
+        ? 'list'
+        : call.name === 'workspace_file_read'
+          ? 'read'
+          : 'propose',
       riskLevel: 'low',
       input: call.input,
       inputSummary: call.name === 'workspace_files_list'
         ? 'List files in the current Session workspace.'
-        : 'Read a text file from the current Session workspace.',
+        : call.name === 'workspace_file_read'
+          ? 'Read a text file from the current Session workspace.'
+          : 'Propose a bounded Advisor control-plane plan for explicit confirmation.',
     })
     const started = await this.coordinator.startToolCall({
       organizationId: context.organizationId,
@@ -194,7 +261,9 @@ export class GovernedConversationToolBroker implements ConversationToolBroker {
     try {
       outcome = call.name === 'workspace_files_list'
         ? await this.listFiles(context, call.input)
-        : await this.readFile(context, call.input)
+        : call.name === 'workspace_file_read'
+          ? await this.readFile(context, call.input)
+          : await this.proposeAdvisorPlan(context, call)
     } catch (error) {
       outcome = error instanceof ToolInputError
         ? failure('invalid_input', error.message)
@@ -219,6 +288,35 @@ export class GovernedConversationToolBroker implements ConversationToolBroker {
       outputSummary: outcome.summary,
     })
     return { content }
+  }
+
+  private async proposeAdvisorPlan(
+    context: ConversationToolContext,
+    call: ConversationAgentToolCall,
+  ): Promise<ToolOutcome> {
+    if (!this.advisorPlans) return failure('tool_unavailable', 'Advisor planning is not enabled for this Worker.')
+    const proposal = AdvisorPlanProposalSchema.safeParse(call.input)
+    if (!proposal.success) return failure('invalid_input', 'The Advisor plan is outside the supported controlled schema.')
+    try {
+      const plan = await this.advisorPlans.proposePlan({
+        ...context,
+        actorId: context.requestedBy,
+        providerToolCallId: call.providerToolCallId,
+        proposal: proposal.data,
+      })
+      return {
+        status: 'succeeded',
+        output: {
+          ok: true,
+          planId: plan.id,
+          status: plan.status,
+          message: 'The plan is visible in the Session and requires explicit confirmation before any controlled write.',
+        },
+        summary: `Proposed Advisor plan ${plan.id}; no control-plane change has been applied.`,
+      }
+    } catch {
+      return failure('plan_rejected', 'The Advisor plan could not be proposed under the current scope and policy.')
+    }
   }
 
   private async listFiles(

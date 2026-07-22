@@ -17544,3 +17544,114 @@ body {
     border-bottom: 0;
   }
 }
+/* Advisor plans stay dense and readable while keeping the confirmation boundary explicit. */
+.remote-advisor-plans {
+  gap: 16px;
+}
+
+.remote-advisor-plan {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--cosmos-border, #d9d9d9);
+  padding: 16px;
+  background: var(--cosmos-surface, #fff);
+}
+
+.remote-advisor-plan > header,
+.remote-advisor-plan__step-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.remote-advisor-plan > header strong,
+.remote-advisor-plan__step-heading strong {
+  display: block;
+  line-height: 1.4;
+}
+
+.remote-advisor-plan > header code {
+  display: block;
+  margin-top: 4px;
+  color: var(--cosmos-muted, #666);
+  font-size: 11px;
+}
+
+.remote-advisor-plan h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.remote-advisor-plan ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.remote-advisor-plan__steps {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding-left: 24px;
+}
+
+.remote-advisor-plan__steps > li {
+  padding-left: 4px;
+}
+
+.remote-advisor-plan__step-heading span {
+  flex: 0 0 auto;
+  color: var(--cosmos-muted, #666);
+  font-size: 12px;
+}
+
+.remote-advisor-plan__steps p {
+  margin: 6px 0;
+}
+
+.remote-advisor-diff {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+}
+
+.remote-advisor-diff > div {
+  display: grid;
+  grid-template-columns: minmax(120px, .7fr) minmax(0, 1.3fr);
+  gap: 8px;
+  align-items: baseline;
+}
+
+.remote-advisor-diff dt {
+  color: var(--cosmos-muted, #666);
+  font-size: 12px;
+}
+
+.remote-advisor-diff dd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+}
+
+.remote-advisor-manual {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px;
+  border-left: 3px solid var(--cosmos-warning, #9a6700);
+  background: var(--cosmos-subtle, #f6f6f6);
+}
+
+.remote-advisor-plan--succeeded { border-color: var(--cosmos-success, #2f7d32); }
+.remote-advisor-plan--failed { border-color: var(--cosmos-danger, #b42318); }
+.remote-advisor-plan--action_required { border-color: var(--cosmos-warning, #9a6700); }
+
+@media (max-width: 720px) {
+  .remote-advisor-plan { padding: 12px; }
+  .remote-advisor-plan > header,
+  .remote-advisor-plan__step-heading { flex-direction: column; }
+  .remote-advisor-diff > div { grid-template-columns: 1fr; gap: 2px; }
+}

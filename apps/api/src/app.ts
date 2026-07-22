@@ -2,6 +2,10 @@ import cors from '@fastify/cors'
 import helmet from '@fastify/helmet'
 import {
   ApiErrorSchema,
+  AdvisorPlanDecisionRequestSchema,
+  AdvisorPlanDtoSchema,
+  AdvisorPlanListResponseSchema,
+  AdvisorPlanRetryRequestSchema,
   AutomationEventListResponseSchema,
   AutomationEventReceiptSchema,
   AutomationListResponseSchema,
@@ -72,6 +76,16 @@ import Fastify, {
   type FastifyRequest,
   type FastifyServerOptions,
 } from 'fastify'
+import {
+  AdvisorPlanIdempotencyConflictError,
+  AdvisorPlanPermissionError,
+  AdvisorPlanStateConflictError,
+  AdvisorPlanValidationError,
+  AdvisorPlanVersionConflictError,
+  EmptyAdvisorPlanRepository,
+  type AdvisorPlanRepository,
+} from './advisor-plan-repository.js'
+import { AdvisorPlanExecutor } from './advisor-plan-executor.js'
 import {
   ArtifactConflictError,
   ArtifactValidationError,
@@ -253,6 +267,10 @@ type ApprovalParams = SpaceParams & {
   approvalId: string
 }
 
+type AdvisorPlanParams = SessionParams & {
+  planId: string
+}
+
 type FileParams = SpaceParams & {
   fileId: string
 }
@@ -295,6 +313,7 @@ type ValidationIssue = {
 }
 
 export type CreateAppOptions = {
+  advisorPlanRepository?: AdvisorPlanRepository
   automationRepository?: AutomationRepository
   spaceRepository?: SpaceRepository
   sessionRepository?: SessionRepository
@@ -656,6 +675,8 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     ?? new EmptyConfigurationCatalogRepository()
   const automationRepository = options.automationRepository ?? new EmptyAutomationRepository()
   const spaceRepository = options.spaceRepository ?? new EmptySpaceRepository()
+  const advisorPlanRepository = options.advisorPlanRepository ?? new EmptyAdvisorPlanRepository()
+  const advisorPlanExecutor = new AdvisorPlanExecutor(advisorPlanRepository, spaceRepository)
   const contextEngineGateway = options.contextEngineGateway
   const authenticate = options.authenticate ?? rejectAuthentication
   const executionEnabled = options.executionEnabled ?? true
@@ -794,7 +815,8 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       || error instanceof ExpertIdempotencyConflictError
       || error instanceof EnvironmentIdempotencyConflictError
       || error instanceof AutomationIdempotencyConflictError
-      || error instanceof SpaceIdempotencyConflictError) {
+      || error instanceof SpaceIdempotencyConflictError
+      || error instanceof AdvisorPlanIdempotencyConflictError) {
       return sendApiError(reply, 409, request, {
         code: 'IDEMPOTENCY_KEY_REUSED',
         message: error.message,
@@ -871,6 +893,32 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       return sendApiError(reply, 412, request, {
         code: 'PRECONDITION_FAILED', message: error.message, retryable: false,
         details: { expectedVersion: error.expectedVersion, currentVersion: error.actualVersion },
+      })
+    }
+
+    if (error instanceof AdvisorPlanVersionConflictError) {
+      return sendApiError(reply, 412, request, {
+        code: 'PRECONDITION_FAILED', message: error.message, retryable: false,
+        details: { expectedVersion: error.expectedVersion, currentVersion: error.actualVersion },
+      })
+    }
+
+    if (error instanceof AdvisorPlanPermissionError) {
+      return sendApiError(reply, 403, request, {
+        code: 'PERMISSION_DENIED', message: error.message, retryable: false,
+      })
+    }
+
+    if (error instanceof AdvisorPlanStateConflictError) {
+      return sendApiError(reply, 409, request, {
+        code: 'ADVISOR_PLAN_STATE_CONFLICT', message: error.message, retryable: false,
+      })
+    }
+
+    if (error instanceof AdvisorPlanValidationError) {
+      return sendApiError(reply, 422, request, {
+        code: 'VALIDATION_FAILED', message: error.message, retryable: false,
+        ...(error.field ? { fieldErrors: { [`body.${error.field}`]: [error.message] } } : {}),
       })
     }
 
@@ -1340,6 +1388,151 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       )
       if (!preview) return sendResourceNotFound(reply, request)
       return SpaceMigrationPreviewSchema.parse(preview)
+    },
+  )
+
+  app.get<{ Params: SessionParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/advisor/plans',
+    async (request, reply) => {
+      const authorization = await authorizeSpace(request, reply, request.params)
+      if (!authorization) return
+      const sessionId = parseSpaceId(request.params.sessionId)
+      if (!sessionId) return sendResourceNotFound(reply, request)
+      const items = await advisorPlanRepository.listPlans(
+        authorization.organizationId,
+        authorization.spaceId,
+        sessionId,
+        authorization.actor.id,
+      )
+      if (!items) return sendResourceNotFound(reply, request)
+      return AdvisorPlanListResponseSchema.parse({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        sessionId,
+        items,
+      })
+    },
+  )
+
+  app.get<{ Params: AdvisorPlanParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/advisor/plans/:planId',
+    async (request, reply) => {
+      const authorization = await authorizeSpace(request, reply, request.params)
+      if (!authorization) return
+      const sessionId = parseSpaceId(request.params.sessionId)
+      const planId = parseSpaceId(request.params.planId)
+      if (!sessionId || !planId) return sendResourceNotFound(reply, request)
+      const plan = await advisorPlanRepository.getPlan(
+        authorization.organizationId,
+        authorization.spaceId,
+        sessionId,
+        planId,
+        authorization.actor.id,
+      )
+      if (!plan) return sendResourceNotFound(reply, request)
+      reply.header('ETag', resourceEtag(plan))
+      return AdvisorPlanDtoSchema.parse(plan)
+    },
+  )
+
+  app.post<{ Params: AdvisorPlanParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/advisor/plans/:planId/decision',
+    async (request, reply) => {
+      const authorization = await authorizeSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageExperts(authorization.access)) return denySpaceMutation(request, reply)
+      const sessionId = parseSpaceId(request.params.sessionId)
+      const planId = parseSpaceId(request.params.planId)
+      if (!sessionId || !planId) return sendResourceNotFound(reply, request)
+      const expectedVersion = requireIfMatchVersion(request, reply, 'Advisor plan')
+      if (expectedVersion === null) return
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) return sendApiError(reply, 400, request, {
+        code: 'IDEMPOTENCY_KEY_REQUIRED',
+        message: 'A valid Idempotency-Key header is required.',
+        retryable: false,
+        fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+      })
+      const parsed = AdvisorPlanDecisionRequestSchema.safeParse(request.body)
+      if (!parsed.success) return sendApiError(reply, 400, request, {
+        code: 'VALIDATION_FAILED', message: 'The Advisor plan decision is invalid.', retryable: false,
+        fieldErrors: validationFieldErrors(parsed.error.issues),
+      })
+      const result = await advisorPlanRepository.decidePlan({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        sessionId,
+        planId,
+        actorId: authorization.actor.id,
+        requestId: request.id,
+        expectedVersion,
+        idempotencyKey,
+        request: parsed.data,
+      })
+      if (!result) return sendResourceNotFound(reply, request)
+      const plan = parsed.data.decision === 'confirmed'
+        ? await advisorPlanExecutor.execute({
+            organizationId: authorization.organizationId,
+            spaceId: authorization.spaceId,
+            sessionId,
+            planId,
+            actorId: authorization.actor.id,
+            requestId: request.id,
+          })
+        : result.plan
+      if (!plan) return sendResourceNotFound(reply, request)
+      reply.header('Idempotency-Replayed', String(result.replayed))
+      reply.header('ETag', resourceEtag(plan))
+      return AdvisorPlanDtoSchema.parse(plan)
+    },
+  )
+
+  app.post<{ Params: AdvisorPlanParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/advisor/plans/:planId/retry',
+    async (request, reply) => {
+      const authorization = await authorizeSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageExperts(authorization.access)) return denySpaceMutation(request, reply)
+      const sessionId = parseSpaceId(request.params.sessionId)
+      const planId = parseSpaceId(request.params.planId)
+      if (!sessionId || !planId) return sendResourceNotFound(reply, request)
+      const expectedVersion = requireIfMatchVersion(request, reply, 'Advisor plan')
+      if (expectedVersion === null) return
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) return sendApiError(reply, 400, request, {
+        code: 'IDEMPOTENCY_KEY_REQUIRED',
+        message: 'A valid Idempotency-Key header is required.',
+        retryable: false,
+        fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+      })
+      const parsed = AdvisorPlanRetryRequestSchema.safeParse(request.body ?? {})
+      if (!parsed.success) return sendApiError(reply, 400, request, {
+        code: 'VALIDATION_FAILED', message: 'The Advisor plan retry request is invalid.', retryable: false,
+        fieldErrors: validationFieldErrors(parsed.error.issues),
+      })
+      const result = await advisorPlanRepository.prepareRetry({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        sessionId,
+        planId,
+        actorId: authorization.actor.id,
+        requestId: request.id,
+        expectedVersion,
+        idempotencyKey,
+      })
+      if (!result) return sendResourceNotFound(reply, request)
+      const plan = await advisorPlanExecutor.execute({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        sessionId,
+        planId,
+        actorId: authorization.actor.id,
+        requestId: request.id,
+      })
+      if (!plan) return sendResourceNotFound(reply, request)
+      reply.header('Idempotency-Replayed', String(result.replayed))
+      reply.header('ETag', resourceEtag(plan))
+      return AdvisorPlanDtoSchema.parse(plan)
     },
   )
 

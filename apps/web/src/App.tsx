@@ -1,4 +1,4 @@
-import { DEFAULT_AGENT_MODEL, type ContextPackResponse, type EnvironmentSummaryDto, type SessionDto, type SessionEventDto, type SessionMessageDto } from '@relay/contracts'
+import { DEFAULT_AGENT_MODEL, type AdvisorPlanDto, type ContextPackResponse, type EnvironmentSummaryDto, type SessionDto, type SessionEventDto, type SessionMessageDto } from '@relay/contracts'
 import { AlertTriangle, CheckCircle2, Home, LoaderCircle, Menu, RefreshCw, X } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
@@ -29,11 +29,13 @@ import {
 } from './features/experts'
 import { deriveSessionTitle, detectTaskContextItems } from './features/run/sessionDraft'
 import { useRemoteSessionTimeline } from './features/session/useRemoteSessionTimeline'
+import { useAdvisorPlans } from './features/session/useAdvisorPlans'
 import { usePreferences } from './preferences'
 import {
   RelayApiError,
   type RelayApiAuthContext,
   archiveSession,
+  decideAdvisorPlan,
   cancelSession,
   createSession,
   getRuntimeCapabilities,
@@ -43,6 +45,7 @@ import {
   packContextEngine,
   renameSession as renameSessionRequest,
   restoreSession,
+  retryAdvisorPlan,
   resumeSession,
   retrySessionTurn,
   sendSessionMessage,
@@ -335,6 +338,7 @@ function SessionRoute({
   onRetry,
   onPause,
   onStop,
+  advisorManagementEnabled,
 }: {
   runs: Run[]
   organizationId: string
@@ -354,6 +358,7 @@ function SessionRoute({
   onRetry: (runId: string) => void
   onPause: (runId: string) => void
   onStop: (runId: string) => void
+  advisorManagementEnabled: boolean
 }) {
   const { sessionId } = useParams()
   const navigate = useNavigate()
@@ -502,6 +507,51 @@ function SessionRoute({
     for (const message of timeline.messages) messages.set(message.id, message)
     return [...messages.values()].sort((left, right) => left.sequence - right.sequence)
   }, [acceptedMessages, requestKey, timeline.messages])
+  const advisorPlans = useAdvisorPlans({
+    organizationId,
+    spaceId,
+    sessionId,
+    credentialVersion,
+    auth,
+    enabled: !demoMode && !detailConcealed && resolvedSession?.expertId.startsWith('expert-advisor-') === true,
+  })
+  const [advisorMutation, setAdvisorMutation] = useState<{
+    planId?: string
+    status: 'idle' | 'submitting' | 'error'
+    error?: string
+  }>({ status: 'idle' })
+  const runAdvisorDecision = useCallback(async (plan: AdvisorPlanDto, decision: 'confirmed' | 'rejected') => {
+    setAdvisorMutation({ planId: plan.id, status: 'submitting' })
+    try {
+      const updated = await decideAdvisorPlan(
+        organizationId, spaceId, plan.sessionId, plan.id,
+        { decision }, plan.version, makeSessionIdempotencyKey(`advisor-${plan.id}-${decision}-${plan.version}`), auth,
+      )
+      advisorPlans.replacePlan?.(updated)
+      setAdvisorMutation({ status: 'idle' })
+    } catch (cause) {
+      setAdvisorMutation({
+        planId: plan.id, status: 'error',
+        error: cause instanceof Error ? cause.message : (locale === 'zh' ? '无法更新 Advisor 计划。' : 'Unable to update the Advisor plan.'),
+      })
+    }
+  }, [advisorPlans, auth, locale, organizationId, spaceId])
+  const runAdvisorRetry = useCallback(async (plan: AdvisorPlanDto) => {
+    setAdvisorMutation({ planId: plan.id, status: 'submitting' })
+    try {
+      const updated = await retryAdvisorPlan(
+        organizationId, spaceId, plan.sessionId, plan.id, plan.version,
+        makeSessionIdempotencyKey(`advisor-retry-${plan.id}-${plan.version}`), auth,
+      )
+      advisorPlans.replacePlan?.(updated)
+      setAdvisorMutation({ status: 'idle' })
+    } catch (cause) {
+      setAdvisorMutation({
+        planId: plan.id, status: 'error',
+        error: cause instanceof Error ? cause.message : (locale === 'zh' ? '无法重试 Advisor 计划。' : 'Unable to retry the Advisor plan.'),
+      })
+    }
+  }, [advisorPlans, auth, locale, organizationId, spaceId])
 
   const startDraft = useCallback(() => {
     if (!resolvedSession || resolvedSession.status !== 'draft' || !executionEnabled) return
@@ -720,6 +770,13 @@ function SessionRoute({
         onOpenWorkers={() => navigate(`/sessions/${resolvedSession.id}/workers`)}
         onOpenNavigation={onOpenNavigation}
         onBack={() => navigate('/sessions')}
+        advisorPlans={advisorPlans.plans}
+        advisorPlansStatus={advisorPlans.status}
+        advisorPlansError={advisorMutation.error ?? ('error' in advisorPlans ? advisorPlans.error : undefined)}
+        advisorManagementEnabled={advisorManagementEnabled}
+        advisorMutationPlanId={advisorMutation.planId}
+        onAdvisorDecision={(plan, decision) => { void runAdvisorDecision(plan, decision) }}
+        onAdvisorRetry={(plan) => { void runAdvisorRetry(plan) }}
       />
     )
   }
@@ -1620,12 +1677,17 @@ function RelayApp() {
       group: expert.visibility === 'private'
         ? (locale === 'zh' ? '我的 Expert' : 'My Experts')
         : (locale === 'zh' ? 'Space Expert' : 'Space Experts'),
-      tools: '—',
+      tools: expert.kind === 'built_in'
+        ? (locale === 'zh' ? '受控 Space 配置 · 计划确认' : 'Governed Space configuration · Plan confirmation')
+        : '—',
       environment: environment.name,
       environmentId: environment.id,
       repository: environment.activeRevision.defaultRepository.repository,
-      approval: policy,
+      approval: expert.kind === 'built_in'
+        ? (locale === 'zh' ? '每次变更前确认' : 'Confirm every change')
+        : policy,
       successRate: '—',
+      builtIn: expert.kind === 'built_in',
     }]
   })
   const sessionExpertOptions = demoMode ? demoSessionExpertOptions : remoteSessionExpertOptions
@@ -1951,6 +2013,7 @@ function RelayApp() {
             onRetry={retry}
             onPause={pauseRun}
             onStop={stopRun}
+            advisorManagementEnabled={expertManagementEnabled}
           />
         } />
         <Route path="/sessions/:sessionId/files" element={demoMode

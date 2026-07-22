@@ -1,4 +1,5 @@
 import type {
+  AdvisorPlanDto,
   SessionDto,
   SessionEventDto,
   SessionMessageDto,
@@ -10,12 +11,14 @@ import {
   ArrowLeft,
   Bot,
   CalendarClock,
+  Check,
   CheckCircle2,
   CircleAlert,
   Clock3,
   FileText,
   GitBranch,
   GitFork,
+  KeyRound,
   Link2,
   LoaderCircle,
   Menu,
@@ -26,6 +29,7 @@ import {
   Send,
   ShieldCheck,
   Square,
+  X,
   XCircle,
 } from 'lucide-react'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
@@ -58,6 +62,13 @@ export type RemoteSessionWorkbenchProps = {
   onOpenWorkers?: () => void
   onBack: () => void
   onOpenNavigation?: () => void
+  advisorPlans?: AdvisorPlanDto[]
+  advisorPlansStatus?: 'idle' | 'loading' | 'ready' | 'error'
+  advisorPlansError?: string
+  advisorManagementEnabled?: boolean
+  advisorMutationPlanId?: string
+  onAdvisorDecision?: (plan: AdvisorPlanDto, decision: 'confirmed' | 'rejected') => void
+  onAdvisorRetry?: (plan: AdvisorPlanDto) => void
 }
 
 function text(locale: Locale, zh: string, en: string) {
@@ -273,6 +284,85 @@ function SessionStatusBadge({ status }: { status: SessionStatus }) {
   )
 }
 
+function advisorPlanStatusLabel(status: AdvisorPlanDto['status'], locale: Locale) {
+  const labels: Record<AdvisorPlanDto['status'], [string, string]> = {
+    proposed: ['待确认', 'Needs confirmation'],
+    executing: ['执行中', 'Executing'],
+    succeeded: ['已完成', 'Succeeded'],
+    failed: ['执行失败', 'Failed'],
+    rejected: ['已拒绝', 'Rejected'],
+    action_required: ['需要人工操作', 'Action required'],
+  }
+  return text(locale, ...labels[status])
+}
+
+function AdvisorPlanPanel({
+  plans,
+  status,
+  error,
+  managementEnabled,
+  mutationPlanId,
+  onDecision,
+  onRetry,
+}: {
+  plans: AdvisorPlanDto[]
+  status: 'idle' | 'loading' | 'ready' | 'error'
+  error?: string
+  managementEnabled: boolean
+  mutationPlanId?: string
+  onDecision?: (plan: AdvisorPlanDto, decision: 'confirmed' | 'rejected') => void
+  onRetry?: (plan: AdvisorPlanDto) => void
+}) {
+  const { locale } = usePreferences()
+  const changedFields = (step: Extract<AdvisorPlanDto['steps'][number], { kind: 'control_plane' }>) => (
+    (['description', 'defaultExpertId', 'defaultEnvironmentId', 'isDefault'] as const)
+      .filter((field) => step.before[field] !== step.after[field])
+      .map((field) => ({ field, before: step.before[field], after: step.after[field] }))
+  )
+  return (
+    <section className="remote-session-section remote-advisor-plans" aria-labelledby="remote-advisor-plans-title">
+      <header>
+        <ShieldCheck aria-hidden="true" />
+        <h2 id="remote-advisor-plans-title">{text(locale, 'Advisor 计划与变更', 'Advisor plans and changes')}</h2>
+        <span className="remote-session-section__count">{plans.length}</span>
+      </header>
+      {status === 'loading' ? <p className="remote-session-empty"><LoaderCircle className="cosmos-spin" aria-hidden="true" />{text(locale, '正在加载计划…', 'Loading plans…')}</p> : null}
+      {status === 'error' ? <p className="remote-session-timeline-error" role="alert"><CircleAlert aria-hidden="true" />{error ?? text(locale, '计划暂时不可用。', 'Plans are temporarily unavailable.')}</p> : null}
+      {status === 'ready' && !plans.length ? <p className="remote-session-empty">{text(locale, 'Advisor 尚未提出计划。', 'Advisor has not proposed a plan yet.')}</p> : null}
+      {plans.map((plan) => {
+        const busy = mutationPlanId === plan.id
+        return (
+          <article className={`remote-advisor-plan remote-advisor-plan--${plan.status}`} key={plan.id}>
+            <header>
+              <div><strong>{plan.summary}</strong><code>{plan.id}</code></div>
+              <span className="remote-session-status">{advisorPlanStatusLabel(plan.status, locale)}</span>
+            </header>
+            {plan.dependencies.length ? <div><h3>{text(locale, '依赖', 'Dependencies')}</h3><ul>{plan.dependencies.map((item) => <li key={item}>{item}</li>)}</ul></div> : null}
+            {plan.risks.length ? <div><h3>{text(locale, '风险', 'Risks')}</h3><ul>{plan.risks.map((item) => <li key={item}>{item}</li>)}</ul></div> : null}
+            <ol className="remote-advisor-plan__steps">
+              {plan.steps.map((step) => (
+                <li key={step.id}>
+                  <div className="remote-advisor-plan__step-heading"><strong>{step.ordinal}. {step.kind === 'control_plane' ? step.operation : step.manualAction?.label}</strong><span>{advisorPlanStatusLabel(step.status, locale)}</span></div>
+                  {step.kind === 'control_plane' ? <>
+                    <p>{step.rationale}</p>
+                    <dl className="remote-advisor-diff">{changedFields(step).map(({ field, before, after }) => <div key={field}><dt>{field}</dt><dd><code>{before === null ? 'null' : String(before)}</code><span aria-hidden="true">→</span><code>{after === null ? 'null' : String(after)}</code></dd></div>)}</dl>
+                  </> : <p className="remote-advisor-manual"><KeyRound aria-hidden="true" />{step.manualAction?.instructions}</p>}
+                  {step.failureMessage ? <p className="cosmos-field-error" role="alert">{step.failureMessage}</p> : null}
+                </li>
+              ))}
+            </ol>
+            {managementEnabled && onDecision && plan.status === 'proposed' ? <footer className="cosmos-form-actions">
+              <button type="button" className="cosmos-button cosmos-button--primary" disabled={busy} onClick={() => onDecision(plan, 'confirmed')}><Check aria-hidden="true" />{busy ? text(locale, '处理中…', 'Working…') : text(locale, '确认并执行', 'Confirm and execute')}</button>
+              <button type="button" className="cosmos-button cosmos-button--secondary" disabled={busy} onClick={() => onDecision(plan, 'rejected')}><X aria-hidden="true" />{text(locale, '拒绝计划', 'Reject plan')}</button>
+            </footer> : null}
+            {managementEnabled && onRetry && plan.status === 'failed' ? <footer className="cosmos-form-actions"><button type="button" className="cosmos-button cosmos-button--secondary" disabled={busy} onClick={() => onRetry(plan)}><RotateCcw aria-hidden="true" />{busy ? text(locale, '重试中…', 'Retrying…') : text(locale, '安全重试', 'Retry safely')}</button></footer> : null}
+          </article>
+        )
+      })}
+    </section>
+  )
+}
+
 export function RemoteSessionWorkbench({
   session,
   messages = [],
@@ -298,6 +388,13 @@ export function RemoteSessionWorkbench({
   onOpenWorkers,
   onBack,
   onOpenNavigation,
+  advisorPlans = [],
+  advisorPlansStatus = 'idle',
+  advisorPlansError,
+  advisorManagementEnabled = false,
+  advisorMutationPlanId,
+  onAdvisorDecision,
+  onAdvisorRetry,
 }: RemoteSessionWorkbenchProps) {
   const { locale } = usePreferences()
   const [copyNotice, setCopyNotice] = useState('')
@@ -497,6 +594,16 @@ export function RemoteSessionWorkbench({
             {timelineError ? <code>{timelineError}</code> : null}
           </div>
         ) : null}
+
+        {advisorPlansStatus !== 'idle' ? <AdvisorPlanPanel
+          plans={advisorPlans}
+          status={advisorPlansStatus}
+          error={advisorPlansError}
+          managementEnabled={advisorManagementEnabled}
+          mutationPlanId={advisorMutationPlanId}
+          onDecision={onAdvisorDecision}
+          onRetry={onAdvisorRetry}
+        /> : null}
 
         <section className="remote-session-section" aria-labelledby="remote-session-messages-title">
           <header>

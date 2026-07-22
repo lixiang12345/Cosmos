@@ -1,5 +1,7 @@
 import {
   ApiErrorSchema,
+  AdvisorPlanDtoSchema,
+  AdvisorPlanListResponseSchema,
   AutomationEventListResponseSchema,
   AutomationEventReceiptSchema,
   AutomationListResponseSchema,
@@ -39,6 +41,9 @@ import {
   SpaceMutationResponseSchema,
   StartSessionResponseSchema,
   type ApiError,
+  type AdvisorPlanDecisionRequestInput,
+  type AdvisorPlanDto,
+  type AdvisorPlanListResponse,
   type AutomationDto,
   type AutomationEventListResponse,
   type AutomationEventReceipt,
@@ -448,6 +453,14 @@ function sessionPath(organizationId: string, spaceId: string, sessionId: string)
   return `${sessionsPath(organizationId, spaceId)}/${encodeURIComponent(sessionId)}`
 }
 
+function advisorPlansPath(organizationId: string, spaceId: string, sessionId: string) {
+  return `${sessionPath(organizationId, spaceId, sessionId)}/advisor/plans`
+}
+
+function advisorPlanPath(organizationId: string, spaceId: string, sessionId: string, planId: string) {
+  return `${advisorPlansPath(organizationId, spaceId, sessionId)}/${encodeURIComponent(planId)}`
+}
+
 function expertsPath(organizationId: string, spaceId: string) {
   return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/experts`
 }
@@ -690,6 +703,110 @@ export function getSession(
   }, SessionDtoSchema, auth).then((session) => {
     assertSessionScope(session, organizationId, spaceId, sessionId)
     return session
+  })
+}
+
+function assertAdvisorPlanScope(
+  plan: AdvisorPlanDto,
+  organizationId: string,
+  spaceId: string,
+  sessionId: string,
+  planId?: string,
+) {
+  if (
+    plan.organizationId !== organizationId
+    || plan.spaceId !== spaceId
+    || plan.sessionId !== sessionId
+    || (planId !== undefined && plan.id !== planId)
+  ) {
+    throw new RelayApiError('Relay API returned an Advisor plan outside the requested scope.', {
+      code: 'INVALID_RESPONSE', status: 200,
+    })
+  }
+}
+
+export function listAdvisorPlans(
+  organizationId: string,
+  spaceId: string,
+  sessionId: string,
+  auth?: RelayApiAuthContext,
+  signal?: AbortSignal,
+): Promise<AdvisorPlanListResponse> {
+  return request(advisorPlansPath(organizationId, spaceId, sessionId), {
+    method: 'GET', headers: { Accept: 'application/json' }, signal,
+  }, AdvisorPlanListResponseSchema, auth).then((response) => {
+    if (
+      response.organizationId !== organizationId
+      || response.spaceId !== spaceId
+      || response.sessionId !== sessionId
+    ) {
+      throw new RelayApiError('Relay API returned Advisor plans outside the requested scope.', {
+        code: 'INVALID_RESPONSE', status: 200,
+      })
+    }
+    response.items.forEach((plan) => assertAdvisorPlanScope(plan, organizationId, spaceId, sessionId))
+    return response
+  })
+}
+
+export function getAdvisorPlan(
+  organizationId: string,
+  spaceId: string,
+  sessionId: string,
+  planId: string,
+  auth?: RelayApiAuthContext,
+  signal?: AbortSignal,
+): Promise<AdvisorPlanDto> {
+  return request(advisorPlanPath(organizationId, spaceId, sessionId, planId), {
+    method: 'GET', headers: { Accept: 'application/json' }, signal,
+  }, AdvisorPlanDtoSchema, auth).then((plan) => {
+    assertAdvisorPlanScope(plan, organizationId, spaceId, sessionId, planId)
+    return plan
+  })
+}
+
+export function decideAdvisorPlan(
+  organizationId: string,
+  spaceId: string,
+  sessionId: string,
+  planId: string,
+  decision: AdvisorPlanDecisionRequestInput,
+  version: number,
+  idempotencyKey: string,
+  auth?: RelayApiAuthContext,
+): Promise<AdvisorPlanDto> {
+  return request(`${advisorPlanPath(organizationId, spaceId, sessionId, planId)}/decision`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json', 'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey, 'If-Match': `"${version}"`,
+    },
+    body: JSON.stringify(decision),
+  }, AdvisorPlanDtoSchema, auth).then((plan) => {
+    assertAdvisorPlanScope(plan, organizationId, spaceId, sessionId, planId)
+    return plan
+  })
+}
+
+export function retryAdvisorPlan(
+  organizationId: string,
+  spaceId: string,
+  sessionId: string,
+  planId: string,
+  version: number,
+  idempotencyKey: string,
+  auth?: RelayApiAuthContext,
+): Promise<AdvisorPlanDto> {
+  return request(`${advisorPlanPath(organizationId, spaceId, sessionId, planId)}/retry`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json', 'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey, 'If-Match': `"${version}"`,
+    },
+    body: JSON.stringify({}),
+  }, AdvisorPlanDtoSchema, auth).then((plan) => {
+    assertAdvisorPlanScope(plan, organizationId, spaceId, sessionId, planId)
+    return plan
   })
 }
 

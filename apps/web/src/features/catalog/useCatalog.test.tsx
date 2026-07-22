@@ -30,6 +30,7 @@ const expert: ExpertSummaryDto = {
   id: 'expert-platform',
   organizationId: 'organization-alpha',
   spaceId: 'space-alpha',
+  kind: 'custom',
   name: 'Platform Expert',
   description: 'Maintains platform services.',
   visibility: 'space',

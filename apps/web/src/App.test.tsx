@@ -128,6 +128,7 @@ const productionExpert: ExpertSummaryDto = {
   id: 'expert-production',
   organizationId: 'organization-production',
   spaceId: 'space-production',
+  kind: 'custom',
   name: 'Production Expert',
   description: 'Implements production changes with verification.',
   visibility: 'space',

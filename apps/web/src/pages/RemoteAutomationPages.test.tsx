@@ -51,6 +51,7 @@ const expert: ExpertSummaryDto = {
   id: 'expert-a',
   organizationId,
   spaceId,
+  kind: 'custom',
   name: 'Platform Reviewer',
   description: 'Reviews platform changes.',
   visibility: 'space',

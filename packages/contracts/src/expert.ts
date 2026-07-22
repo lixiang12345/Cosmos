@@ -65,6 +65,7 @@ const expertSummaryFields = {
   id: IdentifierSchema,
   organizationId: IdentifierSchema,
   spaceId: IdentifierSchema,
+  kind: ExpertKindSchema.default('custom'),
   name: z.string().trim().min(1).max(160),
   description: z.string().max(2_000),
   visibility: ExpertVisibilitySchema,

@@ -1,4 +1,5 @@
 import type {
+  AdvisorPlanDto,
   ApprovalDto,
   CreateSessionRequestInput,
   EnvironmentDetailDto,
@@ -19,8 +20,10 @@ import {
   archiveSession,
   cancelSession,
   createSession,
+  decideAdvisorPlan,
   decideApproval,
   getApproval,
+  getAdvisorPlan,
   getEnvironment,
   getExpert,
   getFile,
@@ -31,6 +34,7 @@ import {
   getRelayApiBaseUrl,
   listEnvironments,
   listApprovals,
+  listAdvisorPlans,
   listExperts,
   listFiles,
   listFileVersions,
@@ -44,6 +48,7 @@ import {
   resolveRelayApiBaseUrl,
   resolveRelayApiRequestUrl,
   restoreSession,
+  retryAdvisorPlan,
   retrySessionTurn,
   sendSessionMessage,
   startSession,
@@ -119,6 +124,21 @@ const approval: ApprovalDto = {
   updatedAt: session.updatedAt, version: 1,
 }
 
+const advisorPlan: AdvisorPlanDto = {
+  organizationId: 'relay', spaceId: 'space-platform', sessionId: session.id, id: 'advisor-plan-1',
+  summary: 'Update the Space description.', dependencies: [], risks: [], status: 'proposed',
+  steps: [{
+    id: 'advisor-step-1', ordinal: 1, kind: 'control_plane', operation: 'space.update',
+    targetType: 'space', targetId: 'space-platform', rationale: 'Clarify ownership.',
+    before: { name: 'Platform', description: '', defaultExpertId: null, defaultEnvironmentId: null, isDefault: true, version: 1 },
+    after: { name: 'Platform', description: 'Delivery Space.', defaultExpertId: null, defaultEnvironmentId: null, isDefault: true, version: 2 },
+    manualAction: null, riskLevel: 'medium', status: 'proposed', failureCode: null,
+    failureMessage: null, startedAt: null, completedAt: null, version: 1,
+  }],
+  requestedBy: 'user-1', confirmedBy: null, confirmedAt: null,
+  createdAt: session.createdAt, updatedAt: session.updatedAt, version: 1,
+}
+
 const messagePage: SessionMessagePage = {
   organizationId: 'relay',
   spaceId: 'space-platform',
@@ -183,6 +203,7 @@ const expertSummary: ExpertSummaryDto = {
   id: 'expert-pr-author',
   organizationId: 'relay',
   spaceId: 'space-platform',
+  kind: 'custom',
   name: 'PR Author',
   description: 'Produces reviewed pull requests.',
   visibility: 'space',
@@ -1115,6 +1136,59 @@ describe('Relay API client', () => {
     const decisionHeaders = new Headers(fetchMock.mock.calls[2][1]?.headers)
     expect(decisionHeaders.get('Idempotency-Key')).toBe('approval-decision-key')
     expect(decisionHeaders.get('If-Match')).toBe('"1"')
+  })
+
+  it('lists, reads, decides, and retries Advisor plans with scoped concurrency headers', async () => {
+    const executing = {
+      ...advisorPlan,
+      status: 'executing' as const,
+      confirmedBy: 'user-1',
+      confirmedAt: '2026-07-12T08:01:00.000Z',
+      updatedAt: '2026-07-12T08:01:00.000Z',
+      version: 2,
+    }
+    const failed = {
+      ...executing,
+      status: 'failed' as const,
+      steps: [{
+        ...executing.steps[0], status: 'failed' as const,
+        failureCode: 'version_conflict', failureMessage: 'Generate a new plan.',
+        startedAt: '2026-07-12T08:01:00.000Z', completedAt: '2026-07-12T08:02:00.000Z', version: 3,
+      }],
+      updatedAt: '2026-07-12T08:02:00.000Z',
+      version: 3,
+    }
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({
+        organizationId: advisorPlan.organizationId,
+        spaceId: advisorPlan.spaceId,
+        sessionId: advisorPlan.sessionId,
+        items: [advisorPlan],
+      }))
+      .mockResolvedValueOnce(jsonResponse(advisorPlan))
+      .mockResolvedValueOnce(jsonResponse(executing))
+      .mockResolvedValueOnce(jsonResponse(failed))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listAdvisorPlans('relay', 'space-platform', session.id)).resolves.toMatchObject({
+      items: [{ id: advisorPlan.id }],
+    })
+    await expect(getAdvisorPlan('relay', 'space-platform', session.id, advisorPlan.id)).resolves.toEqual(advisorPlan)
+    await expect(decideAdvisorPlan(
+      'relay', 'space-platform', session.id, advisorPlan.id,
+      { decision: 'confirmed' }, 1, 'advisor-decision-key',
+    )).resolves.toMatchObject({ status: 'executing', version: 2 })
+    await expect(retryAdvisorPlan(
+      'relay', 'space-platform', session.id, advisorPlan.id,
+      3, 'advisor-retry-key',
+    )).resolves.toMatchObject({ status: 'failed', version: 3 })
+
+    const decisionHeaders = new Headers(fetchMock.mock.calls[2][1]?.headers)
+    expect(decisionHeaders.get('Idempotency-Key')).toBe('advisor-decision-key')
+    expect(decisionHeaders.get('If-Match')).toBe('"1"')
+    const retryHeaders = new Headers(fetchMock.mock.calls[3][1]?.headers)
+    expect(retryHeaders.get('Idempotency-Key')).toBe('advisor-retry-key')
+    expect(retryHeaders.get('If-Match')).toBe('"3"')
   })
 
   it('discovers the authenticated actor and authorized tenant hierarchy', async () => {

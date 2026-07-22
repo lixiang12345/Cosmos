@@ -1,5 +1,7 @@
 import {
   ApiErrorSchema,
+  AdvisorPlanDtoSchema,
+  AdvisorPlanListResponseSchema,
   AutomationDtoSchema,
   AutomationEventDtoSchema,
   CreateSessionRequestSchema,
@@ -20,11 +22,13 @@ import {
   SendSessionMessageResponseSchema,
   StartSessionResponseSchema,
   type CreateSessionRequestInput,
+  type AdvisorPlanDto,
   type EnvironmentDetailDto,
   type ExpertDetailDto,
 } from '@relay/contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.js'
+import type { AdvisorPlanRepository } from './advisor-plan-repository.js'
 import type { AutomationRepository } from './automation-repository.js'
 import type { SpaceRepository } from './space-repository.js'
 import { createDevelopmentAuthenticator } from './auth.js'
@@ -128,6 +132,7 @@ const expertDetail: ExpertDetailDto = {
   id: 'expert-pr-author',
   organizationId: 'relay',
   spaceId: 'platform',
+  kind: 'custom',
   name: 'PR Author',
   description: 'Produces reviewed pull requests.',
   visibility: 'space',
@@ -328,6 +333,20 @@ const spaceDto = SpaceDtoSchema.parse({
   description: 'Platform workspace.', isDefault: true, status: 'active',
   defaultExpertId: 'expert-pr-author', defaultEnvironmentId: 'environment-platform',
   settings: {}, version: 2, createdAt: '2026-07-22T00:00:00.000Z', updatedAt: '2026-07-22T01:00:00.000Z',
+})
+
+const advisorManualPlan: AdvisorPlanDto = AdvisorPlanDtoSchema.parse({
+  organizationId: 'relay', spaceId: 'platform', sessionId: 'session-advisor', id: 'plan-advisor',
+  summary: 'Complete provider authorization.', dependencies: [], risks: [], status: 'proposed',
+  steps: [{
+    id: 'step-advisor', ordinal: 1, kind: 'manual_action', operation: null,
+    targetType: null, targetId: null, rationale: null, before: null, after: null,
+    manualAction: { kind: 'oauth', label: 'Authorize provider', instructions: 'Open trusted Integration settings.' },
+    riskLevel: 'high', status: 'proposed', failureCode: null, failureMessage: null,
+    startedAt: null, completedAt: null, version: 1,
+  }],
+  requestedBy: 'user-local-admin', confirmedBy: null, confirmedAt: null,
+  createdAt: '2026-07-22T00:00:00.000Z', updatedAt: '2026-07-22T00:00:00.000Z', version: 1,
 })
 
 function testSpaceRepository(): SpaceRepository {
@@ -1947,6 +1966,68 @@ describe('Relay API', () => {
     expect(otherSpace.statusCode).toBe(201)
     expect(otherSpace.headers['idempotency-replayed']).toBe('false')
     expect((await repository.listBySpace('relay', 'commerce', 'user-local-admin')).items).toHaveLength(1)
+  })
+
+  it('lists Advisor plans and stops OAuth execution at action required after confirmation', async () => {
+    const confirmedAt = '2026-07-22T00:01:00.000Z'
+    const executing = AdvisorPlanDtoSchema.parse({
+      ...advisorManualPlan,
+      status: 'executing', confirmedBy: 'user-local-admin', confirmedAt,
+      updatedAt: confirmedAt, version: 2,
+    })
+    const actionStep = {
+      ...executing.steps[0],
+      status: 'action_required' as const,
+      completedAt: '2026-07-22T00:02:00.000Z',
+      version: 2,
+    }
+    const awaitingAction = AdvisorPlanDtoSchema.parse({
+      ...executing, steps: [actionStep], updatedAt: '2026-07-22T00:02:00.000Z',
+    })
+    const final = AdvisorPlanDtoSchema.parse({
+      ...awaitingAction, status: 'action_required', updatedAt: '2026-07-22T00:03:00.000Z', version: 3,
+    })
+    const advisorPlanRepository: AdvisorPlanRepository = {
+      proposePlan: vi.fn(),
+      listPlans: vi.fn().mockResolvedValue([advisorManualPlan]),
+      getPlan: vi.fn().mockResolvedValueOnce(executing).mockResolvedValueOnce(awaitingAction),
+      decidePlan: vi.fn().mockResolvedValue({ plan: executing, replayed: false }),
+      prepareRetry: vi.fn(),
+      startStep: vi.fn(),
+      finishStep: vi.fn().mockResolvedValue(actionStep),
+      finishPlan: vi.fn().mockResolvedValue(final),
+    }
+    const app = createApp({
+      sessionRepository: testRepository(),
+      advisorPlanRepository,
+      spaceRepository: testSpaceRepository(),
+      authenticate: createDevelopmentAuthenticator('user-local-admin'),
+      executionReadinessCheck: async () => true,
+    })
+    openApps.push(app)
+    const baseUrl = '/api/v1/organizations/relay/spaces/platform/sessions/session-advisor/advisor/plans'
+    const listed = await app.inject({ method: 'GET', url: baseUrl })
+    expect(listed.statusCode).toBe(200)
+    expect(AdvisorPlanListResponseSchema.parse(listed.json()).items).toEqual([advisorManualPlan])
+
+    const withoutPrecondition = await app.inject({
+      method: 'POST', url: `${baseUrl}/${advisorManualPlan.id}/decision`,
+      headers: { 'idempotency-key': 'advisor-confirm' },
+      payload: { decision: 'confirmed' },
+    })
+    expect(withoutPrecondition.statusCode).toBe(428)
+
+    const decided = await app.inject({
+      method: 'POST', url: `${baseUrl}/${advisorManualPlan.id}/decision`,
+      headers: { 'idempotency-key': 'advisor-confirm', 'if-match': '"1"' },
+      payload: { decision: 'confirmed' },
+    })
+    expect(decided.statusCode, decided.body).toBe(200)
+    expect(decided.headers.etag).toBe('"3"')
+    expect(AdvisorPlanDtoSchema.parse(decided.json())).toEqual(final)
+    expect(advisorPlanRepository.finishStep).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'action_required', stepId: advisorManualPlan.steps[0]?.id,
+    }))
   })
 
   it('serves the production Automation control-plane routes through the shared contracts', async () => {

@@ -4,11 +4,11 @@
 >
 > 更新日期：2026-07-22
 >
-> 基线提交：随本次 Space 权威模型交付更新
+> 基线提交：Advisor 受控执行交付后更新
 
 ## 结论
 
-Space 管理权威模型已完成。下一条垂直切片是 **Advisor 受控执行**：让内置 Advisor 通过普通 Session 生成 plan/diff，在用户确认后调用受控控制面工具，并把失败恢复与审计接入同一事实链。
+Space 管理与 Advisor 受控执行已完成。下一条垂直切片是 **生产硬化**：补齐对象存储、配额、PITR/恢复、限流、实时撤权、通知/SLO 和负载/故障演练证据。
 
 ```text
 Organization → Space defaults → Expert published revision + Environment ready revision → Session execution snapshot
@@ -39,6 +39,7 @@ Environment 已具备 Cloud/Daemon 类型、immutable revision、provisioning wo
 | Space 删除迁移 | 已计算源/目标与 Sessions/Experts/Environments/Automations/Files 影响，并阻止 Default Space 迁移 | 逐资源迁移执行、恢复/回滚与最终 archive/delete 仍 capability-gated |
 | Files | Worker 内部 append 与只读浏览已存在，provider 写入和对象存储未完成 | 代码修改闭环不能对外承诺 |
 | Agent execution | 基础对话和只读 Workspace tools 可用，coding sandbox/外部写工具未开放 | 不能把执行结果当成完整代码交付能力 |
+| Advisor model provider | 控制面 plan/diff/confirm 闭环已完成；本地配置的兼容 provider `/models` 可访问，但 `/chat/completions` 对当前客户端返回 403 | Worker 会安全记录 `provider_http_error`；不会伪造 plan 或执行成功，需 provider 放行后再做在线模型 smoke |
 | Production hardening | 高可用、PITR、容量和负载恢复证据未完成 | 仍不适合直接承载公网客户数据 |
 
 ## M3-E：Environment 生命周期（已完成）
@@ -133,14 +134,36 @@ Space Admin 可以在统一、克制的 Cosmos 风格控制面中：
 - Space membership、邀请与批量角色管理；当前继续由身份/membership 数据源提供。
 - settings 的产品化字段与 Organization 级治理策略；当前只提供有界 JSON authority。
 
+## M4-C：Advisor 受控执行（已完成）
+
+### 交付结果
+
+- 内置 Advisor 作为普通 Session Expert；通过受控 `advisor_plan_propose` tool 生成结构化 plan，并持久化 before/after diff、风险、依赖和执行状态。
+- 用户显式确认后才执行控制面写入；当前支持 `space.update` 与 `organization.set_default_space`，沿用 Space authority 的 CAS、幂等、RLS、审计和 outbox 事实链。
+- OAuth/Secret 仅生成 `action_required` 人工步骤，不读取、保存或伪造凭据；Environment/Expert/Automation Advisor 动作继续 capability-gated。
+- failed plan 可安全 retry；版本冲突不会重放过期 before state，需重新生成 plan。每个控制步骤使用确定性 `advisor:{planId}:{stepId}` 幂等键。
+- Web Session workbench 展示 plan、diff、依赖、风险、确认/拒绝、失败重试和人工步骤，并覆盖 loading/empty/error/permission 与移动端布局。
+
+### 验证证据
+
+- Contracts 60 tests、API 214 tests、Web 207 tests 通过；OpenAPI lint 通过，生产构建成功。
+- PostgreSQL integration 27 files / 144 tests 通过，覆盖 Advisor proposal 去重、跨 tenant concealment、CAS/confirm、Space authority 写入、审计计数和人工 OAuth action-required。
+- Docker rebuild 后 API、Worker、Web、PostgreSQL 均 healthy；`/api/health` 200、Web 200、migration `070_advisor_controlled_execution.sql` 已应用，日志 fatal/panic/unhandled 扫描干净。
+- 浏览器验证 Advisor 生产 catalog/session、失败/空计划态；桌面 1280px 与 `390×844` 均无横向溢出。在线模型 smoke 受 provider `/chat/completions` 403 限制，未把失败伪装成成功。
+
+### 明确延期
+
+- 真实模型 provider 放行前，不承诺在线 Advisor 自动生成 plan；控制面和 Web 在 provider unavailable 时继续显示安全失败。
+- `environment.*`、`expert.*`、`automation.*` 等更高风险 Advisor 操作需单独 capability、schema、迁移与人工确认设计。
+
 ## M4 排序
 
 后续按以下顺序推进：
 
 1. **Automation 权威模型（M4-A 已完成）**：已交付 Trigger 唯一资源、Event 去重/脱敏/匹配、ServiceAccount Session dispatch 与同源 Run History；上述延期项在后续 Automation hardening 收口。
 2. **Space 管理（M4-B 已完成）**：已交付 Default、默认 Expert/Environment、删除迁移预览和真实 scope 切换；实际迁移执行保持 capability-gated。
-3. **Advisor 受控执行（下一步）**：plan/diff/confirm、受控工具、失败恢复和审计；OAuth/Secret 只返回人工步骤，不伪造完成。
-4. **生产硬化**：对象存储、配额、PITR/恢复、限流、实时撤权、通知/SLO、负载与故障演练。
+3. **Advisor 受控执行（M4-C 已完成）**：plan/diff/confirm、受控工具、失败恢复和审计；OAuth/Secret 只返回人工步骤，不伪造完成。
+4. **生产硬化（下一步）**：对象存储、配额、PITR/恢复、限流、实时撤权、通知/SLO、负载与故障演练。
 
 Pinned Sessions、Artifact 高级搜索和高级启动覆盖属于 P2，在上述 P1 控制面闭环之后处理。
 

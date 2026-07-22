@@ -5,6 +5,7 @@ import { UnavailableEnvironmentProvisioner } from './environment-provisioning-re
 import { EnvironmentProvisioningWorker } from './environment-provisioning-worker.js'
 import { assertMigrationsCurrent } from './migrations.js'
 import { PostgresExecutionRepository } from './postgres-execution-repository.js'
+import { PostgresAdvisorPlanRepository } from './postgres-advisor-plan-repository.js'
 import { PostgresEnvironmentProvisioningRepository } from './postgres-environment-provisioning-repository.js'
 import { PostgresFileRepository } from './postgres-file-repository.js'
 import { assertRuntimeDatabaseRole, createRuntimePool } from './postgres-runtime-database.js'
@@ -51,6 +52,7 @@ try {
   const toolBroker = new GovernedConversationToolBroker(
     new PostgresToolCoordinatorRepository(pool),
     new PostgresFileRepository(pool),
+    new PostgresAdvisorPlanRepository(pool),
   )
   const readinessRepository = new PostgresWorkerReadinessRepository(pool)
   const worker = new ExecutionWorker({

@@ -1,6 +1,7 @@
-import type { FileDto, FileVersionDto, ToolCallDto } from '@relay/contracts'
+import type { AdvisorPlanDto, FileDto, FileVersionDto, ToolCallDto } from '@relay/contracts'
 import { describe, expect, it, vi } from 'vitest'
 import type { FileRepository } from './file-repository.js'
+import type { AdvisorPlanRepository } from './advisor-plan-repository.js'
 import {
   GovernedConversationToolBroker,
   type ConversationToolContext,
@@ -73,6 +74,30 @@ const fileVersion: FileVersionDto = {
   sourceSessionId: context.sessionId,
   sourceTurnId: context.turnId,
   createdAt: file.createdAt,
+}
+
+const advisorPlan: AdvisorPlanDto = {
+  organizationId: context.organizationId, spaceId: context.spaceId,
+  sessionId: context.sessionId, id: 'advisor-plan-a',
+  summary: 'Update the Space description.', dependencies: [], risks: [], status: 'proposed',
+  steps: [{
+    id: 'advisor-step-a', ordinal: 1, kind: 'control_plane', operation: 'space.update',
+    targetType: 'space', targetId: context.spaceId, rationale: 'Clarify ownership.',
+    before: { name: 'Space A', description: '', defaultExpertId: null, defaultEnvironmentId: null, isDefault: false, version: 1 },
+    after: { name: 'Space A', description: 'Delivery Space.', defaultExpertId: null, defaultEnvironmentId: null, isDefault: false, version: 2 },
+    manualAction: null, riskLevel: 'medium', status: 'proposed', failureCode: null,
+    failureMessage: null, startedAt: null, completedAt: null, version: 1,
+  }],
+  requestedBy: context.requestedBy, confirmedBy: null, confirmedAt: null,
+  createdAt: '2026-07-22T00:00:00.000Z', updatedAt: '2026-07-22T00:00:00.000Z', version: 1,
+}
+
+function advisorPlans(): AdvisorPlanRepository {
+  return {
+    proposePlan: vi.fn().mockResolvedValue(advisorPlan),
+    listPlans: vi.fn(), getPlan: vi.fn(), decidePlan: vi.fn(), prepareRetry: vi.fn(),
+    startStep: vi.fn(), finishStep: vi.fn(), finishPlan: vi.fn(),
+  }
 }
 
 function coordinator(): ToolCoordinatorRepository {
@@ -189,6 +214,37 @@ describe('GovernedConversationToolBroker', () => {
       file: { id: file.id, path: file.path },
       version: 1,
       content: 'export const value = 1',
+    })
+  })
+
+  it('persists an Advisor proposal without applying the control-plane change', async () => {
+    const repository = advisorPlans()
+    const toolCoordinator = coordinator()
+    const broker = new GovernedConversationToolBroker(toolCoordinator, files(), repository)
+    const proposal = {
+      summary: 'Update the Space description.', dependencies: [], risks: [],
+      steps: [{
+        kind: 'control_plane' as const, operation: 'space.update' as const,
+        changes: { description: 'Delivery Space.' }, rationale: 'Clarify ownership.',
+      }],
+    }
+    const result = await broker.execute(context, {
+      providerToolCallId: 'provider-advisor-plan', name: 'advisor_plan_propose', input: proposal,
+    }, 1)
+
+    expect(broker.definitions.map(({ name }) => name)).toContain('advisor_plan_propose')
+    expect(repository.proposePlan).toHaveBeenCalledWith(expect.objectContaining({
+      organizationId: context.organizationId,
+      spaceId: context.spaceId,
+      actorId: context.requestedBy,
+      providerToolCallId: 'provider-advisor-plan',
+      proposal,
+    }))
+    expect(toolCoordinator.createToolCall).toHaveBeenCalledWith(expect.objectContaining({
+      operation: 'propose', riskLevel: 'low',
+    }))
+    expect(JSON.parse(result.content)).toMatchObject({
+      ok: true, planId: advisorPlan.id, status: 'proposed',
     })
   })
 

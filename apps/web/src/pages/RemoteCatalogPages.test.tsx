@@ -59,6 +59,7 @@ const publishedExpert: ExpertSummaryDto = {
   id: 'expert-published',
   organizationId: 'organization-a',
   spaceId: 'space-a',
+  kind: 'custom',
   name: 'Published Expert',
   description: 'Reviews production changes.',
   visibility: 'space',

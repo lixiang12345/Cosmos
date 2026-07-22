@@ -56,6 +56,7 @@ describeWithDatabase('development database bootstrap', () => {
     const catalog = await pool.query<{
       environments: number
       experts: number
+      built_in_experts: number
       repositories: number
     }>(`
       SELECT
@@ -63,9 +64,13 @@ describeWithDatabase('development database bootstrap', () => {
           WHERE organization_id = 'relay' AND status = 'ready') AS environments,
         (SELECT count(*)::integer FROM relay_experts
           WHERE organization_id = 'relay' AND status = 'published') AS experts,
+        (SELECT count(*)::integer FROM relay_experts
+          WHERE organization_id = 'relay' AND status = 'published' AND kind = 'built_in') AS built_in_experts,
         (SELECT count(*)::integer FROM relay_environment_revision_repositories
           WHERE organization_id = 'relay' AND is_default) AS repositories
     `)
-    expect(catalog.rows).toEqual([{ environments: 2, experts: 2, repositories: 2 }])
+    expect(catalog.rows).toEqual([{
+      environments: 2, experts: 4, built_in_experts: 2, repositories: 2,
+    }])
   })
 })

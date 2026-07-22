@@ -105,6 +105,22 @@ export {
 } from './auth.js'
 export { loadConfig, loadMigrationConfig, type ApiConfig, type MigrationConfig } from './config.js'
 export { bootstrapDevelopmentDatabase } from './development-database-bootstrap.js'
+export { AdvisorPlanExecutor } from './advisor-plan-executor.js'
+export {
+  AdvisorPlanIdempotencyConflictError,
+  AdvisorPlanPermissionError,
+  AdvisorPlanStateConflictError,
+  AdvisorPlanValidationError,
+  AdvisorPlanVersionConflictError,
+  EmptyAdvisorPlanRepository,
+  type AdvisorPlanMutationResult,
+  type AdvisorPlanRepository,
+  type AdvisorPlanScope,
+  type DecideAdvisorPlanRecord,
+  type ProposeAdvisorPlanRecord,
+  type RetryAdvisorPlanRecord,
+} from './advisor-plan-repository.js'
+export { PostgresAdvisorPlanRepository } from './postgres-advisor-plan-repository.js'
 export { loadWorkerConfig, type WorkerConfig } from './worker-config.js'
 export {
   AgentProviderError,
