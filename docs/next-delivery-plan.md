@@ -172,8 +172,27 @@ Space Admin 可以在统一、克制的 Cosmos 风格控制面中：
 
 ### 明确延期
 
-- 生产 bucket/IAM/KMS、生命周期/retention、orphan object GC、跨区域复制和对象备份恢复演练。
+- 生产 bucket/IAM/KMS、生命周期/retention、跨区域复制和对象备份恢复演练。
 - 现有 Worker 仍只通过受控 File repository 读对象；coding sandbox、外部写工具和大输出对象化另有 capability 边界。
+
+## 生产硬化-2：Object retention 与 orphan GC（已完成）
+
+### 交付结果
+
+- `ObjectStore` 增加有界分页 list；GC 只扫描 `organizations/` prefix，按 PostgreSQL `relay_file_versions.object_key` 权威引用集保护仍在使用的对象。
+- `pnpm object-storage:gc` 要求显式 `dry_run|apply`，最小保护窗 24 小时、单次对象上限有界，并用全局 advisory lock 阻止并发运行。
+- Migration `072_object_storage_gc_runs.sql` 建立 append-only、count-only 运维账本，不保存 object key、客户路径或凭据；partial/failed 使用安全错误码。
+- Runbook 明确 bucket 版本化、KMS、公开访问阻断、最小 IAM、生命周期与恢复抽样要求；GC 不由 API/Worker 静默触发。
+
+### 验证证据
+
+- Contracts 60 tests、API 217 tests、Web 207 tests 与生产构建通过；PostgreSQL integration 28 files / 147 tests 通过。
+- GC 专项验证 dry-run 不删除、apply 只删除超龄 orphan、引用对象保持可读、运行证据不可 UPDATE/DELETE。
+
+### 明确延期
+
+- 真实云 bucket/IAM/KMS/跨区域复制的部署和季度恢复演练必须在目标环境执行，仓库代码不能替代云侧证据。
+- 下一条生产硬化切片转向 Organization 配额权威模型与限流共享状态。
 
 ## M4 排序
 
@@ -182,7 +201,7 @@ Space Admin 可以在统一、克制的 Cosmos 风格控制面中：
 1. **Automation 权威模型（M4-A 已完成）**：已交付 Trigger 唯一资源、Event 去重/脱敏/匹配、ServiceAccount Session dispatch 与同源 Run History；上述延期项在后续 Automation hardening 收口。
 2. **Space 管理（M4-B 已完成）**：已交付 Default、默认 Expert/Environment、删除迁移预览和真实 scope 切换；实际迁移执行保持 capability-gated。
 3. **Advisor 受控执行（M4-C 已完成）**：plan/diff/confirm、受控工具、失败恢复和审计；OAuth/Secret 只返回人工步骤，不伪造完成。
-4. **生产硬化（进行中）**：对象存储代码切片已完成；下一项是生产 bucket/IAM/retention 与 orphan GC，再推进配额、PITR/恢复、限流、实时撤权、通知/SLO、负载与故障演练。
+4. **生产硬化（进行中）**：对象存储与 orphan GC 代码切片已完成；下一项是 Organization 配额权威模型与共享限流，再推进 PITR/恢复、实时撤权、通知/SLO、负载与故障演练。
 
 Pinned Sessions、Artifact 高级搜索和高级启动覆盖属于 P2，在上述 P1 控制面闭环之后处理。
 

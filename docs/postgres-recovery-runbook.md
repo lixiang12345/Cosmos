@@ -59,3 +59,20 @@ pnpm db:restore
 ## FileVersion 对象存储配置
 
 生产 API 和 Worker 还必须从 Secret Manager 注入 `OBJECT_STORAGE_ENDPOINT`、`OBJECT_STORAGE_REGION`、`OBJECT_STORAGE_BUCKET`、`OBJECT_STORAGE_ACCESS_KEY_ID` 和 `OBJECT_STORAGE_SECRET_ACCESS_KEY`；可选的 `OBJECT_STORAGE_FORCE_PATH_STYLE=true` 仅用于 S3-compatible 开发端点。服务在 staging/production 缺少任一项时拒绝启动。对象 key 不含客户路径，恢复演练必须同时核验对象 checksum、FileVersion metadata 和授权下载。
+
+对象存储身份只允许目标 bucket 的 `ListBucket`，以及 `organizations/` prefix 下的 `GetObject`、条件 `PutObject` 和 `DeleteObject`；不得授予 bucket policy、IAM、KMS key 管理或其他 bucket 权限。生产 bucket 必须启用版本化、默认 KMS 加密、公开访问阻断、访问日志和生命周期策略，删除保护期不得短于数据库/对象恢复窗口。
+
+## Orphan object GC
+
+GC 是独立运维命令，不由 API 或执行 Worker 自动运行。默认先 dry-run，保护窗至少 24 小时，并限制单次扫描对象数：
+
+```bash
+export OBJECT_STORAGE_GC_MODE=dry_run
+export OBJECT_STORAGE_GC_MIN_AGE_SECONDS=86400
+export OBJECT_STORAGE_GC_MAX_OBJECTS=100000
+pnpm object-storage:gc
+```
+
+核对 `scannedObjects`、`referencedObjects` 和 `eligibleObjects` 后，经变更审批将 mode 改为 `apply`。命令使用全局 advisory lock 阻止并发运行，只删除超过保护窗且在 `relay_file_versions.object_key` 中不存在的对象；不打印对象 key。每次完成都会向 append-only `relay_object_storage_gc_runs` 写入计数、模式、时间和安全错误码。`partial` 或 `failed` 必须告警并停止后续批次，不能反复盲删。
+
+季度恢复演练还需从隔离恢复库抽样 object-backed FileVersion，验证 metadata 指向的对象可读取、size/SHA-256 一致、无权限 actor 仍被拒绝，并对一次合成 orphan 先 dry-run 再 apply。

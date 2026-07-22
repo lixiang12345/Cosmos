@@ -104,6 +104,12 @@ export {
 } from './object-storage.js'
 export { loadObjectStorageConfig, type ObjectStorageConfig } from './object-storage-config.js'
 export {
+  runObjectStorageGc,
+  type ObjectStorageGcMode,
+  type ObjectStorageGcOptions,
+  type ObjectStorageGcResult,
+} from './object-storage-gc.js'
+export {
   AuthenticationError,
   createDevelopmentAuthenticator,
   createJwtAuthenticator,

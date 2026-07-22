@@ -153,7 +153,7 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
       WHERE relnamespace = current_schema()::regnamespace
         AND relname LIKE 'relay_%'
         AND relkind = 'r'
-        AND relname NOT IN ('relay_schema_migrations', 'relay_worker_heartbeats')
+        AND relname NOT IN ('relay_schema_migrations', 'relay_worker_heartbeats', 'relay_object_storage_gc_runs')
     `)
     expect(protection.rows[0]).toEqual({
       protected_tables: '48',

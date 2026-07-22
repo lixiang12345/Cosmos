@@ -2,6 +2,7 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   PutObjectCommand,
+  ListObjectsV2Command,
   S3Client,
   S3ServiceException,
 } from '@aws-sdk/client-s3'
@@ -11,6 +12,10 @@ export interface ObjectStore {
   put(key: string, content: Buffer, contentType: string): Promise<void>
   get(key: string): Promise<Buffer | null>
   delete(key: string): Promise<void>
+  list(prefix: string, continuationToken?: string, limit?: number): Promise<{
+    objects: Array<{ key: string; size: number; lastModified: Date }>
+    continuationToken: string | null
+  }>
 }
 
 export class ObjectStorageError extends Error {
@@ -90,13 +95,36 @@ export class S3ObjectStore implements ObjectStore {
       throw new ObjectStorageError('Object storage cleanup failed.', { cause: error })
     }
   }
+
+  async list(prefix: string, continuationToken?: string, limit = 1_000) {
+    try {
+      const response = await this.client.send(new ListObjectsV2Command({
+        Bucket: this.options.bucket,
+        Prefix: safeKey(prefix),
+        ContinuationToken: continuationToken,
+        MaxKeys: limit,
+      }))
+      return {
+        objects: (response.Contents ?? []).flatMap((item) => (
+          typeof item.Key === 'string' && item.LastModified instanceof Date
+            ? [{ key: item.Key, size: item.Size ?? 0, lastModified: item.LastModified }]
+            : []
+        )),
+        continuationToken: response.IsTruncated ? (response.NextContinuationToken ?? null) : null,
+      }
+    } catch (error) {
+      throw new ObjectStorageError('Object storage listing failed.', { cause: error })
+    }
+  }
 }
 
 export class InMemoryObjectStore implements ObjectStore {
-  private readonly objects = new Map<string, { content: Buffer; contentType: string }>()
+  private readonly objects = new Map<string, { content: Buffer; contentType: string; lastModified: Date }>()
+
+  constructor(private readonly now: () => Date = () => new Date()) {}
 
   async put(key: string, content: Buffer, contentType: string) {
-    this.objects.set(safeKey(key), { content: Buffer.from(content), contentType })
+    this.objects.set(safeKey(key), { content: Buffer.from(content), contentType, lastModified: this.now() })
   }
 
   async get(key: string) {
@@ -106,5 +134,19 @@ export class InMemoryObjectStore implements ObjectStore {
 
   async delete(key: string) {
     this.objects.delete(safeKey(key))
+  }
+
+  async list(prefix: string, continuationToken?: string, limit = 1_000) {
+    const keys = [...this.objects.keys()].filter((key) => key.startsWith(safeKey(prefix))).sort()
+    const start = continuationToken ? Math.max(0, keys.indexOf(continuationToken) + 1) : 0
+    const selected = keys.slice(start, start + limit)
+    const next = start + selected.length < keys.length ? selected.at(-1) ?? null : null
+    return {
+      objects: selected.map((key) => {
+        const value = this.objects.get(key)!
+        return { key, size: value.content.byteLength, lastModified: new Date(value.lastModified) }
+      }),
+      continuationToken: next,
+    }
   }
 }
