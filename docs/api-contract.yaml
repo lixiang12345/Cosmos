@@ -225,7 +225,7 @@ paths:
 
   /organizations/{organizationId}:
     parameters:
-      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
     get:
       tags: [Organizations]
       operationId: getOrganization
@@ -279,37 +279,29 @@ paths:
 
   /organizations/{organizationId}/spaces:
     parameters:
-      - $ref: '#/components/parameters/OrganizationId'
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
     get:
       tags: [Spaces]
       operationId: listSpaces
+      x-relay-implementation-status: implemented
       summary: List accessible spaces
-      parameters:
-        - $ref: '#/components/parameters/Cursor'
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Search'
       responses:
         '200':
           description: Space page
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: '#/components/schemas/Page'
-                  - type: object
-                    required: [items]
-                    properties:
-                      items:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/Space'
+                $ref: '#/components/schemas/RuntimeSpaceListResponse'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/RuntimeUnauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/RuntimeForbidden'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
     post:
       tags: [Spaces]
       operationId: createSpace
+      x-relay-implementation-status: implemented
       summary: Create a space
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -330,7 +322,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Space'
+                $ref: '#/components/schemas/RuntimeSpaceMutationResponse'
         '400':
           $ref: '#/components/responses/RuntimeBadRequest'
         '409':
@@ -346,11 +338,12 @@ paths:
 
   /organizations/{organizationId}/spaces/{spaceId}:
     parameters:
-      - $ref: '#/components/parameters/OrganizationId'
-      - $ref: '#/components/parameters/SpaceId'
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
     get:
       tags: [Spaces]
       operationId: getSpace
+      x-relay-implementation-status: implemented
       summary: Get a space
       responses:
         '200':
@@ -361,15 +354,21 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Space'
+                $ref: '#/components/schemas/RuntimeSpace'
         '404':
-          $ref: '#/components/responses/NotFound'
+          $ref: '#/components/responses/RuntimeNotFound'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
     patch:
       tags: [Spaces]
       operationId: updateSpace
+      x-relay-implementation-status: implemented
       summary: Update defaults or metadata for a space
       parameters:
         - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -385,11 +384,21 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Space'
+                $ref: '#/components/schemas/RuntimeSpaceMutationResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
         '412':
-          $ref: '#/components/responses/PreconditionFailed'
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
     delete:
       tags: [Spaces]
       operationId: deleteSpace
@@ -409,6 +418,73 @@ paths:
           $ref: '#/components/responses/Conflict'
         '412':
           $ref: '#/components/responses/PreconditionFailed'
+
+  /organizations/{organizationId}/spaces/{spaceId}/default:
+    parameters:
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
+    post:
+      tags: [Spaces]
+      operationId: setDefaultSpace
+      x-relay-implementation-status: implemented
+      summary: Make an active Space the Organization default
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Default Space changed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeSpaceMutationResponse'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
+        '412':
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+
+  /organizations/{organizationId}/spaces/{spaceId}/migration-preview:
+    parameters:
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
+    get:
+      tags: [Spaces]
+      operationId: previewSpaceMigration
+      x-relay-implementation-status: implemented
+      summary: Preview resource impact before migrating or deleting a Space
+      parameters:
+        - name: targetSpaceId
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/RuntimeIdentifier'
+      responses:
+        '200':
+          description: Non-destructive migration impact preview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeSpaceMigrationPreview'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
 
   /organizations/{organizationId}/spaces/{spaceId}/experts:
     parameters:
@@ -2930,13 +3006,6 @@ components:
         minimum: 1
         maximum: 500
         default: 100
-    Search:
-      name: search
-      in: query
-      required: false
-      schema:
-        type: string
-        maxLength: 256
     RuntimeCatalogCursor:
       name: cursor
       in: query
@@ -4774,6 +4843,99 @@ components:
         serviceAccountId:
           $ref: '#/components/schemas/RuntimeIdentifier'
       additionalProperties: false
+    RuntimeSpace:
+      type: object
+      required: [id, organizationId, name, slug, description, isDefault, status, defaultExpertId, defaultEnvironmentId, settings, version, createdAt, updatedAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        slug:
+          type: string
+          pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 2000
+        isDefault:
+          type: boolean
+        status:
+          type: string
+          enum: [active, migrating, archived]
+        defaultExpertId:
+          type: [string, 'null']
+        defaultEnvironmentId:
+          type: [string, 'null']
+        settings:
+          type: object
+          additionalProperties: true
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+    RuntimeSpaceListResponse:
+      type: object
+      required: [items, projectionUpdatedAt]
+      properties:
+        items:
+          type: array
+          maxItems: 10000
+          items:
+            $ref: '#/components/schemas/RuntimeSpace'
+        projectionUpdatedAt:
+          type: [string, 'null']
+          format: date-time
+      additionalProperties: false
+    RuntimeSpaceMutationResponse:
+      type: object
+      required: [space, replayed]
+      properties:
+        space:
+          $ref: '#/components/schemas/RuntimeSpace'
+        replayed:
+          type: boolean
+      additionalProperties: false
+    RuntimeSpaceResourceCounts:
+      type: object
+      required: [sessions, experts, environments, automations, files]
+      properties:
+        sessions: { type: integer, minimum: 0 }
+        experts: { type: integer, minimum: 0 }
+        environments: { type: integer, minimum: 0 }
+        automations: { type: integer, minimum: 0 }
+        files: { type: integer, minimum: 0 }
+      additionalProperties: false
+    RuntimeSpaceMigrationPreview:
+      type: object
+      required: [source, target, resourceCounts, canMigrate, blockingReasons]
+      properties:
+        source:
+          $ref: '#/components/schemas/RuntimeSpace'
+        target:
+          $ref: '#/components/schemas/RuntimeSpace'
+        resourceCounts:
+          $ref: '#/components/schemas/RuntimeSpaceResourceCounts'
+        canMigrate:
+          type: boolean
+        blockingReasons:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+            maxLength: 500
+      additionalProperties: false
+
     RuntimeAutomation:
       type: object
       required: [id, organizationId, spaceId, expertId, expertRevisionId, triggerId, name, source, eventType, filter, status, autoArchive, serviceAccountId, lastTestedAt, lastMatchedAt, matchCount, version, createdAt, updatedAt]
@@ -5910,6 +6072,8 @@ components:
           maxLength: 160
         role:
           $ref: '#/components/schemas/SpaceRole'
+        isDefault:
+          type: boolean
       additionalProperties: false
     MeOrganization:
       type: object
@@ -5981,31 +6145,6 @@ components:
           format: uuid
       additionalProperties: false
 
-    Space:
-      allOf:
-        - $ref: '#/components/schemas/ResourceBase'
-        - type: object
-          required: [name, slug, description, isDefault, status]
-          properties:
-            name:
-              type: string
-            slug:
-              type: string
-            description:
-              type: string
-            isDefault:
-              type: boolean
-            status:
-              type: string
-              enum: [active, migrating, archived]
-            defaultExpertId:
-              type: [string, 'null']
-              format: uuid
-            defaultEnvironmentId:
-              type: [string, 'null']
-              format: uuid
-            settings:
-              $ref: '#/components/schemas/JsonObject'
     SpaceCreate:
       type: object
       required: [name]

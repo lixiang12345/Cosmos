@@ -52,7 +52,7 @@ function resolveSelection(me: MeResponse, stored: Selection | undefined) {
     if (organization && space) return { organization, space }
   }
   for (const organization of me.organizations) {
-    const space = organization.spaces[0]
+    const space = organization.spaces.find((candidate) => candidate.isDefault) ?? organization.spaces[0]
     if (space) return { organization, space }
   }
   return undefined

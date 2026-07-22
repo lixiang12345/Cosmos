@@ -33,6 +33,10 @@ import {
   SessionMessagePageSchema,
   SessionWorkerListResponseSchema,
   SendSessionMessageResponseSchema,
+  SpaceDtoSchema,
+  SpaceListResponseSchema,
+  SpaceMigrationPreviewSchema,
+  SpaceMutationResponseSchema,
   StartSessionResponseSchema,
   type ApiError,
   type AutomationDto,
@@ -78,6 +82,11 @@ import {
   type SessionListResponse,
   type SessionMessagePage,
   type SessionWorkerListResponse,
+  type CreateSpaceRequestInput,
+  type SpaceDto,
+  type SpaceListResponse,
+  type SpaceMigrationPreview,
+  type UpdateSpaceRequestInput,
   type SendSessionMessageResponse,
   type StartSessionResponse,
   type UpdateExpertRequestInput,
@@ -441,6 +450,14 @@ function sessionPath(organizationId: string, spaceId: string, sessionId: string)
 
 function expertsPath(organizationId: string, spaceId: string) {
   return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/experts`
+}
+
+function spacesPath(organizationId: string) {
+  return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces`
+}
+
+function spacePath(organizationId: string, spaceId: string) {
+  return `${spacesPath(organizationId)}/${encodeURIComponent(spaceId)}`
 }
 
 function environmentsPath(organizationId: string, spaceId: string) {
@@ -1324,6 +1341,99 @@ export function listExperts(
     }
     return response
   })
+}
+
+export function listSpaces(
+  organizationId: string,
+  auth?: RelayApiAuthContext,
+  signal?: AbortSignal,
+): Promise<SpaceListResponse> {
+  return request(spacesPath(organizationId), {
+    method: 'GET', headers: { Accept: 'application/json' }, signal,
+  }, SpaceListResponseSchema, auth).then((response) => {
+    if (response.items.some((space) => space.organizationId !== organizationId)) {
+      throw new RelayApiError('Relay API returned a Space outside the requested Organization.', {
+        code: 'INVALID_RESPONSE', status: 200,
+      })
+    }
+    return response
+  })
+}
+
+export function getSpace(
+  organizationId: string,
+  spaceId: string,
+  auth?: RelayApiAuthContext,
+  signal?: AbortSignal,
+): Promise<SpaceDto> {
+  return request(spacePath(organizationId, spaceId), {
+    method: 'GET', headers: { Accept: 'application/json' }, signal,
+  }, SpaceDtoSchema, auth).then((space) => {
+    if (space.organizationId !== organizationId || space.id !== spaceId) {
+      throw new RelayApiError('Relay API returned a Space outside the requested scope.', {
+        code: 'INVALID_RESPONSE', status: 200,
+      })
+    }
+    return space
+  })
+}
+
+export function createSpace(
+  organizationId: string,
+  input: CreateSpaceRequestInput,
+  idempotencyKey: string,
+  auth?: RelayApiAuthContext,
+): Promise<SpaceDto> {
+  return request(spacesPath(organizationId), {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify(input),
+  }, SpaceMutationResponseSchema, auth).then(({ space }) => space)
+}
+
+export function updateSpace(
+  organizationId: string,
+  spaceId: string,
+  input: UpdateSpaceRequestInput,
+  version: number,
+  idempotencyKey: string,
+  auth?: RelayApiAuthContext,
+): Promise<SpaceDto> {
+  return request(spacePath(organizationId, spaceId), {
+    method: 'PATCH',
+    headers: {
+      Accept: 'application/json', 'Content-Type': 'application/merge-patch+json',
+      'If-Match': `"${version}"`, 'Idempotency-Key': idempotencyKey,
+    },
+    body: JSON.stringify(input),
+  }, SpaceMutationResponseSchema, auth).then(({ space }) => space)
+}
+
+export function setDefaultSpace(
+  organizationId: string,
+  spaceId: string,
+  version: number,
+  idempotencyKey: string,
+  auth?: RelayApiAuthContext,
+): Promise<SpaceDto> {
+  return request(`${spacePath(organizationId, spaceId)}/default`, {
+    method: 'POST', headers: {
+      Accept: 'application/json', 'If-Match': `"${version}"`, 'Idempotency-Key': idempotencyKey,
+    },
+  }, SpaceMutationResponseSchema, auth).then(({ space }) => space)
+}
+
+export function previewSpaceMigration(
+  organizationId: string,
+  spaceId: string,
+  targetSpaceId: string,
+  auth?: RelayApiAuthContext,
+  signal?: AbortSignal,
+): Promise<SpaceMigrationPreview> {
+  const query = new URLSearchParams({ targetSpaceId }).toString()
+  return request(`${spacePath(organizationId, spaceId)}/migration-preview?${query}`, {
+    method: 'GET', headers: { Accept: 'application/json' }, signal,
+  }, SpaceMigrationPreviewSchema, auth)
 }
 
 export function getExpert(

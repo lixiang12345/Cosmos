@@ -13,6 +13,10 @@ import {
   SessionDtoSchema,
   SessionControlResponseSchema,
   SessionListResponseSchema,
+  SpaceDtoSchema,
+  SpaceListResponseSchema,
+  SpaceMigrationPreviewSchema,
+  SpaceMutationResponseSchema,
   SendSessionMessageResponseSchema,
   StartSessionResponseSchema,
   type CreateSessionRequestInput,
@@ -22,6 +26,7 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.js'
 import type { AutomationRepository } from './automation-repository.js'
+import type { SpaceRepository } from './space-repository.js'
 import { createDevelopmentAuthenticator } from './auth.js'
 import {
   EmptyConfigurationCatalogRepository,
@@ -301,10 +306,12 @@ function testRepository(options: InMemorySessionRepositoryOptions = {}) {
 function testApp(
   repository = testRepository(),
   configurationCatalogRepository?: ConfigurationCatalogRepository,
+  spaceRepository?: SpaceRepository,
 ) {
   const app = createApp({
     sessionRepository: repository,
     configurationCatalogRepository,
+    spaceRepository,
     authenticate: createDevelopmentAuthenticator('user-local-admin'),
     executionReadinessCheck: async () => true,
   })
@@ -315,6 +322,28 @@ function testApp(
 afterEach(async () => {
   await Promise.all(openApps.splice(0).map((app) => app.close()))
 })
+
+const spaceDto = SpaceDtoSchema.parse({
+  id: 'platform', organizationId: 'relay', name: 'Platform', slug: 'platform',
+  description: 'Platform workspace.', isDefault: true, status: 'active',
+  defaultExpertId: 'expert-pr-author', defaultEnvironmentId: 'environment-platform',
+  settings: {}, version: 2, createdAt: '2026-07-22T00:00:00.000Z', updatedAt: '2026-07-22T01:00:00.000Z',
+})
+
+function testSpaceRepository(): SpaceRepository {
+  return {
+    listSpaces: vi.fn(async () => [spaceDto]),
+    getSpace: vi.fn(async () => spaceDto),
+    createSpace: vi.fn(async () => ({ space: { ...spaceDto, id: 'created-space', slug: 'created-space', isDefault: false, version: 1 }, replayed: false })),
+    updateSpace: vi.fn(async () => ({ space: { ...spaceDto, description: 'Updated.', version: 3 }, replayed: false })),
+    setDefaultSpace: vi.fn(async () => ({ space: { ...spaceDto, isDefault: true, version: 3 }, replayed: false })),
+    previewMigration: vi.fn(async () => SpaceMigrationPreviewSchema.parse({
+      source: spaceDto, target: { ...spaceDto, id: 'commerce', slug: 'commerce', name: 'Commerce', isDefault: false },
+      resourceCounts: { sessions: 2, experts: 1, environments: 1, automations: 1, files: 0 },
+      canMigrate: false, blockingReasons: ['The Default Space cannot be migrated.'],
+    })),
+  }
+}
 
 describe('Relay API', () => {
   it('reports health', async () => {
@@ -555,6 +584,65 @@ describe('Relay API', () => {
       actor: { id: 'user-local-admin', kind: 'user' },
       organizations: [],
     })
+  })
+
+  it('serves Space authority, defaults, CAS writes, and migration preview', async () => {
+    const spaces = testSpaceRepository()
+    const app = testApp(testRepository(), undefined, spaces)
+    const list = await app.inject({ method: 'GET', url: '/api/v1/organizations/relay/spaces' })
+    expect(list.statusCode).toBe(200)
+    expect(SpaceListResponseSchema.parse(list.json()).items).toEqual([spaceDto])
+
+    const created = await app.inject({
+      method: 'POST', url: '/api/v1/organizations/relay/spaces',
+      headers: { 'idempotency-key': 'space-create' },
+      payload: { name: 'Created Space', description: 'New scope.' },
+    })
+    expect(created.statusCode).toBe(201)
+    expect(SpaceMutationResponseSchema.parse(created.json())).toMatchObject({ space: { id: 'created-space' }, replayed: false })
+    expect(created.headers.location).toContain('/spaces/created-space')
+
+    const updated = await app.inject({
+      method: 'PATCH', url: '/api/v1/organizations/relay/spaces/platform',
+      headers: { 'if-match': '"2"', 'idempotency-key': 'space-update', 'content-type': 'application/merge-patch+json' },
+      payload: { description: 'Updated.' },
+    })
+    expect(updated.statusCode).toBe(200)
+    expect(SpaceMutationResponseSchema.parse(updated.json()).space.version).toBe(3)
+
+    const madeDefault = await app.inject({
+      method: 'POST', url: '/api/v1/organizations/relay/spaces/platform/default',
+      headers: { 'if-match': '"2"', 'idempotency-key': 'space-default' },
+    })
+    expect(madeDefault.statusCode).toBe(200)
+
+    const preview = await app.inject({
+      method: 'GET', url: '/api/v1/organizations/relay/spaces/platform/migration-preview?targetSpaceId=commerce',
+    })
+    expect(preview.statusCode).toBe(200)
+    expect(SpaceMigrationPreviewSchema.parse(preview.json())).toMatchObject({
+      resourceCounts: { sessions: 2 }, canMigrate: false,
+    })
+  })
+
+  it('requires Space write preconditions and manager permissions', async () => {
+    const spaces = testSpaceRepository()
+    const memberRepository = testRepository({
+      actorOrganizations: { 'user-local-admin': [{ id: 'relay', name: 'Relay', role: 'member', spaces: [{ id: 'platform', name: 'Platform', role: 'member' }] }] },
+    })
+    const app = testApp(memberRepository, undefined, spaces)
+    const forbidden = await app.inject({
+      method: 'PATCH', url: '/api/v1/organizations/relay/spaces/platform',
+      headers: { 'if-match': '"2"', 'idempotency-key': 'space-update', 'content-type': 'application/merge-patch+json' },
+      payload: { description: 'Forbidden.' },
+    })
+    expect(forbidden.statusCode).toBe(403)
+    expect(ApiErrorSchema.parse(forbidden.json()).code).toBe('PERMISSION_DENIED')
+    const missingKey = await testApp(testRepository(), undefined, spaces).inject({
+      method: 'POST', url: '/api/v1/organizations/relay/spaces', payload: { name: 'Missing key' },
+    })
+    expect(missingKey.statusCode).toBe(400)
+    expect(ApiErrorSchema.parse(missingKey.json()).code).toBe('IDEMPOTENCY_KEY_REQUIRED')
   })
 
   it('serves paginated Expert and Environment catalogs with canonical private headers', async () => {

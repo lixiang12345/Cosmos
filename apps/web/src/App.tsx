@@ -49,7 +49,7 @@ import {
   startSession,
 } from './services/relayApi'
 import type { NewTaskInput, Run, RunAttempt, TaskCreateMode } from './types'
-import { canCreateSessionInWorkspace, useActiveWorkspace } from './workspace'
+import { canCreateSessionInWorkspace, useActiveWorkspace, useWorkspace } from './workspace'
 
 const RunWorkbench = lazy(() => import('./features/run/RunWorkbench').then((module) => ({ default: module.RunWorkbench })))
 const RemoteSessionWorkbench = lazy(() => import('./features/session/RemoteSessionWorkbench').then((module) => ({ default: module.RemoteSessionWorkbench })))
@@ -67,6 +67,7 @@ const RemoteApprovalsPage = lazy(() => import('./pages/RemoteApprovalsPage').the
 const RemoteAutomationsPage = lazy(() => import('./pages/RemoteAutomationPages').then((module) => ({ default: module.RemoteAutomationsPage })))
 const RemoteAutomationEventLogPage = lazy(() => import('./pages/RemoteAutomationPages').then((module) => ({ default: module.RemoteAutomationEventLogPage })))
 const RemoteAutomationRunHistoryPage = lazy(() => import('./pages/RemoteAutomationPages').then((module) => ({ default: module.RemoteAutomationRunHistoryPage })))
+const RemoteSpacesPage = lazy(() => import('./pages/RemoteSpacesPage').then((module) => ({ default: module.RemoteSpacesPage })))
 const CosmosHomePage = lazy(() => import('./pages/CosmosOperationsPages').then((module) => ({ default: module.CosmosHomePage })))
 const ContextWorkspacePage = lazy(() => import('./pages/ContextWorkspacePage').then((module) => ({ default: module.ContextWorkspacePage })))
 const CosmosFilesPage = lazy(() => import('./pages/CosmosOperationsPages').then((module) => ({ default: module.CosmosFilesPage })))
@@ -957,6 +958,7 @@ function RemoteExpertEditorRoute({
 function RelayApp() {
   const { accessToken, credentialVersion, demoMode, handleUnauthorized } = useAuth()
   const workspace = useActiveWorkspace()
+  const { refresh: refreshWorkspace } = useWorkspace()
   const { organization } = workspace
   const organizationId = organization.id
   const requestIdentity = `${workspace.me.actor.id}\u0000${credentialVersion}`
@@ -2070,7 +2072,7 @@ function RelayApp() {
         <Route path="/mcp" element={demoMode ? <McpRegistryPage onOpenNavigation={openNavigation} /> : productionUnavailable} />
         <Route path="/webhooks" element={demoMode ? <WebhooksPage onOpenNavigation={openNavigation} /> : productionUnavailable} />
         <Route path="/secrets" element={demoMode ? <SecretsPage onOpenNavigation={openNavigation} /> : productionUnavailable} />
-        <Route path="/spaces" element={demoMode ? <SpacesPage onOpenNavigation={openNavigation} /> : productionUnavailable} />
+        <Route path="/spaces" element={demoMode ? <SpacesPage onOpenNavigation={openNavigation} /> : <RemoteSpacesPage key={workspace.space.id} organizationId={organizationId} accessibleSpaces={organization.spaces} activeSpaceId={workspace.space.id} auth={catalogAuth} credentialVersion={credentialVersion} canManage={expertManagementEnabled} onSelectSpace={(spaceId) => workspace.selectSpace(organizationId, spaceId)} onWorkspaceRefresh={refreshWorkspace} onOpenNavigation={openNavigation} />} />
         <Route path="/settings" element={demoMode ? <SettingsPage onOpenNavigation={openNavigation} /> : productionUnavailable} />
         <Route path="/governance" element={demoMode ? <Navigate to="/approvals" replace /> : productionUnavailable} />
         <Route path="/activity" element={demoMode ? <Navigate to="/automations/events" replace /> : productionUnavailable} />

@@ -12044,9 +12044,123 @@ button:disabled {
   }
 }
 
+.remote-space-page .cosmos-page__content,
 .remote-automation-page .cosmos-page__content {
   display: grid;
   gap: 20px;
+}
+
+.remote-space-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.remote-space-card,
+.remote-space-editor,
+.remote-space-migration,
+.remote-space-preview {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.remote-space-card--active {
+  border-color: var(--text-primary);
+}
+
+.remote-space-card > header,
+.remote-space-editor > header,
+.remote-space-migration > header,
+.remote-space-preview > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.remote-space-card h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.remote-space-default,
+.remote-space-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.remote-space-default svg,
+.remote-space-status svg {
+  width: 14px;
+  height: 14px;
+}
+
+.remote-space-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.remote-space-form-grid label {
+  display: grid;
+  gap: 6px;
+}
+
+.remote-space-form-grid input,
+.remote-space-migration select {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  padding: 8px 10px;
+}
+
+.remote-space-migration__controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.remote-space-counts {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.remote-space-counts > div {
+  padding: 10px;
+  border: 1px solid var(--row-line);
+  border-radius: 7px;
+}
+
+.remote-space-counts dd {
+  margin: 4px 0 0;
+  font-size: 20px;
+  font-weight: 650;
+}
+
+@media (max-width: 720px) {
+  .remote-space-form-grid,
+  .remote-space-migration__controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .remote-space-counts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .remote-space-card .cosmos-form-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 
 .remote-automation-page .cosmos-section-heading {

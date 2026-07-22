@@ -12,6 +12,18 @@ export {
   type PostgresAutomationRepositoryOptions,
 } from './postgres-automation-repository.js'
 export {
+  PostgresSpaceRepository,
+  type PostgresSpaceRepositoryOptions,
+} from './postgres-space-repository.js'
+export {
+  EmptySpaceRepository,
+  SpaceIdempotencyConflictError,
+  SpacePermissionError,
+  SpaceValidationError,
+  SpaceVersionConflictError,
+  type SpaceRepository,
+} from './space-repository.js'
+export {
   ContextEngineGatewayError,
   HttpContextEngineGateway,
   type ContextEngineGateway,

@@ -117,6 +117,22 @@ describe('WorkspaceProvider', () => {
     }))
   })
 
+  it('chooses the server-authoritative Default Space when no valid preference exists', async () => {
+    vi.mocked(getMe).mockResolvedValue({
+      ...me,
+      organizations: [{
+        ...me.organizations[0]!,
+        spaces: [
+          { ...me.organizations[0]!.spaces[0]!, isDefault: false },
+          { ...me.organizations[0]!.spaces[1]!, isDefault: true },
+        ],
+      }],
+    })
+    renderWorkspace()
+
+    await waitFor(() => expect(screen.getByTestId('selection')).toHaveTextContent('organization-alpha:space-shared'))
+  })
+
   it('honors only a persisted selection that still exists in the actor memberships', async () => {
     window.localStorage.setItem('relay.workspace.selection.v1', JSON.stringify({
       actorId: 'user-a', organizationId: 'organization-beta', spaceId: 'space-shared',

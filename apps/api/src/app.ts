@@ -18,6 +18,7 @@ import {
   ContextPackRequestSchema,
   ContextSearchRequestSchema,
   CreateAutomationRequestSchema,
+  CreateSpaceRequestSchema,
   CreateEnvironmentRequestSchema,
   CreateExpertRequestSchema,
   CreateArtifactRequestSchema,
@@ -46,6 +47,10 @@ import {
   SessionListResponseSchema,
   SessionShareListResponseSchema,
   SessionWorkerListResponseSchema,
+  SpaceDtoSchema,
+  SpaceListResponseSchema,
+  SpaceMigrationPreviewSchema,
+  SpaceMutationResponseSchema,
   ShareGrantDtoSchema,
   SessionMessagePageSchema,
   SendSessionMessageResponseSchema,
@@ -56,6 +61,7 @@ import {
   UpdateAutomationRequestSchema,
   UpdateExpertRequestSchema,
   UpdateEnvironmentRequestSchema,
+  UpdateSpaceRequestSchema,
   type ApiError,
   type SessionEventDto,
   type SessionEventPage,
@@ -82,6 +88,14 @@ import {
   EmptyAutomationRepository,
   type AutomationRepository,
 } from './automation-repository.js'
+import {
+  EmptySpaceRepository,
+  SpaceIdempotencyConflictError,
+  SpacePermissionError,
+  SpaceValidationError,
+  SpaceVersionConflictError,
+  type SpaceRepository,
+} from './space-repository.js'
 import {
   InvalidArtifactPaginationError,
   encodeArtifactCursor,
@@ -216,6 +230,9 @@ type SpaceParams = {
   spaceId: string
 }
 
+type OrganizationParams = { organizationId: string }
+type SpaceMigrationQuery = { targetSpaceId?: string }
+
 type SessionParams = SpaceParams & {
   sessionId: string
 }
@@ -279,6 +296,7 @@ type ValidationIssue = {
 
 export type CreateAppOptions = {
   automationRepository?: AutomationRepository
+  spaceRepository?: SpaceRepository
   sessionRepository?: SessionRepository
   sessionTimelineRepository?: SessionTimelineRepository
   artifactRepository?: ArtifactRepository
@@ -637,6 +655,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   const configurationCatalogRepository = options.configurationCatalogRepository
     ?? new EmptyConfigurationCatalogRepository()
   const automationRepository = options.automationRepository ?? new EmptyAutomationRepository()
+  const spaceRepository = options.spaceRepository ?? new EmptySpaceRepository()
   const contextEngineGateway = options.contextEngineGateway
   const authenticate = options.authenticate ?? rejectAuthentication
   const executionEnabled = options.executionEnabled ?? true
@@ -774,7 +793,8 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     if (error instanceof IdempotencyConflictError
       || error instanceof ExpertIdempotencyConflictError
       || error instanceof EnvironmentIdempotencyConflictError
-      || error instanceof AutomationIdempotencyConflictError) {
+      || error instanceof AutomationIdempotencyConflictError
+      || error instanceof SpaceIdempotencyConflictError) {
       return sendApiError(reply, 409, request, {
         code: 'IDEMPOTENCY_KEY_REUSED',
         message: error.message,
@@ -844,6 +864,26 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
           expectedVersion: error.expectedVersion,
           currentVersion: error.actualVersion,
         },
+      })
+    }
+
+    if (error instanceof SpaceVersionConflictError) {
+      return sendApiError(reply, 412, request, {
+        code: 'PRECONDITION_FAILED', message: error.message, retryable: false,
+        details: { expectedVersion: error.expectedVersion, currentVersion: error.actualVersion },
+      })
+    }
+
+    if (error instanceof SpacePermissionError) {
+      return sendApiError(reply, 403, request, {
+        code: 'PERMISSION_DENIED', message: error.message, retryable: false,
+      })
+    }
+
+    if (error instanceof SpaceValidationError) {
+      return sendApiError(reply, 409, request, {
+        code: 'SPACE_CONFIGURATION_INVALID', message: error.message, retryable: false,
+        ...(error.field ? { fieldErrors: { [error.field]: [error.message] } } : {}),
       })
     }
 
@@ -1184,6 +1224,125 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     })
   })
 
+  app.get<{ Params: OrganizationParams }>('/api/v1/organizations/:organizationId/spaces', async (request, reply) => {
+    const actor = actorsByRequest.get(request)
+    if (!actor) throw new AuthenticationError()
+    const organizationId = parseSpaceId(request.params.organizationId)
+    if (!organizationId) return sendResourceNotFound(reply, request)
+    const items = await spaceRepository.listSpaces(organizationId, actor.id)
+    return SpaceListResponseSchema.parse({
+      items,
+      projectionUpdatedAt: items[0]?.updatedAt ?? null,
+    })
+  })
+
+  app.post<{ Params: OrganizationParams }>('/api/v1/organizations/:organizationId/spaces', async (request, reply) => {
+    const actor = actorsByRequest.get(request)
+    if (!actor) throw new AuthenticationError()
+    const organizationId = parseSpaceId(request.params.organizationId)
+    if (!organizationId) return sendResourceNotFound(reply, request)
+    const idempotencyKey = readIdempotencyKey(request)
+    if (!idempotencyKey) {
+      return sendApiError(reply, 400, request, {
+        code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
+        fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+      })
+    }
+    const parsed = CreateSpaceRequestSchema.safeParse(request.body)
+    if (!parsed.success) return sendApiError(reply, 400, request, {
+      code: 'VALIDATION_FAILED', message: 'The Space request is invalid.', retryable: false,
+      fieldErrors: validationFieldErrors(parsed.error.issues),
+    })
+    const result = await spaceRepository.createSpace({
+      organizationId, actorId: actor.id, requestId: request.id, idempotencyKey, request: parsed.data,
+    })
+    const response = SpaceMutationResponseSchema.parse(result)
+    reply.header('Idempotency-Replayed', String(response.replayed))
+    reply.header('Location', `/api/v1/organizations/${organizationId}/spaces/${response.space.id}`)
+    reply.header('ETag', resourceEtag(response.space))
+    return reply.code(201).send(response)
+  })
+
+  app.get<{ Params: SpaceParams }>('/api/v1/organizations/:organizationId/spaces/:spaceId', async (request, reply) => {
+    const authorization = await authorizeSpace(request, reply, request.params)
+    if (!authorization) return
+    const space = await spaceRepository.getSpace(
+      authorization.organizationId, authorization.spaceId, authorization.actor.id,
+    )
+    if (!space) return sendResourceNotFound(reply, request)
+    reply.header('ETag', resourceEtag(space))
+    return SpaceDtoSchema.parse(space)
+  })
+
+  app.patch<{ Params: SpaceParams }>('/api/v1/organizations/:organizationId/spaces/:spaceId', async (request, reply) => {
+    const authorization = await authorizeSpace(request, reply, request.params)
+    if (!authorization) return
+    if (!canManageExperts(authorization.access)) return denySpaceMutation(request, reply)
+    const expectedVersion = requireIfMatchVersion(request, reply, 'Space')
+    if (expectedVersion === null) return
+    const idempotencyKey = readIdempotencyKey(request)
+    if (!idempotencyKey) return sendApiError(reply, 400, request, {
+      code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
+      fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+    })
+    const parsed = UpdateSpaceRequestSchema.safeParse(request.body)
+    if (!parsed.success) return sendApiError(reply, 400, request, {
+      code: 'VALIDATION_FAILED', message: 'The Space update is invalid.', retryable: false,
+      fieldErrors: validationFieldErrors(parsed.error.issues),
+    })
+    const result = await spaceRepository.updateSpace({
+      organizationId: authorization.organizationId, spaceId: authorization.spaceId,
+      actorId: authorization.actor.id, requestId: request.id, expectedVersion, idempotencyKey,
+      request: parsed.data,
+    })
+    if (!result) return sendResourceNotFound(reply, request)
+    const response = SpaceMutationResponseSchema.parse(result)
+    reply.header('Idempotency-Replayed', String(response.replayed))
+    reply.header('ETag', resourceEtag(response.space))
+    return response
+  })
+
+  app.post<{ Params: SpaceParams }>('/api/v1/organizations/:organizationId/spaces/:spaceId/default', async (request, reply) => {
+    const authorization = await authorizeSpace(request, reply, request.params)
+    if (!authorization) return
+    if (authorization.access.organizationRole !== 'organization_owner'
+      && authorization.access.organizationRole !== 'organization_admin') return denySpaceMutation(request, reply)
+    const expectedVersion = requireIfMatchVersion(request, reply, 'Space')
+    if (expectedVersion === null) return
+    const idempotencyKey = readIdempotencyKey(request)
+    if (!idempotencyKey) return sendApiError(reply, 400, request, {
+      code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
+      fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+    })
+    const result = await spaceRepository.setDefaultSpace({
+      organizationId: authorization.organizationId, spaceId: authorization.spaceId,
+      actorId: authorization.actor.id, requestId: request.id, expectedVersion, idempotencyKey,
+    })
+    if (!result) return sendResourceNotFound(reply, request)
+    const response = SpaceMutationResponseSchema.parse(result)
+    reply.header('Idempotency-Replayed', String(response.replayed))
+    reply.header('ETag', resourceEtag(response.space))
+    return response
+  })
+
+  app.get<{ Params: SpaceParams; Querystring: SpaceMigrationQuery }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/migration-preview', async (request, reply) => {
+      const authorization = await authorizeSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageExperts(authorization.access)) return denySpaceMutation(request, reply)
+      const targetSpaceId = parseSpaceId(request.query.targetSpaceId ?? '')
+      if (!targetSpaceId) return sendApiError(reply, 400, request, {
+        code: 'VALIDATION_FAILED', message: 'A migration target Space is required.', retryable: false,
+        fieldErrors: { 'query.targetSpaceId': ['Provide a valid target Space id.'] },
+      })
+      const preview = await spaceRepository.previewMigration(
+        authorization.organizationId, authorization.spaceId, targetSpaceId, authorization.actor.id,
+      )
+      if (!preview) return sendResourceNotFound(reply, request)
+      return SpaceMigrationPreviewSchema.parse(preview)
+    },
+  )
+
   app.get('/api/v1/capabilities', async (request) => RuntimeCapabilitiesSchema.parse({
     execution: {
       enabled: await executionAvailable(request),
@@ -1266,6 +1425,14 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     return sendApiError(reply, 403, request, {
       code: 'PERMISSION_DENIED',
       message: 'Only Space Managers and Organization Administrators can manage Automations and Events.',
+      retryable: false,
+    })
+  }
+
+  function denySpaceMutation(request: FastifyRequest, reply: FastifyReply) {
+    return sendApiError(reply, 403, request, {
+      code: 'PERMISSION_DENIED',
+      message: 'Only Space Managers and Organization Administrators can manage Spaces.',
       retryable: false,
     })
   }

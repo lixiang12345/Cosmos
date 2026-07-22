@@ -28,6 +28,7 @@ export const MeSpaceSchema = z.object({
   id: IdentifierSchema,
   name: NameSchema,
   role: SpaceRoleSchema,
+  isDefault: z.boolean().optional(),
 }).strict()
 export type MeSpace = z.infer<typeof MeSpaceSchema>
 

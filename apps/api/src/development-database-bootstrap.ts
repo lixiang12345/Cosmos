@@ -184,6 +184,21 @@ export async function bootstrapDevelopmentDatabase(pool: Pool, actorId: string) 
       ])
     }
 
+    await client.query(`
+      UPDATE relay_organizations
+      SET default_space_id = 'space-platform'
+      WHERE id = 'relay' AND default_space_id IS NULL
+    `)
+    for (const space of developmentSpaces) {
+      await client.query(`
+        UPDATE relay_spaces
+        SET default_expert_id = COALESCE(default_expert_id, $2),
+            default_environment_id = COALESCE(default_environment_id, $3),
+            updated_at = GREATEST(updated_at, created_at)
+        WHERE organization_id = 'relay' AND id = $1
+      `, [space.id, `expert-${space.id}`, `environment-${space.id}`])
+    }
+
     await client.query('COMMIT')
   } catch (error) {
     await client.query('ROLLBACK')

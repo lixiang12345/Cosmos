@@ -706,7 +706,9 @@ function compareNames(left: { id: string; name: string }, right: { id: string; n
 function cloneOrganization(organization: MeOrganization): MeOrganization {
   return {
     ...organization,
-    spaces: organization.spaces.map((space) => ({ ...space })).sort(compareNames),
+    spaces: organization.spaces.map((space) => ({ ...space })).sort((left, right) => (
+      Number(right.isDefault === true) - Number(left.isDefault === true) || compareNames(left, right)
+    )),
   }
 }
 

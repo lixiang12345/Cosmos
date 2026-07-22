@@ -1,4 +1,25 @@
 export {
+  CreateSpaceRequestSchema,
+  SpaceDtoSchema,
+  SpaceListResponseSchema,
+  SpaceMigrationPreviewSchema,
+  SpaceMutationResponseSchema,
+  SpaceResourceCountsSchema,
+  SpaceStatusSchema,
+  UpdateSpaceRequestSchema,
+  type CreateSpaceRequest,
+  type CreateSpaceRequestInput,
+  type SpaceDto,
+  type SpaceListResponse,
+  type SpaceMigrationPreview,
+  type SpaceMutationResponse,
+  type SpaceResourceCounts,
+  type SpaceStatus,
+  type UpdateSpaceRequest,
+  type UpdateSpaceRequestInput,
+} from './space.js'
+
+export {
   AutomationDtoSchema,
   AutomationEventDtoSchema,
   AutomationEventListResponseSchema,

@@ -14,6 +14,7 @@ import { PostgresSecurityAuditRepository } from './postgres-security-audit-repos
 import { PostgresSessionRepository } from './postgres-session-repository.js'
 import { PostgresSessionTimelineRepository } from './postgres-session-timeline-repository.js'
 import { PostgresSessionWorkerRepository } from './postgres-session-worker-repository.js'
+import { PostgresSpaceRepository } from './postgres-space-repository.js'
 import { PostgresToolApprovalRepository } from './postgres-tool-approval-repository.js'
 import { PostgresServiceAccountPolicyRepository } from './service-account-policy-repository.js'
 import { PostgresWorkerReadinessRepository } from './postgres-worker-readiness-repository.js'
@@ -86,6 +87,7 @@ const app = createApp({
   sessionWorkerRepository: pool ? new PostgresSessionWorkerRepository(pool) : undefined,
   artifactRepository: pool ? new PostgresArtifactRepository(pool) : undefined,
   automationRepository: pool ? new PostgresAutomationRepository(pool) : undefined,
+  spaceRepository: pool ? new PostgresSpaceRepository(pool) : undefined,
   fileRepository: pool ? new PostgresFileRepository(pool) : undefined,
   toolApprovalRepository: pool ? new PostgresToolApprovalRepository(pool) : undefined,
   serviceAccountPolicyRepository: pool ? new PostgresServiceAccountPolicyRepository(pool) : undefined,

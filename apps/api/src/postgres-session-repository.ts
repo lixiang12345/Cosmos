@@ -282,10 +282,12 @@ export class PostgresSessionRepository implements SessionRepository {
       space_id: string | null
       space_name: string | null
       space_role: SpaceRole | null
+      space_is_default: boolean | null
     }>(this.pool, { actorId }, `
       SELECT organization.id AS organization_id, organization.name AS organization_name,
         organization_membership.role AS organization_role,
-        space.id AS space_id, space.name AS space_name, space_membership.role AS space_role
+        space.id AS space_id, space.name AS space_name, space_membership.role AS space_role,
+        (organization.default_space_id = space.id) AS space_is_default
       FROM relay_organization_memberships organization_membership
       JOIN relay_organizations organization
         ON organization.id = organization_membership.organization_id
@@ -315,6 +317,7 @@ export class PostgresSessionRepository implements SessionRepository {
           id: row.space_id,
           name: row.space_name,
           role: row.space_role,
+          ...(row.space_is_default === true ? { isDefault: true } : {}),
         })
       }
     }
