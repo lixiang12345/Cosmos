@@ -1,4 +1,4 @@
-import type { ApprovalDto, MeOrganization, ToolCallDto } from '@relay/contracts'
+import type { ApprovalDto, MeOrganization, ToolCallDto } from '@cosmos/contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.js'
 import { createDevelopmentAuthenticator } from './auth.js'
@@ -10,7 +10,7 @@ import {
   type ToolApprovalRepository,
 } from './tool-approval-repository.js'
 
-const organizationId = 'relay'
+const organizationId = 'cosmos'
 const spaceId = 'platform'
 const sessionId = 'session-1'
 const actorId = 'reviewer-1'
@@ -26,7 +26,7 @@ const toolCall: ToolCallDto = {
   operation: 'merge_pull_request',
   riskLevel: 'high',
   status: 'approval_required',
-  inputSummary: 'Merge relay/cosmos#42 into main.',
+  inputSummary: 'Merge cosmos/cosmos#42 into main.',
   outputSummary: null,
   approvalId: 'approval-1',
   createdAt: '2026-07-13T01:00:00.000Z',
@@ -61,7 +61,7 @@ const approval: ApprovalDto = {
 }
 const organizations: MeOrganization[] = [{
   id: organizationId,
-  name: 'Relay',
+  name: 'Cosmos',
   role: 'member',
   spaces: [{ id: spaceId, name: 'Platform', role: 'member' }],
 }]
@@ -224,7 +224,7 @@ describe('ToolCall and Approval API', () => {
     const listApprovals = vi.fn<ToolApprovalRepository['listApprovals']>()
     const app = application(
       repository({ listApprovals }),
-      async () => ({ id: actorId, kind: 'service_account', audience: 'relay-api' }),
+      async () => ({ id: actorId, kind: 'service_account', audience: 'cosmos-api' }),
     )
     const response = await app.inject({
       method: 'GET',

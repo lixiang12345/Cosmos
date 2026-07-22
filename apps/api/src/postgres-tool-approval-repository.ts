@@ -5,7 +5,7 @@ import {
   type ApprovalDto,
   type ApprovalStatus,
   type ToolCallDto,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 import type { Pool, PoolClient } from 'pg'
 import { setLocalApiDatabaseContext } from './postgres-runtime-database.js'
 import { IdempotencyConflictError } from './session-repository.js'
@@ -90,18 +90,18 @@ const approvalColumns = `
   approval.decided_at, approval.created_at, approval.updated_at, approval.version,
   COALESCE((
     SELECT array_agg(assignment.actor_id ORDER BY assignment.actor_id)
-    FROM relay_approval_assignments assignment
+    FROM cosmos_approval_assignments assignment
     WHERE assignment.organization_id = approval.organization_id
       AND assignment.space_id = approval.space_id
       AND assignment.approval_id = approval.id
   ), ARRAY[]::text[]) AS assigned_to,
   EXISTS (
     SELECT 1
-    FROM relay_approval_decisions actor_decision
+    FROM cosmos_approval_decisions actor_decision
     WHERE actor_decision.organization_id = approval.organization_id
       AND actor_decision.space_id = approval.space_id
       AND actor_decision.approval_id = approval.id
-      AND actor_decision.actor_id = current_setting('relay.actor_id', true)
+      AND actor_decision.actor_id = current_setting('cosmos.actor_id', true)
   ) AS actor_has_decided
 `
 
@@ -218,13 +218,13 @@ export class PostgresToolApprovalRepository implements ToolApprovalRepository {
   ): Promise<ToolCallListPage | null> {
     return transaction(this.pool, { organizationId, spaceId, actorId }, async (client) => {
       const session = await client.query(`
-        SELECT 1 FROM relay_sessions
+        SELECT 1 FROM cosmos_sessions
         WHERE organization_id = $1 AND space_id = $2 AND id = $3
       `, [organizationId, spaceId, sessionId])
       if (!session.rowCount) return null
       const rows = await client.query<ToolCallRow>(`
         SELECT ${toolCallColumns}
-        FROM relay_tool_calls
+        FROM cosmos_tool_calls
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
           AND ($4::text IS NULL OR turn_id = $4)
           AND ($5::text IS NULL OR status = $5)
@@ -255,12 +255,12 @@ export class PostgresToolApprovalRepository implements ToolApprovalRepository {
     return transaction(this.pool, { organizationId, spaceId, actorId }, async (client) => {
       const rows = await client.query<ApprovalRow>(`
         SELECT ${approvalColumns}
-        FROM relay_approvals approval
+        FROM cosmos_approvals approval
         WHERE approval.organization_id = $1 AND approval.space_id = $2
           AND ($3::text IS NULL OR approval.status = $3)
           AND ($4::text IS NULL OR approval.session_id = $4)
           AND (NOT $5::boolean OR EXISTS (
-            SELECT 1 FROM relay_approval_assignments mine
+            SELECT 1 FROM cosmos_approval_assignments mine
             WHERE mine.organization_id = approval.organization_id
               AND mine.space_id = approval.space_id
               AND mine.approval_id = approval.id AND mine.actor_id = $6
@@ -293,7 +293,7 @@ export class PostgresToolApprovalRepository implements ToolApprovalRepository {
     return transaction(this.pool, { organizationId, spaceId, actorId }, async (client) => {
       const result = await client.query<ApprovalRow>(`
         SELECT ${approvalColumns}
-        FROM relay_approvals approval
+        FROM cosmos_approvals approval
         WHERE approval.organization_id = $1 AND approval.space_id = $2 AND approval.id = $3
       `, [organizationId, spaceId, approvalId])
       return result.rows[0] ? mapApproval(result.rows[0]) : null
@@ -327,7 +327,7 @@ export class PostgresToolApprovalRepository implements ToolApprovalRepository {
 
     const selected = await client.query<ApprovalRow>(`
       SELECT approval.*
-      FROM relay_approvals approval
+      FROM cosmos_approvals approval
       WHERE approval.organization_id = $1 AND approval.space_id = $2 AND approval.id = $3
       FOR UPDATE
     `, [record.organizationId, record.spaceId, record.approvalId])
@@ -335,14 +335,14 @@ export class PostgresToolApprovalRepository implements ToolApprovalRepository {
     if (!row) return null
 
     const assignments = await client.query<{ actor_id: string }>(`
-      SELECT actor_id FROM relay_approval_assignments
+      SELECT actor_id FROM cosmos_approval_assignments
       WHERE organization_id = $1 AND space_id = $2 AND approval_id = $3
       ORDER BY actor_id
     `, [record.organizationId, record.spaceId, record.approvalId])
     row.assigned_to = assignments.rows.map(({ actor_id }) => actor_id)
     const before = mapApproval(row)
     const priorDecision = await client.query<{ decision: string }>(`
-      SELECT decision FROM relay_approval_decisions
+      SELECT decision FROM cosmos_approval_decisions
       WHERE organization_id = $1 AND space_id = $2 AND approval_id = $3 AND actor_id = $4
     `, [record.organizationId, record.spaceId, record.approvalId, record.actorId])
     if (priorDecision.rows[0]) {
@@ -365,15 +365,15 @@ export class PostgresToolApprovalRepository implements ToolApprovalRepository {
     const permitted = await client.query(`
       SELECT 1
       WHERE EXISTS (
-        SELECT 1 FROM relay_approval_assignments assignment
+        SELECT 1 FROM cosmos_approval_assignments assignment
         WHERE assignment.organization_id = $1 AND assignment.space_id = $2
           AND assignment.approval_id = $3 AND assignment.actor_id = $4
       ) OR EXISTS (
-        SELECT 1 FROM relay_organization_memberships membership
+        SELECT 1 FROM cosmos_organization_memberships membership
         WHERE membership.organization_id = $1 AND membership.actor_id = $4
           AND membership.role IN ('organization_owner', 'organization_admin')
       ) OR EXISTS (
-        SELECT 1 FROM relay_space_memberships membership
+        SELECT 1 FROM cosmos_space_memberships membership
         WHERE membership.organization_id = $1 AND membership.space_id = $2
           AND membership.actor_id = $4 AND membership.role = 'space_manager'
       )
@@ -389,7 +389,7 @@ export class PostgresToolApprovalRepository implements ToolApprovalRepository {
     }
 
     await client.query(`
-      INSERT INTO relay_approval_decisions (
+      INSERT INTO cosmos_approval_decisions (
         organization_id, space_id, approval_id, id, actor_id, decision,
         note, input_hash, idempotency_key_hash, decided_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -407,7 +407,7 @@ export class PostgresToolApprovalRepository implements ToolApprovalRepository {
       : record.request.decision
     const terminal = finalStatus !== 'pending'
     const updated = await client.query<ApprovalRow>(`
-      UPDATE relay_approvals approval
+      UPDATE cosmos_approvals approval
       SET status = $4, approval_count = $5,
         decided_by = CASE WHEN $6 THEN $7 ELSE NULL END,
         decision_note = CASE WHEN $6 THEN $8 ELSE NULL END,
@@ -429,7 +429,7 @@ export class PostgresToolApprovalRepository implements ToolApprovalRepository {
     if (terminal) {
       const toolStatus = finalStatus === 'approved' ? 'queued' : 'canceled'
       const tool = await client.query<ToolCallRow>(`
-        UPDATE relay_tool_calls
+        UPDATE cosmos_tool_calls
         SET status = $5,
           completed_at = CASE WHEN $5 = 'canceled' THEN $6::timestamptz ELSE NULL END,
           version = version + 1
@@ -463,7 +463,7 @@ export class PostgresToolApprovalRepository implements ToolApprovalRepository {
     occurredAt: string,
   ) {
     const updated = await client.query<ApprovalRow>(`
-      UPDATE relay_approvals approval
+      UPDATE cosmos_approvals approval
       SET status = 'expired', decided_at = $4, updated_at = $4, version = version + 1
       WHERE organization_id = $1 AND space_id = $2 AND id = $3
       RETURNING approval.*
@@ -472,7 +472,7 @@ export class PostgresToolApprovalRepository implements ToolApprovalRepository {
     row.assigned_to = before.assignedTo
     const approval = mapApproval(row)
     const tool = await client.query<ToolCallRow>(`
-      UPDATE relay_tool_calls
+      UPDATE cosmos_tool_calls
       SET status = 'canceled', completed_at = $5, version = version + 1
       WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
         AND status = 'approval_required'
@@ -493,7 +493,7 @@ export class PostgresToolApprovalRepository implements ToolApprovalRepository {
     occurredAt: string,
   ) {
     await client.query(`
-      UPDATE relay_attempts
+      UPDATE cosmos_attempts
       SET status = 'running', heartbeat_at = $6
       WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
         AND turn_id = $4 AND id = $5 AND status = 'waiting'
@@ -502,7 +502,7 @@ export class PostgresToolApprovalRepository implements ToolApprovalRepository {
       toolCall.turnId, toolCall.attemptId, occurredAt,
     ])
     await client.query(`
-      UPDATE relay_turns
+      UPDATE cosmos_turns
       SET status = 'running', heartbeat_at = $5, version = version + 1
       WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
         AND id = $4 AND status = 'waiting_approval'
@@ -510,7 +510,7 @@ export class PostgresToolApprovalRepository implements ToolApprovalRepository {
       toolCall.organizationId, toolCall.spaceId, toolCall.sessionId, toolCall.turnId, occurredAt,
     ])
     const session = await client.query<{ version: number }>(`
-      UPDATE relay_sessions
+      UPDATE cosmos_sessions
       SET status = 'active', updated_at = $4, last_activity_at = $4, version = version + 1
       WHERE organization_id = $1 AND space_id = $2 AND id = $3 AND status = 'waiting'
       RETURNING version
@@ -530,7 +530,7 @@ export class PostgresToolApprovalRepository implements ToolApprovalRepository {
   ) {
     const eventCount = 1 + (toolCall ? 1 : 0) + (resumedSessionVersion === null ? 0 : 1)
     const reservation = await client.query<{ sequence: string }>(`
-      UPDATE relay_sessions SET last_event_sequence = last_event_sequence + $4
+      UPDATE cosmos_sessions SET last_event_sequence = last_event_sequence + $4
       WHERE organization_id = $1 AND space_id = $2 AND id = $3
       RETURNING last_event_sequence AS sequence
     `, [record.organizationId, record.spaceId, approval.sessionId, eventCount])
@@ -538,7 +538,7 @@ export class PostgresToolApprovalRepository implements ToolApprovalRepository {
     const lastSequence = Number(reservation.rows[0].sequence)
     const approvalSequence = lastSequence - eventCount + 1
     await client.query(`
-      INSERT INTO relay_session_events (
+      INSERT INTO cosmos_session_events (
         organization_id, space_id, session_id, event_id, sequence, event_type,
         resource_type, resource_id, payload, actor_id, actor_kind, turn_id,
         tool_call_id, approval_id, request_id, occurred_at
@@ -558,7 +558,7 @@ export class PostgresToolApprovalRepository implements ToolApprovalRepository {
     ])
     if (toolCall) {
       await client.query(`
-        INSERT INTO relay_session_events (
+        INSERT INTO cosmos_session_events (
           organization_id, space_id, session_id, event_id, sequence, event_type,
           resource_type, resource_id, payload, actor_id, actor_kind, turn_id,
           attempt_id, tool_call_id, approval_id, request_id, occurred_at
@@ -577,7 +577,7 @@ export class PostgresToolApprovalRepository implements ToolApprovalRepository {
     }
     if (resumedSessionVersion !== null) {
       await client.query(`
-        INSERT INTO relay_session_events (
+        INSERT INTO cosmos_session_events (
           organization_id, space_id, session_id, event_id, sequence, event_type,
           resource_type, resource_id, payload, actor_id, actor_kind, request_id, occurred_at
         ) VALUES ($1, $2, $3, $4, $5, 'session.updated', 'session', $3,
@@ -589,7 +589,7 @@ export class PostgresToolApprovalRepository implements ToolApprovalRepository {
       ])
     }
     await client.query(`
-      INSERT INTO relay_audit_events (
+      INSERT INTO cosmos_audit_events (
         organization_id, audit_event_id, space_id, session_id, actor_id,
         actor_kind, delegation_chain, action, target_type, target_id, result,
         request_id, idempotency_key_hash, policy_decision, policy_reason,
@@ -605,7 +605,7 @@ export class PostgresToolApprovalRepository implements ToolApprovalRepository {
       occurredAt,
     ])
     await client.query(`
-      INSERT INTO relay_outbox_events (
+      INSERT INTO cosmos_outbox_events (
         id, organization_id, space_id, session_id, aggregate_type,
         aggregate_id, event_type, payload, occurred_at
       ) VALUES ($1, $2, $3, $4, 'approval', $5, 'approval.decided', $6::jsonb, $7)
@@ -637,8 +637,8 @@ export class PostgresToolApprovalRepository implements ToolApprovalRepository {
     const now = this.now()
     const existing = await client.query<{ request_hash: string; response_body: unknown | null }>(`
       SELECT idempotency.request_hash, response.response_body
-      FROM relay_idempotency_records idempotency
-      LEFT JOIN relay_idempotency_responses response
+      FROM cosmos_idempotency_records idempotency
+      LEFT JOIN cosmos_idempotency_responses response
         ON response.organization_id = idempotency.organization_id
         AND response.actor_id = idempotency.actor_id
         AND response.method = idempotency.method
@@ -659,12 +659,12 @@ export class PostgresToolApprovalRepository implements ToolApprovalRepository {
       }
     }
     await client.query(`
-      DELETE FROM relay_idempotency_responses
+      DELETE FROM cosmos_idempotency_responses
       WHERE organization_id = $1 AND actor_id = $2 AND method = $3
         AND canonical_path = $4 AND idempotency_key_hash = $5 AND expires_at <= $6
     `, [input.organizationId, input.actorId, input.method, input.canonicalPath, keyHash, now.toISOString()])
     await client.query(`
-      DELETE FROM relay_idempotency_records
+      DELETE FROM cosmos_idempotency_records
       WHERE organization_id = $1 AND actor_id = $2 AND method = $3
         AND canonical_path = $4 AND idempotency_key_hash = $5 AND expires_at <= $6
     `, [input.organizationId, input.actorId, input.method, input.canonicalPath, keyHash, now.toISOString()])
@@ -691,7 +691,7 @@ export class PostgresToolApprovalRepository implements ToolApprovalRepository {
     },
   ) {
     await client.query(`
-      INSERT INTO relay_idempotency_records (
+      INSERT INTO cosmos_idempotency_records (
         organization_id, space_id, actor_id, method, canonical_path,
         idempotency_key_hash, request_hash, session_id, expires_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -700,7 +700,7 @@ export class PostgresToolApprovalRepository implements ToolApprovalRepository {
       input.canonicalPath, input.keyHash, input.requestHash, input.sessionId, input.expiresAt,
     ])
     await client.query(`
-      INSERT INTO relay_idempotency_responses (
+      INSERT INTO cosmos_idempotency_responses (
         organization_id, actor_id, method, canonical_path, idempotency_key_hash,
         status_code, response_body, response_headers, expires_at
       ) VALUES ($1, $2, $3, $4, $5, 200, $6::jsonb, $7::jsonb, $8)

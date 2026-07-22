@@ -35,7 +35,7 @@ export class PostgresOrganizationQuotaRepository implements OrganizationQuotaRep
           api_window_seconds: number
         }>(`
           SELECT api_requests_limit, api_window_seconds
-          FROM relay_organization_quotas
+          FROM cosmos_organization_quotas
           WHERE organization_id = $1
         `, [input.organizationId])
         const row = quota.rows[0]
@@ -43,13 +43,13 @@ export class PostgresOrganizationQuotaRepository implements OrganizationQuotaRep
         const windowMs = row.api_window_seconds * 1_000
         const windowStartedAt = new Date(Math.floor(now.getTime() / windowMs) * windowMs)
         const consumed = await client.query<{ request_count: number }>(`
-          INSERT INTO relay_organization_rate_limit_windows (
+          INSERT INTO cosmos_organization_rate_limit_windows (
             organization_id, window_started_at, request_count, updated_at
           ) VALUES ($1, $2, 1, $3)
           ON CONFLICT (organization_id) DO UPDATE SET
             request_count = CASE
-              WHEN relay_organization_rate_limit_windows.window_started_at = EXCLUDED.window_started_at
-                THEN relay_organization_rate_limit_windows.request_count + 1
+              WHEN cosmos_organization_rate_limit_windows.window_started_at = EXCLUDED.window_started_at
+                THEN cosmos_organization_rate_limit_windows.request_count + 1
               ELSE 1
             END,
             window_started_at = EXCLUDED.window_started_at,

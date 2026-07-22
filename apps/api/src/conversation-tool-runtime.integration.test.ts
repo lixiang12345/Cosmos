@@ -14,16 +14,16 @@ const databaseUrl = process.env.TEST_DATABASE_URL
 const describeWithDatabase = databaseUrl ? describe : describe.skip
 
 describeWithDatabase('governed conversation tool runtime', () => {
-  const schema = `relay_conversation_tools_${crypto.randomUUID().replaceAll('-', '')}`
+  const schema = `cosmos_conversation_tools_${crypto.randomUUID().replaceAll('-', '')}`
   const adminPool = new Pool({ connectionString: databaseUrl })
   const migrationPool = new Pool({ connectionString: databaseUrl, options: `-c search_path=${schema}` })
   const apiPool = new Pool({
     connectionString: databaseUrl,
-    options: `-c role=relay_api_runtime -c search_path=${schema}`,
+    options: `-c role=cosmos_api_runtime -c search_path=${schema}`,
   })
   const workerPool = new Pool({
     connectionString: databaseUrl,
-    options: `-c role=relay_worker_runtime -c search_path=${schema}`,
+    options: `-c role=cosmos_worker_runtime -c search_path=${schema}`,
   })
   let sequence = 0
   let sessionId = ''
@@ -33,13 +33,13 @@ describeWithDatabase('governed conversation tool runtime', () => {
     await adminPool.query(`CREATE SCHEMA ${schema}`)
     await runMigrations(migrationPool)
     await migrationPool.query(`
-      INSERT INTO relay_organizations (id, name)
+      INSERT INTO cosmos_organizations (id, name)
       VALUES ('conversation-tool-org', 'Conversation Tool Organization');
-      INSERT INTO relay_spaces (organization_id, id, name)
+      INSERT INTO cosmos_spaces (organization_id, id, name)
       VALUES ('conversation-tool-org', 'conversation-tool-space', 'Conversation Tool Space');
-      INSERT INTO relay_organization_memberships (organization_id, actor_id, role)
+      INSERT INTO cosmos_organization_memberships (organization_id, actor_id, role)
       VALUES ('conversation-tool-org', 'conversation-tool-user', 'member');
-      INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
+      INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role)
       VALUES ('conversation-tool-org', 'conversation-tool-space', 'conversation-tool-user', 'member');
     `)
     await seedSessionConfiguration(migrationPool, 'conversation-tool-org', 'conversation-tool-space')
@@ -153,7 +153,7 @@ describeWithDatabase('governed conversation tool runtime', () => {
       output_hash: string
     }>(`
       SELECT tool_name, operation, risk_level, status, input_hash, output_hash
-      FROM relay_tool_calls
+      FROM cosmos_tool_calls
       WHERE session_id = $1
       ORDER BY created_at, id
     `, [sessionId])
@@ -170,7 +170,7 @@ describeWithDatabase('governed conversation tool runtime', () => {
       expect(call.output_hash).toMatch(/^[a-f0-9]{64}$/)
     }
     const completed = await migrationPool.query<{ content: string }>(`
-      SELECT content FROM relay_messages
+      SELECT content FROM cosmos_messages
       WHERE session_id = $1 AND role = 'agent'
     `, [sessionId])
     expect(completed.rows[0]?.content).toContain('Status: ready for validation.')
@@ -180,12 +180,12 @@ describeWithDatabase('governed conversation tool runtime', () => {
       leaked_content: boolean
     }>(`
       SELECT
-        (SELECT count(*)::text FROM relay_session_events
+        (SELECT count(*)::text FROM cosmos_session_events
           WHERE session_id = $1 AND event_type = 'tool_call.updated') AS tool_events,
-        (SELECT count(*)::text FROM relay_audit_events
+        (SELECT count(*)::text FROM cosmos_audit_events
           WHERE session_id = $1 AND action IN ('tool_call.create', 'tool_call.update')) AS audit_events,
         EXISTS (
-          SELECT 1 FROM relay_session_events
+          SELECT 1 FROM cosmos_session_events
           WHERE session_id = $1 AND payload::text LIKE '%ready for validation%'
         ) AS leaked_content
     `, [sessionId])

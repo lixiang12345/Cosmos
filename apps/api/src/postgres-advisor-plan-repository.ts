@@ -7,7 +7,7 @@ import {
   type AdvisorPlanDto,
   type AdvisorPlanStepDto,
   type AdvisorSpaceState,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 import type { Pool, PoolClient } from 'pg'
 import {
   AdvisorPlanIdempotencyConflictError,
@@ -142,14 +142,14 @@ async function readPlans(
   planId?: string,
 ) {
   const plans = await client.query<PlanRow>(`
-    SELECT ${planColumns} FROM relay_advisor_plans
+    SELECT ${planColumns} FROM cosmos_advisor_plans
     WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
       AND ($4::text IS NULL OR id = $4)
     ORDER BY created_at, id LIMIT 50
   `, [organizationId, spaceId, sessionId, planId ?? null])
   if (!plans.rowCount) return []
   const steps = await client.query<StepRow>(`
-    SELECT ${stepColumns} FROM relay_advisor_plan_steps
+    SELECT ${stepColumns} FROM cosmos_advisor_plan_steps
     WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
       AND plan_id = ANY($4::text[])
     ORDER BY plan_id, ordinal
@@ -174,11 +174,11 @@ export class PostgresAdvisorPlanRepository implements AdvisorPlanRepository {
   private async assertManager(client: PoolClient, scope: AdvisorPlanScope) {
     const result = await client.query(`
       SELECT 1 WHERE EXISTS (
-        SELECT 1 FROM relay_organization_memberships membership
+        SELECT 1 FROM cosmos_organization_memberships membership
         WHERE membership.organization_id = $1 AND membership.actor_id = $3
           AND membership.role IN ('organization_owner', 'organization_admin')
       ) OR EXISTS (
-        SELECT 1 FROM relay_space_memberships membership
+        SELECT 1 FROM cosmos_space_memberships membership
         WHERE membership.organization_id = $1 AND membership.space_id = $2
           AND membership.actor_id = $3 AND membership.role = 'space_manager'
       )
@@ -195,7 +195,7 @@ export class PostgresAdvisorPlanRepository implements AdvisorPlanRepository {
   }) {
     const occurredAt = this.now().toISOString()
     await client.query(`
-      INSERT INTO relay_audit_events (
+      INSERT INTO cosmos_audit_events (
         organization_id, audit_event_id, space_id, session_id, actor_id,
         actor_kind, delegation_chain, action, target_type, target_id, result,
         request_id, idempotency_key_hash, policy_decision, policy_reason,
@@ -210,7 +210,7 @@ export class PostgresAdvisorPlanRepository implements AdvisorPlanRepository {
       JSON.stringify(input.after), occurredAt,
     ])
     await client.query(`
-      INSERT INTO relay_outbox_events (
+      INSERT INTO cosmos_outbox_events (
         id, organization_id, space_id, session_id, aggregate_type,
         aggregate_id, event_type, payload, occurred_at
       ) VALUES ($1,$2,$3,$4,'advisor_plan',$5,$6,$7::jsonb,$8)
@@ -232,14 +232,14 @@ export class PostgresAdvisorPlanRepository implements AdvisorPlanRepository {
     await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [canonicalJson([
       input.organizationId, input.actorId, input.method, input.canonicalPath, keyHash,
     ])])
-    await client.query(`DELETE FROM relay_control_plane_idempotency
+    await client.query(`DELETE FROM cosmos_control_plane_idempotency
       WHERE organization_id = $1 AND actor_id = $2 AND method = $3
         AND canonical_path = $4 AND idempotency_key_hash = $5 AND expires_at <= $6`, [
       input.organizationId, input.actorId, input.method, input.canonicalPath,
       keyHash, now.toISOString(),
     ])
     const existing = await client.query<{ request_hash: string; response_body: unknown }>(`
-      SELECT request_hash, response_body FROM relay_control_plane_idempotency
+      SELECT request_hash, response_body FROM cosmos_control_plane_idempotency
       WHERE organization_id = $1 AND actor_id = $2 AND method = $3
         AND canonical_path = $4 AND idempotency_key_hash = $5 AND expires_at > $6
     `, [
@@ -260,7 +260,7 @@ export class PostgresAdvisorPlanRepository implements AdvisorPlanRepository {
     plan: AdvisorPlanDto
   }) {
     await client.query(`
-      INSERT INTO relay_control_plane_idempotency (
+      INSERT INTO cosmos_control_plane_idempotency (
         organization_id, space_id, actor_id, method, canonical_path,
         idempotency_key_hash, request_hash, status_code, response_body,
         response_headers, expires_at
@@ -278,7 +278,7 @@ export class PostgresAdvisorPlanRepository implements AdvisorPlanRepository {
     return withApiDatabaseContext(this.pool, record, async (client) => {
       const providerToolCallHash = hash(record.providerToolCallId)
       const existing = await client.query<{ id: string }>(`
-        SELECT id FROM relay_advisor_plans
+        SELECT id FROM cosmos_advisor_plans
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
           AND provider_tool_call_hash = $4
       `, [record.organizationId, record.spaceId, record.sessionId, providerToolCallHash])
@@ -302,21 +302,21 @@ export class PostgresAdvisorPlanRepository implements AdvisorPlanRepository {
           space.default_environment_id,
           COALESCE(organization.default_space_id = space.id, false) AS is_default,
           space.version
-        FROM relay_sessions session_record
-        JOIN relay_experts expert ON expert.organization_id = session_record.organization_id
+        FROM cosmos_sessions session_record
+        JOIN cosmos_experts expert ON expert.organization_id = session_record.organization_id
           AND expert.space_id = session_record.space_id AND expert.id = session_record.expert_id
-        JOIN relay_expert_revisions revision
+        JOIN cosmos_expert_revisions revision
           ON revision.organization_id = session_record.organization_id
           AND revision.space_id = session_record.space_id
           AND revision.expert_id = session_record.expert_id
           AND revision.id = session_record.expert_revision_id
-        JOIN relay_spaces space ON space.organization_id = session_record.organization_id
+        JOIN cosmos_spaces space ON space.organization_id = session_record.organization_id
           AND space.id = session_record.space_id
-        JOIN relay_organizations organization ON organization.id = space.organization_id
-        JOIN relay_organization_memberships organization_membership
+        JOIN cosmos_organizations organization ON organization.id = space.organization_id
+        JOIN cosmos_organization_memberships organization_membership
           ON organization_membership.organization_id = session_record.organization_id
           AND organization_membership.actor_id = $4 AND organization_membership.role <> 'viewer'
-        JOIN relay_space_memberships space_membership
+        JOIN cosmos_space_memberships space_membership
           ON space_membership.organization_id = session_record.organization_id
           AND space_membership.space_id = session_record.space_id
           AND space_membership.actor_id = $4 AND space_membership.role <> 'viewer'
@@ -324,7 +324,7 @@ export class PostgresAdvisorPlanRepository implements AdvisorPlanRepository {
           AND session_record.id = $3 AND expert.kind = 'built_in'
           AND revision.status = 'published'
           AND (revision.configuration -> 'capabilities') ? 'advisor.control_plane.plan'
-          AND NOT EXISTS (SELECT 1 FROM relay_service_accounts service_account
+          AND NOT EXISTS (SELECT 1 FROM cosmos_service_accounts service_account
             WHERE service_account.organization_id = $1 AND service_account.id = $4)
       `, [record.organizationId, record.spaceId, record.sessionId, record.actorId])
       const current = authority.rows[0]
@@ -367,13 +367,13 @@ export class PostgresAdvisorPlanRepository implements AdvisorPlanRepository {
         if (step.operation === 'space.update') {
           const changes = step.changes
           if (changes.defaultExpertId) {
-            const valid = await client.query(`SELECT 1 FROM relay_experts
+            const valid = await client.query(`SELECT 1 FROM cosmos_experts
               WHERE organization_id = $1 AND space_id = $2 AND id = $3
                 AND status = 'published'`, [record.organizationId, record.spaceId, changes.defaultExpertId])
             if (!valid.rowCount) throw new AdvisorPlanValidationError('Default Expert must be published in the current Space.', 'steps.changes.defaultExpertId')
           }
           if (changes.defaultEnvironmentId) {
-            const valid = await client.query(`SELECT 1 FROM relay_environments
+            const valid = await client.query(`SELECT 1 FROM cosmos_environments
               WHERE organization_id = $1 AND space_id = $2 AND id = $3
                 AND status = 'ready'`, [record.organizationId, record.spaceId, changes.defaultEnvironmentId])
             if (!valid.rowCount) throw new AdvisorPlanValidationError('Default Environment must be ready in the current Space.', 'steps.changes.defaultEnvironmentId')
@@ -400,7 +400,7 @@ export class PostgresAdvisorPlanRepository implements AdvisorPlanRepository {
       }
 
       await client.query(`
-        INSERT INTO relay_advisor_plans (
+        INSERT INTO cosmos_advisor_plans (
           organization_id, space_id, session_id, id, provider_tool_call_hash,
           summary, dependencies, risks, status, requested_by, created_at, updated_at, version
         ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,'proposed',$9,$10,$10,1)
@@ -411,7 +411,7 @@ export class PostgresAdvisorPlanRepository implements AdvisorPlanRepository {
       ])
       for (const step of steps) {
         await client.query(`
-          INSERT INTO relay_advisor_plan_steps (
+          INSERT INTO cosmos_advisor_plan_steps (
             organization_id, space_id, session_id, plan_id, id, ordinal, kind,
             operation, target_type, target_id, rationale, before_state, after_state,
             manual_action, risk_level, status, version
@@ -439,7 +439,7 @@ export class PostgresAdvisorPlanRepository implements AdvisorPlanRepository {
 
   async listPlans(organizationId: string, spaceId: string, sessionId: string, actorId: string) {
     return withApiDatabaseContext(this.pool, { organizationId, spaceId, actorId }, async (client) => {
-      const session = await client.query(`SELECT 1 FROM relay_sessions
+      const session = await client.query(`SELECT 1 FROM cosmos_sessions
         WHERE organization_id = $1 AND space_id = $2 AND id = $3`, [organizationId, spaceId, sessionId])
       if (!session.rowCount) return null
       return readPlans(client, organizationId, spaceId, sessionId)
@@ -448,7 +448,7 @@ export class PostgresAdvisorPlanRepository implements AdvisorPlanRepository {
 
   async getPlan(organizationId: string, spaceId: string, sessionId: string, planId: string, actorId: string) {
     const result = await queryWithApiDatabaseContext<PlanRow>(this.pool, { organizationId, spaceId, actorId }, `
-      SELECT ${planColumns} FROM relay_advisor_plans
+      SELECT ${planColumns} FROM cosmos_advisor_plans
       WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
     `, [organizationId, spaceId, sessionId, planId])
     if (!result.rows[0]) return null
@@ -466,7 +466,7 @@ export class PostgresAdvisorPlanRepository implements AdvisorPlanRepository {
       })
       if (idempotency.replay) return { plan: idempotency.replay, replayed: true }
       const selected = await client.query<PlanRow>(`SELECT ${planColumns}
-        FROM relay_advisor_plans WHERE organization_id = $1 AND space_id = $2
+        FROM cosmos_advisor_plans WHERE organization_id = $1 AND space_id = $2
           AND session_id = $3 AND id = $4 FOR UPDATE`, [
         record.organizationId, record.spaceId, record.sessionId, record.planId,
       ])
@@ -481,14 +481,14 @@ export class PostgresAdvisorPlanRepository implements AdvisorPlanRepository {
       const occurredAt = this.now().toISOString()
       const status = record.request.decision === 'confirmed' ? 'executing' : 'rejected'
       if (status === 'rejected') {
-        await client.query(`UPDATE relay_advisor_plan_steps SET status = 'rejected',
+        await client.query(`UPDATE cosmos_advisor_plan_steps SET status = 'rejected',
           completed_at = $5, version = version + 1
           WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
             AND plan_id = $4 AND status = 'proposed'`, [
           record.organizationId, record.spaceId, record.sessionId, record.planId, occurredAt,
         ])
       }
-      await client.query(`UPDATE relay_advisor_plans SET status = $5,
+      await client.query(`UPDATE cosmos_advisor_plans SET status = $5,
         confirmed_by = CASE WHEN $5 = 'executing' THEN $6 ELSE NULL END,
         confirmed_at = CASE WHEN $5 = 'executing' THEN $7::timestamptz ELSE NULL END,
         decision_note = $8, updated_at = $7, version = version + 1
@@ -521,7 +521,7 @@ export class PostgresAdvisorPlanRepository implements AdvisorPlanRepository {
       })
       if (idempotency.replay) return { plan: idempotency.replay, replayed: true }
       const selected = await client.query<PlanRow>(`SELECT ${planColumns}
-        FROM relay_advisor_plans WHERE organization_id = $1 AND space_id = $2
+        FROM cosmos_advisor_plans WHERE organization_id = $1 AND space_id = $2
           AND session_id = $3 AND id = $4 FOR UPDATE`, [
         record.organizationId, record.spaceId, record.sessionId, record.planId,
       ])
@@ -530,7 +530,7 @@ export class PostgresAdvisorPlanRepository implements AdvisorPlanRepository {
       if (before.version !== record.expectedVersion) throw new AdvisorPlanVersionConflictError(record.expectedVersion, before.version)
       if (before.status !== 'failed') throw new AdvisorPlanStateConflictError('Only a failed Advisor plan can be retried.')
       const occurredAt = this.now().toISOString()
-      await client.query(`UPDATE relay_advisor_plans SET status = 'executing',
+      await client.query(`UPDATE cosmos_advisor_plans SET status = 'executing',
         updated_at = $5, version = version + 1
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4`, [
         record.organizationId, record.spaceId, record.sessionId, record.planId, occurredAt,
@@ -554,13 +554,13 @@ export class PostgresAdvisorPlanRepository implements AdvisorPlanRepository {
   async startStep(record: AdvisorPlanScope & { planId: string; stepId: string; expectedVersion: number }) {
     return withApiDatabaseContext(this.pool, record, async (client) => {
       await this.assertManager(client, record)
-      const plan = await client.query<{ status: string }>(`SELECT status FROM relay_advisor_plans
+      const plan = await client.query<{ status: string }>(`SELECT status FROM cosmos_advisor_plans
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4 FOR UPDATE`, [
         record.organizationId, record.spaceId, record.sessionId, record.planId,
       ])
       if (plan.rows[0]?.status !== 'executing') throw new AdvisorPlanStateConflictError('The Advisor plan is not executing.')
       const occurredAt = this.now().toISOString()
-      const updated = await client.query<StepRow>(`UPDATE relay_advisor_plan_steps
+      const updated = await client.query<StepRow>(`UPDATE cosmos_advisor_plan_steps
         SET status = 'executing', failure_code = NULL, failure_message = NULL,
           started_at = $7, completed_at = NULL, version = version + 1
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
@@ -585,7 +585,7 @@ export class PostgresAdvisorPlanRepository implements AdvisorPlanRepository {
       await this.assertManager(client, record)
       const occurredAt = this.now().toISOString()
       const expectedStatus = record.status === 'action_required' ? 'proposed' : 'executing'
-      const updated = await client.query<StepRow>(`UPDATE relay_advisor_plan_steps
+      const updated = await client.query<StepRow>(`UPDATE cosmos_advisor_plan_steps
         SET status = $7, failure_code = $8, failure_message = $9,
           completed_at = $10, version = version + 1
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
@@ -607,7 +607,7 @@ export class PostgresAdvisorPlanRepository implements AdvisorPlanRepository {
     return withApiDatabaseContext(this.pool, record, async (client) => {
       await this.assertManager(client, record)
       const selected = await client.query<PlanRow>(`SELECT ${planColumns}
-        FROM relay_advisor_plans WHERE organization_id = $1 AND space_id = $2
+        FROM cosmos_advisor_plans WHERE organization_id = $1 AND space_id = $2
           AND session_id = $3 AND id = $4 FOR UPDATE`, [
         record.organizationId, record.spaceId, record.sessionId, record.planId,
       ])
@@ -616,7 +616,7 @@ export class PostgresAdvisorPlanRepository implements AdvisorPlanRepository {
       if (before.version !== record.expectedVersion) throw new AdvisorPlanVersionConflictError(record.expectedVersion, before.version)
       if (before.status !== 'executing') throw new AdvisorPlanStateConflictError('The Advisor plan is not executing.')
       const statuses = await client.query<{ status: AdvisorPlanStepDto['status'] }>(`
-        SELECT status FROM relay_advisor_plan_steps
+        SELECT status FROM cosmos_advisor_plan_steps
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND plan_id = $4
       `, [record.organizationId, record.spaceId, record.sessionId, record.planId])
       const expected = statuses.rows.some((step) => step.status === 'failed')
@@ -628,7 +628,7 @@ export class PostgresAdvisorPlanRepository implements AdvisorPlanRepository {
             : null
       if (expected !== record.status) throw new AdvisorPlanStateConflictError('Advisor step states do not match the requested plan result.')
       const occurredAt = this.now().toISOString()
-      await client.query(`UPDATE relay_advisor_plans SET status = $5,
+      await client.query(`UPDATE cosmos_advisor_plans SET status = $5,
         updated_at = $6, version = version + 1
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4`, [
         record.organizationId, record.spaceId, record.sessionId, record.planId,

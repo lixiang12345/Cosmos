@@ -25,7 +25,7 @@ import {
   type AdvisorPlanDto,
   type EnvironmentDetailDto,
   type ExpertDetailDto,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.js'
 import type { AdvisorPlanRepository } from './advisor-plan-repository.js'
@@ -60,7 +60,7 @@ const sessionRequest: CreateSessionRequestInput = {
 const testActorOrganizations = {
   'user-local-admin': [
     {
-      id: 'relay', name: 'Relay', role: 'organization_owner' as const,
+      id: 'cosmos', name: 'Cosmos', role: 'organization_owner' as const,
       spaces: [
         { id: 'commerce', name: 'Commerce', role: 'space_manager' as const },
         { id: 'platform', name: 'Platform', role: 'space_manager' as const },
@@ -113,13 +113,13 @@ function catalogEntry(
 }
 
 const testAuthoritativeCatalog = [
-  catalogEntry('relay', 'commerce'),
-  catalogEntry('relay', 'platform'),
+  catalogEntry('cosmos', 'commerce'),
+  catalogEntry('cosmos', 'platform'),
   catalogEntry('other', 'platform'),
 ]
 
 const automationDto = AutomationDtoSchema.parse({
-  id: 'automation-platform', organizationId: 'relay', spaceId: 'platform',
+  id: 'automation-platform', organizationId: 'cosmos', spaceId: 'platform',
   expertId: 'expert-pr-author', expertRevisionId: 'expert-revision-platform',
   triggerId: 'automation-platform', name: 'Pull request triage', source: 'github',
   eventType: 'pull_request.opened', filter: { '==': [{ var: 'action' }, 'opened'] },
@@ -130,7 +130,7 @@ const automationDto = AutomationDtoSchema.parse({
 
 const expertDetail: ExpertDetailDto = {
   id: 'expert-pr-author',
-  organizationId: 'relay',
+  organizationId: 'cosmos',
   spaceId: 'platform',
   kind: 'custom',
   name: 'PR Author',
@@ -143,7 +143,7 @@ const expertDetail: ExpertDetailDto = {
     expertId: 'expert-pr-author',
     revision: 7,
     status: 'published',
-    model: 'relay-default',
+    model: 'cosmos-default',
     environmentId: 'environment-platform',
     environmentRevisionId: 'environment-revision-platform',
     allowRepositoryOverride: true,
@@ -155,7 +155,7 @@ const expertDetail: ExpertDetailDto = {
     expertId: 'expert-pr-author',
     revision: 7,
     status: 'published',
-    model: 'relay-default',
+    model: 'cosmos-default',
     environmentId: 'environment-platform',
     environmentRevisionId: 'environment-revision-platform',
     allowRepositoryOverride: true,
@@ -181,7 +181,7 @@ const defaultRepository = {
 
 const environmentDetail: EnvironmentDetailDto = {
   id: 'environment-platform',
-  organizationId: 'relay',
+  organizationId: 'cosmos',
   spaceId: 'platform',
   type: 'cloud',
   name: 'Platform runtime',
@@ -196,7 +196,7 @@ const environmentDetail: EnvironmentDetailDto = {
     status: 'ready',
     defaultRepository,
     repositoryBindings: [defaultRepository],
-    image: 'ghcr.io/relay/runtime:stable',
+    image: 'ghcr.io/cosmos/runtime:stable',
     variableReferences: [],
     hooks: [],
     networkPolicy: { mode: 'restricted', allowedHosts: [] },
@@ -211,7 +211,7 @@ const environmentDetail: EnvironmentDetailDto = {
     revision: 2,
     status: 'ready',
     repositoryBindings: [defaultRepository],
-    image: 'ghcr.io/relay/runtime:stable',
+    image: 'ghcr.io/cosmos/runtime:stable',
     variableReferences: [],
     hooks: [],
     networkPolicy: { mode: 'restricted', allowedHosts: [] },
@@ -329,14 +329,14 @@ afterEach(async () => {
 })
 
 const spaceDto = SpaceDtoSchema.parse({
-  id: 'platform', organizationId: 'relay', name: 'Platform', slug: 'platform',
+  id: 'platform', organizationId: 'cosmos', name: 'Platform', slug: 'platform',
   description: 'Platform workspace.', isDefault: true, status: 'active',
   defaultExpertId: 'expert-pr-author', defaultEnvironmentId: 'environment-platform',
   settings: {}, version: 2, createdAt: '2026-07-22T00:00:00.000Z', updatedAt: '2026-07-22T01:00:00.000Z',
 })
 
 const advisorManualPlan: AdvisorPlanDto = AdvisorPlanDtoSchema.parse({
-  organizationId: 'relay', spaceId: 'platform', sessionId: 'session-advisor', id: 'plan-advisor',
+  organizationId: 'cosmos', spaceId: 'platform', sessionId: 'session-advisor', id: 'plan-advisor',
   summary: 'Complete provider authorization.', dependencies: [], risks: [], status: 'proposed',
   steps: [{
     id: 'step-advisor', ordinal: 1, kind: 'manual_action', operation: null,
@@ -364,7 +364,7 @@ function testSpaceRepository(): SpaceRepository {
   }
 }
 
-describe('Relay API', () => {
+describe('Cosmos API', () => {
   it('reports health', async () => {
     const app = createApp()
     openApps.push(app)
@@ -393,11 +393,11 @@ describe('Relay API', () => {
 
     expect(response.statusCode).toBe(200)
     expect(response.headers['content-type']).toContain('text/plain')
-    expect(response.body).toContain('# TYPE relay_http_requests_total counter')
+    expect(response.body).toContain('# TYPE cosmos_http_requests_total counter')
     expect(response.body).toContain('route="/api/health"')
-    expect(response.body).toContain('# TYPE relay_sse_connections_active gauge')
-    expect(response.body).toContain('relay_execution_enabled 1')
-    expect(response.body).toContain('relay_worker_execution_ready 1')
+    expect(response.body).toContain('# TYPE cosmos_sse_connections_active gauge')
+    expect(response.body).toContain('cosmos_execution_enabled 1')
+    expect(response.body).toContain('cosmos_worker_execution_ready 1')
     expect(response.body).not.toContain(token)
     expect(executionReadinessCheck).toHaveBeenCalledOnce()
 
@@ -486,7 +486,7 @@ describe('Relay API', () => {
       securityAuditRepository: { append: appendSecurityAudit },
     })
     openApps.push(app)
-    const url = '/api/v1/organizations/relay/spaces/platform/sessions'
+    const url = '/api/v1/organizations/cosmos/spaces/platform/sessions'
 
     expect((await app.inject({ method: 'GET', url })).statusCode).toBe(200)
     const limited = await app.inject({ method: 'GET', url })
@@ -496,10 +496,10 @@ describe('Relay API', () => {
       'ratelimit-limit': '1', 'ratelimit-remaining': '0', 'retry-after': '29',
     })
     expect(consumeApiRequest).toHaveBeenLastCalledWith({
-      organizationId: 'relay', actorId: 'user-local-admin',
+      organizationId: 'cosmos', actorId: 'user-local-admin',
     })
     expect(appendSecurityAudit).toHaveBeenCalledWith(expect.objectContaining({
-      errorCode: 'RATE_LIMITED', organizationId: 'relay', statusCode: 429,
+      errorCode: 'RATE_LIMITED', organizationId: 'cosmos', statusCode: 429,
     }))
 
     const unavailable = createApp({
@@ -527,7 +527,7 @@ describe('Relay API', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: '/api/v1/organizations/relay/spaces/platform/sessions/missing-private-session',
+      url: '/api/v1/organizations/cosmos/spaces/platform/sessions/missing-private-session',
       headers: { 'user-agent': 'audit-test-agent' },
     })
 
@@ -539,7 +539,7 @@ describe('Relay API', () => {
       routePattern: '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId',
       statusCode: 404,
       errorCode: 'RESOURCE_NOT_FOUND',
-      organizationId: 'relay',
+      organizationId: 'cosmos',
       spaceId: 'platform',
       target: { sessionId: 'missing-private-session' },
       clientIp: '127.0.0.1',
@@ -557,7 +557,7 @@ describe('Relay API', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: '/api/v1/organizations/relay/spaces/platform/sessions/missing-private-session',
+      url: '/api/v1/organizations/cosmos/spaces/platform/sessions/missing-private-session',
     })
 
     expect(response.statusCode).toBe(404)
@@ -608,10 +608,10 @@ describe('Relay API', () => {
 
     const health = await app.inject({ method: 'GET', url: '/api/health' })
     const sessions = await app.inject({
-      method: 'GET', url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      method: 'GET', url: '/api/v1/organizations/cosmos/spaces/platform/sessions',
     })
     const experts = await app.inject({
-      method: 'GET', url: '/api/v1/organizations/relay/spaces/platform/experts',
+      method: 'GET', url: '/api/v1/organizations/cosmos/spaces/platform/experts',
     })
     const me = await app.inject({ method: 'GET', url: '/api/v1/me' })
     const readiness = await app.inject({ method: 'GET', url: '/api/ready' })
@@ -619,7 +619,7 @@ describe('Relay API', () => {
 
     expect(health.statusCode).toBe(200)
     expect(sessions.statusCode).toBe(401)
-    expect(sessions.headers['www-authenticate']).toBe('Bearer realm="relay-api"')
+    expect(sessions.headers['www-authenticate']).toBe('Bearer realm="cosmos-api"')
     expect(ApiErrorSchema.parse(sessions.json())).toMatchObject({
       code: 'AUTHENTICATION_REQUIRED', retryable: false,
     })
@@ -632,7 +632,7 @@ describe('Relay API', () => {
 
     const malformedBody = await app.inject({
       method: 'POST',
-      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      url: '/api/v1/organizations/cosmos/spaces/platform/sessions',
       headers: { 'content-type': 'application/json' },
       payload: '{not-json',
     })
@@ -696,12 +696,12 @@ describe('Relay API', () => {
   it('serves Space authority, defaults, CAS writes, and migration preview', async () => {
     const spaces = testSpaceRepository()
     const app = testApp(testRepository(), undefined, spaces)
-    const list = await app.inject({ method: 'GET', url: '/api/v1/organizations/relay/spaces' })
+    const list = await app.inject({ method: 'GET', url: '/api/v1/organizations/cosmos/spaces' })
     expect(list.statusCode).toBe(200)
     expect(SpaceListResponseSchema.parse(list.json()).items).toEqual([spaceDto])
 
     const created = await app.inject({
-      method: 'POST', url: '/api/v1/organizations/relay/spaces',
+      method: 'POST', url: '/api/v1/organizations/cosmos/spaces',
       headers: { 'idempotency-key': 'space-create' },
       payload: { name: 'Created Space', description: 'New scope.' },
     })
@@ -710,7 +710,7 @@ describe('Relay API', () => {
     expect(created.headers.location).toContain('/spaces/created-space')
 
     const updated = await app.inject({
-      method: 'PATCH', url: '/api/v1/organizations/relay/spaces/platform',
+      method: 'PATCH', url: '/api/v1/organizations/cosmos/spaces/platform',
       headers: { 'if-match': '"2"', 'idempotency-key': 'space-update', 'content-type': 'application/merge-patch+json' },
       payload: { description: 'Updated.' },
     })
@@ -718,13 +718,13 @@ describe('Relay API', () => {
     expect(SpaceMutationResponseSchema.parse(updated.json()).space.version).toBe(3)
 
     const madeDefault = await app.inject({
-      method: 'POST', url: '/api/v1/organizations/relay/spaces/platform/default',
+      method: 'POST', url: '/api/v1/organizations/cosmos/spaces/platform/default',
       headers: { 'if-match': '"2"', 'idempotency-key': 'space-default' },
     })
     expect(madeDefault.statusCode).toBe(200)
 
     const preview = await app.inject({
-      method: 'GET', url: '/api/v1/organizations/relay/spaces/platform/migration-preview?targetSpaceId=commerce',
+      method: 'GET', url: '/api/v1/organizations/cosmos/spaces/platform/migration-preview?targetSpaceId=commerce',
     })
     expect(preview.statusCode).toBe(200)
     expect(SpaceMigrationPreviewSchema.parse(preview.json())).toMatchObject({
@@ -735,18 +735,18 @@ describe('Relay API', () => {
   it('requires Space write preconditions and manager permissions', async () => {
     const spaces = testSpaceRepository()
     const memberRepository = testRepository({
-      actorOrganizations: { 'user-local-admin': [{ id: 'relay', name: 'Relay', role: 'member', spaces: [{ id: 'platform', name: 'Platform', role: 'member' }] }] },
+      actorOrganizations: { 'user-local-admin': [{ id: 'cosmos', name: 'Cosmos', role: 'member', spaces: [{ id: 'platform', name: 'Platform', role: 'member' }] }] },
     })
     const app = testApp(memberRepository, undefined, spaces)
     const forbidden = await app.inject({
-      method: 'PATCH', url: '/api/v1/organizations/relay/spaces/platform',
+      method: 'PATCH', url: '/api/v1/organizations/cosmos/spaces/platform',
       headers: { 'if-match': '"2"', 'idempotency-key': 'space-update', 'content-type': 'application/merge-patch+json' },
       payload: { description: 'Forbidden.' },
     })
     expect(forbidden.statusCode).toBe(403)
     expect(ApiErrorSchema.parse(forbidden.json()).code).toBe('PERMISSION_DENIED')
     const missingKey = await testApp(testRepository(), undefined, spaces).inject({
-      method: 'POST', url: '/api/v1/organizations/relay/spaces', payload: { name: 'Missing key' },
+      method: 'POST', url: '/api/v1/organizations/cosmos/spaces', payload: { name: 'Missing key' },
     })
     expect(missingKey.statusCode).toBe(400)
     expect(ApiErrorSchema.parse(missingKey.json()).code).toBe('IDEMPOTENCY_KEY_REQUIRED')
@@ -757,7 +757,7 @@ describe('Relay API', () => {
     const app = testApp(testRepository(), testConfigurationCatalog((options) => listOptions.push(options)))
     const experts = await app.inject({
       method: 'GET',
-      url: '/api/v1/organizations/relay/spaces/platform/experts?limit=1',
+      url: '/api/v1/organizations/cosmos/spaces/platform/experts?limit=1',
     })
     const expertList = ExpertListResponseSchema.parse(experts.json())
 
@@ -771,7 +771,7 @@ describe('Relay API', () => {
 
     const nextPage = await app.inject({
       method: 'GET',
-      url: `/api/v1/organizations/relay/spaces/platform/experts?limit=1&cursor=${encodeURIComponent(expertList.page.nextCursor!)}`,
+      url: `/api/v1/organizations/cosmos/spaces/platform/experts?limit=1&cursor=${encodeURIComponent(expertList.page.nextCursor!)}`,
     })
     expect(nextPage.statusCode).toBe(200)
     expect(listOptions[1]).toEqual({
@@ -781,7 +781,7 @@ describe('Relay API', () => {
 
     const expert = await app.inject({
       method: 'GET',
-      url: `/api/v1/organizations/relay/spaces/platform/experts/${expertDetail.id}`,
+      url: `/api/v1/organizations/cosmos/spaces/platform/experts/${expertDetail.id}`,
     })
     expect(expert.statusCode).toBe(200)
     expect(expert.headers.etag).toBe('"4"')
@@ -789,11 +789,11 @@ describe('Relay API', () => {
 
     const environments = await app.inject({
       method: 'GET',
-      url: '/api/v1/organizations/relay/spaces/platform/environments',
+      url: '/api/v1/organizations/cosmos/spaces/platform/environments',
     })
     const environment = await app.inject({
       method: 'GET',
-      url: `/api/v1/organizations/relay/spaces/platform/environments/${environmentDetail.id}`,
+      url: `/api/v1/organizations/cosmos/spaces/platform/environments/${environmentDetail.id}`,
     })
     expect(environments.statusCode).toBe(200)
     expect(EnvironmentListResponseSchema.parse(environments.json()).items).toHaveLength(1)
@@ -817,7 +817,7 @@ describe('Relay API', () => {
       name: 'Platform runtime',
       description: 'Isolated runtime for platform repositories.',
       visibility: 'space',
-      image: 'ghcr.io/relay/runtime:stable',
+      image: 'ghcr.io/cosmos/runtime:stable',
       repositoryBindings: [defaultRepository],
       variableReferences: [],
       hooks: [],
@@ -828,7 +828,7 @@ describe('Relay API', () => {
 
     const missingKey = await app.inject({
       method: 'POST',
-      url: '/api/v1/organizations/relay/spaces/platform/environments',
+      url: '/api/v1/organizations/cosmos/spaces/platform/environments',
       payload: requestBody,
     })
     expect(missingKey.statusCode).toBe(400)
@@ -836,7 +836,7 @@ describe('Relay API', () => {
 
     const created = await app.inject({
       method: 'POST',
-      url: '/api/v1/organizations/relay/spaces/platform/environments',
+      url: '/api/v1/organizations/cosmos/spaces/platform/environments',
       headers: { 'idempotency-key': 'create-environment-1' },
       payload: requestBody,
     })
@@ -850,28 +850,28 @@ describe('Relay API', () => {
 
     const missingIfMatch = await app.inject({
       method: 'PATCH',
-      url: `/api/v1/organizations/relay/spaces/platform/environments/${environmentDetail.id}`,
+      url: `/api/v1/organizations/cosmos/spaces/platform/environments/${environmentDetail.id}`,
       headers: { 'idempotency-key': 'update-environment-1', 'content-type': 'application/merge-patch+json' },
-      payload: JSON.stringify({ image: 'ghcr.io/relay/runtime:next' }),
+      payload: JSON.stringify({ image: 'ghcr.io/cosmos/runtime:next' }),
     })
     expect(missingIfMatch.statusCode).toBe(428)
 
     const updated = await app.inject({
       method: 'PATCH',
-      url: `/api/v1/organizations/relay/spaces/platform/environments/${environmentDetail.id}`,
+      url: `/api/v1/organizations/cosmos/spaces/platform/environments/${environmentDetail.id}`,
       headers: {
         'idempotency-key': 'update-environment-1',
         'if-match': '"3"',
         'content-type': 'application/merge-patch+json',
       },
-      payload: JSON.stringify({ image: 'ghcr.io/relay/runtime:next' }),
+      payload: JSON.stringify({ image: 'ghcr.io/cosmos/runtime:next' }),
     })
     expect(updated.statusCode).toBe(202)
     expect(updateEnvironment).toHaveBeenCalledWith(expect.objectContaining({ expectedVersion: 3 }))
 
     const retried = await app.inject({
       method: 'POST',
-      url: `/api/v1/organizations/relay/spaces/platform/environments/${environmentDetail.id}/retry`,
+      url: `/api/v1/organizations/cosmos/spaces/platform/environments/${environmentDetail.id}/retry`,
       headers: { 'idempotency-key': 'retry-environment-1', 'if-match': '"3"' },
     })
     expect(retried.statusCode).toBe(202)
@@ -884,18 +884,18 @@ describe('Relay API', () => {
     const app = testApp(testRepository(), repository)
     const first = await app.inject({
       method: 'GET',
-      url: '/api/v1/organizations/relay/spaces/platform/experts?limit=1',
+      url: '/api/v1/organizations/cosmos/spaces/platform/experts?limit=1',
     })
     const cursor = ExpertListResponseSchema.parse(first.json()).page.nextCursor
     expect(cursor).toEqual(expect.any(String))
 
     const invalidLimit = await app.inject({
       method: 'GET',
-      url: '/api/v1/organizations/relay/spaces/platform/experts?limit=101',
+      url: '/api/v1/organizations/cosmos/spaces/platform/experts?limit=101',
     })
     const crossResourceCursor = await app.inject({
       method: 'GET',
-      url: `/api/v1/organizations/relay/spaces/platform/environments?cursor=${encodeURIComponent(cursor!)}`,
+      url: `/api/v1/organizations/cosmos/spaces/platform/environments?cursor=${encodeURIComponent(cursor!)}`,
     })
 
     expect(invalidLimit.statusCode).toBe(400)
@@ -914,15 +914,15 @@ describe('Relay API', () => {
     const app = testApp(testRepository(), repository)
     const revokedList = await app.inject({
       method: 'GET',
-      url: '/api/v1/organizations/relay/spaces/platform/experts',
+      url: '/api/v1/organizations/cosmos/spaces/platform/experts',
     })
     const hidden = await app.inject({
       method: 'GET',
-      url: '/api/v1/organizations/relay/spaces/platform/experts/private-expert',
+      url: '/api/v1/organizations/cosmos/spaces/platform/experts/private-expert',
     })
     const missing = await app.inject({
       method: 'GET',
-      url: '/api/v1/organizations/relay/spaces/platform/experts/missing-expert',
+      url: '/api/v1/organizations/cosmos/spaces/platform/experts/missing-expert',
     })
 
     expect(revokedList.statusCode).toBe(404)
@@ -949,7 +949,7 @@ describe('Relay API', () => {
     openApps.push(app)
     const response = await app.inject({
       method: 'GET',
-      url: '/api/v1/organizations/relay/spaces/platform/experts',
+      url: '/api/v1/organizations/cosmos/spaces/platform/experts',
     })
 
     expect(response.statusCode).toBe(403)
@@ -964,7 +964,7 @@ describe('Relay API', () => {
     const repository = testRepository({
       actorOrganizations: {
         'service-session-operator': [{
-          id: 'relay', name: 'Relay', role: 'organization_admin',
+          id: 'cosmos', name: 'Cosmos', role: 'organization_admin',
           spaces: [{ id: 'platform', name: 'Platform', role: 'space_manager' }],
         }],
       },
@@ -978,7 +978,7 @@ describe('Relay API', () => {
       authenticate: async () => ({ id: 'service-session-operator', kind: 'service_account' }),
     })
     openApps.push(app)
-    const url = '/api/v1/organizations/relay/spaces/platform/sessions'
+    const url = '/api/v1/organizations/cosmos/spaces/platform/sessions'
 
     const [list, detail, createResponse] = await Promise.all([
       app.inject({ method: 'GET', url }),
@@ -1014,7 +1014,7 @@ describe('Relay API', () => {
       executionEnabled: false,
     })
     openApps.push(app)
-    const url = '/api/v1/organizations/relay/spaces/platform/sessions'
+    const url = '/api/v1/organizations/cosmos/spaces/platform/sessions'
     const start = await app.inject({
       method: 'POST',
       url,
@@ -1051,7 +1051,7 @@ describe('Relay API', () => {
     expect(ApiErrorSchema.parse(rejectedDraftStart.json())).toMatchObject({
       code: 'EXECUTION_UNAVAILABLE', retryable: false,
     })
-    await expect(repository.getById('relay', 'platform', savedDraft.id, 'user-local-admin'))
+    await expect(repository.getById('cosmos', 'platform', savedDraft.id, 'user-local-admin'))
       .resolves.toMatchObject({ status: 'draft', version: 1 })
   })
 
@@ -1067,7 +1067,7 @@ describe('Relay API', () => {
       executionReadinessCheck,
     })
     openApps.push(app)
-    const url = '/api/v1/organizations/relay/spaces/platform/sessions'
+    const url = '/api/v1/organizations/cosmos/spaces/platform/sessions'
 
     const [readiness, capabilities, start] = await Promise.all([
       app.inject({ method: 'GET', url: '/api/ready' }),
@@ -1109,7 +1109,7 @@ describe('Relay API', () => {
       executionEnabled: false,
     })
     openApps.push(enabledApp, disabledApp)
-    const url = '/api/v1/organizations/relay/spaces/platform/sessions'
+    const url = '/api/v1/organizations/cosmos/spaces/platform/sessions'
     const request = {
       method: 'POST' as const,
       url,
@@ -1153,7 +1153,7 @@ describe('Relay API', () => {
     const create = vi.spyOn(repository, 'create')
     const response = await testApp(repository).inject({
       method: 'POST',
-      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      url: '/api/v1/organizations/cosmos/spaces/platform/sessions',
       headers: { 'idempotency-key': 'create-session-1' },
       payload: {
         title: sessionRequest.title,
@@ -1168,7 +1168,7 @@ describe('Relay API', () => {
     expect(response.headers.etag).toBe('"1"')
     expect(body.session).toMatchObject({
       id: 'session-1',
-      organizationId: 'relay',
+      organizationId: 'cosmos',
       spaceId: 'platform',
       status: 'queued',
       visibility: 'private',
@@ -1184,7 +1184,7 @@ describe('Relay API', () => {
     expect(body.message).toMatchObject({ sessionId: 'session-1', sequence: 1, role: 'user' })
     expect(body.turn).toMatchObject({ sessionId: 'session-1', ordinal: 1, status: 'queued' })
     expect(body.command).toMatchObject({ type: 'session.start', status: 'accepted' })
-    expect(response.headers.location).toBe('/api/v1/organizations/relay/spaces/platform/sessions/session-1')
+    expect(response.headers.location).toBe('/api/v1/organizations/cosmos/spaces/platform/sessions/session-1')
     expect(create).toHaveBeenCalledWith(expect.objectContaining({
       actorId: 'user-local-admin',
       actorKind: 'user',
@@ -1200,7 +1200,7 @@ describe('Relay API', () => {
     })
     const response = await testApp(repository).inject({
       method: 'POST',
-      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      url: '/api/v1/organizations/cosmos/spaces/platform/sessions',
       headers: { 'idempotency-key': 'create-draft-1' },
       payload: { ...sessionRequest, start: false },
     })
@@ -1226,7 +1226,7 @@ describe('Relay API', () => {
       now: () => new Date('2026-07-12T08:00:00.000Z'),
     })
     const app = testApp(repository)
-    const collectionUrl = '/api/v1/organizations/relay/spaces/platform/sessions'
+    const collectionUrl = '/api/v1/organizations/cosmos/spaces/platform/sessions'
     const created = await app.inject({
       method: 'POST',
       url: collectionUrl,
@@ -1262,7 +1262,7 @@ describe('Relay API', () => {
   it('enforces start preconditions, an empty body, and draft-only transitions', async () => {
     const repository = testRepository()
     const app = testApp(repository)
-    const collectionUrl = '/api/v1/organizations/relay/spaces/platform/sessions'
+    const collectionUrl = '/api/v1/organizations/cosmos/spaces/platform/sessions'
     const created = await app.inject({
       method: 'POST', url: collectionUrl,
       headers: { 'idempotency-key': 'create-draft-preconditions' },
@@ -1311,7 +1311,7 @@ describe('Relay API', () => {
   it('queues consecutive follow-up Messages with stable idempotent FIFO records', async () => {
     const repository = testRepository()
     const app = testApp(repository)
-    const collectionUrl = '/api/v1/organizations/relay/spaces/platform/sessions'
+    const collectionUrl = '/api/v1/organizations/cosmos/spaces/platform/sessions'
     const created = await app.inject({
       method: 'POST', url: collectionUrl,
       headers: { 'idempotency-key': 'create-follow-up-session' },
@@ -1362,7 +1362,7 @@ describe('Relay API', () => {
       executionEnabled: false,
     })
     openApps.push(disabled)
-    const collectionUrl = '/api/v1/organizations/relay/spaces/platform/sessions'
+    const collectionUrl = '/api/v1/organizations/cosmos/spaces/platform/sessions'
     const draftResponse = await disabled.inject({
       method: 'POST', url: collectionUrl,
       headers: { 'idempotency-key': 'create-send-draft' },
@@ -1393,7 +1393,7 @@ describe('Relay API', () => {
     })
     expect(unavailable.statusCode).toBe(503)
     expect(ApiErrorSchema.parse(unavailable.json()).code).toBe('EXECUTION_UNAVAILABLE')
-    await expect(repository.getById('relay', 'platform', queued.id, 'user-local-admin'))
+    await expect(repository.getById('cosmos', 'platform', queued.id, 'user-local-admin'))
       .resolves.toMatchObject({ version: 1 })
   })
 
@@ -1409,7 +1409,7 @@ describe('Relay API', () => {
     openApps.push(app)
     const response = await app.inject({
       method: 'POST',
-      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      url: '/api/v1/organizations/cosmos/spaces/platform/sessions',
       headers: { 'idempotency-key': 'long-actor-subject' },
       payload: { ...sessionRequest, start: false },
     })
@@ -1421,7 +1421,7 @@ describe('Relay API', () => {
   it('fails closed without an authoritative catalog and ignores forged compatibility metadata', async () => {
     const failClosed = new InMemorySessionRepository({ actorOrganizations: testActorOrganizations })
     await expect(failClosed.create({
-      organizationId: 'relay',
+      organizationId: 'cosmos',
       spaceId: 'platform',
       actorId: 'user-local-admin',
       actorKind: 'user',
@@ -1433,7 +1433,7 @@ describe('Relay API', () => {
     const repository = testRepository({ createId: () => crypto.randomUUID() })
     const response = await testApp(repository).inject({
       method: 'POST',
-      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      url: '/api/v1/organizations/cosmos/spaces/platform/sessions',
       headers: { 'idempotency-key': 'authoritative-resolution' },
       payload: {
         ...sessionRequest,
@@ -1468,7 +1468,7 @@ describe('Relay API', () => {
     })
     const response = await testApp(repository).inject({
       method: 'POST',
-      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      url: '/api/v1/organizations/cosmos/spaces/platform/sessions',
       headers: { 'idempotency-key': 'legacy-development-fallback' },
       payload: sessionRequest,
     })
@@ -1483,9 +1483,9 @@ describe('Relay API', () => {
 
   it('maps unavailable authoritative configuration states without creating a Session', async () => {
     const disabledExpertRepository = testRepository({
-      authoritativeCatalog: [catalogEntry('relay', 'platform', { status: 'disabled' })],
+      authoritativeCatalog: [catalogEntry('cosmos', 'platform', { status: 'disabled' })],
     })
-    const notReadyEntry = catalogEntry('relay', 'platform')
+    const notReadyEntry = catalogEntry('cosmos', 'platform')
     if (!notReadyEntry.publishedRevision) throw new Error('Expected a published test revision.')
     notReadyEntry.publishedRevision.environment.status = 'disabled'
     const notReadyRepository = testRepository({ authoritativeCatalog: [notReadyEntry] })
@@ -1493,19 +1493,19 @@ describe('Relay API', () => {
 
     const disabledExpert = await testApp(disabledExpertRepository).inject({
       method: 'POST',
-      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      url: '/api/v1/organizations/cosmos/spaces/platform/sessions',
       headers: { 'idempotency-key': 'disabled-expert' },
       payload: sessionRequest,
     })
     const notReadyEnvironment = await testApp(notReadyRepository).inject({
       method: 'POST',
-      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      url: '/api/v1/organizations/cosmos/spaces/platform/sessions',
       headers: { 'idempotency-key': 'not-ready-environment' },
       payload: sessionRequest,
     })
     const unknownExpert = await testApp(unknownRepository).inject({
       method: 'POST',
-      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      url: '/api/v1/organizations/cosmos/spaces/platform/sessions',
       headers: { 'idempotency-key': 'unknown-expert' },
       payload: { ...sessionRequest, expertId: 'unknown-expert' },
     })
@@ -1516,27 +1516,27 @@ describe('Relay API', () => {
     expect(ApiErrorSchema.parse(notReadyEnvironment.json()).code).toBe('ENVIRONMENT_NOT_READY')
     expect(unknownExpert.statusCode).toBe(404)
     expect(ApiErrorSchema.parse(unknownExpert.json()).code).toBe('RESOURCE_NOT_FOUND')
-    await expect(disabledExpertRepository.listBySpace('relay', 'platform', 'user-local-admin'))
+    await expect(disabledExpertRepository.listBySpace('cosmos', 'platform', 'user-local-admin'))
       .resolves.toMatchObject({ items: [], hasMore: false })
-    await expect(notReadyRepository.listBySpace('relay', 'platform', 'user-local-admin'))
+    await expect(notReadyRepository.listBySpace('cosmos', 'platform', 'user-local-admin'))
       .resolves.toMatchObject({ items: [], hasMore: false })
   })
 
   it('conceals a private Expert from another Space member as not found', async () => {
-    const privateExpert = catalogEntry('relay', 'platform', {
+    const privateExpert = catalogEntry('cosmos', 'platform', {
       visibility: 'private',
       createdBy: 'user-expert-owner',
     })
     const app = testApp(testRepository({ authoritativeCatalog: [privateExpert] }))
     const privateResponse = await app.inject({
       method: 'POST',
-      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      url: '/api/v1/organizations/cosmos/spaces/platform/sessions',
       headers: { 'idempotency-key': 'private-expert' },
       payload: sessionRequest,
     })
     const missingResponse = await app.inject({
       method: 'POST',
-      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      url: '/api/v1/organizations/cosmos/spaces/platform/sessions',
       headers: { 'idempotency-key': 'missing-expert' },
       payload: { ...sessionRequest, expertId: 'missing-expert' },
     })
@@ -1551,21 +1551,21 @@ describe('Relay API', () => {
   it('rejects conflicting or forbidden advanced overrides as domain validation errors', async () => {
     const conflictingBranches = await testApp().inject({
       method: 'POST',
-      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      url: '/api/v1/organizations/cosmos/spaces/platform/sessions',
       headers: { 'idempotency-key': 'conflicting-branches' },
       payload: {
         ...sessionRequest,
         advancedOverrides: { repositoryId: 'repository-platform', baseBranch: 'release' },
       },
     })
-    const lockedEntry = catalogEntry('relay', 'platform')
+    const lockedEntry = catalogEntry('cosmos', 'platform')
     if (!lockedEntry.publishedRevision) throw new Error('Expected a published test revision.')
     lockedEntry.publishedRevision.allowRepositoryOverride = false
     const forbiddenRepository = await testApp(testRepository({
       authoritativeCatalog: [lockedEntry],
     })).inject({
       method: 'POST',
-      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      url: '/api/v1/organizations/cosmos/spaces/platform/sessions',
       headers: { 'idempotency-key': 'forbidden-repository' },
       payload: {
         ...sessionRequest,
@@ -1587,13 +1587,13 @@ describe('Relay API', () => {
     const actorOrganizations = {
       ...testActorOrganizations,
       'user-space-member': [{
-        id: 'relay', name: 'Relay', role: 'member' as const,
+        id: 'cosmos', name: 'Cosmos', role: 'member' as const,
         spaces: [{ id: 'platform', name: 'Platform', role: 'member' as const }],
       }],
     }
     const repository = testRepository({ actorOrganizations })
     const created = await repository.create({
-      organizationId: 'relay',
+      organizationId: 'cosmos',
       spaceId: 'platform',
       actorId: 'user-local-admin',
       actorKind: 'user',
@@ -1607,12 +1607,12 @@ describe('Relay API', () => {
       authenticate: createDevelopmentAuthenticator('user-space-member'),
     })
     openApps.push(memberApp)
-    const detailUrl = `/api/v1/organizations/relay/spaces/platform/sessions/${created.session.id}`
+    const detailUrl = `/api/v1/organizations/cosmos/spaces/platform/sessions/${created.session.id}`
     const detail = await creatorApp.inject({ method: 'GET', url: detailUrl })
     const hidden = await memberApp.inject({ method: 'GET', url: detailUrl })
     const missing = await creatorApp.inject({
       method: 'GET',
-      url: '/api/v1/organizations/relay/spaces/platform/sessions/missing-session',
+      url: '/api/v1/organizations/cosmos/spaces/platform/sessions/missing-session',
     })
 
     expect(detail.statusCode).toBe(200)
@@ -1632,14 +1632,14 @@ describe('Relay API', () => {
     const repository = testRepository({
       actorOrganizations: {
         'user-local-admin': [{
-          id: 'relay', name: 'Relay', role: 'viewer',
+          id: 'cosmos', name: 'Cosmos', role: 'viewer',
           spaces: [{ id: 'platform', name: 'Platform', role: 'space_manager' }],
         }],
       },
     })
     const response = await testApp(repository).inject({
       method: 'POST',
-      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      url: '/api/v1/organizations/cosmos/spaces/platform/sessions',
       headers: { 'idempotency-key': 'organization-viewer-create' },
       payload: sessionRequest,
     })
@@ -1649,7 +1649,7 @@ describe('Relay API', () => {
       code: 'PERMISSION_DENIED', retryable: false,
     })
     await expect(repository.create({
-      organizationId: 'relay',
+      organizationId: 'cosmos',
       spaceId: 'platform',
       actorId: 'user-local-admin',
       actorKind: 'user',
@@ -1667,18 +1667,18 @@ describe('Relay API', () => {
       visibility: 'private' as const,
       message: { ...sessionRequest.message, attachments: [] },
     }
-    await repository.create({ organizationId: 'relay', spaceId: 'platform', actorId: 'user-local-admin', actorKind: 'user', requestId: 'request-platform-1', idempotencyKey: 'platform-1', request: normalizedRequest })
+    await repository.create({ organizationId: 'cosmos', spaceId: 'platform', actorId: 'user-local-admin', actorKind: 'user', requestId: 'request-platform-1', idempotencyKey: 'platform-1', request: normalizedRequest })
     await repository.create({ organizationId: 'other', spaceId: 'platform', actorId: 'user-local-admin', actorKind: 'user', requestId: 'request-other-1', idempotencyKey: 'other-1', request: normalizedRequest })
 
     const response = await testApp(repository).inject({
       method: 'GET',
-      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      url: '/api/v1/organizations/cosmos/spaces/platform/sessions',
     })
     const body = SessionListResponseSchema.parse(response.json())
 
     expect(response.statusCode).toBe(200)
     expect(body.items).toHaveLength(1)
-    expect(body.items[0]).toMatchObject({ organizationId: 'relay', spaceId: 'platform' })
+    expect(body.items[0]).toMatchObject({ organizationId: 'cosmos', spaceId: 'platform' })
     expect(body.page.hasMore).toBe(false)
   })
 
@@ -1694,7 +1694,7 @@ describe('Relay API', () => {
       ['page-3', 'Unrelated work'],
     ] as const) {
       await repository.create({
-        organizationId: 'relay', spaceId: 'platform', actorId: 'user-local-admin',
+        organizationId: 'cosmos', spaceId: 'platform', actorId: 'user-local-admin',
         actorKind: 'user', requestId: idempotencyKey, idempotencyKey,
         request: {
           ...sessionRequest,
@@ -1708,7 +1708,7 @@ describe('Relay API', () => {
     const app = testApp(repository)
     const firstResponse = await app.inject({
       method: 'GET',
-      url: '/api/v1/organizations/relay/spaces/platform/sessions?limit=1&search=Checkout',
+      url: '/api/v1/organizations/cosmos/spaces/platform/sessions?limit=1&search=Checkout',
     })
     const first = SessionListResponseSchema.parse(firstResponse.json())
 
@@ -1719,7 +1719,7 @@ describe('Relay API', () => {
 
     const secondResponse = await app.inject({
       method: 'GET',
-      url: `/api/v1/organizations/relay/spaces/platform/sessions?limit=1&search=Checkout&cursor=${first.page.nextCursor}`,
+      url: `/api/v1/organizations/cosmos/spaces/platform/sessions?limit=1&search=Checkout&cursor=${first.page.nextCursor}`,
     })
     const second = SessionListResponseSchema.parse(secondResponse.json())
     expect(secondResponse.statusCode).toBe(200)
@@ -1729,7 +1729,7 @@ describe('Relay API', () => {
 
     const thirdResponse = await app.inject({
       method: 'GET',
-      url: `/api/v1/organizations/relay/spaces/platform/sessions?limit=1&search=Checkout&cursor=${second.page.nextCursor}`,
+      url: `/api/v1/organizations/cosmos/spaces/platform/sessions?limit=1&search=Checkout&cursor=${second.page.nextCursor}`,
     })
     const third = SessionListResponseSchema.parse(thirdResponse.json())
     expect(thirdResponse.statusCode).toBe(200)
@@ -1739,7 +1739,7 @@ describe('Relay API', () => {
 
     const crossFilter = await app.inject({
       method: 'GET',
-      url: `/api/v1/organizations/relay/spaces/platform/sessions?limit=1&search=Checkout&status=queued&cursor=${first.page.nextCursor}`,
+      url: `/api/v1/organizations/cosmos/spaces/platform/sessions?limit=1&search=Checkout&status=queued&cursor=${first.page.nextCursor}`,
     })
     const crossTenant = await app.inject({
       method: 'GET',
@@ -1747,7 +1747,7 @@ describe('Relay API', () => {
     })
     const invalidLimit = await app.inject({
       method: 'GET',
-      url: '/api/v1/organizations/relay/spaces/platform/sessions?limit=0',
+      url: '/api/v1/organizations/cosmos/spaces/platform/sessions?limit=0',
     })
 
     expect(crossFilter.statusCode).toBe(400)
@@ -1760,12 +1760,12 @@ describe('Relay API', () => {
     const app = testApp()
     const createdResponse = await app.inject({
       method: 'POST',
-      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      url: '/api/v1/organizations/cosmos/spaces/platform/sessions',
       headers: { 'idempotency-key': 'rename-source' },
       payload: sessionRequest,
     })
     const created = CreateSessionResponseSchema.parse(createdResponse.json()).session
-    const url = `/api/v1/organizations/relay/spaces/platform/sessions/${created.id}`
+    const url = `/api/v1/organizations/cosmos/spaces/platform/sessions/${created.id}`
 
     const missingPrecondition = await app.inject({ method: 'PATCH', url, payload: { title: 'Renamed' } })
     expect(missingPrecondition.statusCode).toBe(428)
@@ -1799,12 +1799,12 @@ describe('Relay API', () => {
     const app = testApp()
     const createdResponse = await app.inject({
       method: 'POST',
-      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      url: '/api/v1/organizations/cosmos/spaces/platform/sessions',
       headers: { 'idempotency-key': 'archive-source' },
       payload: sessionRequest,
     })
     const created = CreateSessionResponseSchema.parse(createdResponse.json()).session
-    const baseUrl = `/api/v1/organizations/relay/spaces/platform/sessions/${created.id}`
+    const baseUrl = `/api/v1/organizations/cosmos/spaces/platform/sessions/${created.id}`
     const archiveRequest = {
       method: 'POST' as const,
       url: `${baseUrl}/archive`,
@@ -1830,10 +1830,10 @@ describe('Relay API', () => {
     expect(conflict.statusCode).toBe(409)
 
     const activeList = SessionListResponseSchema.parse((await app.inject({
-      method: 'GET', url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      method: 'GET', url: '/api/v1/organizations/cosmos/spaces/platform/sessions',
     })).json())
     const archivedList = SessionListResponseSchema.parse((await app.inject({
-      method: 'GET', url: '/api/v1/organizations/relay/spaces/platform/sessions?archived=true',
+      method: 'GET', url: '/api/v1/organizations/cosmos/spaces/platform/sessions?archived=true',
     })).json())
     expect(activeList.items).toHaveLength(0)
     expect(archivedList.items.map((session) => session.id)).toEqual([created.id])
@@ -1859,12 +1859,12 @@ describe('Relay API', () => {
     const app = testApp()
     const createdResponse = await app.inject({
       method: 'POST',
-      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      url: '/api/v1/organizations/cosmos/spaces/platform/sessions',
       headers: { 'idempotency-key': 'control-source' },
       payload: sessionRequest,
     })
     const created = CreateSessionResponseSchema.parse(createdResponse.json()).session
-    const baseUrl = `/api/v1/organizations/relay/spaces/platform/sessions/${created.id}`
+    const baseUrl = `/api/v1/organizations/cosmos/spaces/platform/sessions/${created.id}`
 
     expect((await app.inject({ method: 'POST', url: `${baseUrl}/pause` })).statusCode).toBe(400)
     expect((await app.inject({
@@ -1932,7 +1932,7 @@ describe('Relay API', () => {
     const app = testApp(repository)
     const createdResponse = await app.inject({
       method: 'POST',
-      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      url: '/api/v1/organizations/cosmos/spaces/platform/sessions',
       headers: { 'idempotency-key': 'retry-source' },
       payload: sessionRequest,
     })
@@ -1955,7 +1955,7 @@ describe('Relay API', () => {
         turnId,
         number: 2,
         status: 'queued',
-        model: 'relay-default',
+        model: 'cosmos-default',
         providerModel: null,
         runtimeId: null,
         failureCode: null,
@@ -1973,7 +1973,7 @@ describe('Relay API', () => {
       },
     })
     const retryTurn = vi.spyOn(repository, 'retryTurn').mockResolvedValue({ ...result, replayed: false })
-    const url = `/api/v1/organizations/relay/spaces/platform/sessions/${created.id}/turns/${turnId}/retry`
+    const url = `/api/v1/organizations/cosmos/spaces/platform/sessions/${created.id}/turns/${turnId}/retry`
 
     const response = await app.inject({
       method: 'POST',
@@ -1999,7 +1999,7 @@ describe('Relay API', () => {
   it('returns a contract-shaped error for invalid input', async () => {
     const response = await testApp().inject({
       method: 'POST',
-      url: '/api/v1/organizations/relay/spaces/platform/sessions',
+      url: '/api/v1/organizations/cosmos/spaces/platform/sessions',
       headers: { 'idempotency-key': 'invalid-session' },
       payload: { ...sessionRequest, message: { content: '' } },
     })
@@ -2013,7 +2013,7 @@ describe('Relay API', () => {
   it('requires Idempotency-Key and replays the same Session per organization and Space', async () => {
     const repository = testRepository()
     const app = testApp(repository)
-    const url = '/api/v1/organizations/relay/spaces/platform/sessions'
+    const url = '/api/v1/organizations/cosmos/spaces/platform/sessions'
     const withoutKey = await app.inject({ method: 'POST', url, payload: sessionRequest })
 
     expect(withoutKey.statusCode).toBe(400)
@@ -2022,7 +2022,7 @@ describe('Relay API', () => {
     const request = { method: 'POST' as const, url, headers: { 'idempotency-key': 'same-command' }, payload: sessionRequest }
     const first = await app.inject(request)
     const replay = await app.inject(request)
-    const sessions = await repository.listBySpace('relay', 'platform', 'user-local-admin')
+    const sessions = await repository.listBySpace('cosmos', 'platform', 'user-local-admin')
 
     expect(first.statusCode).toBe(201)
     expect(replay.statusCode).toBe(201)
@@ -2043,17 +2043,17 @@ describe('Relay API', () => {
       code: 'IDEMPOTENCY_KEY_REUSED',
       retryable: false,
     })
-    expect((await repository.listBySpace('relay', 'platform', 'user-local-admin')).items).toHaveLength(1)
+    expect((await repository.listBySpace('cosmos', 'platform', 'user-local-admin')).items).toHaveLength(1)
 
     const otherSpace = await app.inject({
       ...request,
-      url: '/api/v1/organizations/relay/spaces/commerce/sessions',
+      url: '/api/v1/organizations/cosmos/spaces/commerce/sessions',
       payload: { ...sessionRequest, repository: 'commerce/checkout' },
     })
 
     expect(otherSpace.statusCode).toBe(201)
     expect(otherSpace.headers['idempotency-replayed']).toBe('false')
-    expect((await repository.listBySpace('relay', 'commerce', 'user-local-admin')).items).toHaveLength(1)
+    expect((await repository.listBySpace('cosmos', 'commerce', 'user-local-admin')).items).toHaveLength(1)
   })
 
   it('lists Advisor plans and stops OAuth execution at action required after confirmation', async () => {
@@ -2093,7 +2093,7 @@ describe('Relay API', () => {
       executionReadinessCheck: async () => true,
     })
     openApps.push(app)
-    const baseUrl = '/api/v1/organizations/relay/spaces/platform/sessions/session-advisor/advisor/plans'
+    const baseUrl = '/api/v1/organizations/cosmos/spaces/platform/sessions/session-advisor/advisor/plans'
     const listed = await app.inject({ method: 'GET', url: baseUrl })
     expect(listed.statusCode).toBe(200)
     expect(AdvisorPlanListResponseSchema.parse(listed.json()).items).toEqual([advisorManualPlan])
@@ -2120,7 +2120,7 @@ describe('Relay API', () => {
 
   it('serves the production Automation control-plane routes through the shared contracts', async () => {
     const event = AutomationEventDtoSchema.parse({
-      id: 'event-platform', organizationId: 'relay', spaceId: 'platform', source: 'github',
+      id: 'event-platform', organizationId: 'cosmos', spaceId: 'platform', source: 'github',
       eventType: 'pull_request.opened', externalId: 'provider-1', headers: {}, payload: {},
       payloadHash: 'a'.repeat(64), status: 'ignored', automationId: null, sessionId: null,
       matchExplanation: 'No active Trigger matched the source and event type.',
@@ -2146,12 +2146,12 @@ describe('Relay API', () => {
       executionReadinessCheck: async () => true,
     })
     openApps.push(app)
-    const listed = await app.inject({ method: 'GET', url: '/api/v1/organizations/relay/spaces/platform/automations' })
+    const listed = await app.inject({ method: 'GET', url: '/api/v1/organizations/cosmos/spaces/platform/automations' })
     expect(listed.statusCode).toBe(200)
     expect(listed.json().items[0]).toMatchObject({ id: automationDto.id })
     const created = await app.inject({
       method: 'POST',
-      url: '/api/v1/organizations/relay/spaces/platform/automations',
+      url: '/api/v1/organizations/cosmos/spaces/platform/automations',
       headers: { 'idempotency-key': 'automation-route-create' },
       payload: { expertId: automationDto.expertId, name: automationDto.name, source: 'github', eventType: automationDto.eventType, serviceAccountId: automationDto.serviceAccountId },
     })
@@ -2159,7 +2159,7 @@ describe('Relay API', () => {
     expect(created.headers.location).toContain(`/automations/${automationDto.id}`)
     const tested = await app.inject({
       method: 'POST',
-      url: `/api/v1/organizations/relay/spaces/platform/automations/${automationDto.id}/test`,
+      url: `/api/v1/organizations/cosmos/spaces/platform/automations/${automationDto.id}/test`,
       headers: { 'idempotency-key': 'automation-route-test', 'if-match': '"1"' },
       payload: { payload: { action: 'opened' } },
     })
@@ -2167,13 +2167,13 @@ describe('Relay API', () => {
     expect(tested.json()).toMatchObject({ matched: true })
     const archived = await app.inject({
       method: 'DELETE',
-      url: `/api/v1/organizations/relay/spaces/platform/automations/${automationDto.id}`,
+      url: `/api/v1/organizations/cosmos/spaces/platform/automations/${automationDto.id}`,
       headers: { 'idempotency-key': 'automation-route-archive', 'if-match': '"1"' },
     })
     expect(archived.statusCode).toBe(200)
     expect(archived.headers.etag).toBe('"2"')
     expect(archived.json()).toMatchObject({ automation: { status: 'archived' }, replayed: false })
-    const events = await app.inject({ method: 'GET', url: '/api/v1/organizations/relay/spaces/platform/automation-events' })
+    const events = await app.inject({ method: 'GET', url: '/api/v1/organizations/cosmos/spaces/platform/automation-events' })
     expect(events.statusCode).toBe(200)
     expect(events.json().items).toHaveLength(1)
   })

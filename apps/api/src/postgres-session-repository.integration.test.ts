@@ -1,4 +1,4 @@
-import type { CreateSessionRequest } from '@relay/contracts'
+import type { CreateSessionRequest } from '@cosmos/contracts'
 import { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { runMigrations } from './migrations.js'
@@ -57,87 +57,87 @@ describeWithDatabase('PostgresSessionRepository', () => {
   beforeAll(async () => {
     await runMigrations(pool)
     await pool.query(`
-      ALTER TABLE relay_session_events DISABLE TRIGGER relay_session_events_reject_truncate;
-      ALTER TABLE relay_audit_events DISABLE TRIGGER relay_audit_events_reject_truncate;
-      ALTER TABLE relay_attempts DISABLE TRIGGER relay_attempts_reject_truncate;
-      ALTER TABLE relay_artifacts DISABLE TRIGGER relay_artifacts_reject_truncate;
-      ALTER TABLE relay_files DISABLE TRIGGER relay_files_reject_truncate;
-      ALTER TABLE relay_file_versions DISABLE TRIGGER relay_file_versions_reject_truncate;
-      ALTER TABLE relay_tool_calls DISABLE TRIGGER relay_tool_calls_reject_truncate;
-      ALTER TABLE relay_approvals DISABLE TRIGGER relay_approvals_reject_truncate;
-      ALTER TABLE relay_tool_side_effects DISABLE TRIGGER relay_tool_side_effects_reject_truncate;
-      ALTER TABLE relay_approval_assignments DISABLE TRIGGER relay_approval_assignments_reject_truncate;
-      ALTER TABLE relay_approval_decisions DISABLE TRIGGER relay_approval_decisions_reject_truncate;
-      ALTER TABLE relay_session_workers DISABLE TRIGGER relay_session_workers_reject_truncate;
-      ALTER TABLE relay_automation_audit_events DISABLE TRIGGER relay_automation_audit_events_reject_truncate;
-      ALTER TABLE relay_space_audit_events DISABLE TRIGGER relay_space_audit_events_reject_truncate;
+      ALTER TABLE cosmos_session_events DISABLE TRIGGER cosmos_session_events_reject_truncate;
+      ALTER TABLE cosmos_audit_events DISABLE TRIGGER cosmos_audit_events_reject_truncate;
+      ALTER TABLE cosmos_attempts DISABLE TRIGGER cosmos_attempts_reject_truncate;
+      ALTER TABLE cosmos_artifacts DISABLE TRIGGER cosmos_artifacts_reject_truncate;
+      ALTER TABLE cosmos_files DISABLE TRIGGER cosmos_files_reject_truncate;
+      ALTER TABLE cosmos_file_versions DISABLE TRIGGER cosmos_file_versions_reject_truncate;
+      ALTER TABLE cosmos_tool_calls DISABLE TRIGGER cosmos_tool_calls_reject_truncate;
+      ALTER TABLE cosmos_approvals DISABLE TRIGGER cosmos_approvals_reject_truncate;
+      ALTER TABLE cosmos_tool_side_effects DISABLE TRIGGER cosmos_tool_side_effects_reject_truncate;
+      ALTER TABLE cosmos_approval_assignments DISABLE TRIGGER cosmos_approval_assignments_reject_truncate;
+      ALTER TABLE cosmos_approval_decisions DISABLE TRIGGER cosmos_approval_decisions_reject_truncate;
+      ALTER TABLE cosmos_session_workers DISABLE TRIGGER cosmos_session_workers_reject_truncate;
+      ALTER TABLE cosmos_automation_audit_events DISABLE TRIGGER cosmos_automation_audit_events_reject_truncate;
+      ALTER TABLE cosmos_space_audit_events DISABLE TRIGGER cosmos_space_audit_events_reject_truncate;
     `)
     try {
       await pool.query(`
-        TRUNCATE relay_idempotency_responses, relay_idempotency_records, relay_sessions,
-          relay_space_memberships, relay_organization_memberships, relay_spaces, relay_organizations CASCADE
+        TRUNCATE cosmos_idempotency_responses, cosmos_idempotency_records, cosmos_sessions,
+          cosmos_space_memberships, cosmos_organization_memberships, cosmos_spaces, cosmos_organizations CASCADE
       `)
     } finally {
       await pool.query(`
-        ALTER TABLE relay_session_events ENABLE TRIGGER relay_session_events_reject_truncate;
-        ALTER TABLE relay_audit_events ENABLE TRIGGER relay_audit_events_reject_truncate;
-        ALTER TABLE relay_attempts ENABLE TRIGGER relay_attempts_reject_truncate;
-        ALTER TABLE relay_artifacts ENABLE TRIGGER relay_artifacts_reject_truncate;
-        ALTER TABLE relay_files ENABLE TRIGGER relay_files_reject_truncate;
-        ALTER TABLE relay_file_versions ENABLE TRIGGER relay_file_versions_reject_truncate;
-        ALTER TABLE relay_tool_calls ENABLE TRIGGER relay_tool_calls_reject_truncate;
-        ALTER TABLE relay_approvals ENABLE TRIGGER relay_approvals_reject_truncate;
-        ALTER TABLE relay_tool_side_effects ENABLE TRIGGER relay_tool_side_effects_reject_truncate;
-        ALTER TABLE relay_approval_assignments ENABLE TRIGGER relay_approval_assignments_reject_truncate;
-        ALTER TABLE relay_approval_decisions ENABLE TRIGGER relay_approval_decisions_reject_truncate;
-        ALTER TABLE relay_session_workers ENABLE TRIGGER relay_session_workers_reject_truncate;
-        ALTER TABLE relay_automation_audit_events ENABLE TRIGGER relay_automation_audit_events_reject_truncate;
-        ALTER TABLE relay_space_audit_events ENABLE TRIGGER relay_space_audit_events_reject_truncate;
+        ALTER TABLE cosmos_session_events ENABLE TRIGGER cosmos_session_events_reject_truncate;
+        ALTER TABLE cosmos_audit_events ENABLE TRIGGER cosmos_audit_events_reject_truncate;
+        ALTER TABLE cosmos_attempts ENABLE TRIGGER cosmos_attempts_reject_truncate;
+        ALTER TABLE cosmos_artifacts ENABLE TRIGGER cosmos_artifacts_reject_truncate;
+        ALTER TABLE cosmos_files ENABLE TRIGGER cosmos_files_reject_truncate;
+        ALTER TABLE cosmos_file_versions ENABLE TRIGGER cosmos_file_versions_reject_truncate;
+        ALTER TABLE cosmos_tool_calls ENABLE TRIGGER cosmos_tool_calls_reject_truncate;
+        ALTER TABLE cosmos_approvals ENABLE TRIGGER cosmos_approvals_reject_truncate;
+        ALTER TABLE cosmos_tool_side_effects ENABLE TRIGGER cosmos_tool_side_effects_reject_truncate;
+        ALTER TABLE cosmos_approval_assignments ENABLE TRIGGER cosmos_approval_assignments_reject_truncate;
+        ALTER TABLE cosmos_approval_decisions ENABLE TRIGGER cosmos_approval_decisions_reject_truncate;
+        ALTER TABLE cosmos_session_workers ENABLE TRIGGER cosmos_session_workers_reject_truncate;
+        ALTER TABLE cosmos_automation_audit_events ENABLE TRIGGER cosmos_automation_audit_events_reject_truncate;
+        ALTER TABLE cosmos_space_audit_events ENABLE TRIGGER cosmos_space_audit_events_reject_truncate;
       `)
     }
     const spaces = [
-      ['relay', 'space-commerce'], ['relay', 'space-platform'], ['relay', 'space-ordering'],
-      ['relay', 'space-conflict'], ['relay', 'space-canonical'], ['relay', 'space-expiry'],
-      ['relay', 'space-draft'],
-      ['relay', 'space-rollback'],
-      ['relay', 'space-policy'],
-      ['relay', 'space-private-expert'],
-      ['relay', 'space-list'],
-      ['relay', 'space-metadata'],
-      ['relay', 'space-revision-pin'],
-      ['relay', 'space-role-cap'],
-      ['relay', 'space-role-recheck'],
+      ['cosmos', 'space-commerce'], ['cosmos', 'space-platform'], ['cosmos', 'space-ordering'],
+      ['cosmos', 'space-conflict'], ['cosmos', 'space-canonical'], ['cosmos', 'space-expiry'],
+      ['cosmos', 'space-draft'],
+      ['cosmos', 'space-rollback'],
+      ['cosmos', 'space-policy'],
+      ['cosmos', 'space-private-expert'],
+      ['cosmos', 'space-list'],
+      ['cosmos', 'space-metadata'],
+      ['cosmos', 'space-revision-pin'],
+      ['cosmos', 'space-role-cap'],
+      ['cosmos', 'space-role-recheck'],
       ['other', 'space-commerce'],
     ]
     for (const [organizationId, spaceId] of spaces) {
-      await pool.query('INSERT INTO relay_organizations (id, name) VALUES ($1, $1) ON CONFLICT DO NOTHING', [organizationId])
-      await pool.query('INSERT INTO relay_spaces (organization_id, id, name) VALUES ($1, $2, $2) ON CONFLICT DO NOTHING', [organizationId, spaceId])
+      await pool.query('INSERT INTO cosmos_organizations (id, name) VALUES ($1, $1) ON CONFLICT DO NOTHING', [organizationId])
+      await pool.query('INSERT INTO cosmos_spaces (organization_id, id, name) VALUES ($1, $2, $2) ON CONFLICT DO NOTHING', [organizationId, spaceId])
       await pool.query(`
-        INSERT INTO relay_organization_memberships (organization_id, actor_id, role)
+        INSERT INTO cosmos_organization_memberships (organization_id, actor_id, role)
         VALUES ($1, 'user-local-admin', 'organization_owner') ON CONFLICT DO NOTHING
       `, [organizationId])
       await pool.query(`
-        INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
+        INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role)
         VALUES ($1, $2, 'user-local-admin', 'space_manager') ON CONFLICT DO NOTHING
       `, [organizationId, spaceId])
     }
     await pool.query(`
-      INSERT INTO relay_organization_memberships (organization_id, actor_id, role)
+      INSERT INTO cosmos_organization_memberships (organization_id, actor_id, role)
       VALUES
-        ('relay', 'user-capped', 'viewer'),
-        ('relay', 'user-recheck', 'member'),
-        ('relay', 'user-expert-owner', 'member'),
-        ('relay', 'user-list-reader', 'member'),
-        ('relay', 'user-metadata-manager', 'member'),
-        ('relay', 'user-metadata-member', 'member');
-      INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
+        ('cosmos', 'user-capped', 'viewer'),
+        ('cosmos', 'user-recheck', 'member'),
+        ('cosmos', 'user-expert-owner', 'member'),
+        ('cosmos', 'user-list-reader', 'member'),
+        ('cosmos', 'user-metadata-manager', 'member'),
+        ('cosmos', 'user-metadata-member', 'member');
+      INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role)
       VALUES
-        ('relay', 'space-role-cap', 'user-capped', 'space_manager'),
-        ('relay', 'space-role-recheck', 'user-recheck', 'member'),
-        ('relay', 'space-private-expert', 'user-expert-owner', 'member'),
-        ('relay', 'space-list', 'user-list-reader', 'viewer'),
-        ('relay', 'space-metadata', 'user-metadata-manager', 'space_manager'),
-        ('relay', 'space-metadata', 'user-metadata-member', 'member');
+        ('cosmos', 'space-role-cap', 'user-capped', 'space_manager'),
+        ('cosmos', 'space-role-recheck', 'user-recheck', 'member'),
+        ('cosmos', 'space-private-expert', 'user-expert-owner', 'member'),
+        ('cosmos', 'space-list', 'user-list-reader', 'viewer'),
+        ('cosmos', 'space-metadata', 'user-metadata-manager', 'space_manager'),
+        ('cosmos', 'space-metadata', 'user-metadata-member', 'member');
     `)
     for (const [organizationId, spaceId] of spaces) {
       const configurationOptions = spaceId === 'space-policy'
@@ -158,15 +158,15 @@ describeWithDatabase('PostgresSessionRepository', () => {
 
   it('discovers actual memberships with stable Organization and Space ordering', async () => {
     await pool.query(`
-      INSERT INTO relay_organizations (id, name) VALUES
+      INSERT INTO cosmos_organizations (id, name) VALUES
         ('discovery-a', 'Discovery Z'), ('discovery-z', 'Discovery A');
-      INSERT INTO relay_spaces (organization_id, id, name) VALUES
+      INSERT INTO cosmos_spaces (organization_id, id, name) VALUES
         ('discovery-z', 'space-a', 'Space Z'), ('discovery-z', 'space-z', 'Space A'),
         ('discovery-z', 'space-hidden', 'Hidden Space');
-      INSERT INTO relay_organization_memberships (organization_id, actor_id, role) VALUES
+      INSERT INTO cosmos_organization_memberships (organization_id, actor_id, role) VALUES
         ('discovery-a', 'discovery-user', 'viewer'),
         ('discovery-z', 'discovery-user', 'organization_admin');
-      INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role) VALUES
+      INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role) VALUES
         ('discovery-z', 'space-a', 'discovery-user', 'viewer'),
         ('discovery-z', 'space-z', 'discovery-user', 'space_manager');
     `)
@@ -189,7 +189,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
     const repository = new PostgresSessionRepository(pool)
     const created = await repository.create({
       ...auditContext,
-      organizationId: 'relay', spaceId: 'space-commerce', actorId: 'user-local-admin', idempotencyKey: 'persist-1', request,
+      organizationId: 'cosmos', spaceId: 'space-commerce', actorId: 'user-local-admin', idempotencyKey: 'persist-1', request,
     })
     await repository.create({
       ...auditContext,
@@ -197,7 +197,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
     })
 
     const reconnectedRepository = new PostgresSessionRepository(pool)
-    await expect(reconnectedRepository.listBySpace('relay', 'space-commerce', 'user-local-admin'))
+    await expect(reconnectedRepository.listBySpace('cosmos', 'space-commerce', 'user-local-admin'))
       .resolves.toMatchObject({ items: [created.session], hasMore: false })
     expect(created.session).toMatchObject({
       expertName: 'Authoritative PR Author',
@@ -216,7 +216,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
     const repository = new PostgresSessionRepository(pool)
     const result = await repository.create({
       ...auditContext,
-      organizationId: 'relay',
+      organizationId: 'cosmos',
       spaceId: 'space-commerce',
       actorId: 'user-local-admin',
       idempotencyKey: 'forged-compatibility-fields',
@@ -252,8 +252,8 @@ describeWithDatabase('PostgresSessionRepository', () => {
       SELECT command.payload AS command_payload, outbox.payload AS outbox_payload,
         command.protocol_version, command.requested_by, command.request_id,
         command.max_attempts
-      FROM relay_commands command
-      JOIN relay_outbox_events outbox ON outbox.session_id = command.session_id
+      FROM cosmos_commands command
+      JOIN cosmos_outbox_events outbox ON outbox.session_id = command.session_id
       WHERE command.session_id = $1
     `, [result.session.id])
     expect(payloads.rows[0].command_payload).toMatchObject({
@@ -280,7 +280,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
     const repository = new PostgresSessionRepository(pool)
     const record = {
       ...auditContext,
-      organizationId: 'relay',
+      organizationId: 'cosmos',
       spaceId: 'space-commerce',
       actorId: 'user-local-admin',
       request,
@@ -303,7 +303,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
     const repository = new PostgresSessionRepository(pool)
     await expect(repository.create({
       ...auditContext,
-      organizationId: 'relay',
+      organizationId: 'cosmos',
       spaceId: 'space-private-expert',
       actorId: 'user-local-admin',
       idempotencyKey: 'private-expert-concealment',
@@ -312,10 +312,10 @@ describeWithDatabase('PostgresSessionRepository', () => {
 
     const counts = await pool.query<{ sessions: string; idempotency_records: string }>(`
       SELECT
-        (SELECT count(*) FROM relay_sessions
-          WHERE organization_id = 'relay' AND space_id = 'space-private-expert') AS sessions,
-        (SELECT count(*) FROM relay_idempotency_records
-          WHERE organization_id = 'relay' AND space_id = 'space-private-expert') AS idempotency_records
+        (SELECT count(*) FROM cosmos_sessions
+          WHERE organization_id = 'cosmos' AND space_id = 'space-private-expert') AS sessions,
+        (SELECT count(*) FROM cosmos_idempotency_records
+          WHERE organization_id = 'cosmos' AND space_id = 'space-private-expert') AS idempotency_records
     `)
     expect(counts.rows[0]).toEqual({ sessions: '0', idempotency_records: '0' })
   })
@@ -323,36 +323,36 @@ describeWithDatabase('PostgresSessionRepository', () => {
   it('rolls back when the published Expert or its pinned Environment becomes unavailable', async () => {
     const repository = new PostgresSessionRepository(pool)
     await pool.query(`
-      UPDATE relay_experts SET status = 'disabled'
-      WHERE organization_id = 'relay' AND space_id = 'space-role-cap' AND id = 'expert-pr-author'
+      UPDATE cosmos_experts SET status = 'disabled'
+      WHERE organization_id = 'cosmos' AND space_id = 'space-role-cap' AND id = 'expert-pr-author'
     `)
     try {
       await expect(repository.create({
         ...auditContext,
-        organizationId: 'relay', spaceId: 'space-role-cap', actorId: 'user-local-admin',
+        organizationId: 'cosmos', spaceId: 'space-role-cap', actorId: 'user-local-admin',
         idempotencyKey: 'disabled-expert-rollback', request,
       })).rejects.toBeInstanceOf(ExpertNotPublishedError)
     } finally {
       await pool.query(`
-        UPDATE relay_experts SET status = 'published'
-        WHERE organization_id = 'relay' AND space_id = 'space-role-cap' AND id = 'expert-pr-author'
+        UPDATE cosmos_experts SET status = 'published'
+        WHERE organization_id = 'cosmos' AND space_id = 'space-role-cap' AND id = 'expert-pr-author'
       `)
     }
 
     await pool.query(`
-      UPDATE relay_environments SET status = 'disabled'
-      WHERE organization_id = 'relay' AND space_id = 'space-role-recheck' AND id = 'environment-default'
+      UPDATE cosmos_environments SET status = 'disabled'
+      WHERE organization_id = 'cosmos' AND space_id = 'space-role-recheck' AND id = 'environment-default'
     `)
     try {
       await expect(repository.create({
         ...auditContext,
-        organizationId: 'relay', spaceId: 'space-role-recheck', actorId: 'user-local-admin',
+        organizationId: 'cosmos', spaceId: 'space-role-recheck', actorId: 'user-local-admin',
         idempotencyKey: 'disabled-environment-rollback', request,
       })).rejects.toBeInstanceOf(EnvironmentNotReadyError)
     } finally {
       await pool.query(`
-        UPDATE relay_environments SET status = 'ready'
-        WHERE organization_id = 'relay' AND space_id = 'space-role-recheck' AND id = 'environment-default'
+        UPDATE cosmos_environments SET status = 'ready'
+        WHERE organization_id = 'cosmos' AND space_id = 'space-role-recheck' AND id = 'environment-default'
       `)
     }
 
@@ -362,15 +362,15 @@ describeWithDatabase('PostgresSessionRepository', () => {
       idempotency_responses: string
     }>(`
       SELECT
-        (SELECT count(*) FROM relay_sessions
-          WHERE organization_id = 'relay' AND space_id IN ('space-role-cap', 'space-role-recheck')) AS sessions,
-        (SELECT count(*) FROM relay_idempotency_records
-          WHERE organization_id = 'relay' AND space_id IN ('space-role-cap', 'space-role-recheck')) AS idempotency_records,
-        (SELECT count(*) FROM relay_idempotency_responses
-          WHERE organization_id = 'relay'
+        (SELECT count(*) FROM cosmos_sessions
+          WHERE organization_id = 'cosmos' AND space_id IN ('space-role-cap', 'space-role-recheck')) AS sessions,
+        (SELECT count(*) FROM cosmos_idempotency_records
+          WHERE organization_id = 'cosmos' AND space_id IN ('space-role-cap', 'space-role-recheck')) AS idempotency_records,
+        (SELECT count(*) FROM cosmos_idempotency_responses
+          WHERE organization_id = 'cosmos'
             AND canonical_path IN (
-              '/v1/organizations/relay/spaces/space-role-cap/sessions',
-              '/v1/organizations/relay/spaces/space-role-recheck/sessions'
+              '/v1/organizations/cosmos/spaces/space-role-cap/sessions',
+              '/v1/organizations/cosmos/spaces/space-role-recheck/sessions'
             )) AS idempotency_responses
     `)
     expect(counts.rows[0]).toEqual({
@@ -379,7 +379,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
   })
 
   it('replays the original pinned revisions after the Expert publishes a newer configuration', async () => {
-    const organizationId = 'relay'
+    const organizationId = 'cosmos'
     const spaceId = 'space-revision-pin'
     const configuration = configurations.get(`${organizationId}/${spaceId}`)
     if (!configuration) throw new Error('Expected an authoritative test configuration.')
@@ -395,38 +395,38 @@ describeWithDatabase('PostgresSessionRepository', () => {
     const first = await repository.create(record)
 
     await pool.query(`
-      INSERT INTO relay_environment_revisions (
+      INSERT INTO cosmos_environment_revisions (
         organization_id, space_id, environment_id, id, revision, status, created_by
       ) VALUES ($1, $2, $3, 'environment-revision-2', 2, 'draft', 'system:test-fixture')
     `, [organizationId, spaceId, configuration.environmentId])
     await pool.query(`
-      INSERT INTO relay_environment_revision_repositories (
+      INSERT INTO cosmos_environment_revision_repositories (
         organization_id, space_id, environment_id, environment_revision_id,
         repository_id, repository, base_branch, is_default
       ) VALUES ($1, $2, $3, 'environment-revision-2', 'repository-v2', $4, 'main', true)
     `, [organizationId, spaceId, configuration.environmentId, configuration.repository])
     await pool.query(`
-      UPDATE relay_environment_revisions SET status = 'ready'
+      UPDATE cosmos_environment_revisions SET status = 'ready'
       WHERE organization_id = $1 AND space_id = $2
         AND environment_id = $3 AND id = 'environment-revision-2'
     `, [organizationId, spaceId, configuration.environmentId])
     await pool.query(`
-      UPDATE relay_environments SET active_revision_id = 'environment-revision-2'
+      UPDATE cosmos_environments SET active_revision_id = 'environment-revision-2'
       WHERE organization_id = $1 AND space_id = $2 AND id = $3
     `, [organizationId, spaceId, configuration.environmentId])
     await pool.query(`
-      INSERT INTO relay_expert_revisions (
+      INSERT INTO cosmos_expert_revisions (
         organization_id, space_id, expert_id, id, revision, status,
         environment_id, environment_revision_id, created_by
       ) VALUES ($1, $2, $3, 'expert-revision-2', 2, 'draft', $4, 'environment-revision-2', 'system:test-fixture')
     `, [organizationId, spaceId, configuration.expertId, configuration.environmentId])
     await pool.query(`
-      UPDATE relay_expert_revisions SET status = 'published'
+      UPDATE cosmos_expert_revisions SET status = 'published'
       WHERE organization_id = $1 AND space_id = $2
         AND expert_id = $3 AND id = 'expert-revision-2'
     `, [organizationId, spaceId, configuration.expertId])
     await pool.query(`
-      UPDATE relay_experts SET published_revision_id = 'expert-revision-2'
+      UPDATE cosmos_experts SET published_revision_id = 'expert-revision-2'
       WHERE organization_id = $1 AND space_id = $2 AND id = $3
     `, [organizationId, spaceId, configuration.expertId])
 
@@ -451,21 +451,21 @@ describeWithDatabase('PostgresSessionRepository', () => {
     const repository = new PostgresSessionRepository(pool)
     const created = await repository.create({
       ...auditContext,
-      organizationId: 'relay', spaceId: 'space-commerce', actorId: 'user-local-admin',
+      organizationId: 'cosmos', spaceId: 'space-commerce', actorId: 'user-local-admin',
       idempotencyKey: 'revocation-list-1', request: { ...request, title: 'Revocation proof' },
     })
-    expect((await repository.listBySpace('relay', 'space-commerce', 'user-local-admin')).items
+    expect((await repository.listBySpace('cosmos', 'space-commerce', 'user-local-admin')).items
       .some((session) => session.id === created.session.id)).toBe(true)
 
     await pool.query(`
-      DELETE FROM relay_space_memberships
-      WHERE organization_id = 'relay' AND space_id = 'space-commerce' AND actor_id = 'user-local-admin'
+      DELETE FROM cosmos_space_memberships
+      WHERE organization_id = 'cosmos' AND space_id = 'space-commerce' AND actor_id = 'user-local-admin'
     `)
-    await expect(repository.listBySpace('relay', 'space-commerce', 'user-local-admin'))
+    await expect(repository.listBySpace('cosmos', 'space-commerce', 'user-local-admin'))
       .resolves.toMatchObject({ items: [], hasMore: false })
     await pool.query(`
-      INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
-      VALUES ('relay', 'space-commerce', 'user-local-admin', 'space_manager')
+      INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role)
+      VALUES ('cosmos', 'space-commerce', 'user-local-admin', 'space_manager')
     `)
   })
 
@@ -473,7 +473,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
     const repository = new PostgresSessionRepository(pool)
     const record = {
       ...auditContext,
-      organizationId: 'relay', spaceId: 'space-platform', actorId: 'user-local-admin', idempotencyKey: 'concurrent-command', request,
+      organizationId: 'cosmos', spaceId: 'space-platform', actorId: 'user-local-admin', idempotencyKey: 'concurrent-command', request,
     }
 
     const results = await Promise.all(Array.from({ length: 6 }, () => repository.create(record)))
@@ -483,7 +483,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
     expect(results.every((result) => result.message?.id === results[0].message?.id)).toBe(true)
     expect(results.every((result) => result.turn?.id === results[0].turn?.id)).toBe(true)
     expect(results.every((result) => result.command?.id === results[0].command?.id)).toBe(true)
-    expect((await repository.listBySpace('relay', 'space-platform', 'user-local-admin')).items).toHaveLength(1)
+    expect((await repository.listBySpace('cosmos', 'space-platform', 'user-local-admin')).items).toHaveLength(1)
 
     const executionRows = await pool.query<{
       messages: string
@@ -495,15 +495,15 @@ describeWithDatabase('PostgresSessionRepository', () => {
       responses: string
     }>(`
       SELECT
-        (SELECT count(*) FROM relay_messages WHERE session_id = $1) AS messages,
-        (SELECT count(*) FROM relay_turns WHERE session_id = $1) AS turns,
-        (SELECT count(*) FROM relay_commands WHERE session_id = $1) AS commands,
-        (SELECT count(*) FROM relay_outbox_events WHERE session_id = $1) AS outbox_events,
-        (SELECT count(*) FROM relay_session_events WHERE session_id = $1) AS session_events,
-        (SELECT count(*) FROM relay_audit_events WHERE session_id = $1) AS audit_events,
-        (SELECT count(*) FROM relay_idempotency_responses
+        (SELECT count(*) FROM cosmos_messages WHERE session_id = $1) AS messages,
+        (SELECT count(*) FROM cosmos_turns WHERE session_id = $1) AS turns,
+        (SELECT count(*) FROM cosmos_commands WHERE session_id = $1) AS commands,
+        (SELECT count(*) FROM cosmos_outbox_events WHERE session_id = $1) AS outbox_events,
+        (SELECT count(*) FROM cosmos_session_events WHERE session_id = $1) AS session_events,
+        (SELECT count(*) FROM cosmos_audit_events WHERE session_id = $1) AS audit_events,
+        (SELECT count(*) FROM cosmos_idempotency_responses
           WHERE organization_id = $2 AND actor_id = $3
-            AND canonical_path = '/v1/organizations/relay/spaces/space-platform/sessions') AS responses
+            AND canonical_path = '/v1/organizations/cosmos/spaces/space-platform/sessions') AS responses
     `, [results[0].session.id, record.organizationId, record.actorId])
     expect(executionRows.rows[0]).toEqual({
       messages: '1', turns: '1', commands: '1', outbox_events: '1',
@@ -514,7 +514,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
       idempotency_key_hash: string
     }>(`
       SELECT idempotency_key_hash
-      FROM relay_idempotency_records
+      FROM cosmos_idempotency_records
       WHERE organization_id = $1 AND space_id = $2
     `, [record.organizationId, record.spaceId])
     expect(persistedKeys.rows).toHaveLength(1)
@@ -527,27 +527,27 @@ describeWithDatabase('PostgresSessionRepository', () => {
 
     await expect(repository.create({
       ...auditContext,
-      organizationId: 'relay', spaceId: 'space-role-cap', actorId: 'user-capped',
+      organizationId: 'cosmos', spaceId: 'space-role-cap', actorId: 'user-capped',
       idempotencyKey: 'organization-viewer-create', request,
     })).rejects.toBeInstanceOf(AuthorizationChangedError)
-    await expect(repository.listBySpace('relay', 'space-role-cap', 'user-capped'))
+    await expect(repository.listBySpace('cosmos', 'space-role-cap', 'user-capped'))
       .resolves.toMatchObject({ items: [], hasMore: false })
   })
 
   it('rechecks both membership roles inside the create transaction', async () => {
     const repository = new PostgresSessionRepository(pool)
-    await expect(repository.getSpaceAccess('relay', 'space-role-recheck', 'user-recheck')).resolves.toEqual({
+    await expect(repository.getSpaceAccess('cosmos', 'space-role-recheck', 'user-recheck')).resolves.toEqual({
       organizationRole: 'member', spaceRole: 'member',
     })
 
     await pool.query(`
-      UPDATE relay_organization_memberships SET role = 'viewer'
-      WHERE organization_id = 'relay' AND actor_id = 'user-recheck'
+      UPDATE cosmos_organization_memberships SET role = 'viewer'
+      WHERE organization_id = 'cosmos' AND actor_id = 'user-recheck'
     `)
 
     await expect(repository.create({
       ...auditContext,
-      organizationId: 'relay', spaceId: 'space-role-recheck', actorId: 'user-recheck',
+      organizationId: 'cosmos', spaceId: 'space-role-recheck', actorId: 'user-recheck',
       idempotencyKey: 'role-downgraded-before-create', request,
     })).rejects.toBeInstanceOf(AuthorizationChangedError)
   })
@@ -556,21 +556,21 @@ describeWithDatabase('PostgresSessionRepository', () => {
     const organizationId = 'role-race-organization'
     const spaceId = 'role-race-space'
     const actorId = 'role-race-user'
-    const applicationName = 'relay-role-downgrade-race-test'
+    const applicationName = 'cosmos-role-downgrade-race-test'
     await pool.query(
-      "INSERT INTO relay_organizations (id, name) VALUES ($1, 'Role race Organization')",
+      "INSERT INTO cosmos_organizations (id, name) VALUES ($1, 'Role race Organization')",
       [organizationId],
     )
     await pool.query(
-      "INSERT INTO relay_spaces (organization_id, id, name) VALUES ($1, $2, 'Role race Space')",
+      "INSERT INTO cosmos_spaces (organization_id, id, name) VALUES ($1, $2, 'Role race Space')",
       [organizationId, spaceId],
     )
     await pool.query(`
-      INSERT INTO relay_organization_memberships (organization_id, actor_id, role)
+      INSERT INTO cosmos_organization_memberships (organization_id, actor_id, role)
       VALUES ($1, $2, 'member')
     `, [organizationId, actorId])
     await pool.query(`
-      INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
+      INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role)
       VALUES ($1, $2, $3, 'space_manager')
     `, [organizationId, spaceId, actorId])
 
@@ -586,7 +586,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
         'SELECT pg_backend_pid() AS pid',
       )).rows[0].pid
       await downgradeClient.query(`
-        UPDATE relay_organization_memberships SET role = 'viewer'
+        UPDATE cosmos_organization_memberships SET role = 'viewer'
         WHERE organization_id = $1 AND actor_id = $2
       `, [organizationId, actorId])
 
@@ -606,9 +606,9 @@ describeWithDatabase('PostgresSessionRepository', () => {
       await expect(creation).rejects.toBeInstanceOf(AuthorizationChangedError)
       const counts = await pool.query(`
         SELECT
-          (SELECT count(*) FROM relay_sessions
+          (SELECT count(*) FROM cosmos_sessions
             WHERE organization_id = $1 AND space_id = $2 AND created_by = $3) AS sessions,
-          (SELECT count(*) FROM relay_idempotency_records
+          (SELECT count(*) FROM cosmos_idempotency_records
             WHERE organization_id = $1 AND space_id = $2 AND actor_id = $3) AS idempotency_records
       `, [organizationId, spaceId, actorId])
       expect(counts.rows[0]).toEqual({ sessions: '0', idempotency_records: '0' })
@@ -625,16 +625,16 @@ describeWithDatabase('PostgresSessionRepository', () => {
     const repository = new PostgresSessionRepository(pool, { now: () => now })
     const first = await repository.create({
       ...auditContext,
-      organizationId: 'relay', spaceId: 'space-ordering', actorId: 'user-local-admin', idempotencyKey: 'ordering-1', request,
+      organizationId: 'cosmos', spaceId: 'space-ordering', actorId: 'user-local-admin', idempotencyKey: 'ordering-1', request,
     })
 
     now = new Date('2026-07-12T12:01:00.000Z')
     const second = await repository.create({
       ...auditContext,
-      organizationId: 'relay', spaceId: 'space-ordering', actorId: 'user-local-admin', idempotencyKey: 'ordering-2', request,
+      organizationId: 'cosmos', spaceId: 'space-ordering', actorId: 'user-local-admin', idempotencyKey: 'ordering-2', request,
     })
 
-    await expect(repository.listBySpace('relay', 'space-ordering', 'user-local-admin'))
+    await expect(repository.listBySpace('cosmos', 'space-ordering', 'user-local-admin'))
       .resolves.toMatchObject({ items: [second.session, first.session], hasMore: false })
   })
 
@@ -643,29 +643,29 @@ describeWithDatabase('PostgresSessionRepository', () => {
     const repository = new PostgresSessionRepository(pool, { now: () => now })
     const first = await repository.create({
       ...auditContext,
-      organizationId: 'relay', spaceId: 'space-list', actorId: 'user-local-admin',
+      organizationId: 'cosmos', spaceId: 'space-list', actorId: 'user-local-admin',
       idempotencyKey: 'list-alpha', request: { ...request, title: 'Private needle alpha' },
     })
     const second = await repository.create({
       ...auditContext,
-      organizationId: 'relay', spaceId: 'space-list', actorId: 'user-local-admin',
+      organizationId: 'cosmos', spaceId: 'space-list', actorId: 'user-local-admin',
       idempotencyKey: 'list-beta', request: { ...request, title: 'Private needle 100% beta' },
     })
     const shared = await repository.create({
       ...auditContext,
-      organizationId: 'relay', spaceId: 'space-list', actorId: 'user-local-admin',
+      organizationId: 'cosmos', spaceId: 'space-list', actorId: 'user-local-admin',
       idempotencyKey: 'list-shared',
       request: { ...request, title: 'Shared platform work', visibility: 'space' },
     })
 
-    const firstPage = await repository.listBySpace('relay', 'space-list', 'user-local-admin', {
+    const firstPage = await repository.listBySpace('cosmos', 'space-list', 'user-local-admin', {
       limit: 1, search: 'needle', archived: false,
     })
     expect(firstPage).toMatchObject({ hasMore: true })
     expect(firstPage.items).toHaveLength(1)
     expect(firstPage.nextCursor).not.toBeNull()
 
-    const secondPage = await repository.listBySpace('relay', 'space-list', 'user-local-admin', {
+    const secondPage = await repository.listBySpace('cosmos', 'space-list', 'user-local-admin', {
       limit: 1, search: 'needle', archived: false, cursor: firstPage.nextCursor ?? undefined,
     })
     expect(secondPage).toMatchObject({ hasMore: false, nextCursor: null })
@@ -673,16 +673,16 @@ describeWithDatabase('PostgresSessionRepository', () => {
     expect(new Set([firstPage.items[0].id, secondPage.items[0].id]))
       .toEqual(new Set([first.session.id, second.session.id]))
 
-    await expect(repository.listBySpace('relay', 'space-list', 'user-list-reader', { search: 'needle' }))
+    await expect(repository.listBySpace('cosmos', 'space-list', 'user-list-reader', { search: 'needle' }))
       .resolves.toMatchObject({ items: [], hasMore: false })
-    await expect(repository.listBySpace('relay', 'space-list', 'user-list-reader'))
+    await expect(repository.listBySpace('cosmos', 'space-list', 'user-list-reader'))
       .resolves.toMatchObject({ items: [shared.session], hasMore: false })
-    await expect(repository.listBySpace('relay', 'space-list', 'user-local-admin', { search: '100%' }))
+    await expect(repository.listBySpace('cosmos', 'space-list', 'user-local-admin', { search: '100%' }))
       .resolves.toMatchObject({ items: [second.session], hasMore: false })
 
-    await pool.query('UPDATE relay_sessions SET archived_at = $1 WHERE id = $2', [now, second.session.id])
-    const active = await repository.listBySpace('relay', 'space-list', 'user-local-admin', { search: 'needle' })
-    const archived = await repository.listBySpace('relay', 'space-list', 'user-local-admin', {
+    await pool.query('UPDATE cosmos_sessions SET archived_at = $1 WHERE id = $2', [now, second.session.id])
+    const active = await repository.listBySpace('cosmos', 'space-list', 'user-local-admin', { search: 'needle' })
+    const archived = await repository.listBySpace('cosmos', 'space-list', 'user-local-admin', {
       search: 'needle', archived: true,
     })
     expect(active.items.map((session) => session.id)).toEqual([first.session.id])
@@ -694,13 +694,13 @@ describeWithDatabase('PostgresSessionRepository', () => {
     const repository = new PostgresSessionRepository(pool, { now: () => now })
     const created = await repository.create({
       ...auditContext,
-      organizationId: 'relay', spaceId: 'space-metadata', actorId: 'user-local-admin',
+      organizationId: 'cosmos', spaceId: 'space-metadata', actorId: 'user-local-admin',
       idempotencyKey: 'metadata-public',
       request: { ...request, title: 'Metadata lifecycle', visibility: 'space' },
     })
     const privateSession = await repository.create({
       ...auditContext,
-      organizationId: 'relay', spaceId: 'space-metadata', actorId: 'user-local-admin',
+      organizationId: 'cosmos', spaceId: 'space-metadata', actorId: 'user-local-admin',
       idempotencyKey: 'metadata-private',
       request: { ...request, title: 'Private metadata', visibility: 'private' },
     })
@@ -709,20 +709,20 @@ describeWithDatabase('PostgresSessionRepository', () => {
     now = new Date('2026-07-12T13:01:00.000Z')
     const renamed = await repository.rename({
       ...auditContext,
-      organizationId: 'relay', spaceId: 'space-metadata', sessionId: created.session.id,
+      organizationId: 'cosmos', spaceId: 'space-metadata', sessionId: created.session.id,
       actorId: 'user-metadata-manager', expectedVersion: 1,
       request: { title: 'Manager rename' },
     })
     expect(renamed).toMatchObject({ title: 'Manager rename', version: 2, lastActivityAt: originalActivity })
     await expect(repository.rename({
       ...auditContext,
-      organizationId: 'relay', spaceId: 'space-metadata', sessionId: created.session.id,
+      organizationId: 'cosmos', spaceId: 'space-metadata', sessionId: created.session.id,
       actorId: 'user-metadata-member', expectedVersion: 2,
       request: { title: 'Member rename' },
     })).rejects.toBeInstanceOf(AuthorizationChangedError)
     await expect(repository.rename({
       ...auditContext,
-      organizationId: 'relay', spaceId: 'space-metadata', sessionId: privateSession.session.id,
+      organizationId: 'cosmos', spaceId: 'space-metadata', sessionId: privateSession.session.id,
       actorId: 'user-metadata-manager', expectedVersion: 1,
       request: { title: 'Concealed rename' },
     })).resolves.toBeNull()
@@ -731,12 +731,12 @@ describeWithDatabase('PostgresSessionRepository', () => {
     const competingRenames = await Promise.allSettled([
       repository.rename({
         ...auditContext,
-        organizationId: 'relay', spaceId: 'space-metadata', sessionId: created.session.id,
+        organizationId: 'cosmos', spaceId: 'space-metadata', sessionId: created.session.id,
         actorId: 'user-local-admin', expectedVersion: 2, request: { title: 'Creator winner' },
       }),
       repository.rename({
         ...auditContext,
-        organizationId: 'relay', spaceId: 'space-metadata', sessionId: created.session.id,
+        organizationId: 'cosmos', spaceId: 'space-metadata', sessionId: created.session.id,
         actorId: 'user-metadata-manager', expectedVersion: 2, request: { title: 'Manager winner' },
       }),
     ])
@@ -744,7 +744,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
     const rejectedRename = competingRenames.find((result) => result.status === 'rejected')
     expect(rejectedRename).toMatchObject({ reason: expect.any(SessionVersionConflictError) })
     const afterRename = await repository.getById(
-      'relay', 'space-metadata', created.session.id, 'user-local-admin',
+      'cosmos', 'space-metadata', created.session.id, 'user-local-admin',
     )
     if (!afterRename) throw new Error('Expected the metadata Session after rename.')
     expect(afterRename).toMatchObject({ version: 3, lastActivityAt: originalActivity })
@@ -752,7 +752,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
     now = new Date('2026-07-12T13:03:00.000Z')
     const archiveRecord = {
       ...auditContext,
-      organizationId: 'relay',
+      organizationId: 'cosmos',
       spaceId: 'space-metadata',
       sessionId: created.session.id,
       actorId: 'user-metadata-manager',
@@ -773,7 +773,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
     if (!archived) throw new Error('Expected an archived Session.')
     expect(archived).toMatchObject({ status: created.session.status, version: 4, lastActivityAt: originalActivity })
     expect(archived.archivedAt).toBe(now.toISOString())
-    await expect(repository.listBySpace('relay', 'space-metadata', 'user-local-admin'))
+    await expect(repository.listBySpace('cosmos', 'space-metadata', 'user-local-admin'))
       .resolves.toMatchObject({ items: [privateSession.session] })
 
     const noOpArchive = await repository.setArchived({
@@ -790,7 +790,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
     now = new Date('2026-07-12T13:04:00.000Z')
     const restored = await repository.setArchived({
       ...auditContext,
-      organizationId: 'relay', spaceId: 'space-metadata', sessionId: created.session.id,
+      organizationId: 'cosmos', spaceId: 'space-metadata', sessionId: created.session.id,
       actorId: 'user-metadata-manager', expectedVersion: 4,
       action: 'restore', idempotencyKey: 'metadata-restore',
     })
@@ -798,8 +798,8 @@ describeWithDatabase('PostgresSessionRepository', () => {
 
     const events = await pool.query<{ event_type: string; payload: Record<string, unknown> }>(`
       SELECT event_type, payload
-      FROM relay_session_events
-      WHERE organization_id = 'relay' AND space_id = 'space-metadata' AND session_id = $1
+      FROM cosmos_session_events
+      WHERE organization_id = 'cosmos' AND space_id = 'space-metadata' AND session_id = $1
         AND event_type IN ('session.renamed', 'session.archived', 'session.restored')
       ORDER BY sequence
     `, [created.session.id])
@@ -808,7 +808,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
     ])
     expect(events.rows.at(-1)?.payload).toEqual({ archivedAt: null, version: 5 })
     const projectedEvents = await new PostgresSessionTimelineRepository(pool).listEvents(
-      'relay', 'space-metadata', created.session.id, 'user-local-admin', { limit: 20 },
+      'cosmos', 'space-metadata', created.session.id, 'user-local-admin', { limit: 20 },
     )
     expect(projectedEvents?.items.filter((event) => (
       event.type === 'session.renamed'
@@ -822,8 +822,8 @@ describeWithDatabase('PostgresSessionRepository', () => {
     ])
     const audits = await pool.query<{ action: string; idempotency_key_hash: string | null }>(`
       SELECT action, idempotency_key_hash
-      FROM relay_audit_events
-      WHERE organization_id = 'relay' AND space_id = 'space-metadata' AND session_id = $1
+      FROM cosmos_audit_events
+      WHERE organization_id = 'cosmos' AND space_id = 'space-metadata' AND session_id = $1
         AND action IN ('session.rename', 'session.archive', 'session.restore')
       ORDER BY occurred_at, audit_event_id
     `, [created.session.id])
@@ -838,7 +838,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
     const repository = new PostgresSessionRepository(pool)
     const record = {
       ...auditContext,
-      organizationId: 'relay', spaceId: 'space-conflict', actorId: 'user-local-admin', idempotencyKey: 'conflicting-command', request,
+      organizationId: 'cosmos', spaceId: 'space-conflict', actorId: 'user-local-admin', idempotencyKey: 'conflicting-command', request,
     }
     await repository.create(record)
     await expect(repository.create({
@@ -850,7 +850,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
     const repository = new PostgresSessionRepository(pool)
     const record = {
       ...auditContext,
-      organizationId: 'relay', spaceId: 'space-canonical', actorId: 'user-local-admin', idempotencyKey: 'canonical-command', request,
+      organizationId: 'cosmos', spaceId: 'space-canonical', actorId: 'user-local-admin', idempotencyKey: 'canonical-command', request,
     }
     const first = await repository.create(record)
     const reorderedRequest: CreateSessionRequest = {
@@ -871,7 +871,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
     const replay = await repository.create({ ...record, request: reorderedRequest })
 
     expect(replay).toEqual({ ...first, replayed: true })
-    expect((await repository.listBySpace('relay', 'space-canonical', 'user-local-admin')).items).toHaveLength(1)
+    expect((await repository.listBySpace('cosmos', 'space-canonical', 'user-local-admin')).items).toHaveLength(1)
   })
 
   it('allows a key to create a new Session after its idempotency window expires', async () => {
@@ -882,7 +882,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
     })
     const record = {
       ...auditContext,
-      organizationId: 'relay', spaceId: 'space-expiry', actorId: 'user-local-admin', idempotencyKey: 'expiring-command', request,
+      organizationId: 'cosmos', spaceId: 'space-expiry', actorId: 'user-local-admin', idempotencyKey: 'expiring-command', request,
     }
     const first = await repository.create(record)
 
@@ -893,14 +893,14 @@ describeWithDatabase('PostgresSessionRepository', () => {
 
     expect(afterExpiry.replayed).toBe(false)
     expect(afterExpiry.session.id).not.toBe(first.session.id)
-    expect((await repository.listBySpace('relay', 'space-expiry', 'user-local-admin')).items).toHaveLength(2)
+    expect((await repository.listBySpace('cosmos', 'space-expiry', 'user-local-admin')).items).toHaveLength(2)
   })
 
   it('starts a draft from its persisted first Message without duplicating queue records', async () => {
     const repository = new PostgresSessionRepository(pool)
     const result = await repository.create({
       ...auditContext,
-      organizationId: 'relay', spaceId: 'space-draft', actorId: 'user-local-admin',
+      organizationId: 'cosmos', spaceId: 'space-draft', actorId: 'user-local-admin',
       idempotencyKey: 'draft-only', request: { ...request, start: false },
     })
 
@@ -920,16 +920,16 @@ describeWithDatabase('PostgresSessionRepository', () => {
       outbox_events: string
     }>(`
       SELECT
-        (SELECT count(*) FROM relay_messages WHERE session_id = $1) AS messages,
-        (SELECT count(*) FROM relay_turns WHERE session_id = $1) AS turns,
-        (SELECT count(*) FROM relay_commands WHERE session_id = $1) AS commands,
-        (SELECT count(*) FROM relay_outbox_events WHERE session_id = $1) AS outbox_events
+        (SELECT count(*) FROM cosmos_messages WHERE session_id = $1) AS messages,
+        (SELECT count(*) FROM cosmos_turns WHERE session_id = $1) AS turns,
+        (SELECT count(*) FROM cosmos_commands WHERE session_id = $1) AS commands,
+        (SELECT count(*) FROM cosmos_outbox_events WHERE session_id = $1) AS outbox_events
     `, [result.session.id])
     expect(counts.rows[0]).toEqual({ messages: '1', turns: '0', commands: '0', outbox_events: '0' })
 
     const startRecord = {
       ...auditContext,
-      organizationId: 'relay',
+      organizationId: 'cosmos',
       spaceId: 'space-draft',
       sessionId: result.session.id,
       actorId: 'user-local-admin',
@@ -956,12 +956,12 @@ describeWithDatabase('PostgresSessionRepository', () => {
       audit_events: string
     }>(`
       SELECT
-        (SELECT count(*) FROM relay_messages WHERE session_id = $1) AS messages,
-        (SELECT count(*) FROM relay_turns WHERE session_id = $1) AS turns,
-        (SELECT count(*) FROM relay_commands WHERE session_id = $1) AS commands,
-        (SELECT count(*) FROM relay_outbox_events WHERE session_id = $1) AS outbox_events,
-        (SELECT count(*) FROM relay_session_events WHERE session_id = $1) AS session_events,
-        (SELECT count(*) FROM relay_audit_events WHERE session_id = $1) AS audit_events
+        (SELECT count(*) FROM cosmos_messages WHERE session_id = $1) AS messages,
+        (SELECT count(*) FROM cosmos_turns WHERE session_id = $1) AS turns,
+        (SELECT count(*) FROM cosmos_commands WHERE session_id = $1) AS commands,
+        (SELECT count(*) FROM cosmos_outbox_events WHERE session_id = $1) AS outbox_events,
+        (SELECT count(*) FROM cosmos_session_events WHERE session_id = $1) AS session_events,
+        (SELECT count(*) FROM cosmos_audit_events WHERE session_id = $1) AS audit_events
     `, [result.session.id])
     expect(startedCounts.rows[0]).toEqual({
       messages: '1', turns: '1', commands: '1', outbox_events: '1',
@@ -969,7 +969,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
     })
     const ledger = await pool.query<{ action: string; before_state: unknown }>(`
       SELECT action, before_state
-      FROM relay_audit_events
+      FROM cosmos_audit_events
       WHERE session_id = $1
       ORDER BY action
     `, [result.session.id])
@@ -983,12 +983,12 @@ describeWithDatabase('PostgresSessionRepository', () => {
     const repository = new PostgresSessionRepository(pool)
     const created = await repository.create({
       ...auditContext,
-      organizationId: 'relay', spaceId: 'space-ordering', actorId: 'user-local-admin',
+      organizationId: 'cosmos', spaceId: 'space-ordering', actorId: 'user-local-admin',
       idempotencyKey: 'follow-up-create', request,
     })
     const firstRecord = {
       ...auditContext,
-      organizationId: 'relay',
+      organizationId: 'cosmos',
       spaceId: 'space-ordering',
       sessionId: created.session.id,
       actorId: 'user-local-admin',
@@ -1033,20 +1033,20 @@ describeWithDatabase('PostgresSessionRepository', () => {
       idempotency_records: string
     }>(`
       SELECT
-        (SELECT array_agg(sequence::integer ORDER BY sequence) FROM relay_messages
+        (SELECT array_agg(sequence::integer ORDER BY sequence) FROM cosmos_messages
           WHERE session_id = $1) AS message_sequences,
-        (SELECT array_agg(ordinal ORDER BY ordinal) FROM relay_turns
+        (SELECT array_agg(ordinal ORDER BY ordinal) FROM cosmos_turns
           WHERE session_id = $1) AS turn_ordinals,
         (SELECT array_agg(command.type ORDER BY turn.ordinal)
-          FROM relay_commands command
-          JOIN relay_turns turn ON turn.id = command.resource_id
+          FROM cosmos_commands command
+          JOIN cosmos_turns turn ON turn.id = command.resource_id
           WHERE command.session_id = $1) AS command_types,
-        (SELECT array_agg(event_type ORDER BY sequence) FROM relay_session_events
+        (SELECT array_agg(event_type ORDER BY sequence) FROM cosmos_session_events
           WHERE session_id = $1) AS event_types,
-        (SELECT array_agg(action ORDER BY action) FROM relay_audit_events
+        (SELECT array_agg(action ORDER BY action) FROM cosmos_audit_events
           WHERE session_id = $1) AS audit_actions,
-        (SELECT count(*) FROM relay_outbox_events WHERE session_id = $1) AS outbox_events,
-        (SELECT count(*) FROM relay_idempotency_records WHERE session_id = $1) AS idempotency_records
+        (SELECT count(*) FROM cosmos_outbox_events WHERE session_id = $1) AS outbox_events,
+        (SELECT count(*) FROM cosmos_idempotency_records WHERE session_id = $1) AS idempotency_records
     `, [created.session.id])
     expect(facts.rows[0]).toEqual({
       message_sequences: [1, 2, 3],
@@ -1065,28 +1065,28 @@ describeWithDatabase('PostgresSessionRepository', () => {
 
   it('rolls back every domain and idempotency row when command creation fails', async () => {
     await pool.query(`
-      CREATE FUNCTION relay_test_reject_command() RETURNS trigger
+      CREATE FUNCTION cosmos_test_reject_command() RETURNS trigger
       LANGUAGE plpgsql AS $$
       BEGIN
         RAISE EXCEPTION 'injected command failure';
       END;
       $$;
-      CREATE TRIGGER relay_test_reject_command
-      BEFORE INSERT ON relay_commands
-      FOR EACH ROW EXECUTE FUNCTION relay_test_reject_command();
+      CREATE TRIGGER cosmos_test_reject_command
+      BEFORE INSERT ON cosmos_commands
+      FOR EACH ROW EXECUTE FUNCTION cosmos_test_reject_command();
     `)
     const repository = new PostgresSessionRepository(pool)
     const record = {
       ...auditContext,
-      organizationId: 'relay', spaceId: 'space-rollback', actorId: 'user-local-admin',
+      organizationId: 'cosmos', spaceId: 'space-rollback', actorId: 'user-local-admin',
       idempotencyKey: 'rollback-command', request: { ...request, title: 'Rollback proof' },
     }
     try {
       await expect(repository.create(record)).rejects.toThrow('injected command failure')
     } finally {
       await pool.query(`
-        DROP TRIGGER relay_test_reject_command ON relay_commands;
-        DROP FUNCTION relay_test_reject_command();
+        DROP TRIGGER cosmos_test_reject_command ON cosmos_commands;
+        DROP FUNCTION cosmos_test_reject_command();
       `)
     }
 
@@ -1100,15 +1100,15 @@ describeWithDatabase('PostgresSessionRepository', () => {
       idempotency_responses: string
     }>(`
       SELECT
-        (SELECT count(*) FROM relay_sessions WHERE organization_id = 'relay' AND space_id = 'space-rollback') AS sessions,
-        (SELECT count(*) FROM relay_messages WHERE organization_id = 'relay' AND space_id = 'space-rollback') AS messages,
-        (SELECT count(*) FROM relay_turns WHERE organization_id = 'relay' AND space_id = 'space-rollback') AS turns,
-        (SELECT count(*) FROM relay_commands WHERE organization_id = 'relay' AND space_id = 'space-rollback') AS commands,
-        (SELECT count(*) FROM relay_outbox_events WHERE organization_id = 'relay' AND space_id = 'space-rollback') AS outbox_events,
-        (SELECT count(*) FROM relay_idempotency_records WHERE organization_id = 'relay' AND space_id = 'space-rollback') AS idempotency_records,
-        (SELECT count(*) FROM relay_idempotency_responses
-          WHERE organization_id = 'relay'
-            AND canonical_path = '/v1/organizations/relay/spaces/space-rollback/sessions') AS idempotency_responses
+        (SELECT count(*) FROM cosmos_sessions WHERE organization_id = 'cosmos' AND space_id = 'space-rollback') AS sessions,
+        (SELECT count(*) FROM cosmos_messages WHERE organization_id = 'cosmos' AND space_id = 'space-rollback') AS messages,
+        (SELECT count(*) FROM cosmos_turns WHERE organization_id = 'cosmos' AND space_id = 'space-rollback') AS turns,
+        (SELECT count(*) FROM cosmos_commands WHERE organization_id = 'cosmos' AND space_id = 'space-rollback') AS commands,
+        (SELECT count(*) FROM cosmos_outbox_events WHERE organization_id = 'cosmos' AND space_id = 'space-rollback') AS outbox_events,
+        (SELECT count(*) FROM cosmos_idempotency_records WHERE organization_id = 'cosmos' AND space_id = 'space-rollback') AS idempotency_records,
+        (SELECT count(*) FROM cosmos_idempotency_responses
+          WHERE organization_id = 'cosmos'
+            AND canonical_path = '/v1/organizations/cosmos/spaces/space-rollback/sessions') AS idempotency_responses
     `)
     expect(counts.rows[0]).toEqual({
       sessions: '0', messages: '0', turns: '0', commands: '0', outbox_events: '0',

@@ -1,14 +1,14 @@
-import type { FileDto, FileVersionDto } from '@relay/contracts'
+import type { FileDto, FileVersionDto } from '@cosmos/contracts'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PREFERENCE_STORAGE_KEYS, PreferencesProvider } from '../preferences'
-import { getFileContent, listFiles, listFileVersions } from '../services/relayApi'
+import { getFileContent, listFiles, listFileVersions } from '../services/cosmosApi'
 import { RemoteFilesPage, type RemoteFilesPageProps } from './RemoteFilesPage'
 
-vi.mock('../services/relayApi', async (importOriginal) => ({
-  ...await importOriginal<typeof import('../services/relayApi')>(),
+vi.mock('../services/cosmosApi', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../services/cosmosApi')>(),
   getFileContent: vi.fn(),
   listFiles: vi.fn(),
   listFileVersions: vi.fn(),

@@ -1,4 +1,4 @@
-import type { MeSpace, SpaceDto, SpaceMigrationPreview } from '@relay/contracts'
+import type { MeSpace, SpaceDto, SpaceMigrationPreview } from '@cosmos/contracts'
 import {
   CheckCircle2,
   ChevronRight,
@@ -20,14 +20,14 @@ import {
   previewSpaceMigration,
   setDefaultSpace,
   updateSpace,
-  type RelayApiAuthContext,
-} from '../services/relayApi'
+  type CosmosApiAuthContext,
+} from '../services/cosmosApi'
 
 type Props = {
   organizationId: string
   accessibleSpaces: MeSpace[]
   activeSpaceId: string
-  auth: RelayApiAuthContext
+  auth: CosmosApiAuthContext
   credentialVersion: number
   canManage: boolean
   onSelectSpace: (spaceId: string) => void
@@ -43,7 +43,7 @@ function date(value: string, locale: Locale) {
 
 function Header({ onOpenNavigation }: { onOpenNavigation?: () => void }) {
   const { locale } = usePreferences()
-  return <header className="cosmos-page-header"><div className="cosmos-page-header__leading"><IconButton icon={Shield} label={copy(locale, '打开导航', 'Open navigation')} onClick={onOpenNavigation} /><div><p>Relay · Control Plane</p><h1>{copy(locale, 'Spaces', 'Spaces')}</h1><span>{copy(locale, '组织默认值与真实工作区边界', 'Organization defaults and the authoritative workspace boundary')}</span></div></div><GlobalControls /></header>
+  return <header className="cosmos-page-header"><div className="cosmos-page-header__leading"><IconButton icon={Shield} label={copy(locale, '打开导航', 'Open navigation')} onClick={onOpenNavigation} /><div><p>Cosmos · Control Plane</p><h1>{copy(locale, 'Spaces', 'Spaces')}</h1><span>{copy(locale, '组织默认值与真实工作区边界', 'Organization defaults and the authoritative workspace boundary')}</span></div></div><GlobalControls /></header>
 }
 
 function SpaceEditor({ initial, busy, onCancel, onSave }: {

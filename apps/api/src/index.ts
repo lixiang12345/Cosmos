@@ -1,5 +1,5 @@
 export { createApp, type CreateAppOptions } from './app.js'
-export { RelayMetrics } from './metrics.js'
+export { CosmosMetrics } from './metrics.js'
 export {
   AutomationIdempotencyConflictError,
   AutomationStateConflictError,

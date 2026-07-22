@@ -3,12 +3,12 @@ import type {
   EnvironmentSummaryDto,
   ExpertListResponse,
   ExpertSummaryDto,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 import { act, renderHook, waitFor } from '@testing-library/react'
-import { listEnvironments, listExperts } from '../../services/relayApi'
+import { listEnvironments, listExperts } from '../../services/cosmosApi'
 import { useCatalog, type CatalogRequestInput } from './useCatalog'
 
-vi.mock('../../services/relayApi', () => ({
+vi.mock('../../services/cosmosApi', () => ({
   listEnvironments: vi.fn(),
   listExperts: vi.fn(),
 }))
@@ -17,7 +17,7 @@ const expertRevision = {
   id: 'expert-revision-1',
   expertId: 'expert-platform',
   revision: 1,
-  model: 'relay-default',
+  model: 'cosmos-default',
   environmentId: 'environment-platform',
   environmentRevisionId: 'environment-revision-1',
   allowRepositoryOverride: true,
@@ -44,7 +44,7 @@ const expert: ExpertSummaryDto = {
 
 const defaultRepository = {
   repositoryId: 'repository-platform',
-  repository: 'relay/platform',
+  repository: 'cosmos/platform',
   baseBranch: 'main',
   isDefault: true,
 } as const

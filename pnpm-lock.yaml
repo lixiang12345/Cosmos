@@ -38,15 +38,15 @@ importers:
       '@aws-sdk/client-s3':
         specifier: ^3.1091.0
         version: 3.1091.0
+      '@cosmos/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@fastify/cors':
         specifier: ^11.1.0
         version: 11.3.0
       '@fastify/helmet':
         specifier: 13.1.0
         version: 13.1.0
-      '@relay/contracts':
-        specifier: workspace:*
-        version: link:../../packages/contracts
       fastify:
         specifier: ^5.6.2
         version: 5.10.0
@@ -81,7 +81,7 @@ importers:
 
   apps/web:
     dependencies:
-      '@relay/contracts':
+      '@cosmos/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
       lucide-react:

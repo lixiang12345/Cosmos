@@ -1,9 +1,9 @@
 try {
-  const storedTheme = localStorage.getItem('relay.theme')
+  const storedTheme = localStorage.getItem('cosmos.theme')
   const theme = storedTheme === 'light' || storedTheme === 'dark'
     ? storedTheme
     : matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
-  const storedLocale = localStorage.getItem('relay.locale')
+  const storedLocale = localStorage.getItem('cosmos.locale')
   const locale = storedLocale === 'zh' || storedLocale === 'en'
     ? storedLocale
     : navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en'

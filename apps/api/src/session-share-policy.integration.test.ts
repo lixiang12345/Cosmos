@@ -1,4 +1,4 @@
-import { ApiErrorSchema, ShareGrantDtoSchema } from '@relay/contracts'
+import { ApiErrorSchema, ShareGrantDtoSchema } from '@cosmos/contracts'
 import { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { runMigrations } from './migrations.js'
@@ -18,7 +18,7 @@ const databaseUrl = process.env.TEST_DATABASE_URL
 const describeWithDatabase = databaseUrl ? describe : describe.skip
 
 describeWithDatabase('Session ShareGrant policy', () => {
-  const schema = `relay_shares_${crypto.randomUUID().replaceAll('-', '')}`
+  const schema = `cosmos_shares_${crypto.randomUUID().replaceAll('-', '')}`
   const adminPool = new Pool({ connectionString: databaseUrl })
   const pool = new Pool({ connectionString: databaseUrl, options: `-c search_path=${schema}` })
   const repository = new PostgresSessionRepository(pool)
@@ -38,24 +38,24 @@ describeWithDatabase('Session ShareGrant policy', () => {
     await adminPool.query(`CREATE SCHEMA ${schema}`)
     await runMigrations(pool)
     await pool.query(`
-      INSERT INTO relay_organizations (id, name) VALUES ('share-org', 'Share Org');
-      INSERT INTO relay_spaces (organization_id, id, name)
+      INSERT INTO cosmos_organizations (id, name) VALUES ('share-org', 'Share Org');
+      INSERT INTO cosmos_spaces (organization_id, id, name)
       VALUES ('share-org', 'share-space', 'Share Space');
-      INSERT INTO relay_organization_memberships (organization_id, actor_id, role) VALUES
+      INSERT INTO cosmos_organization_memberships (organization_id, actor_id, role) VALUES
         ('share-org', 'share-owner', 'member'),
         ('share-org', 'share-collaborator', 'member'),
         ('share-org', 'share-viewer', 'member'),
         ('share-org', 'share-group-user', 'member'),
         ('share-org', 'share-concurrent', 'member');
-      INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role) VALUES
+      INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role) VALUES
         ('share-org', 'share-space', 'share-owner', 'space_manager'),
         ('share-org', 'share-space', 'share-collaborator', 'member'),
         ('share-org', 'share-space', 'share-viewer', 'member'),
         ('share-org', 'share-space', 'share-group-user', 'member'),
         ('share-org', 'share-space', 'share-concurrent', 'member');
-      INSERT INTO relay_groups (organization_id, id, name)
+      INSERT INTO cosmos_groups (organization_id, id, name)
       VALUES ('share-org', 'share-team', 'Share Team');
-      INSERT INTO relay_group_memberships (organization_id, group_id, actor_id)
+      INSERT INTO cosmos_group_memberships (organization_id, group_id, actor_id)
       VALUES ('share-org', 'share-team', 'share-group-user');
     `)
     await seedSessionConfiguration(pool, 'share-org', 'share-space')
@@ -139,7 +139,7 @@ describeWithDatabase('Session ShareGrant policy', () => {
     await expect(repository.getById('share-org', 'share-space', sessionId, 'share-group-user'))
       .resolves.toMatchObject({ id: sessionId })
     await pool.query(`
-      DELETE FROM relay_group_memberships
+      DELETE FROM cosmos_group_memberships
       WHERE organization_id = 'share-org' AND group_id = 'share-team' AND actor_id = 'share-group-user'
     `)
     await expect(repository.getById('share-org', 'share-space', sessionId, 'share-group-user'))
@@ -165,7 +165,7 @@ describeWithDatabase('Session ShareGrant policy', () => {
     )).resolves.toBeNull()
 
     await pool.query(`
-      UPDATE relay_session_share_grants
+      UPDATE cosmos_session_share_grants
       SET expires_at = created_at + interval '1 millisecond'
       WHERE organization_id = 'share-org' AND space_id = 'share-space'
         AND session_id = $1 AND id = $2
@@ -197,7 +197,7 @@ describeWithDatabase('Session ShareGrant policy', () => {
     expect(shares).toMatchObject({ hasMore: true, items: { length: 2 } })
     const actions = await pool.query<{ action: string; count: string }>(`
       SELECT action, count(*)::text AS count
-      FROM relay_audit_events
+      FROM cosmos_audit_events
       WHERE organization_id = 'share-org' AND session_id = $1
         AND action IN ('session.share.create', 'session.share.revoke')
       GROUP BY action
@@ -206,7 +206,7 @@ describeWithDatabase('Session ShareGrant policy', () => {
       .toMatchObject({ 'session.share.create': 5, 'session.share.revoke': 2 })
     const outbox = await pool.query<{ event_type: string; count: string }>(`
       SELECT event_type, count(*)::text AS count
-      FROM relay_outbox_events
+      FROM cosmos_outbox_events
       WHERE organization_id = 'share-org' AND session_id = $1
         AND event_type IN ('session.share_created', 'session.share_revoked')
       GROUP BY event_type
@@ -257,7 +257,7 @@ describeWithDatabase('Session ShareGrant policy', () => {
       revoke: () => Promise<void>,
     ) => {
       const currentSequence = await pool.query<{ last_event_sequence: string }>(
-        'SELECT last_event_sequence::text FROM relay_sessions WHERE organization_id = $1 AND space_id = $2 AND id = $3',
+        'SELECT last_event_sequence::text FROM cosmos_sessions WHERE organization_id = $1 AND space_id = $2 AND id = $3',
         ['share-org', 'share-space', streamBase.split('/').at(-1)],
       )
       const cursor = encodeSessionTimelineCursor({
@@ -382,7 +382,7 @@ describeWithDatabase('Session ShareGrant policy', () => {
         viewer,
         async () => {
           await pool.query(
-            'DELETE FROM relay_space_memberships WHERE organization_id = $1 AND space_id = $2 AND actor_id = $3',
+            'DELETE FROM cosmos_space_memberships WHERE organization_id = $1 AND space_id = $2 AND actor_id = $3',
             ['share-org', 'share-space', 'share-viewer'],
           )
           await repository.send({

@@ -1,6 +1,6 @@
 SET LOCAL lock_timeout = '5s';
 
-ALTER TABLE relay_commands
+ALTER TABLE cosmos_commands
   ADD COLUMN protocol_version smallint NOT NULL DEFAULT 0,
   ADD COLUMN requested_by text,
   ADD COLUMN request_id text,
@@ -12,12 +12,12 @@ ALTER TABLE relay_commands
   ADD COLUMN failure_code text,
   ADD COLUMN failure_message text;
 
-ALTER TABLE relay_turns
+ALTER TABLE cosmos_turns
   ADD COLUMN heartbeat_at timestamptz,
   ADD COLUMN failure_code text,
   ADD COLUMN failure_message text;
 
-CREATE TABLE relay_attempts (
+CREATE TABLE cosmos_attempts (
   organization_id text NOT NULL,
   space_id text NOT NULL,
   session_id text NOT NULL,
@@ -35,9 +35,9 @@ CREATE TABLE relay_attempts (
   failure_message text
 );
 
-ALTER TABLE relay_messages
+ALTER TABLE cosmos_messages
   ADD COLUMN turn_id text,
   ADD COLUMN attempt_id text;
 
-ALTER TABLE relay_session_events
+ALTER TABLE cosmos_session_events
   ADD COLUMN attempt_id text;

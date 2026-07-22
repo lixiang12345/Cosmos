@@ -357,7 +357,7 @@ function TerminalView({ run }: { run: Run }) {
       <header>
         <div>
           <span className="terminal-dots" aria-hidden="true"><i /><i /><i /></span>
-          <strong>relay-sandbox · {run.repo}</strong>
+          <strong>cosmos-sandbox · {run.repo}</strong>
         </div>
         <span>{t('workbench.readOnlyReplay')}</span>
       </header>

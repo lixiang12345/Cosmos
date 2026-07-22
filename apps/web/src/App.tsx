@@ -1,4 +1,4 @@
-import { DEFAULT_AGENT_MODEL, type AdvisorPlanDto, type ContextPackResponse, type EnvironmentSummaryDto, type SessionDto, type SessionEventDto, type SessionMessageDto } from '@relay/contracts'
+import { DEFAULT_AGENT_MODEL, type AdvisorPlanDto, type ContextPackResponse, type EnvironmentSummaryDto, type SessionDto, type SessionEventDto, type SessionMessageDto } from '@cosmos/contracts'
 import { AlertTriangle, CheckCircle2, Home, LoaderCircle, Menu, RefreshCw, X } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
@@ -32,8 +32,8 @@ import { useRemoteSessionTimeline } from './features/session/useRemoteSessionTim
 import { useAdvisorPlans } from './features/session/useAdvisorPlans'
 import { usePreferences } from './preferences'
 import {
-  RelayApiError,
-  type RelayApiAuthContext,
+  CosmosApiError,
+  type CosmosApiAuthContext,
   archiveSession,
   decideAdvisorPlan,
   cancelSession,
@@ -50,7 +50,7 @@ import {
   retrySessionTurn,
   sendSessionMessage,
   startSession,
-} from './services/relayApi'
+} from './services/cosmosApi'
 import type { NewTaskInput, Run, RunAttempt, TaskCreateMode } from './types'
 import { canCreateSessionInWorkspace, useActiveWorkspace, useWorkspace } from './workspace'
 
@@ -108,7 +108,7 @@ function sessionDtoToDemoRun(session: SessionDto, locale: 'zh' | 'en'): Run {
     favorite: false,
     archived: session.archivedAt !== null,
     repo: session.repository,
-    branch: `relay/${session.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'session'}`,
+    branch: `cosmos/${session.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'session'}`,
     expert: session.expertName,
     expertId: session.expertId,
     expertVersion: session.expertVersion,
@@ -256,7 +256,7 @@ function hydrateRun(run: Run): Run {
 
 function getDemoRuns() {
   try {
-    const stored = window.localStorage.getItem('relay.demo.sessions')
+    const stored = window.localStorage.getItem('cosmos.demo.sessions')
     if (!stored) return initialRuns.map(hydrateRun)
     const parsed: unknown = JSON.parse(stored)
     return Array.isArray(parsed) ? (parsed as Run[]).map(hydrateRun) : initialRuns.map(hydrateRun)
@@ -451,7 +451,7 @@ function SessionRoute({
         setRequest({ key: requestKey, status: 'ready', session })
       }, (cause: unknown) => {
         if (cancelled) return
-        const concealed = cause instanceof RelayApiError
+        const concealed = cause instanceof CosmosApiError
           && cause.status !== undefined
           && [401, 403, 404].includes(cause.status)
         setRequest({
@@ -573,10 +573,10 @@ function SessionRoute({
       const message = cause instanceof Error
         ? cause.message
         : (locale === 'zh' ? '无法启动会话。' : 'Unable to start the Session.')
-      if (cause instanceof RelayApiError && cause.status === 412) {
+      if (cause instanceof CosmosApiError && cause.status === 412) {
         setRetryVersion((version) => version + 1)
       }
-      if (cause instanceof RelayApiError && cause.status !== undefined && [401, 403, 404].includes(cause.status)) {
+      if (cause instanceof CosmosApiError && cause.status !== undefined && [401, 403, 404].includes(cause.status)) {
         concealDetail(message)
         return
       }
@@ -636,7 +636,7 @@ function SessionRoute({
       const message = cause instanceof Error
         ? cause.message
         : (locale === 'zh' ? '无法发送后续消息。' : 'Unable to send the follow-up message.')
-      if (cause instanceof RelayApiError && cause.status !== undefined && [401, 403, 404].includes(cause.status)) {
+      if (cause instanceof CosmosApiError && cause.status !== undefined && [401, 403, 404].includes(cause.status)) {
         concealDetail(message)
       } else {
         setSendMutation({ key: resolvedSession.id, status: 'error', error: message })
@@ -694,10 +694,10 @@ function SessionRoute({
       const message = cause instanceof Error
         ? cause.message
         : (locale === 'zh' ? '无法更新会话执行状态。' : 'Unable to update Session execution state.')
-      if (cause instanceof RelayApiError && cause.status === 412) {
+      if (cause instanceof CosmosApiError && cause.status === 412) {
         setRetryVersion((version) => version + 1)
       }
-      if (cause instanceof RelayApiError && cause.status !== undefined && [401, 403, 404].includes(cause.status)) {
+      if (cause instanceof CosmosApiError && cause.status !== undefined && [401, 403, 404].includes(cause.status)) {
         concealDetail(message)
         return
       }
@@ -820,7 +820,7 @@ function SessionWorkspaceFilesRoute({
 }: {
   organizationId: string
   spaceId: string
-  auth: RelayApiAuthContext
+  auth: CosmosApiAuthContext
   credentialVersion: number
   requestModificationEnabled: boolean
   locale: 'zh' | 'en'
@@ -859,7 +859,7 @@ function SessionWorkersRoute({
 }: {
   organizationId: string
   spaceId: string
-  auth: RelayApiAuthContext
+  auth: CosmosApiAuthContext
   credentialVersion: number
   onOpenNavigation: () => void
 }) {
@@ -1012,7 +1012,7 @@ function RemoteExpertEditorRoute({
   />
 }
 
-function RelayApp() {
+function CosmosApp() {
   const { accessToken, credentialVersion, demoMode, handleUnauthorized } = useAuth()
   const workspace = useActiveWorkspace()
   const { refresh: refreshWorkspace } = useWorkspace()
@@ -1055,7 +1055,7 @@ function RelayApp() {
   const [commandOpen, setCommandOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
-      return window.localStorage.getItem('relay.sidebarCollapsed') === 'true'
+      return window.localStorage.getItem('cosmos.sidebarCollapsed') === 'true'
     } catch {
       return false
     }
@@ -1138,7 +1138,7 @@ function RelayApp() {
 
   useEffect(() => {
     try {
-      window.localStorage.setItem('relay.sidebarCollapsed', String(sidebarCollapsed))
+      window.localStorage.setItem('cosmos.sidebarCollapsed', String(sidebarCollapsed))
     } catch {
       // The collapsed state still applies for this browser session.
     }
@@ -1155,7 +1155,7 @@ function RelayApp() {
   useEffect(() => {
     if (!demoMode) return
     try {
-      window.localStorage.setItem('relay.demo.sessions', JSON.stringify(runs))
+      window.localStorage.setItem('cosmos.demo.sessions', JSON.stringify(runs))
     } catch {
       // Demo state remains available for the current browser session.
     }
@@ -1388,7 +1388,7 @@ function RelayApp() {
       favorite: false,
       archived: false,
       repo: session.repository,
-      branch: `relay/${session.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'new-task'}`,
+      branch: `cosmos/${session.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'new-task'}`,
       expert: session.expertName,
       expertId: session.expertId,
       expertVersion: session.expertVersion,
@@ -1459,7 +1459,7 @@ function RelayApp() {
           ...run.approval,
           status: approved ? 'approved' : 'changes_requested',
           decidedAt: new Date().toISOString(),
-          decisionNote: approved ? 'Approved from Relay decision inbox.' : 'Changes requested from Relay decision inbox.',
+          decisionNote: approved ? 'Approved from Cosmos decision inbox.' : 'Changes requested from Cosmos decision inbox.',
         } : undefined,
         attempts: run.attempts?.map((attempt, index, all) => index === all.length - 1 ? { ...attempt, status: approved ? 'succeeded' as const : 'running' as const, finishedAt: approved ? new Date().toISOString() : undefined } : attempt),
         artifacts,
@@ -1507,7 +1507,7 @@ function RelayApp() {
           ...(run.attempts ?? []),
           { id: `${run.id}-attempt-${attemptNumber}`, number: attemptNumber, status: 'succeeded' as const, startedAt: new Date().toISOString(), finishedAt: new Date().toISOString(), duration: '1m 12s' },
         ],
-        terminal: [...run.terminal, '$ relay attempt retry --from verify', 'Sandbox restored', 'All checks passed'],
+        terminal: [...run.terminal, '$ cosmos attempt retry --from verify', 'Sandbox restored', 'All checks passed'],
         events: [...run.events, {
           id: `${run.id}-retry-${attemptNumber}`,
           kind: 'result' as const,
@@ -1590,7 +1590,7 @@ function RelayApp() {
         ],
         environment: {
           environmentId: environment?.id,
-          image: environment?.image ?? 'relay-ubuntu-22.04', timeoutMinutes: 45, networkPolicy: 'allowlist', allowedHosts: ['github.com', 'api.github.com'],
+          image: environment?.image ?? 'cosmos-ubuntu-22.04', timeoutMinutes: 45, networkPolicy: 'allowlist', allowedHosts: ['github.com', 'api.github.com'],
         },
         launchGuidance: locale === 'zh' ? '提供目标、约束、仓库和可验证的验收标准。' : 'Provide the goal, constraints, repository, and verifiable acceptance criteria.',
       },
@@ -1839,7 +1839,7 @@ function RelayApp() {
       setToast(locale === 'zh' ? '会话已重命名' : 'Session renamed')
       return true
     } catch (error) {
-      if (error instanceof RelayApiError && error.status === 412) {
+      if (error instanceof CosmosApiError && error.status === 412) {
         setSessionsRetryVersion((version) => version + 1)
       }
       setToast(error instanceof Error ? error.message : (locale === 'zh' ? '无法重命名会话' : 'Unable to rename Session'))
@@ -1882,10 +1882,10 @@ function RelayApp() {
         : (locale === 'zh' ? '会话已归档' : 'Session archived'))
       return true
     } catch (error) {
-      if (error instanceof RelayApiError && error.status === 412) {
+      if (error instanceof CosmosApiError && error.status === 412) {
         setSessionsRetryVersion((version) => version + 1)
       }
-      if (error instanceof RelayApiError && error.status === 404) concealRemoteSession(runId)
+      if (error instanceof CosmosApiError && error.status === 404) concealRemoteSession(runId)
       setToast(error instanceof Error ? error.message : (locale === 'zh' ? '无法更新会话' : 'Unable to update Session'))
       return false
     }
@@ -1922,7 +1922,7 @@ function RelayApp() {
         source: 'automation',
         title: draft.title,
         repo: repository?.fullName ?? 'unscoped/repository',
-        branch: `relay/${id}`,
+        branch: `cosmos/${id}`,
         expert: expertName,
         expertId: draft.expertId,
         status: 'running',
@@ -1944,7 +1944,7 @@ function RelayApp() {
         ],
         events: [{ id: `${id}-event`, kind: 'request', actor: automation?.source ?? 'Event Router', title: locale === 'zh' ? '自动化事件已匹配' : 'Automation event matched', body: draft.summary, timestamp: now, meta: `${automation?.name ?? draft.automationId} · ${draft.sourceEventId}` }],
         files: [],
-        terminal: ['$ relay automation session start', `Matched ${automation?.name ?? draft.automationId}`],
+        terminal: ['$ cosmos automation session start', `Matched ${automation?.name ?? draft.automationId}`],
         attempts: [{ id: `${id}-attempt-1`, number: 1, status: 'running', startedAt: new Date().toISOString() }],
         artifacts: [],
       }
@@ -2199,7 +2199,7 @@ export default function App() {
       storage={demoMode ? undefined : null}
       onActiveSpaceChange={syncSpace}
     >
-      <RelayApp />
+      <CosmosApp />
     </ControlPlaneProvider>
   )
 }

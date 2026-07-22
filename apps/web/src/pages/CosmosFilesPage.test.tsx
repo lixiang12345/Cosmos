@@ -22,7 +22,7 @@ describe('Cosmos Files browser', () => {
   beforeEach(() => {
     window.localStorage.setItem(PREFERENCE_STORAGE_KEYS.locale, 'zh')
     window.localStorage.setItem(PREFERENCE_STORAGE_KEYS.theme, 'dark')
-    window.localStorage.removeItem('relay.controlPlane.v1')
+    window.localStorage.removeItem('cosmos.controlPlane.v1')
   })
 
   it('browses scoped files without exposing direct mutation actions', async () => {

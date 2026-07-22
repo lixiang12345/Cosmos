@@ -1,11 +1,11 @@
-import type { MeOrganization, SessionWorkerDto } from '@relay/contracts'
+import type { MeOrganization, SessionWorkerDto } from '@cosmos/contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.js'
 import { createDevelopmentAuthenticator } from './auth.js'
 import type { SessionWorkerRepository } from './session-worker-repository.js'
 import { InMemorySessionRepository } from './session-repository.js'
 
-const organizationId = 'relay'
+const organizationId = 'cosmos'
 const spaceId = 'platform'
 const sessionId = 'session-1'
 const actorId = 'user-1'
@@ -30,7 +30,7 @@ const worker: SessionWorkerDto = {
 }
 const organizations: MeOrganization[] = [{
   id: organizationId,
-  name: 'Relay',
+  name: 'Cosmos',
   role: 'member',
   spaces: [{ id: spaceId, name: 'Platform', role: 'member' }],
 }]

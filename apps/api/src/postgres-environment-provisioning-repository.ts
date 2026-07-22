@@ -26,7 +26,7 @@ export class PostgresEnvironmentProvisioningRepository implements EnvironmentPro
       }>(`
         SELECT organization_id, space_id, id, environment_id, environment_revision_id,
           attempt, max_attempts
-        FROM relay_environment_provisioning_jobs
+        FROM cosmos_environment_provisioning_jobs
         WHERE status = 'running' AND lease_expires_at < now()
         ORDER BY lease_expires_at, id
         FOR UPDATE SKIP LOCKED LIMIT $1
@@ -37,7 +37,7 @@ export class PostgresEnvironmentProvisioningRepository implements EnvironmentPro
         if (job.attempt < job.max_attempts) {
           requeued += 1
           await client.query(`
-            UPDATE relay_environment_provisioning_jobs SET status = 'queued', phase = 'queued',
+            UPDATE cosmos_environment_provisioning_jobs SET status = 'queued', phase = 'queued',
               progress = 0, lease_owner = NULL, lease_expires_at = NULL,
               error_code = 'provisioning_lease_expired',
               error_message = 'The provisioning worker lease expired; the job was requeued.',
@@ -89,12 +89,12 @@ export class PostgresEnvironmentProvisioningRepository implements EnvironmentPro
         SELECT job.organization_id, job.space_id, job.id, job.environment_id,
           job.environment_revision_id, environment.type, revision.configuration,
           job.attempt, job.max_attempts, job.lease_token
-        FROM relay_environment_provisioning_jobs job
-        JOIN relay_environments environment
+        FROM cosmos_environment_provisioning_jobs job
+        JOIN cosmos_environments environment
           ON environment.organization_id = job.organization_id
           AND environment.space_id = job.space_id
           AND environment.id = job.environment_id
-        JOIN relay_environment_revisions revision
+        JOIN cosmos_environment_revisions revision
           ON revision.organization_id = job.organization_id
           AND revision.space_id = job.space_id
           AND revision.environment_id = job.environment_id
@@ -103,7 +103,7 @@ export class PostgresEnvironmentProvisioningRepository implements EnvironmentPro
         ORDER BY job.available_at, job.created_at, job.id
         FOR UPDATE OF job SKIP LOCKED LIMIT 1
       )
-      UPDATE relay_environment_provisioning_jobs job
+      UPDATE cosmos_environment_provisioning_jobs job
       SET status = 'running', phase = CASE WHEN candidate.type = 'daemon' THEN 'connecting_daemon' ELSE 'pulling_image' END,
         progress = 20, attempt = candidate.attempt + 1, lease_owner = $1,
         lease_token = candidate.lease_token + 1,
@@ -137,7 +137,7 @@ export class PostgresEnvironmentProvisioningRepository implements EnvironmentPro
 
   async heartbeat(input: { claim: EnvironmentProvisioningClaim; leaseDurationMs: number }) {
     const result = await this.pool.query(`
-      UPDATE relay_environment_provisioning_jobs SET
+      UPDATE cosmos_environment_provisioning_jobs SET
         lease_expires_at = now() + ($6 * interval '1 millisecond'), updated_at = now()
       WHERE organization_id = $1 AND space_id = $2 AND id = $3
         AND status = 'running' AND lease_owner = $4 AND lease_token = $5
@@ -154,7 +154,7 @@ export class PostgresEnvironmentProvisioningRepository implements EnvironmentPro
     try {
       await client.query('BEGIN')
       const updated = await client.query(`
-        UPDATE relay_environment_provisioning_jobs SET status = 'succeeded', phase = 'ready',
+        UPDATE cosmos_environment_provisioning_jobs SET status = 'succeeded', phase = 'ready',
           progress = 100, completed_at = now(), updated_at = now(),
           lease_owner = NULL, lease_expires_at = NULL
         WHERE organization_id = $1 AND space_id = $2 AND id = $3
@@ -165,11 +165,11 @@ export class PostgresEnvironmentProvisioningRepository implements EnvironmentPro
         return false
       }
       await client.query(`
-        UPDATE relay_environment_revisions SET status = 'ready'
+        UPDATE cosmos_environment_revisions SET status = 'ready'
         WHERE organization_id = $1 AND space_id = $2 AND environment_id = $3 AND id = $4
       `, [claim.organizationId, claim.spaceId, claim.environmentId, claim.environmentRevisionId])
       await client.query(`
-        UPDATE relay_environments SET status = 'ready', active_revision_id = $4, latest_revision_id = $4
+        UPDATE cosmos_environments SET status = 'ready', active_revision_id = $4, latest_revision_id = $4
         WHERE organization_id = $1 AND space_id = $2 AND id = $3
           AND status IN ('provisioning', 'updating', 'failed')
       `, [claim.organizationId, claim.spaceId, claim.environmentId, claim.environmentRevisionId])
@@ -193,7 +193,7 @@ export class PostgresEnvironmentProvisioningRepository implements EnvironmentPro
     try {
       await client.query('BEGIN')
       const current = await client.query<{ attempt: number; max_attempts: number }>(`
-        SELECT attempt, max_attempts FROM relay_environment_provisioning_jobs
+        SELECT attempt, max_attempts FROM cosmos_environment_provisioning_jobs
         WHERE organization_id = $1 AND space_id = $2 AND id = $3
           AND status = 'running' AND lease_owner = $4 AND lease_token = $5 FOR UPDATE
       `, [input.claim.organizationId, input.claim.spaceId, input.claim.jobId, input.claim.leaseOwner, input.claim.leaseToken])
@@ -204,7 +204,7 @@ export class PostgresEnvironmentProvisioningRepository implements EnvironmentPro
       }
       if (input.failure.retryable && row.attempt < row.max_attempts) {
         await client.query(`
-          UPDATE relay_environment_provisioning_jobs SET status = 'queued', phase = 'queued', progress = 0,
+          UPDATE cosmos_environment_provisioning_jobs SET status = 'queued', phase = 'queued', progress = 0,
             available_at = now() + ($6 * interval '1 millisecond'), updated_at = now(),
             lease_owner = NULL, lease_expires_at = NULL, error_code = $4,
             error_message = $5, error_retryable = true
@@ -231,18 +231,18 @@ export class PostgresEnvironmentProvisioningRepository implements EnvironmentPro
     failure: EnvironmentProvisioningFailure,
   ) {
     await client.query(`
-      UPDATE relay_environment_provisioning_jobs SET status = 'failed', phase = 'failed', progress = 100,
+      UPDATE cosmos_environment_provisioning_jobs SET status = 'failed', phase = 'failed', progress = 100,
         completed_at = now(), updated_at = now(), lease_owner = NULL, lease_expires_at = NULL,
         error_code = $4, error_message = $5, error_retryable = $6
       WHERE organization_id = $1 AND space_id = $2 AND id = $3
     `, [claim.organizationId, claim.spaceId, claim.jobId, failure.code, failure.message, failure.retryable])
     await client.query(`
-      UPDATE relay_environment_revisions SET status = 'failed'
+      UPDATE cosmos_environment_revisions SET status = 'failed'
       WHERE organization_id = $1 AND space_id = $2 AND environment_id = $3 AND id = $4
         AND status = 'provisioning'
     `, [claim.organizationId, claim.spaceId, claim.environmentId, claim.environmentRevisionId])
     await client.query(`
-      UPDATE relay_environments SET status = 'failed'
+      UPDATE cosmos_environments SET status = 'failed'
       WHERE organization_id = $1 AND space_id = $2 AND id = $3
         AND status IN ('provisioning', 'updating')
     `, [claim.organizationId, claim.spaceId, claim.environmentId])
@@ -257,13 +257,13 @@ export class PostgresEnvironmentProvisioningRepository implements EnvironmentPro
   ) {
     const nowValue = now().toISOString()
     await client.query(`
-      INSERT INTO relay_environment_audit_events (
+      INSERT INTO cosmos_environment_audit_events (
         organization_id, space_id, id, environment_id, environment_revision_id,
         actor_id, action, result, resource_version, metadata, occurred_at
       )
       SELECT $1, $2, $3, $4, $5, 'environment-worker', 'environment.provision', $6,
         environment.version, $7::jsonb, $8
-      FROM relay_environments environment
+      FROM cosmos_environments environment
       WHERE environment.organization_id = $1 AND environment.space_id = $2 AND environment.id = $4
     `, [
       claim.organizationId, claim.spaceId, this.createId(), claim.environmentId,
@@ -273,7 +273,7 @@ export class PostgresEnvironmentProvisioningRepository implements EnvironmentPro
       } : {}) }), nowValue,
     ])
     await client.query(`
-      INSERT INTO relay_environment_outbox_events (
+      INSERT INTO cosmos_environment_outbox_events (
         organization_id, space_id, id, environment_id, environment_revision_id,
         event_type, payload, occurred_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)

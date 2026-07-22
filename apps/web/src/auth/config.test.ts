@@ -10,7 +10,7 @@ describe('web authentication configuration', () => {
     })
     expect(() => loadWebAuthConfig({
       VITE_AUTH_MODE: 'development', PROD: true,
-    }, 'https://relay.example')).toThrow('disabled in production')
+    }, 'https://cosmos.example')).toThrow('disabled in production')
     expect(loadWebAuthConfig({
       VITE_AUTH_MODE: 'development', PROD: true,
       VITE_ALLOW_PRODUCTION_DEVELOPMENT_AUTH: 'true',
@@ -20,7 +20,7 @@ describe('web authentication configuration', () => {
     expect(() => loadWebAuthConfig({
       VITE_AUTH_MODE: 'development', PROD: true,
       VITE_ALLOW_PRODUCTION_DEVELOPMENT_AUTH: 'true',
-    }, 'https://relay.example')).toThrow('loopback runtime')
+    }, 'https://cosmos.example')).toThrow('loopback runtime')
     expect(() => loadWebAuthConfig({
       VITE_AUTH_MODE: 'development', PROD: true, VITE_DEMO_MODE: 'true',
       VITE_ALLOW_PRODUCTION_DEVELOPMENT_AUTH: 'true',
@@ -30,40 +30,40 @@ describe('web authentication configuration', () => {
   it('requires complete OIDC client configuration without deployment-scoped tenant ids', () => {
     expect(loadWebAuthConfig({
       VITE_AUTH_MODE: 'oidc',
-      VITE_OIDC_AUTHORITY: 'https://identity.example.com', VITE_OIDC_CLIENT_ID: 'relay-web',
-      VITE_OIDC_AUDIENCE: 'relay-api',
-    }, 'https://relay.example')).toMatchObject({
+      VITE_OIDC_AUTHORITY: 'https://identity.example.com', VITE_OIDC_CLIENT_ID: 'cosmos-web',
+      VITE_OIDC_AUDIENCE: 'cosmos-api',
+    }, 'https://cosmos.example')).toMatchObject({
       mode: 'oidc', authority: 'https://identity.example.com/',
-      clientId: 'relay-web', redirectUri: 'https://relay.example/auth/callback',
-      audience: 'relay-api', demoMode: false,
+      clientId: 'cosmos-web', redirectUri: 'https://cosmos.example/auth/callback',
+      audience: 'cosmos-api', demoMode: false,
     })
   })
 
   it('fails closed when the mode is not explicit', () => {
-    expect(() => loadWebAuthConfig({}, 'https://relay.example')).toThrow('VITE_AUTH_MODE')
+    expect(() => loadWebAuthConfig({}, 'https://cosmos.example')).toThrow('VITE_AUTH_MODE')
   })
 
   it('requires secure OIDC endpoints and same-origin callbacks in production', () => {
     const base = {
       VITE_AUTH_MODE: 'oidc', PROD: true,
-      VITE_OIDC_CLIENT_ID: 'relay-web',
+      VITE_OIDC_CLIENT_ID: 'cosmos-web',
     }
     expect(() => loadWebAuthConfig({
       ...base, VITE_OIDC_AUTHORITY: 'http://identity.example.com',
-    }, 'https://relay.example')).toThrow('must use HTTPS')
+    }, 'https://cosmos.example')).toThrow('must use HTTPS')
     expect(() => loadWebAuthConfig({
       ...base, VITE_OIDC_AUTHORITY: 'https://identity.example.com',
       VITE_OIDC_REDIRECT_URI: 'https://attacker.example/callback',
-    }, 'https://relay.example')).toThrow('application origin')
+    }, 'https://cosmos.example')).toThrow('application origin')
     expect(() => loadWebAuthConfig({
       ...base, VITE_OIDC_AUTHORITY: 'https://user:secret@identity.example.com',
-    }, 'https://relay.example')).toThrow('cannot contain credentials')
+    }, 'https://cosmos.example')).toThrow('cannot contain credentials')
   })
 
   it('allows loopback HTTP only outside production', () => {
     expect(loadWebAuthConfig({
       VITE_AUTH_MODE: 'oidc',
-      VITE_OIDC_AUTHORITY: 'http://127.0.0.1:9000', VITE_OIDC_CLIENT_ID: 'relay-local',
+      VITE_OIDC_AUTHORITY: 'http://127.0.0.1:9000', VITE_OIDC_CLIENT_ID: 'cosmos-local',
     }, 'http://127.0.0.1:5173')).toMatchObject({
       authority: 'http://127.0.0.1:9000/', redirectUri: 'http://127.0.0.1:5173/auth/callback',
     })

@@ -11,15 +11,15 @@ RUN pnpm install --frozen-lockfile
 
 COPY apps/api apps/api
 COPY packages/contracts packages/contracts
-RUN pnpm --filter @relay/contracts build \
-  && pnpm --filter @relay/api build \
-  && pnpm --filter @relay/api --prod deploy --legacy /opt/relay-api
+RUN pnpm --filter @cosmos/contracts build \
+  && pnpm --filter @cosmos/api build \
+  && pnpm --filter @cosmos/api --prod deploy --legacy /opt/cosmos-api
 
 FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:70a2c12a0d76018b54d7bd01c5e3677632eeed9f890ba318d6db55fc54cf3baa AS runtime
 
 ENV NODE_ENV=production
 WORKDIR /app
-COPY --from=build --chown=node:node /opt/relay-api/ ./
+COPY --from=build --chown=node:node /opt/cosmos-api/ ./
 
 FROM runtime AS worker
 

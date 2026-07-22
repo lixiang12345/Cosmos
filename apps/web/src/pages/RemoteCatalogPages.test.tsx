@@ -4,13 +4,13 @@ import type {
   EnvironmentSummaryDto,
   ExpertDetailDto,
   ExpertSummaryDto,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PREFERENCE_STORAGE_KEYS, PreferencesProvider } from '../preferences'
 import {
-  RelayApiError,
+  CosmosApiError,
   createEnvironment,
   createExpert,
   getEnvironment,
@@ -19,8 +19,8 @@ import {
   listEnvironmentRevisions,
   publishExpert,
   updateExpert,
-  type RelayApiAuthContext,
-} from '../services/relayApi'
+  type CosmosApiAuthContext,
+} from '../services/cosmosApi'
 import {
   RemoteEnvironmentsPage,
   RemoteExpertDetailPage,
@@ -30,8 +30,8 @@ import {
   type RemoteExpertDetailPageProps,
 } from './RemoteCatalogPages'
 
-vi.mock('../services/relayApi', async (importOriginal) => ({
-  ...await importOriginal<typeof import('../services/relayApi')>(),
+vi.mock('../services/cosmosApi', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../services/cosmosApi')>(),
   getEnvironment: vi.fn(),
   getExpert: vi.fn(),
   createExpert: vi.fn(),
@@ -46,7 +46,7 @@ const publishedRevision = {
   id: 'expert-revision-2',
   expertId: 'expert-published',
   revision: 2,
-  model: 'relay-default',
+  model: 'cosmos-default',
   environmentId: 'environment-a',
   environmentRevisionId: 'environment-revision-1',
   allowRepositoryOverride: true,
@@ -149,14 +149,14 @@ const publishedCreatedExpertDetail: ExpertDetailDto = {
 
 const repositoryA = {
   repositoryId: 'repository-a',
-  repository: 'relay/service-a',
+  repository: 'cosmos/service-a',
   baseBranch: 'main',
   isDefault: true,
 } as const
 
 const repositoryB = {
   repositoryId: 'repository-b',
-  repository: 'relay/service-b',
+  repository: 'cosmos/service-b',
   baseBranch: 'release',
   isDefault: true,
 } as const
@@ -198,7 +198,7 @@ function environmentDetail(summary: EnvironmentSummaryDto): EnvironmentDetailDto
     activeRevision: {
       ...summary.activeRevision,
       repositoryBindings: [summary.activeRevision.defaultRepository],
-      image: 'ghcr.io/relay/runtime:stable',
+      image: 'ghcr.io/cosmos/runtime:stable',
       variableReferences: [],
       hooks: [],
       networkPolicy: { mode: 'restricted', allowedHosts: [] },
@@ -210,7 +210,7 @@ function environmentDetail(summary: EnvironmentSummaryDto): EnvironmentDetailDto
       id: summary.activeRevision.id, environmentId: summary.id,
       revision: summary.activeRevision.revision, status: 'ready',
       repositoryBindings: [summary.activeRevision.defaultRepository],
-      image: 'ghcr.io/relay/runtime:stable', variableReferences: [], hooks: [],
+      image: 'ghcr.io/cosmos/runtime:stable', variableReferences: [], hooks: [],
       networkPolicy: { mode: 'restricted', allowedHosts: [] }, sharing: 'space', daemonPoolId: null,
       checksum: 'a'.repeat(64), createdAt: summary.activeRevision.createdAt,
     },
@@ -221,7 +221,7 @@ function environmentDetail(summary: EnvironmentSummaryDto): EnvironmentDetailDto
 const environmentA = environmentSummary('environment-a', 'Environment A', repositoryA)
 const environmentB = environmentSummary('environment-b', 'Environment B', repositoryB)
 
-const auth: RelayApiAuthContext = {
+const auth: CosmosApiAuthContext = {
   accessToken: 'token-a',
   onUnauthorized: vi.fn(async () => undefined),
 }
@@ -380,7 +380,7 @@ describe('remote Catalog pages', () => {
   it('offers a reload after an Expert version conflict', async () => {
     const user = userEvent.setup()
     vi.mocked(getExpert).mockResolvedValue(expertDetail)
-    vi.mocked(updateExpert).mockRejectedValue(new RelayApiError('Expert changed elsewhere.', {
+    vi.mocked(updateExpert).mockRejectedValue(new CosmosApiError('Expert changed elsewhere.', {
       code: 'PRECONDITION_FAILED',
       status: 412,
     }))
@@ -453,7 +453,7 @@ describe('remote Catalog pages', () => {
   it('renders Expert 404 separately and retries the detail request', async () => {
     const user = userEvent.setup()
     vi.mocked(getExpert)
-      .mockRejectedValueOnce(new RelayApiError('Expert does not exist.', { code: 'NOT_FOUND', status: 404 }))
+      .mockRejectedValueOnce(new CosmosApiError('Expert does not exist.', { code: 'NOT_FOUND', status: 404 }))
       .mockResolvedValueOnce(draftExpertDetail)
     render(withPreferences(<RemoteExpertDetailPage {...expertDetailProps()} />))
 
@@ -512,9 +512,9 @@ describe('remote Catalog pages', () => {
 
     await user.click(screen.getByRole('button', { name: '创建环境' }))
     await user.type(screen.getByLabelText('名称'), 'Release runtime')
-    await user.type(screen.getByLabelText('镜像'), 'ghcr.io/relay/runtime:stable')
+    await user.type(screen.getByLabelText('镜像'), 'ghcr.io/cosmos/runtime:stable')
     await user.type(screen.getByLabelText('仓库 ID'), 'repository-release')
-    await user.type(screen.getByLabelText('仓库'), 'relay/release')
+    await user.type(screen.getByLabelText('仓库'), 'cosmos/release')
     await user.click(screen.getByRole('button', { name: '保存并配置' }))
 
     await waitFor(() => expect(createEnvironment).toHaveBeenCalledTimes(1))
@@ -525,7 +525,7 @@ describe('remote Catalog pages', () => {
         type: 'cloud',
         name: 'Release runtime',
         repositoryBindings: [{
-          repositoryId: 'repository-release', repository: 'relay/release', baseBranch: 'main', isDefault: true,
+          repositoryId: 'repository-release', repository: 'cosmos/release', baseBranch: 'main', isDefault: true,
         }],
         variableReferences: [],
         networkPolicy: { mode: 'restricted', allowedHosts: [] },

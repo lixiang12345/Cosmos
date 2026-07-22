@@ -5,7 +5,7 @@ const securityAuditHmacKey = '01'.repeat(32)
 const objectStorage = {
   OBJECT_STORAGE_ENDPOINT: 'https://objects.example.test',
   OBJECT_STORAGE_REGION: 'us-east-1',
-  OBJECT_STORAGE_BUCKET: 'relay-production',
+  OBJECT_STORAGE_BUCKET: 'cosmos-production',
   OBJECT_STORAGE_ACCESS_KEY_ID: 'access-id',
   OBJECT_STORAGE_SECRET_ACCESS_KEY: 'secret-value',
 }
@@ -44,7 +44,7 @@ describe('API configuration', () => {
   it('keeps Context Engine HTTP limited to explicit development deployments', () => {
     const contextEngine = {
       CONTEXT_ENGINE_API_KEY: 'context-secret',
-      CONTEXT_ENGINE_WORKSPACES_JSON: '{"relay/platform":"workspace-platform"}',
+      CONTEXT_ENGINE_WORKSPACES_JSON: '{"cosmos/platform":"workspace-platform"}',
     }
     expect(loadConfig({
       AUTH_MODE: 'development',
@@ -52,7 +52,7 @@ describe('API configuration', () => {
       CONTEXT_ENGINE_BASE_URL: 'http://127.0.0.1:8790',
     }).contextEngine).toMatchObject({
       baseUrl: 'http://127.0.0.1:8790',
-      workspaces: { 'relay/platform': 'workspace-platform' },
+      workspaces: { 'cosmos/platform': 'workspace-platform' },
     })
     expect(() => loadConfig({
       AUTH_MODE: 'development',
@@ -68,9 +68,9 @@ describe('API configuration', () => {
     expect(() => loadConfig({
       NODE_ENV: 'test',
       AUTH_MODE: 'oidc',
-      DATABASE_URL: 'postgres://relay',
+      DATABASE_URL: 'postgres://cosmos',
       OIDC_ISSUER: 'https://identity.test/',
-      OIDC_AUDIENCE: 'relay-api',
+      OIDC_AUDIENCE: 'cosmos-api',
       OIDC_JWKS_URI: 'https://identity.test/.well-known/jwks.json',
       ...contextEngine,
       CONTEXT_ENGINE_BASE_URL: 'http://contextengine.internal:8790',
@@ -81,11 +81,11 @@ describe('API configuration', () => {
   it('requires persistent storage and an explicit CORS origin in production', () => {
     expect(() => loadConfig({ NODE_ENV: 'production', AUTH_MODE: 'oidc' })).toThrow('DATABASE_URL')
     expect(() => loadConfig({
-      NODE_ENV: 'production', AUTH_MODE: 'oidc', DATABASE_URL: 'postgres://relay',
+      NODE_ENV: 'production', AUTH_MODE: 'oidc', DATABASE_URL: 'postgres://cosmos',
     })).toThrow('CORS_ORIGIN')
     expect(() => loadConfig({
-      NODE_ENV: 'production', AUTH_MODE: 'oidc', DATABASE_URL: 'postgres://relay',
-      CORS_ORIGIN: 'https://relay.example',
+      NODE_ENV: 'production', AUTH_MODE: 'oidc', DATABASE_URL: 'postgres://cosmos',
+      CORS_ORIGIN: 'https://cosmos.example',
     })).toThrow('OIDC_ISSUER')
   })
 
@@ -93,10 +93,10 @@ describe('API configuration', () => {
     const oidc = {
       AUTH_MODE: 'oidc',
       OIDC_ISSUER: 'https://identity.test/',
-      OIDC_AUDIENCE: 'relay-api',
+      OIDC_AUDIENCE: 'cosmos-api',
       OIDC_JWKS_URI: 'https://identity.test/.well-known/jwks.json',
     }
-    expect(() => loadConfig({ ...oidc, DATABASE_URL: 'postgres://relay' })).toThrow('NODE_ENV must be explicitly set')
+    expect(() => loadConfig({ ...oidc, DATABASE_URL: 'postgres://cosmos' })).toThrow('NODE_ENV must be explicitly set')
     expect(() => loadConfig({ ...oidc, NODE_ENV: 'development' })).toThrow('DATABASE_URL')
   })
 
@@ -104,9 +104,9 @@ describe('API configuration', () => {
     const production = {
       NODE_ENV: 'production',
       AUTH_MODE: 'oidc',
-      DATABASE_URL: 'postgres://relay',
-      CORS_ORIGIN: 'https://relay.example',
-      OIDC_AUDIENCE: 'relay-api',
+      DATABASE_URL: 'postgres://cosmos',
+      CORS_ORIGIN: 'https://cosmos.example',
+      OIDC_AUDIENCE: 'cosmos-api',
     }
     expect(() => loadConfig({
       ...production,
@@ -124,19 +124,19 @@ describe('API configuration', () => {
     const production = {
       NODE_ENV: 'production',
       AUTH_MODE: 'oidc',
-      DATABASE_URL: 'postgres://relay',
+      DATABASE_URL: 'postgres://cosmos',
       OIDC_ISSUER: 'https://identity.test/',
-      OIDC_AUDIENCE: 'relay-api',
+      OIDC_AUDIENCE: 'cosmos-api',
       OIDC_JWKS_URI: 'https://identity.test/.well-known/jwks.json',
       SECURITY_AUDIT_HMAC_KEY: securityAuditHmacKey,
       SECURITY_AUDIT_HMAC_KEY_ID: 'production-v1',
       ...objectStorage,
     }
-    for (const corsOrigin of ['*', 'http://relay.example', 'https://relay.example/path', 'https://relay.example/']) {
+    for (const corsOrigin of ['*', 'http://cosmos.example', 'https://cosmos.example/path', 'https://cosmos.example/']) {
       expect(() => loadConfig({ ...production, CORS_ORIGIN: corsOrigin })).toThrow('exact HTTPS origin')
     }
-    expect(loadConfig({ ...production, CORS_ORIGIN: 'https://relay.example' })).toMatchObject({
-      corsOrigin: 'https://relay.example',
+    expect(loadConfig({ ...production, CORS_ORIGIN: 'https://cosmos.example' })).toMatchObject({
+      corsOrigin: 'https://cosmos.example',
       securityHeaders: { hsts: true },
     })
   })
@@ -154,10 +154,10 @@ describe('API configuration', () => {
     const production = {
       NODE_ENV: 'production',
       AUTH_MODE: 'oidc',
-      DATABASE_URL: 'postgres://relay',
-      CORS_ORIGIN: 'https://relay.example',
+      DATABASE_URL: 'postgres://cosmos',
+      CORS_ORIGIN: 'https://cosmos.example',
       OIDC_ISSUER: 'https://identity.test/',
-      OIDC_AUDIENCE: 'relay-api',
+      OIDC_AUDIENCE: 'cosmos-api',
       OIDC_JWKS_URI: 'https://identity.test/.well-known/jwks.json',
       SECURITY_AUDIT_HMAC_KEY: securityAuditHmacKey,
       SECURITY_AUDIT_HMAC_KEY_ID: 'production-v1',
@@ -173,10 +173,10 @@ describe('API configuration', () => {
     const production = {
       NODE_ENV: 'production',
       AUTH_MODE: 'oidc',
-      DATABASE_URL: 'postgres://relay',
-      CORS_ORIGIN: 'https://relay.example',
+      DATABASE_URL: 'postgres://cosmos',
+      CORS_ORIGIN: 'https://cosmos.example',
       OIDC_ISSUER: 'https://identity.test/',
-      OIDC_AUDIENCE: 'relay-api',
+      OIDC_AUDIENCE: 'cosmos-api',
       OIDC_JWKS_URI: 'https://identity.test/.well-known/jwks.json',
       ...objectStorage,
     }
@@ -203,8 +203,8 @@ describe('API configuration', () => {
   })
 
   it('loads migration-only database settings without runtime credentials', () => {
-    expect(loadMigrationConfig({ DATABASE_URL: 'postgres://relay' })).toEqual({
-      databaseUrl: 'postgres://relay',
+    expect(loadMigrationConfig({ DATABASE_URL: 'postgres://cosmos' })).toEqual({
+      databaseUrl: 'postgres://cosmos',
       databaseConnectionTimeoutMs: 5_000,
       databaseQueryTimeoutMs: 20_000,
       databaseStatementTimeoutMs: 15_000,

@@ -4,7 +4,7 @@ import {
   type ExpertStore,
 } from './domain'
 
-export const EXPERT_STORAGE_KEY = 'relay.experts'
+export const EXPERT_STORAGE_KEY = 'cosmos.experts'
 
 export type ExpertStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 

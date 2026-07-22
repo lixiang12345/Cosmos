@@ -1,6 +1,6 @@
 SET LOCAL lock_timeout = '5s';
 
-CREATE TABLE relay_service_accounts (
+CREATE TABLE cosmos_service_accounts (
   organization_id text NOT NULL,
   id text NOT NULL,
   audience text NOT NULL CHECK (length(audience) BETWEEN 1 AND 256),
@@ -10,12 +10,12 @@ CREATE TABLE relay_service_accounts (
   version integer NOT NULL DEFAULT 1 CHECK (version > 0),
   PRIMARY KEY (organization_id, id),
   FOREIGN KEY (organization_id, id)
-    REFERENCES relay_organization_memberships(organization_id, actor_id) ON DELETE CASCADE,
+    REFERENCES cosmos_organization_memberships(organization_id, actor_id) ON DELETE CASCADE,
   CHECK ((status = 'revoked') = (revoked_at IS NOT NULL)),
   CHECK (revoked_at IS NULL OR revoked_at >= created_at)
 );
 
-CREATE TABLE relay_service_account_bindings (
+CREATE TABLE cosmos_service_account_bindings (
   organization_id text NOT NULL,
   space_id text NOT NULL,
   service_account_id text NOT NULL,
@@ -33,9 +33,9 @@ CREATE TABLE relay_service_account_bindings (
   version integer NOT NULL DEFAULT 1 CHECK (version > 0),
   PRIMARY KEY (organization_id, space_id, service_account_id, id),
   FOREIGN KEY (organization_id, space_id)
-    REFERENCES relay_spaces(organization_id, id) ON DELETE CASCADE,
+    REFERENCES cosmos_spaces(organization_id, id) ON DELETE CASCADE,
   FOREIGN KEY (organization_id, service_account_id)
-    REFERENCES relay_service_accounts(organization_id, id) ON DELETE CASCADE,
+    REFERENCES cosmos_service_accounts(organization_id, id) ON DELETE CASCADE,
   CHECK (expires_at IS NULL OR expires_at > created_at),
   CHECK (revoked_at IS NULL OR revoked_at >= created_at),
   CHECK (
@@ -44,14 +44,14 @@ CREATE TABLE relay_service_account_bindings (
   )
 );
 
-CREATE UNIQUE INDEX relay_service_account_bindings_unrevoked_scope_idx
-  ON relay_service_account_bindings (
+CREATE UNIQUE INDEX cosmos_service_account_bindings_unrevoked_scope_idx
+  ON cosmos_service_account_bindings (
     organization_id, space_id, service_account_id, scope, resource_type, resource_id
   )
   WHERE revoked_at IS NULL;
 
-CREATE INDEX relay_service_account_bindings_authorization_idx
-  ON relay_service_account_bindings (
+CREATE INDEX cosmos_service_account_bindings_authorization_idx
+  ON cosmos_service_account_bindings (
     organization_id, space_id, service_account_id, scope, resource_type, resource_id
   )
   WHERE revoked_at IS NULL;

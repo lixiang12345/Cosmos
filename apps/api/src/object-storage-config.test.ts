@@ -5,7 +5,7 @@ const configured = {
   NODE_ENV: 'production',
   OBJECT_STORAGE_ENDPOINT: 'https://objects.example.test',
   OBJECT_STORAGE_REGION: 'us-east-1',
-  OBJECT_STORAGE_BUCKET: 'relay-production',
+  OBJECT_STORAGE_BUCKET: 'cosmos-production',
   OBJECT_STORAGE_ACCESS_KEY_ID: 'access-id',
   OBJECT_STORAGE_SECRET_ACCESS_KEY: 'secret-value',
 }

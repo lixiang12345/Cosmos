@@ -1,4 +1,4 @@
-import { SUPPORTED_AGENT_MODELS } from '@relay/contracts'
+import { SUPPORTED_AGENT_MODELS } from '@cosmos/contracts'
 import {
   Archive,
   ArrowLeft,
@@ -158,7 +158,7 @@ function getCopy(locale: 'zh' | 'en') {
     emptyTemplates: zh ? '没有匹配的工作流模板' : 'No matching workflow templates',
     fork: zh ? '基于模板创建' : 'Create from template',
     sourceWorkflow: zh ? '查看原始流程' : 'View source workflow',
-    templateNote: zh ? '基于公开 Workflows 目录整理。创建后生成可完整编辑的 Relay 自定义 Expert，不等同于 Cosmos 托管模板。' : 'Based on the public Workflows catalog. Each starter creates a fully editable Relay custom Expert, not a managed Cosmos template.',
+    templateNote: zh ? '基于公开 Workflows 目录整理。创建后生成可完整编辑的 Cosmos 自定义 Expert，不等同于 Cosmos 托管模板。' : 'Based on the public Workflows catalog. Each starter creates a fully editable Cosmos custom Expert, not a managed Cosmos template.',
     templatesCount: zh ? `${expertTemplates.length} 个工作流模板` : `${expertTemplates.length} workflow templates`,
     expertsCount: (count: number) => zh ? `${count} 个专家` : `${count} experts`,
     statusLabels: {
@@ -216,7 +216,7 @@ function getCopy(locale: 'zh' | 'en') {
     icon: zh ? '图标' : 'Icon',
     instructionsLabel: zh ? '系统指令' : 'System instructions',
     instructionsPlaceholder: zh ? '描述专家的职责、执行方式和决策原则…' : 'Describe the Expert role, operating method, and decision principles…',
-    workflowStarterNote: zh ? '此 Expert 来自 Relay 工作流起点，下面的指令属于你的自定义配置，可以完整修改。' : 'This Expert was created from a Relay workflow starter. The instructions below are your custom configuration and remain fully editable.',
+    workflowStarterNote: zh ? '此 Expert 来自 Cosmos 工作流起点，下面的指令属于你的自定义配置，可以完整修改。' : 'This Expert was created from a Cosmos workflow starter. The instructions below are your custom configuration and remain fully editable.',
     constraints: zh ? '约束条件' : 'Constraints',
     lineHint: zh ? '每行一条' : 'One item per line',
     completion: zh ? '完成定义' : 'Definition of done',
@@ -686,7 +686,7 @@ export function ExpertEditorPage({
               <header><span><h2>{copy.sections.runtime}</h2><p>{copy.sectionDescriptions.runtime}</p></span></header>
               <div className="expert-form-grid expert-form-grid--two">
                 <label className="field field--select"><span>{copy.model}</span><span className="select-shell"><Sparkles aria-hidden="true" /><select aria-label={copy.model} value={draft.model} onChange={(event) => replaceDraft('model', event.target.value)}>{SUPPORTED_AGENT_MODELS.map((model) => <option key={model} value={model}>{model}</option>)}</select><ChevronRight aria-hidden="true" /></span></label>
-                <label className="field field--select"><span>{copy.environment}</span><span className="select-shell"><Box aria-hidden="true" /><select aria-label={copy.environment} value={draft.environment.image} onChange={(event) => replaceDraft('environment', { ...draft.environment, image: event.target.value })}><option value="">{locale === 'zh' ? '选择环境' : 'Select environment'}</option><option>relay-ubuntu-22.04</option><option>node-22-browser</option><option>go-1.24-services</option><option>read-only-analysis</option></select><ChevronRight aria-hidden="true" /></span></label>
+                <label className="field field--select"><span>{copy.environment}</span><span className="select-shell"><Box aria-hidden="true" /><select aria-label={copy.environment} value={draft.environment.image} onChange={(event) => replaceDraft('environment', { ...draft.environment, image: event.target.value })}><option value="">{locale === 'zh' ? '选择环境' : 'Select environment'}</option><option>cosmos-ubuntu-22.04</option><option>node-22-browser</option><option>go-1.24-services</option><option>read-only-analysis</option></select><ChevronRight aria-hidden="true" /></span></label>
                 <label className="field"><span>{copy.timeout}</span><input aria-label={copy.timeout} type="number" min="1" max="480" value={draft.environment.timeoutMinutes} onChange={(event) => replaceDraft('environment', { ...draft.environment, timeoutMinutes: Number(event.target.value) })} /></label>
                 <label className="field field--select"><span>{copy.networkPolicy}</span><span className="select-shell"><Network aria-hidden="true" /><select aria-label={copy.networkPolicy} value={draft.environment.networkPolicy} onChange={(event) => replaceDraft('environment', { ...draft.environment, networkPolicy: event.target.value as ExpertConfig['environment']['networkPolicy'] })}><option value="restricted">{copy.restricted}</option><option value="allowlist">{copy.allowlist}</option><option value="unrestricted">{copy.unrestricted}</option></select><ChevronRight aria-hidden="true" /></span></label>
               </div>

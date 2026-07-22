@@ -37,7 +37,7 @@ describe('Advisor contracts', () => {
 
   it('parses an authoritative plan with before and after state', () => {
     expect(AdvisorPlanDtoSchema.parse({
-      organizationId: 'relay', spaceId: 'space-platform', sessionId: 'session-1', id: 'plan-1',
+      organizationId: 'cosmos', spaceId: 'space-platform', sessionId: 'session-1', id: 'plan-1',
       summary: 'Update the Space description.', dependencies: [], risks: [], status: 'proposed',
       steps: [{
         id: 'step-1', ordinal: 1, kind: 'control_plane', operation: 'space.update',

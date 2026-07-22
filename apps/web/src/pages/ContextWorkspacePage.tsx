@@ -4,7 +4,7 @@ import type {
   ContextPackResponse,
   ContextRetrievalMode,
   ContextSearchResponse,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 import {
   ArrowRight,
   Braces,
@@ -37,8 +37,8 @@ import {
   getContextEngineStatus,
   packContextEngine,
   searchContextEngine,
-  type RelayApiAuthContext,
-} from '../services/relayApi'
+  type CosmosApiAuthContext,
+} from '../services/cosmosApi'
 import { useAuth } from '../auth/context'
 import { useActiveWorkspace } from '../workspace'
 
@@ -232,7 +232,7 @@ export function ContextWorkspacePage({
   const selectedRelevancePercent = selectedHit
     ? relativeRelevancePercent(selectedHit.score, maximumVisibleScore)
     : 0
-  const authContext = useMemo<RelayApiAuthContext>(() => ({
+  const authContext = useMemo<CosmosApiAuthContext>(() => ({
     accessToken: auth.accessToken,
     requestIdentity: `${auth.actorId ?? 'anonymous'}:${auth.credentialVersion}`,
     onUnauthorized: auth.handleUnauthorized,

@@ -1,29 +1,29 @@
 openapi: 3.1.0
 info:
-  title: Relay Agent OS API
+  title: Cosmos Agent OS API
   version: 0.2.0
-  summary: Multi-tenant control-plane and Session API for Relay.
+  summary: Multi-tenant control-plane and Session API for Cosmos.
   description: |
-    Contract for the Relay prototype backend. A Session is a persistent conversation;
+    Contract for the Cosmos prototype backend. A Session is a persistent conversation;
     a Turn is one queued unit of Agent work; an Attempt is one execution of a Turn.
     Expert and Environment revisions are immutable once used by a Session.
 
     This file contains the target API surface. Operations not marked with
-    `x-relay-implementation-status` are design contracts and must not be exposed
+    `x-cosmos-implementation-status` are design contracts and must not be exposed
     as implemented. The current Session slice marks its implementation status
-    explicitly and is runtime-validated by `@relay/contracts`.
+    explicitly and is runtime-validated by `@cosmos/contracts`.
 
     All timestamps are UTC RFC 3339. All list endpoints use opaque cursor pagination.
     POST operations that create a resource, enqueue a command, or cause an external
     side effect require `Idempotency-Key`. PATCH and one-time decisions require
     `If-Match` where documented.
   contact:
-    name: Relay Engineering
+    name: Cosmos Engineering
   license:
     name: Proprietary
     identifier: LicenseRef-Proprietary
 servers:
-  - url: https://api.relay.example/api/v1
+  - url: https://api.cosmos.example/api/v1
     description: Production
   - url: http://127.0.0.1:8787/api/v1
     description: Local development
@@ -68,7 +68,7 @@ paths:
     get:
       tags: [Identity]
       operationId: getRuntimeCapabilities
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Discover deployment runtime capabilities
       description: |
         `execution.enabled` is true only when execution is configured and the database
@@ -90,7 +90,7 @@ paths:
     get:
       tags: [Identity]
       operationId: getCurrentActor
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Discover the authenticated actor and accessible workspaces
       description: |
         Returns the authenticated actor and only the Organization and Space memberships
@@ -123,7 +123,7 @@ paths:
     get:
       tags: [ContextEngine]
       operationId: getContextEngineStatus
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Read the index status for an authorized repository
       parameters:
         - name: repository
@@ -160,7 +160,7 @@ paths:
     post:
       tags: [ContextEngine]
       operationId: searchContextEngine
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Search repository evidence across retrieval channels
       requestBody:
         required: true
@@ -195,7 +195,7 @@ paths:
     post:
       tags: [ContextEngine]
       operationId: packContextEngine
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Build a bounded Agent context pack from repository evidence
       requestBody:
         required: true
@@ -283,7 +283,7 @@ paths:
     get:
       tags: [Spaces]
       operationId: listSpaces
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: List accessible spaces
       responses:
         '200':
@@ -301,7 +301,7 @@ paths:
     post:
       tags: [Spaces]
       operationId: createSpace
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Create a space
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -343,7 +343,7 @@ paths:
     get:
       tags: [Spaces]
       operationId: getSpace
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Get a space
       responses:
         '200':
@@ -364,7 +364,7 @@ paths:
     patch:
       tags: [Spaces]
       operationId: updateSpace
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Update defaults or metadata for a space
       parameters:
         - $ref: '#/components/parameters/IfMatch'
@@ -426,7 +426,7 @@ paths:
     post:
       tags: [Spaces]
       operationId: setDefaultSpace
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Make an active Space the Organization default
       parameters:
         - $ref: '#/components/parameters/IfMatch'
@@ -458,7 +458,7 @@ paths:
     get:
       tags: [Spaces]
       operationId: previewSpaceMigration
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Preview resource impact before migrating or deleting a Space
       parameters:
         - name: targetSpaceId
@@ -493,7 +493,7 @@ paths:
     get:
       tags: [Experts]
       operationId: listExperts
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: List Experts visible to the caller
       description: |
         Returns at most 100 Experts in stable `updatedAt DESC, id DESC` order.
@@ -529,7 +529,7 @@ paths:
     post:
       tags: [Experts]
       operationId: createExpert
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Create a Custom Expert draft or managed-template customization
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -572,7 +572,7 @@ paths:
     get:
       tags: [Experts]
       operationId: getExpert
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Get an Expert and its current published revision
       description: |
         Private Experts are concealed from non-creators. Effective Viewers can
@@ -608,7 +608,7 @@ paths:
     patch:
       tags: [Experts]
       operationId: updateExpertDraft
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Update the mutable draft revision
       description: Managed-template base instructions cannot be changed by this operation.
       parameters:
@@ -650,7 +650,7 @@ paths:
     delete:
       tags: [Experts]
       operationId: archiveExpert
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Archive an Expert
       parameters:
         - $ref: '#/components/parameters/IfMatch'
@@ -680,7 +680,7 @@ paths:
     post:
       tags: [Experts]
       operationId: publishExpert
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Validate and publish the current draft as an immutable revision
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -719,7 +719,7 @@ paths:
     post:
       tags: [Experts]
       operationId: disableExpert
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Disable an Expert while preserving its published revision
       parameters:
         - $ref: '#/components/parameters/IfMatch'
@@ -756,7 +756,7 @@ paths:
     get:
       tags: [Experts]
       operationId: listExpertRevisions
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: List immutable Expert revisions
       parameters:
         - $ref: '#/components/parameters/Cursor'
@@ -784,7 +784,7 @@ paths:
     get:
       tags: [Environments]
       operationId: listEnvironments
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: List Environments visible in the Space
       description: |
         Returns at most 100 Space-visible Environments in stable
@@ -820,7 +820,7 @@ paths:
     post:
       tags: [Environments]
       operationId: createEnvironment
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Create and provision an Environment
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -856,7 +856,7 @@ paths:
     get:
       tags: [Environments]
       operationId: getEnvironment
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Get an Environment
       description: |
         Returns the Space-visible Environment and safe repository bindings for
@@ -893,7 +893,7 @@ paths:
     patch:
       tags: [Environments]
       operationId: updateEnvironment
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Create and provision a new immutable Environment revision
       parameters:
         - $ref: '#/components/parameters/IfMatch'
@@ -928,7 +928,7 @@ paths:
     delete:
       tags: [Environments]
       operationId: deleteEnvironment
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Schedule deletion of an unreferenced Environment
       parameters:
         - $ref: '#/components/parameters/IfMatch'
@@ -962,7 +962,7 @@ paths:
     get:
       tags: [Automations]
       operationId: listAutomations
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: List authoritative Expert Triggers in the Space
       responses:
         '200':
@@ -982,7 +982,7 @@ paths:
     post:
       tags: [Automations]
       operationId: createAutomation
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Create a paused authoritative Expert Trigger
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1022,7 +1022,7 @@ paths:
     patch:
       tags: [Automations]
       operationId: updateAutomation
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Update Trigger configuration and return it to paused state
       parameters:
         - $ref: '#/components/parameters/IfMatch'
@@ -1057,7 +1057,7 @@ paths:
     delete:
       tags: [Automations]
       operationId: archiveAutomation
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Terminally archive an authoritative Trigger without deleting its history
       parameters:
         - $ref: '#/components/parameters/IfMatch'
@@ -1096,7 +1096,7 @@ paths:
     post:
       tags: [Automations]
       operationId: testAutomation
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Evaluate a test payload with the restricted Trigger filter
       parameters:
         - $ref: '#/components/parameters/IfMatch'
@@ -1139,7 +1139,7 @@ paths:
     post:
       tags: [Automations]
       operationId: enableAutomation
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Enable a Trigger after a successful test
       parameters:
         - $ref: '#/components/parameters/IfMatch'
@@ -1178,7 +1178,7 @@ paths:
     post:
       tags: [Automations]
       operationId: pauseAutomation
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Pause an active Trigger
       parameters:
         - $ref: '#/components/parameters/IfMatch'
@@ -1210,7 +1210,7 @@ paths:
     get:
       tags: [Events]
       operationId: listAutomationEvents
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: List redacted immutable Automation Events
       responses:
         '200':
@@ -1230,7 +1230,7 @@ paths:
     post:
       tags: [Events]
       operationId: receiveAutomationEvent
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Receive, deduplicate, match, and dispatch an authenticated internal Event
       description: External provider webhook verification remains capability-gated. This endpoint is restricted to Automation managers.
       requestBody:
@@ -1270,7 +1270,7 @@ paths:
     get:
       tags: [Automations]
       operationId: listAutomationRuns
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: List Sessions created by dispatched Automation Events
       responses:
         '200':
@@ -1295,7 +1295,7 @@ paths:
     get:
       tags: [Sessions]
       operationId: listSessions
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: List Sessions visible to the caller
       description: |
         Returns a stable keyset-paginated projection ordered by latest activity. Cursors
@@ -1346,7 +1346,7 @@ paths:
     post:
       tags: [Sessions]
       operationId: createSession
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Create a draft or queued Session from a published Expert
       description: |
         `start=true` atomically creates the Session, first user Message and first Turn.
@@ -1403,7 +1403,7 @@ paths:
     get:
       tags: [Sessions]
       operationId: getSession
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Get a Session
       responses:
         '200':
@@ -1438,7 +1438,7 @@ paths:
     patch:
       tags: [Sessions]
       operationId: renameSession
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Rename a Session
       parameters:
         - $ref: '#/components/parameters/IfMatch'
@@ -1481,7 +1481,7 @@ paths:
     post:
       tags: [Sessions]
       operationId: startSession
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Start a draft Session with its first message
       description: |
         Atomically transitions a draft Session to queued and creates the first Turn,
@@ -1529,7 +1529,7 @@ paths:
     get:
       tags: [Sessions]
       operationId: listSessionMessages
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: List Session messages in timeline order
       parameters:
         - $ref: '#/components/parameters/SessionTimelineCursor'
@@ -1554,7 +1554,7 @@ paths:
     post:
       tags: [Sessions]
       operationId: sendSessionMessage
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Send or queue a message and create the next Turn
       description: |
         If an Agent Turn is active, the new Turn is appended to the Session FIFO queue.
@@ -1605,7 +1605,7 @@ paths:
     get:
       tags: [Sessions]
       operationId: listAdvisorPlans
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: List authoritative Advisor plans for a Session
       responses:
         '200':
@@ -1636,7 +1636,7 @@ paths:
     get:
       tags: [Sessions]
       operationId: getAdvisorPlan
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Get one authoritative Advisor plan and diff
       responses:
         '200':
@@ -1670,7 +1670,7 @@ paths:
     post:
       tags: [Sessions]
       operationId: decideAdvisorPlan
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Confirm or reject an exact Advisor plan before controlled execution
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1723,7 +1723,7 @@ paths:
     post:
       tags: [Sessions]
       operationId: retryAdvisorPlan
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Retry a failed idempotent Advisor control-plane step
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1772,7 +1772,7 @@ paths:
     post:
       tags: [Sessions]
       operationId: pauseSession
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Fence active work and pause a Session
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1814,7 +1814,7 @@ paths:
     post:
       tags: [Sessions]
       operationId: resumeSession
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Resume a paused Session without replaying completed ToolCalls
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1856,7 +1856,7 @@ paths:
     post:
       tags: [Sessions]
       operationId: cancelSession
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Cancel active and queued work in a Session
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1903,7 +1903,7 @@ paths:
     post:
       tags: [Sessions]
       operationId: archiveSession
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Archive a Session without deleting its content
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1945,7 +1945,7 @@ paths:
     post:
       tags: [Sessions]
       operationId: restoreSession
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Restore an archived Session
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1987,7 +1987,7 @@ paths:
     get:
       tags: [Sessions]
       operationId: listSessionShares
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: List explicit Session share grants
       parameters:
         - name: cursor
@@ -2018,7 +2018,7 @@ paths:
     post:
       tags: [Sessions]
       operationId: shareSession
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Grant a user or group access to a Session
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -2068,7 +2068,7 @@ paths:
     delete:
       tags: [Sessions]
       operationId: revokeSessionShare
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Revoke a Session share grant
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -2110,7 +2110,7 @@ paths:
     get:
       tags: [Sessions]
       operationId: listSessionEvents
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: List ordered, redacted Session events
       parameters:
         - $ref: '#/components/parameters/SessionTimelineCursor'
@@ -2141,7 +2141,7 @@ paths:
     get:
       tags: [Sessions]
       operationId: streamSessionEvents
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Stream ordered Session events
       description: |
         Server-Sent Events. Reconnect with `Last-Event-ID`. Delivery is at least once;
@@ -2176,7 +2176,7 @@ paths:
                   value: |-
                     id: eyJvcmdhbml6YXRpb25JZCI6InJlbGF5Iiwic3BhY2VJZCI6InBsYXRmb3JtIiwic2Vzc2lvbklkIjoic2Vzc2lvbi0xIiwic2VxdWVuY2UiOjQyfQ
                     event: session.updated
-                    data: {"organizationId":"relay","spaceId":"platform","sessionId":"session-1","eventId":"event-42","sequence":42,"type":"session.updated","resourceType":"session","resourceId":"session-1","actorId":"worker-1","commandId":"command-1","requestId":"request-1","occurredAt":"2026-07-12T08:00:00Z","payload":{"status":"active","version":2}}
+                    data: {"organizationId":"cosmos","spaceId":"platform","sessionId":"session-1","eventId":"event-42","sequence":42,"type":"session.updated","resourceType":"session","resourceId":"session-1","actorId":"worker-1","commandId":"command-1","requestId":"request-1","occurredAt":"2026-07-12T08:00:00Z","payload":{"status":"active","version":2}}
         '400':
           $ref: '#/components/responses/RuntimeBadRequest'
         '401':
@@ -2229,7 +2229,7 @@ paths:
     post:
       tags: [Turns]
       operationId: retryTurn
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Append and enqueue a new Attempt for a failed Turn
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -2271,7 +2271,7 @@ paths:
     get:
       tags: [Workers]
       operationId: listSessionWorkers
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: List the Session Worker tree
       parameters:
         - $ref: '#/components/parameters/Cursor'
@@ -2302,7 +2302,7 @@ paths:
     get:
       tags: [ToolCalls]
       operationId: listSessionToolCalls
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: List redacted ToolCall metadata
       parameters:
         - $ref: '#/components/parameters/Cursor'
@@ -2340,7 +2340,7 @@ paths:
     get:
       tags: [Files]
       operationId: listFiles
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Browse Workspace, User, or Organization Files
       parameters:
         - name: cursor
@@ -2403,7 +2403,7 @@ paths:
     get:
       tags: [Files]
       operationId: getFile
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Get File metadata
       responses:
         '200':
@@ -2432,7 +2432,7 @@ paths:
     get:
       tags: [Files]
       operationId: downloadFileContent
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Preview or download an authorized File version
       parameters:
         - name: version
@@ -2479,7 +2479,7 @@ paths:
     get:
       tags: [Files]
       operationId: listFileVersions
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: List immutable File versions
       parameters:
         - name: cursor
@@ -2516,7 +2516,7 @@ paths:
     get:
       tags: [Artifacts]
       operationId: listSessionArtifacts
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: List Session Artifacts
       parameters:
         - name: cursor
@@ -2551,7 +2551,7 @@ paths:
     post:
       tags: [Artifacts]
       operationId: createSessionArtifact
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Associate a manually supplied Artifact reference with a Session
       description: This does not mutate the external provider object.
       parameters:
@@ -2598,8 +2598,8 @@ paths:
     patch:
       tags: [Artifacts]
       operationId: updateSessionArtifact
-      x-relay-implementation-status: implemented
-      summary: Update Relay metadata for an Artifact reference
+      x-cosmos-implementation-status: implemented
+      summary: Update Cosmos metadata for an Artifact reference
       parameters:
         - $ref: '#/components/parameters/IfMatch'
       requestBody:
@@ -2635,7 +2635,7 @@ paths:
     delete:
       tags: [Artifacts]
       operationId: removeSessionArtifact
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Remove the association while retaining audit history
       parameters:
         - $ref: '#/components/parameters/IfMatch'
@@ -2673,7 +2673,7 @@ paths:
     post:
       tags: [Environments]
       operationId: retryEnvironment
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Retry a failed Environment provisioning job
       parameters:
         - $ref: '#/components/parameters/IfMatch'
@@ -2708,7 +2708,7 @@ paths:
     post:
       tags: [Environments]
       operationId: disableEnvironment
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Disable an Environment for new Sessions
       parameters:
         - $ref: '#/components/parameters/IfMatch'
@@ -2743,7 +2743,7 @@ paths:
     get:
       tags: [Environments]
       operationId: listEnvironmentRevisions
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: List immutable Environment revisions
       responses:
         '200':
@@ -2943,7 +2943,7 @@ paths:
     get:
       tags: [Approvals]
       operationId: listApprovals
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: List approvals visible or assigned to the caller
       parameters:
         - $ref: '#/components/parameters/Cursor'
@@ -2984,7 +2984,7 @@ paths:
     get:
       tags: [Approvals]
       operationId: getApproval
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Get an Approval and redacted evidence
       responses:
         '200':
@@ -3015,7 +3015,7 @@ paths:
     post:
       tags: [Approvals]
       operationId: decideApproval
-      x-relay-implementation-status: implemented
+      x-cosmos-implementation-status: implemented
       summary: Atomically decide a pending Approval
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -3259,10 +3259,10 @@ components:
         type: string
         const: Authorization
     BearerChallenge:
-      description: Bearer authentication challenge for the Relay API.
+      description: Bearer authentication challenge for the Cosmos API.
       schema:
         type: string
-        const: 'Bearer realm="relay-api"'
+        const: 'Bearer realm="cosmos-api"'
     RetryAfter:
       description: Minimum number of seconds the client should wait before reconnecting.
       schema:

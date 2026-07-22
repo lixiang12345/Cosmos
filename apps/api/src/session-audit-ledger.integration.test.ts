@@ -1,4 +1,4 @@
-import type { CreateSessionRequest } from '@relay/contracts'
+import type { CreateSessionRequest } from '@cosmos/contracts'
 import { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { runMigrations } from './migrations.js'
@@ -34,7 +34,7 @@ function createRecord(overrides: Partial<CreateSessionRecord> = {}): CreateSessi
 }
 
 describeWithDatabase('Session creation ledgers', () => {
-  const schema = `relay_session_ledger_${crypto.randomUUID().replaceAll('-', '')}`
+  const schema = `cosmos_session_ledger_${crypto.randomUUID().replaceAll('-', '')}`
   const adminPool = new Pool({ connectionString: databaseUrl })
   const pool = new Pool({
     connectionString: databaseUrl,
@@ -45,13 +45,13 @@ describeWithDatabase('Session creation ledgers', () => {
     await adminPool.query(`CREATE SCHEMA ${schema}`)
     await runMigrations(pool)
     await pool.query(`
-      INSERT INTO relay_organizations (id, name)
+      INSERT INTO cosmos_organizations (id, name)
       VALUES ('ledger-organization', 'Ledger Organization');
-      INSERT INTO relay_spaces (organization_id, id, name)
+      INSERT INTO cosmos_spaces (organization_id, id, name)
       VALUES ('ledger-organization', 'ledger-space', 'Ledger Space');
-      INSERT INTO relay_organization_memberships (organization_id, actor_id, role)
+      INSERT INTO cosmos_organization_memberships (organization_id, actor_id, role)
       VALUES ('ledger-organization', 'ledger-user', 'organization_admin');
-      INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
+      INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role)
       VALUES ('ledger-organization', 'ledger-space', 'ledger-user', 'space_manager');
     `)
     await seedSessionConfiguration(pool, 'ledger-organization', 'ledger-space')
@@ -82,7 +82,7 @@ describeWithDatabase('Session creation ledgers', () => {
     }>(`
       SELECT sequence, event_type, resource_type, resource_id, actor_kind,
         request_id, command_id, payload
-      FROM relay_session_events
+      FROM cosmos_session_events
       WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
       ORDER BY sequence
     `, [record.organizationId, record.spaceId, created.session.id])
@@ -103,7 +103,7 @@ describeWithDatabase('Session creation ledgers', () => {
       after_state: unknown
     }>(`
       SELECT action, result, policy_decision, idempotency_key_hash, after_state
-      FROM relay_audit_events
+      FROM cosmos_audit_events
       WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
     `, [record.organizationId, record.spaceId, created.session.id])
     expect(audits.rows).toEqual([
@@ -115,7 +115,7 @@ describeWithDatabase('Session creation ledgers', () => {
     expect(audits.rows[0].idempotency_key_hash).toMatch(/^[a-f0-9]{64}$/)
 
     const sessionSequence = await pool.query<{ last_event_sequence: string }>(`
-      SELECT last_event_sequence FROM relay_sessions
+      SELECT last_event_sequence FROM cosmos_sessions
       WHERE organization_id = $1 AND space_id = $2 AND id = $3
     `, [record.organizationId, record.spaceId, created.session.id])
     expect(sessionSequence.rows[0].last_event_sequence).toBe('3')
@@ -149,15 +149,15 @@ describeWithDatabase('Session creation ledgers', () => {
       last_event_sequence: string
     }>(`
       SELECT
-        ARRAY(SELECT event_type FROM relay_session_events
+        ARRAY(SELECT event_type FROM cosmos_session_events
           WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
           ORDER BY sequence) AS event_types,
-        (SELECT count(*) FROM relay_audit_events
+        (SELECT count(*) FROM cosmos_audit_events
           WHERE organization_id = $1 AND space_id = $2 AND session_id = $3) AS audit_events,
-        (SELECT count(*) FROM relay_turns WHERE session_id = $3) AS turns,
-        (SELECT count(*) FROM relay_commands WHERE session_id = $3) AS commands,
-        (SELECT count(*) FROM relay_outbox_events WHERE session_id = $3) AS outbox_events,
-        (SELECT last_event_sequence FROM relay_sessions
+        (SELECT count(*) FROM cosmos_turns WHERE session_id = $3) AS turns,
+        (SELECT count(*) FROM cosmos_commands WHERE session_id = $3) AS commands,
+        (SELECT count(*) FROM cosmos_outbox_events WHERE session_id = $3) AS outbox_events,
+        (SELECT last_event_sequence FROM cosmos_sessions
           WHERE organization_id = $1 AND space_id = $2 AND id = $3) AS last_event_sequence
     `, [record.organizationId, record.spaceId, created.session.id])
 
@@ -174,20 +174,20 @@ describeWithDatabase('Session creation ledgers', () => {
   it('keeps domain, ledger, outbox, and idempotency writes atomic', async () => {
     const before = await pool.query<{ sessions: string; events: string; audits: string }>(`
       SELECT
-        (SELECT count(*) FROM relay_sessions) AS sessions,
-        (SELECT count(*) FROM relay_session_events) AS events,
-        (SELECT count(*) FROM relay_audit_events) AS audits
+        (SELECT count(*) FROM cosmos_sessions) AS sessions,
+        (SELECT count(*) FROM cosmos_session_events) AS events,
+        (SELECT count(*) FROM cosmos_audit_events) AS audits
     `)
     await pool.query(`
-      CREATE FUNCTION relay_test_reject_idempotency_response() RETURNS trigger
+      CREATE FUNCTION cosmos_test_reject_idempotency_response() RETURNS trigger
       LANGUAGE plpgsql AS $$
       BEGIN
         RAISE EXCEPTION 'injected idempotency response failure';
       END;
       $$;
-      CREATE TRIGGER relay_test_reject_idempotency_response
-      BEFORE INSERT ON relay_idempotency_responses
-      FOR EACH ROW EXECUTE FUNCTION relay_test_reject_idempotency_response();
+      CREATE TRIGGER cosmos_test_reject_idempotency_response
+      BEFORE INSERT ON cosmos_idempotency_responses
+      FOR EACH ROW EXECUTE FUNCTION cosmos_test_reject_idempotency_response();
     `)
     const repository = new PostgresSessionRepository(pool)
     const record = createRecord({
@@ -198,8 +198,8 @@ describeWithDatabase('Session creation ledgers', () => {
       await expect(repository.create(record)).rejects.toThrow('injected idempotency response failure')
     } finally {
       await pool.query(`
-        DROP TRIGGER relay_test_reject_idempotency_response ON relay_idempotency_responses;
-        DROP FUNCTION relay_test_reject_idempotency_response();
+        DROP TRIGGER cosmos_test_reject_idempotency_response ON cosmos_idempotency_responses;
+        DROP FUNCTION cosmos_test_reject_idempotency_response();
       `)
     }
 
@@ -215,15 +215,15 @@ describeWithDatabase('Session creation ledgers', () => {
       idempotency_responses: string
     }>(`
       SELECT
-        (SELECT count(*) FROM relay_sessions) AS sessions,
-        (SELECT count(*) FROM relay_messages) AS messages,
-        (SELECT count(*) FROM relay_turns) AS turns,
-        (SELECT count(*) FROM relay_commands) AS commands,
-        (SELECT count(*) FROM relay_outbox_events) AS outbox_events,
-        (SELECT count(*) FROM relay_session_events) AS events,
-        (SELECT count(*) FROM relay_audit_events) AS audits,
-        (SELECT count(*) FROM relay_idempotency_records) AS idempotency_records,
-        (SELECT count(*) FROM relay_idempotency_responses) AS idempotency_responses
+        (SELECT count(*) FROM cosmos_sessions) AS sessions,
+        (SELECT count(*) FROM cosmos_messages) AS messages,
+        (SELECT count(*) FROM cosmos_turns) AS turns,
+        (SELECT count(*) FROM cosmos_commands) AS commands,
+        (SELECT count(*) FROM cosmos_outbox_events) AS outbox_events,
+        (SELECT count(*) FROM cosmos_session_events) AS events,
+        (SELECT count(*) FROM cosmos_audit_events) AS audits,
+        (SELECT count(*) FROM cosmos_idempotency_records) AS idempotency_records,
+        (SELECT count(*) FROM cosmos_idempotency_responses) AS idempotency_responses
     `)
     expect(after.rows[0].sessions).toBe(before.rows[0].sessions)
     expect(after.rows[0].events).toBe(before.rows[0].events)
@@ -248,16 +248,16 @@ describeWithDatabase('Session creation ledgers', () => {
     }>(`
       SELECT session.id AS session_id, session.status, message.id AS message_id,
         turn_record.id AS turn_id, command.id AS command_id
-      FROM relay_sessions session
-      JOIN relay_messages message
+      FROM cosmos_sessions session
+      JOIN cosmos_messages message
         ON message.organization_id = session.organization_id
         AND message.space_id = session.space_id
         AND message.session_id = session.id
-      LEFT JOIN relay_turns turn_record
+      LEFT JOIN cosmos_turns turn_record
         ON turn_record.organization_id = session.organization_id
         AND turn_record.space_id = session.space_id
         AND turn_record.session_id = session.id
-      LEFT JOIN relay_commands command
+      LEFT JOIN cosmos_commands command
         ON command.organization_id = session.organization_id
         AND command.space_id = session.space_id
         AND command.session_id = session.id
@@ -271,7 +271,7 @@ describeWithDatabase('Session creation ledgers', () => {
     }
 
     await expect(pool.query(`
-      INSERT INTO relay_session_events (
+      INSERT INTO cosmos_session_events (
         organization_id, space_id, session_id, event_id, sequence, event_type,
         resource_type, resource_id, payload, actor_id, actor_kind, message_id,
         command_id, request_id, occurred_at
@@ -283,7 +283,7 @@ describeWithDatabase('Session creation ledgers', () => {
     `, [started.session_id, draft.message_id, started.command_id])).rejects.toMatchObject({ code: '23503' })
 
     await expect(pool.query(`
-      INSERT INTO relay_session_events (
+      INSERT INTO cosmos_session_events (
         organization_id, space_id, session_id, event_id, sequence, event_type,
         resource_type, resource_id, payload, actor_id, actor_kind, turn_id,
         command_id, request_id, occurred_at
@@ -295,7 +295,7 @@ describeWithDatabase('Session creation ledgers', () => {
     `, [draft.session_id, started.turn_id, started.command_id])).rejects.toMatchObject({ code: '23503' })
 
     await expect(pool.query(`
-      INSERT INTO relay_session_events (
+      INSERT INTO cosmos_session_events (
         organization_id, space_id, session_id, event_id, sequence, event_type,
         resource_type, resource_id, payload, actor_id, actor_kind, message_id,
         command_id, request_id, occurred_at
@@ -307,7 +307,7 @@ describeWithDatabase('Session creation ledgers', () => {
     `, [draft.session_id, draft.message_id, started.command_id])).rejects.toMatchObject({ code: '23503' })
 
     await expect(pool.query(`
-      INSERT INTO relay_session_events (
+      INSERT INTO cosmos_session_events (
         organization_id, space_id, session_id, event_id, sequence, event_type,
         resource_type, resource_id, payload, actor_id, actor_kind, message_id,
         command_id, request_id, occurred_at
@@ -319,21 +319,21 @@ describeWithDatabase('Session creation ledgers', () => {
     `, [started.session_id, started.message_id, started.command_id])).rejects.toMatchObject({ code: '23505' })
 
     await expect(pool.query(`
-      UPDATE relay_session_events SET payload = '{"mutated":true}'::jsonb
+      UPDATE cosmos_session_events SET payload = '{"mutated":true}'::jsonb
       WHERE organization_id = 'ledger-organization' AND session_id = $1
     `, [started.session_id])).rejects.toMatchObject({ code: '55000' })
     await expect(pool.query(`
-      DELETE FROM relay_audit_events
+      DELETE FROM cosmos_audit_events
       WHERE organization_id = 'ledger-organization' AND session_id = $1
     `, [started.session_id])).rejects.toMatchObject({ code: '55000' })
-    await expect(pool.query('TRUNCATE relay_session_events')).rejects.toMatchObject({ code: '55000' })
-    await expect(pool.query('TRUNCATE relay_audit_events')).rejects.toMatchObject({ code: '55000' })
+    await expect(pool.query('TRUNCATE cosmos_session_events')).rejects.toMatchObject({ code: '55000' })
+    await expect(pool.query('TRUNCATE cosmos_audit_events')).rejects.toMatchObject({ code: '55000' })
 
     const counts = await pool.query<{ events: string; audits: string }>(`
       SELECT
-        (SELECT count(*) FROM relay_session_events
+        (SELECT count(*) FROM cosmos_session_events
           WHERE organization_id = 'ledger-organization' AND session_id = $1) AS events,
-        (SELECT count(*) FROM relay_audit_events
+        (SELECT count(*) FROM cosmos_audit_events
           WHERE organization_id = 'ledger-organization' AND session_id = $1) AS audits
     `, [started.session_id])
     expect(Number(counts.rows[0].events)).toBeGreaterThan(0)

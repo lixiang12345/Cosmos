@@ -3,7 +3,7 @@ import {
   AGENT_MODEL_FAMILY_BY_MODEL,
   SUPPORTED_AGENT_MODELS,
   type SupportedAgentModel,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 import { loadObjectStorageConfig, type ObjectStorageConfig } from './object-storage-config.js'
 
 export type WorkerConfig = {

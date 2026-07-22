@@ -1,8 +1,8 @@
 SET LOCAL lock_timeout = '5s';
 
-ALTER TABLE relay_audit_events
-  DROP CONSTRAINT relay_audit_events_action_check,
-  ADD CONSTRAINT relay_audit_events_action_check
+ALTER TABLE cosmos_audit_events
+  DROP CONSTRAINT cosmos_audit_events_action_check,
+  ADD CONSTRAINT cosmos_audit_events_action_check
     CHECK (action IN (
       'session.create',
       'session.start',
@@ -15,8 +15,8 @@ ALTER TABLE relay_audit_events
       'session.cancel',
       'turn.retry'
     )) NOT VALID,
-  DROP CONSTRAINT relay_audit_events_before_state_check,
-  ADD CONSTRAINT relay_audit_events_before_state_check
+  DROP CONSTRAINT cosmos_audit_events_before_state_check,
+  ADD CONSTRAINT cosmos_audit_events_before_state_check
     CHECK (
       (action = 'session.create' AND before_state IS NULL)
       OR (
@@ -35,11 +35,11 @@ ALTER TABLE relay_audit_events
         AND jsonb_typeof(before_state) = 'object'
       )
     ) NOT VALID,
-  DROP CONSTRAINT relay_audit_events_target_type_check,
-  ADD CONSTRAINT relay_audit_events_target_type_check
+  DROP CONSTRAINT cosmos_audit_events_target_type_check,
+  ADD CONSTRAINT cosmos_audit_events_target_type_check
     CHECK (target_type IN ('session', 'turn')) NOT VALID,
-  DROP CONSTRAINT relay_audit_events_check,
-  ADD CONSTRAINT relay_audit_events_target_check
+  DROP CONSTRAINT cosmos_audit_events_check,
+  ADD CONSTRAINT cosmos_audit_events_target_check
     CHECK (
       (action = 'turn.retry' AND target_type = 'turn')
       OR (
@@ -49,7 +49,7 @@ ALTER TABLE relay_audit_events
       )
     ) NOT VALID;
 
-CREATE OR REPLACE FUNCTION relay_protect_turn_history()
+CREATE OR REPLACE FUNCTION cosmos_protect_turn_history()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
@@ -61,12 +61,12 @@ BEGIN
     OLD.organization_id, OLD.space_id, OLD.session_id, OLD.id, OLD.ordinal,
     OLD.initiator_type, OLD.initiator_id, OLD.input_message_id, OLD.queued_at
   ) THEN
-    RAISE EXCEPTION 'Relay Turn identity is immutable'
+    RAISE EXCEPTION 'Cosmos Turn identity is immutable'
       USING ERRCODE = '55000';
   END IF;
 
   IF OLD.status IN ('completed', 'canceled') THEN
-    RAISE EXCEPTION 'Terminal Relay Turn rows are immutable'
+    RAISE EXCEPTION 'Terminal Cosmos Turn rows are immutable'
       USING ERRCODE = '55000';
   END IF;
 
@@ -79,23 +79,23 @@ BEGIN
       AND NEW.status IN ('queued', 'running', 'completed', 'failed', 'canceled'))
     OR (OLD.status = 'failed' AND NEW.status = 'queued')
   ) THEN
-    RAISE EXCEPTION 'Invalid Relay Turn transition from % to %', OLD.status, NEW.status
+    RAISE EXCEPTION 'Invalid Cosmos Turn transition from % to %', OLD.status, NEW.status
       USING ERRCODE = '23514';
   END IF;
 
   IF NEW.status <> OLD.status AND NEW.version <> OLD.version + 1 THEN
-    RAISE EXCEPTION 'Relay Turn status transitions must advance version by one'
+    RAISE EXCEPTION 'Cosmos Turn status transitions must advance version by one'
       USING ERRCODE = '23514';
   END IF;
 
   IF NEW.status = OLD.status AND NEW.version <> OLD.version THEN
-    RAISE EXCEPTION 'Relay Turn version may change only with status'
+    RAISE EXCEPTION 'Cosmos Turn version may change only with status'
       USING ERRCODE = '23514';
   END IF;
 
   IF OLD.heartbeat_at IS NOT NULL AND NEW.status <> 'queued'
      AND (NEW.heartbeat_at IS NULL OR NEW.heartbeat_at < OLD.heartbeat_at) THEN
-    RAISE EXCEPTION 'Relay Turn heartbeat_at cannot move backwards'
+    RAISE EXCEPTION 'Cosmos Turn heartbeat_at cannot move backwards'
       USING ERRCODE = '23514';
   END IF;
 

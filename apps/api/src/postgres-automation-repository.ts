@@ -9,7 +9,7 @@ import {
   type AutomationDto,
   type AutomationEventDto,
   type AutomationRunDto,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 import type { Pool, PoolClient } from 'pg'
 import { evaluateAutomationFilter, redactAutomationData } from './automation-filter.js'
 import {
@@ -186,7 +186,7 @@ export class PostgresAutomationRepository implements AutomationRepository {
       JSON.stringify([input.organizationId, input.actorId, input.method, input.canonicalPath, keyHash]),
     ])
     const existing = await client.query<{ request_hash: string; response_body: unknown }>(`
-      SELECT request_hash, response_body FROM relay_control_plane_idempotency
+      SELECT request_hash, response_body FROM cosmos_control_plane_idempotency
       WHERE organization_id = $1 AND actor_id = $2 AND method = $3
         AND canonical_path = $4 AND idempotency_key_hash = $5 AND expires_at > $6
     `, [input.organizationId, input.actorId, input.method, input.canonicalPath, keyHash, now.toISOString()])
@@ -195,7 +195,7 @@ export class PostgresAutomationRepository implements AutomationRepository {
       return { keyHash, requestHash, now, replay: existing.rows[0].response_body }
     }
     await client.query(`
-      DELETE FROM relay_control_plane_idempotency
+      DELETE FROM cosmos_control_plane_idempotency
       WHERE organization_id = $1 AND actor_id = $2 AND method = $3
         AND canonical_path = $4 AND idempotency_key_hash = $5 AND expires_at <= $6
     `, [input.organizationId, input.actorId, input.method, input.canonicalPath, keyHash, now.toISOString()])
@@ -214,7 +214,7 @@ export class PostgresAutomationRepository implements AutomationRepository {
     },
   ) {
     await client.query(`
-      INSERT INTO relay_control_plane_idempotency (
+      INSERT INTO cosmos_control_plane_idempotency (
         organization_id, space_id, actor_id, method, canonical_path,
         idempotency_key_hash, request_hash, status_code, response_body,
         response_headers, expires_at
@@ -232,26 +232,26 @@ export class PostgresAutomationRepository implements AutomationRepository {
   ) {
     const result = await client.query<{ expert_revision_id: string; audience: string }>(`
       SELECT expert.published_revision_id AS expert_revision_id, service.audience
-      FROM relay_experts expert
-      JOIN relay_expert_revisions revision
+      FROM cosmos_experts expert
+      JOIN cosmos_expert_revisions revision
         ON revision.organization_id = expert.organization_id
         AND revision.space_id = expert.space_id
         AND revision.expert_id = expert.id
         AND revision.id = expert.published_revision_id
         AND revision.status = 'published'
-      JOIN relay_service_accounts service
+      JOIN cosmos_service_accounts service
         ON service.organization_id = expert.organization_id
         AND service.id = $4 AND service.status = 'active'
-      JOIN relay_organization_memberships organization_membership
+      JOIN cosmos_organization_memberships organization_membership
         ON organization_membership.organization_id = service.organization_id
         AND organization_membership.actor_id = service.id
         AND organization_membership.role <> 'viewer'
-      JOIN relay_space_memberships space_membership
+      JOIN cosmos_space_memberships space_membership
         ON space_membership.organization_id = expert.organization_id
         AND space_membership.space_id = expert.space_id
         AND space_membership.actor_id = service.id
         AND space_membership.role <> 'viewer'
-      JOIN relay_service_account_bindings binding
+      JOIN cosmos_service_account_bindings binding
         ON binding.organization_id = expert.organization_id
         AND binding.space_id = expert.space_id
         AND binding.service_account_id = service.id
@@ -284,7 +284,7 @@ export class PostgresAutomationRepository implements AutomationRepository {
     },
   ) {
     await client.query(`
-      INSERT INTO relay_automation_audit_events (
+      INSERT INTO cosmos_automation_audit_events (
         organization_id, space_id, id, automation_id, event_id, actor_id,
         action, resource_version, request_id, idempotency_key_hash, metadata, occurred_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12)
@@ -301,7 +301,7 @@ export class PostgresAutomationRepository implements AutomationRepository {
       organizationId, spaceId, actorId,
     }, `
       SELECT ${automationColumns}
-      FROM relay_expert_triggers trigger
+      FROM cosmos_expert_triggers trigger
       WHERE trigger.organization_id = $1 AND trigger.space_id = $2
       ORDER BY trigger.updated_at DESC, trigger.id DESC LIMIT 100
     `, [organizationId, spaceId])
@@ -325,7 +325,7 @@ export class PostgresAutomationRepository implements AutomationRepository {
       })
       const id = this.createId()
       const inserted = await client.query<AutomationRow>(`
-        INSERT INTO relay_expert_triggers (
+        INSERT INTO cosmos_expert_triggers (
           organization_id, space_id, id, expert_id, expert_revision_id,
           name, source, event_type, filter, status, auto_archive,
           service_account_id, created_by, created_at, updated_at
@@ -345,7 +345,7 @@ export class PostgresAutomationRepository implements AutomationRepository {
         metadata: { source: automation.source, eventType: automation.eventType },
       })
       await client.query(`
-        INSERT INTO relay_automation_outbox_events (
+        INSERT INTO cosmos_automation_outbox_events (
           organization_id, space_id, id, automation_id, event_type, payload, occurred_at
         ) VALUES ($1, $2, $3, $4, 'automation.created', '{}'::jsonb, $5)
       `, [record.organizationId, record.spaceId, this.createId(), id, idempotency.now.toISOString()])
@@ -361,7 +361,7 @@ export class PostgresAutomationRepository implements AutomationRepository {
   private async lockAutomation(client: PoolClient, record: AutomationMutationRecord) {
     const result = await client.query<AutomationRow>(`
       SELECT ${automationColumns}
-      FROM relay_expert_triggers trigger
+      FROM cosmos_expert_triggers trigger
       WHERE trigger.organization_id = $1 AND trigger.space_id = $2 AND trigger.id = $3
       FOR UPDATE
     `, [record.organizationId, record.spaceId, record.automationId])
@@ -396,7 +396,7 @@ export class PostgresAutomationRepository implements AutomationRepository {
         })
       }
       const updated = await client.query<AutomationRow>(`
-        UPDATE relay_expert_triggers SET
+        UPDATE cosmos_expert_triggers SET
           name = COALESCE($4, name), event_type = COALESCE($5, event_type),
           filter = COALESCE($6::jsonb, filter), auto_archive = COALESCE($7, auto_archive),
           service_account_id = COALESCE($8, service_account_id),
@@ -444,7 +444,7 @@ export class PostgresAutomationRepository implements AutomationRepository {
         throw new AutomationStateConflictError('Automation must pass a test event before it can be enabled.')
       }
       const updated = await client.query<AutomationRow>(`
-        UPDATE relay_expert_triggers SET status = $4, version = version + 1, updated_at = $5
+        UPDATE cosmos_expert_triggers SET status = $4, version = version + 1, updated_at = $5
         WHERE organization_id = $1 AND space_id = $2 AND id = $3
         RETURNING ${automationColumns.replaceAll('trigger.', '')}
       `, [record.organizationId, record.spaceId, record.automationId, record.status, idempotency.now.toISOString()])
@@ -476,7 +476,7 @@ export class PostgresAutomationRepository implements AutomationRepository {
       const current = await this.lockAutomation(client, record)
       if (!current) return null
       const updated = await client.query<AutomationRow>(`
-        UPDATE relay_expert_triggers SET status = 'archived', archived_at = $4,
+        UPDATE cosmos_expert_triggers SET status = 'archived', archived_at = $4,
           version = version + 1, updated_at = $4
         WHERE organization_id = $1 AND space_id = $2 AND id = $3
         RETURNING ${automationColumns.replaceAll('trigger.', '')}
@@ -487,7 +487,7 @@ export class PostgresAutomationRepository implements AutomationRepository {
         resourceVersion: automation.version, idempotencyKeyHash: idempotency.keyHash,
       })
       await client.query(`
-        INSERT INTO relay_automation_outbox_events (
+        INSERT INTO cosmos_automation_outbox_events (
           organization_id, space_id, id, automation_id, event_type, payload, occurred_at
         ) VALUES ($1, $2, $3, $4, 'automation.archived', '{}'::jsonb, $5)
       `, [
@@ -525,7 +525,7 @@ export class PostgresAutomationRepository implements AutomationRepository {
           ? 'Event source, type, and restricted filter all matched.'
           : 'Event type matched, but the restricted filter returned false.'
       const updated = await client.query<AutomationRow>(`
-        UPDATE relay_expert_triggers SET last_tested_at = CASE WHEN $4 THEN $5 ELSE last_tested_at END,
+        UPDATE cosmos_expert_triggers SET last_tested_at = CASE WHEN $4 THEN $5 ELSE last_tested_at END,
           version = version + 1, updated_at = $5
         WHERE organization_id = $1 AND space_id = $2 AND id = $3
         RETURNING ${automationColumns.replaceAll('trigger.', '')}
@@ -551,7 +551,7 @@ export class PostgresAutomationRepository implements AutomationRepository {
       organizationId, spaceId, actorId,
     }, `
       SELECT ${eventColumns}
-      FROM relay_automation_events event
+      FROM cosmos_automation_events event
       WHERE event.organization_id = $1 AND event.space_id = $2
       ORDER BY event.received_at DESC, event.id DESC LIMIT 100
     `, [organizationId, spaceId])
@@ -565,7 +565,7 @@ export class PostgresAutomationRepository implements AutomationRepository {
       const payloadHash = hash(canonicalJson(record.request.payload))
       const now = this.now().toISOString()
       const inserted = await client.query<EventRow>(`
-        INSERT INTO relay_automation_events (
+        INSERT INTO cosmos_automation_events (
           organization_id, space_id, id, source, event_type, external_id,
           headers_redacted, payload_redacted, payload_hash, status,
           received_by, received_at
@@ -580,7 +580,7 @@ export class PostgresAutomationRepository implements AutomationRepository {
       if (!inserted.rows[0]) {
         const existing = await client.query<EventRow>(`
           SELECT ${eventColumns}
-          FROM relay_automation_events event
+          FROM cosmos_automation_events event
           WHERE event.organization_id = $1 AND event.space_id = $2
             AND event.source = $3 AND event.external_id = $4
         `, [record.organizationId, record.spaceId, record.request.source, record.request.externalId])
@@ -589,8 +589,8 @@ export class PostgresAutomationRepository implements AutomationRepository {
       const initial = inserted.rows[0]
       const candidates = await client.query<AutomationRow>(`
         SELECT ${automationColumns}, service.audience AS service_account_audience
-        FROM relay_expert_triggers trigger
-        JOIN relay_service_accounts service
+        FROM cosmos_expert_triggers trigger
+        JOIN cosmos_service_accounts service
           ON service.organization_id = trigger.organization_id
           AND service.id = trigger.service_account_id
           AND service.status = 'active'
@@ -610,7 +610,7 @@ export class PostgresAutomationRepository implements AutomationRepository {
           : 'No active Trigger matched the source and event type.'
       const status = selected ? 'matched' : 'ignored'
       const processed = await client.query<EventRow>(`
-        UPDATE relay_automation_events SET status = $4, automation_id = $5,
+        UPDATE cosmos_automation_events SET status = $4, automation_id = $5,
           match_explanation = $6, processed_at = $7
         WHERE organization_id = $1 AND space_id = $2 AND id = $3
         RETURNING ${eventColumns.replaceAll('event.', '')}
@@ -620,7 +620,7 @@ export class PostgresAutomationRepository implements AutomationRepository {
       ])
       if (selected) {
         await client.query(`
-          UPDATE relay_expert_triggers SET last_matched_at = $4, match_count = match_count + 1
+          UPDATE cosmos_expert_triggers SET last_matched_at = $4, match_count = match_count + 1
           WHERE organization_id = $1 AND space_id = $2 AND id = $3
         `, [record.organizationId, record.spaceId, selected.id, now])
       }
@@ -630,7 +630,7 @@ export class PostgresAutomationRepository implements AutomationRepository {
         metadata: { source: record.request.source, eventType: record.request.eventType },
       })
       await client.query(`
-        INSERT INTO relay_automation_outbox_events (
+        INSERT INTO cosmos_automation_outbox_events (
           organization_id, space_id, id, automation_id, event_id, event_type, payload, occurred_at
         ) VALUES ($1, $2, $3, $4, $5, $6, '{}'::jsonb, $7)
       `, [
@@ -650,7 +650,7 @@ export class PostgresAutomationRepository implements AutomationRepository {
   async completeDispatch(record: AutomationScope & { eventId: string; sessionId: string }) {
     return withApiDatabaseContext(this.pool, record, async (client) => {
       const updated = await client.query<EventRow>(`
-        UPDATE relay_automation_events SET status = 'dispatched', session_id = $4,
+        UPDATE cosmos_automation_events SET status = 'dispatched', session_id = $4,
           error_code = NULL, error_message = NULL, processed_at = $5
         WHERE organization_id = $1 AND space_id = $2 AND id = $3
           AND status IN ('matched', 'dispatching')
@@ -669,7 +669,7 @@ export class PostgresAutomationRepository implements AutomationRepository {
   async failDispatch(record: AutomationScope & { eventId: string; code: string; message: string }) {
     return withApiDatabaseContext(this.pool, record, async (client) => {
       const updated = await client.query<EventRow>(`
-        UPDATE relay_automation_events SET status = 'failed', error_code = $4,
+        UPDATE cosmos_automation_events SET status = 'failed', error_code = $4,
           error_message = $5, processed_at = $6
         WHERE organization_id = $1 AND space_id = $2 AND id = $3
           AND status IN ('matched', 'dispatching')
@@ -735,11 +735,11 @@ export class PostgresAutomationRepository implements AutomationRepository {
         session.automation_auto_archive AS session_automation_auto_archive,
         session.automation_auto_archived_at AS session_automation_auto_archived_at,
         session.version AS session_version
-      FROM relay_automation_events event
-      JOIN relay_expert_triggers trigger
+      FROM cosmos_automation_events event
+      JOIN cosmos_expert_triggers trigger
         ON trigger.organization_id = event.organization_id
         AND trigger.space_id = event.space_id AND trigger.id = event.automation_id
-      JOIN relay_sessions session
+      JOIN cosmos_sessions session
         ON session.organization_id = event.organization_id
         AND session.space_id = event.space_id AND session.id = event.session_id
       WHERE event.organization_id = $1 AND event.space_id = $2 AND event.status = 'dispatched'

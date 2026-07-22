@@ -7,7 +7,7 @@ import {
 } from './session-timeline-pagination.js'
 
 const scope = {
-  organizationId: 'relay',
+  organizationId: 'cosmos',
   spaceId: 'platform',
   sessionId: 'session-1',
 }

@@ -1,6 +1,6 @@
-import type { AdvisorPlanDto } from '@relay/contracts'
+import type { AdvisorPlanDto } from '@cosmos/contracts'
 import { useEffect, useState } from 'react'
-import { listAdvisorPlans, type RelayApiAuthContext } from '../../services/relayApi'
+import { listAdvisorPlans, type CosmosApiAuthContext } from '../../services/cosmosApi'
 
 const ADVISOR_PLAN_POLL_MS = 2_000
 
@@ -16,7 +16,7 @@ export function useAdvisorPlans(options: {
   spaceId: string
   sessionId?: string
   credentialVersion: number
-  auth: RelayApiAuthContext
+  auth: CosmosApiAuthContext
   enabled: boolean
   pollMs?: number
 }) {

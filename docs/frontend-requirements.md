@@ -1,4 +1,4 @@
-# Relay 前端工程与交互需求
+# Cosmos 前端工程与交互需求
 
 > 文档状态：研发基线（Draft for implementation）  
 > 版本：1.2
@@ -8,7 +8,7 @@
 
 ## 1. 目的与适用范围
 
-本文约束 Relay Web 客户端的路由、组件边界、状态管理、视觉系统、交互、错误状态、可访问性和测试。当前 React 原型是迁移起点，不是目标架构的事实来源；实现与 PRD 冲突时以 PRD 和证据矩阵为准。
+本文约束 Cosmos Web 客户端的路由、组件边界、状态管理、视觉系统、交互、错误状态、可访问性和测试。当前 React 原型是迁移起点，不是目标架构的事实来源；实现与 PRD 冲突时以 PRD 和证据矩阵为准。
 
 ## 2. 当前技术基线
 
@@ -38,7 +38,7 @@
 | --- | --- | --- | --- |
 | Session 列表、创建与详情 | `getMe` 发现 actor 的 Organization/Space membership；list/create/get/rename/archive/restore/start/send 与 pause/resume/cancel/retry 使用当前合法 scope；生产列表用服务端 cursor、搜索和状态筛选增量读取当前或归档记录；详情规范路由为 `/sessions/:sessionId`，直刷读取单资源 API，旧 `/runs/:id` 重定向；Web 已接 OIDC Code + PKCE、Bearer、401 失效和生产 fail-closed | **Partial** | Pin 与分享控制仍未接 Web；真实 IdP E2E 待配置 |
 | 创建失败恢复 | Home 和 Dialog 等待 API 确认，失败保留输入，同一草稿重试复用幂等 key | **Implemented** | 幂等 key 仅存在内存；页面刷新后的安全恢复尚未实现 |
-| Session 视图模型 | 生产列表仍使用无执行推测的最小 `Run` 兼容投影，并开放服务端重命名、归档和恢复；生产详情直接渲染 canonical `SessionDto` 和 Message/Event timeline，凭据轮换立即隔离旧详情；demo 数据使用独立 `relay.demo.sessions` key | **Partial** | 列表仍需迁移为原生 Session read model；Pin、分享和 Artifact 摘要必须接入服务端 API 后才可开放 |
+| Session 视图模型 | 生产列表仍使用无执行推测的最小 `Run` 兼容投影，并开放服务端重命名、归档和恢复；生产详情直接渲染 canonical `SessionDto` 和 Message/Event timeline，凭据轮换立即隔离旧详情；demo 数据使用独立 `cosmos.demo.sessions` key | **Partial** | 列表仍需迁移为原生 Session read model；Pin、分享和 Artifact 摘要必须接入服务端 API 后才可开放 |
 | Experts/Environments 查询 | 生产模式使用 tenant-scoped Catalog list/detail API，支持分页聚合、身份切换清屏、401 闭锁、只读详情和 Expert 启动入口；demo 模式保留本地编辑原型 | **Implemented (limited)** | 无创建、编辑、发布、重新配置、审计或 service-account policy |
 | Files | 生产模式的 Organization/User 与 `/sessions/:sessionId/files` Workspace 路由使用 tenant-scoped API，提供服务端搜索、分页树、文本预览、鉴权 Blob 下载、内容/路径复制、不可变版本和请求 Session 修改；Workspace 查询精确绑定当前 Session，凭据/Space/scope 变化会隔离旧投影；无上传、编辑、删除或客户端恢复入口 | **Implemented (limited)** | provider 到 ToolCall/File 写入编排、binary 内联预览与对象存储容量证据 |
 | 其他控制面 | Daemon、Repository、Integration、MCP、Webhook、Secret、Space、Automation 与 Approval 仍是 seed/本地交互，仅在 demo 模式可达；生产导航、命令面板和直达路由均不暴露原型操作 | **Prototype** | 逐域接入权威 API、权限和审计后再加入 production capability allowlist |
@@ -54,19 +54,19 @@
 | FE-R01 | `/` | Root | **Inferred** | `replace` 到 `/home`，不产生历史栈回跳 |
 | FE-R02 | `/home` | Home | **Official** | Expert picker、composer、附件、最近 Session；品牌点击进入 |
 | FE-R03 | `/sessions` | Sessions | **Official** + **Inferred** | 当前/归档列表、搜索、Pin、visibility、Artifact 摘要 |
-| FE-R04 | `/sessions/:sessionId` | Session detail | **Official** + **Relay extension** | 持续会话；旧 `/runs/:id` 仅兼容重定向/适配 |
+| FE-R04 | `/sessions/:sessionId` | Session detail | **Official** + **Cosmos extension** | 持续会话；旧 `/runs/:id` 仅兼容重定向/适配 |
 | FE-R05 | `/files/organization` | Organization Files | **Official** | 只读树、预览、版本、复制/下载、请求修改 |
 | FE-R06 | `/files/user` | User Files | **Official** | 与 Organization 相同交互但 scope 固定为当前用户 |
 | FE-R07 | `/experts` | Experts | **Official** + **Inferred** | Managed/Custom 分段、搜索、状态与启动入口 |
-| FE-R08 | `/experts/:expertId` | Expert detail/editor | **Official** + **Relay extension** | 类型决定只读/可编辑字段；revision 管理 |
+| FE-R08 | `/experts/:expertId` | Expert detail/editor | **Official** + **Cosmos extension** | 类型决定只读/可编辑字段；revision 管理 |
 | FE-R09 | `/environments` | Environments | **Official** + **Inferred** | Cloud/Self-hosted 分段与统一状态 |
 | FE-R10 | `/environments/:environmentId` | Environment detail | **Official** | Overview、Repositories、Variables、Hooks、Terminal、History |
 | FE-R11 | `/automations` | Automations | **Official** | Expert → Triggers 聚合，不维护第二份规则 |
 | FE-R12 | `/automations/events` | Event Log | **Official** | payload/headers、匹配解释、Session 链接 |
 | FE-R13 | `/automations/history` | Run History | **Official** | Trigger 创建 Session 的查询视图 |
 | FE-R14 | `/spaces` | Spaces | **Official** + **Inferred** | Default、创建、默认值、迁移预览 |
-| FE-R15 | `/approvals` | Relay Approvals | **Relay extension** | 按权限条件显示 |
-| FE-R16 | `/settings` | Settings | **Relay extension** | 个人、主题、语言、组织管理入口 |
+| FE-R15 | `/approvals` | Cosmos Approvals | **Cosmos extension** | 按权限条件显示 |
+| FE-R16 | `/settings` | Settings | **Cosmos extension** | 个人、主题、语言、组织管理入口 |
 
 未知路由重定向 `/home`；不存在/无权限的资源必须区分 `404` 与 `403`，不能统一静默跳转。
 
@@ -85,7 +85,7 @@
 7. Files：Organization、User — **Official**。
 8. Automations：Overview、Event Log、Run History — **Official**。
 9. Experts、Environments 是核心资源入口；Settings 下的 Capabilities / Integrations、Personal / Linked Accounts 与 Webhooks 层级有官方文档证据。不存在足够证据支持一个包含所有项目的 Configuration 侧栏组；生产导航只开放已有生产 API 的入口。
-10. Governance/Approvals 与偏好 — **Relay extension**，视觉上单独分组。
+10. Governance/Approvals 与偏好 — **Cosmos extension**，视觉上单独分组。
 
 ### 4.2 布局要求
 
@@ -131,12 +131,12 @@ AppShell
 
 ### 6.1 Home 与 Session launcher
 
-来源等级：**Official**（核心行为）、**Inferred**（布局/overlay）、**Relay extension**（高级工程选项）。
+来源等级：**Official**（核心行为）、**Inferred**（布局/overlay）、**Cosmos extension**（高级工程选项）。
 
 | ID | 需求 |
 | --- | --- |
 | FE-H01 | Home 第一视口必须出现当前 Space、Expert picker、launch guidance、prompt composer 和启动按钮 |
-| FE-H02 | 最近 Session 放在 launcher 之后；健康/审批/自动化摘要若保留，必须为次要 Relay 区域 |
+| FE-H02 | 最近 Session 放在 launcher 之后；健康/审批/自动化摘要若保留，必须为次要 Cosmos 区域 |
 | FE-H03 | Sidebar、Home、Experts、Files“请求修改”和 Cmd+K 调用同一 `openSessionLauncher({ expertId?, prompt?, context? })` |
 | FE-H04 | prompt 必填；标题由首条 prompt 生成；用户后续可重命名 |
 | FE-H05 | Expert 改变时只读摘要同步更新，Environment/Repository 不出现可误覆盖的默认字段 |
@@ -221,7 +221,7 @@ AppShell
 
 ### 7.2 原型适配要求
 
-- `relay.sessions`、`relay.experts`、`relay.controlPlane.v1` 可作为临时 repository adapter，不得被页面直接读取。
+- `cosmos.sessions`、`cosmos.experts`、`cosmos.controlPlane.v1` 可作为临时 repository adapter，不得被页面直接读取。
 - schema 包含 `version`；解析失败使用只读备份/seed 并告知用户，不静默覆盖损坏数据。
 - 从 `favorite` 到 `pinned`、从 `Run` 到 `Session` 的迁移必须是幂等函数并有测试。
 - mock timers、随机 ID 和模拟网络状态必须可注入/可确定，保证测试稳定。

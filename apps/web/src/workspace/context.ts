@@ -1,4 +1,4 @@
-import type { MeOrganization, MeResponse, MeSpace } from '@relay/contracts'
+import type { MeOrganization, MeResponse, MeSpace } from '@cosmos/contracts'
 import { createContext, useContext } from 'react'
 
 export type WorkspaceStatus = 'loading' | 'ready' | 'empty' | 'error'

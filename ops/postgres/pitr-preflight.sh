@@ -49,7 +49,7 @@ case "$PITR_MODE" in
 esac
 require_positive_integer "$TARGET_RPO_SECONDS" TARGET_RPO_SECONDS
 if [ "$TARGET_RPO_SECONDS" -gt 300 ]; then
-  echo 'TARGET_RPO_SECONDS must not exceed the Relay 300-second RPO objective.' >&2
+  echo 'TARGET_RPO_SECONDS must not exceed the Cosmos 300-second RPO objective.' >&2
   exit 1
 fi
 
@@ -71,7 +71,7 @@ case "$server_version_num" in
     ;;
 esac
 if [ "$server_version_num" -lt 170000 ]; then
-  echo 'Relay production PITR requires PostgreSQL 17 or newer.' >&2
+  echo 'Cosmos production PITR requires PostgreSQL 17 or newer.' >&2
   exit 1
 fi
 case "$wal_level" in

@@ -1,4 +1,4 @@
-import { DEFAULT_AGENT_MODEL, SupportedAgentModelSchema } from '@relay/contracts'
+import { DEFAULT_AGENT_MODEL, SupportedAgentModelSchema } from '@cosmos/contracts'
 import { expertTemplateCategories, expertTemplates, type ExpertTemplateCategory } from '../../data/expertTemplates'
 
 export const EXPERT_STORE_SCHEMA_VERSION = 2 as const

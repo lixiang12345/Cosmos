@@ -1,8 +1,8 @@
 SET LOCAL lock_timeout = '5s';
 
-ALTER TABLE relay_attempts
+ALTER TABLE cosmos_attempts
   ADD COLUMN provider_model text,
-  ADD CONSTRAINT relay_attempts_provider_model_check
+  ADD CONSTRAINT cosmos_attempts_provider_model_check
   CHECK (
     provider_model IS NULL
     OR (

@@ -3,7 +3,7 @@ import {
   ToolCallStatusSchema,
   type ApprovalStatus,
   type ToolCallStatus,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 import type {
   ApprovalListCursor,
   ApprovalListOptions,

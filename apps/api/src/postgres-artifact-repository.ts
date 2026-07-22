@@ -3,7 +3,7 @@ import {
   ArtifactDtoSchema,
   type ArtifactDto,
   type ArtifactType,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 import type { Pool, PoolClient } from 'pg'
 import {
   ArtifactConflictError,
@@ -159,11 +159,11 @@ export class PostgresArtifactRepository implements ArtifactRepository {
       const result = await client.query<ArtifactRow & { access_session_id: string }>(`
         WITH access AS (
           SELECT session.id AS session_id
-          FROM relay_sessions session
-          JOIN relay_organization_memberships organization_membership
+          FROM cosmos_sessions session
+          JOIN cosmos_organization_memberships organization_membership
             ON organization_membership.organization_id = session.organization_id
             AND organization_membership.actor_id = $4
-          JOIN relay_space_memberships space_membership
+          JOIN cosmos_space_memberships space_membership
             ON space_membership.organization_id = session.organization_id
             AND space_membership.space_id = session.space_id
             AND space_membership.actor_id = $4
@@ -174,7 +174,7 @@ export class PostgresArtifactRepository implements ArtifactRepository {
               session.visibility = 'space'
               OR session.created_by = $4
               OR EXISTS (
-                SELECT 1 FROM relay_session_share_grants share_grant
+                SELECT 1 FROM cosmos_session_share_grants share_grant
                 WHERE share_grant.organization_id = session.organization_id
                   AND share_grant.space_id = session.space_id
                   AND share_grant.session_id = session.id
@@ -186,7 +186,7 @@ export class PostgresArtifactRepository implements ArtifactRepository {
                     OR (
                       share_grant.principal_type = 'group'
                       AND EXISTS (
-                        SELECT 1 FROM relay_group_memberships group_membership
+                        SELECT 1 FROM cosmos_group_memberships group_membership
                         WHERE group_membership.organization_id = share_grant.organization_id
                           AND group_membership.group_id = share_grant.principal_id
                           AND group_membership.actor_id = $4
@@ -200,7 +200,7 @@ export class PostgresArtifactRepository implements ArtifactRepository {
         FROM access
         LEFT JOIN LATERAL (
           SELECT ${artifactColumns.split(',').map((column) => `artifact.${column.trim()}`).join(', ')}
-          FROM relay_artifacts artifact
+          FROM cosmos_artifacts artifact
           WHERE artifact.organization_id = $1
             AND artifact.space_id = $2
             AND artifact.session_id = access.session_id
@@ -275,7 +275,7 @@ export class PostgresArtifactRepository implements ArtifactRepository {
     }>(`
       SELECT session.visibility, session.created_by, space_membership.role AS space_role,
         EXISTS (
-          SELECT 1 FROM relay_session_share_grants share_grant
+          SELECT 1 FROM cosmos_session_share_grants share_grant
           WHERE share_grant.organization_id = session.organization_id
             AND share_grant.space_id = session.space_id
             AND share_grant.session_id = session.id
@@ -287,7 +287,7 @@ export class PostgresArtifactRepository implements ArtifactRepository {
               OR (
                 share_grant.principal_type = 'group'
                 AND EXISTS (
-                  SELECT 1 FROM relay_group_memberships group_membership
+                  SELECT 1 FROM cosmos_group_memberships group_membership
                   WHERE group_membership.organization_id = share_grant.organization_id
                     AND group_membership.group_id = share_grant.principal_id
                     AND group_membership.actor_id = $4
@@ -295,11 +295,11 @@ export class PostgresArtifactRepository implements ArtifactRepository {
               )
             )
         ) AS active_share
-      FROM relay_sessions session
-      JOIN relay_organization_memberships organization_membership
+      FROM cosmos_sessions session
+      JOIN cosmos_organization_memberships organization_membership
         ON organization_membership.organization_id = session.organization_id
         AND organization_membership.actor_id = $4
-      JOIN relay_space_memberships space_membership
+      JOIN cosmos_space_memberships space_membership
         ON space_membership.organization_id = session.organization_id
         AND space_membership.space_id = session.space_id
         AND space_membership.actor_id = $4
@@ -335,7 +335,7 @@ export class PostgresArtifactRepository implements ArtifactRepository {
     }
     if (record.request.turnId) {
       const turn = await client.query(`
-        SELECT 1 FROM relay_turns
+        SELECT 1 FROM cosmos_turns
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
       `, [record.organizationId, record.spaceId, record.sessionId, record.request.turnId])
       if (!turn.rowCount) {
@@ -346,7 +346,7 @@ export class PostgresArtifactRepository implements ArtifactRepository {
     let inserted
     try {
       inserted = await client.query<ArtifactRow>(`
-        INSERT INTO relay_artifacts (
+        INSERT INTO cosmos_artifacts (
           organization_id, space_id, session_id, id, turn_id, type,
           provider, external_id, label, url, status, attributes,
           created_by_tool_call_id, created_by, created_at, updated_at,
@@ -407,7 +407,7 @@ export class PostgresArtifactRepository implements ArtifactRepository {
     if (!target) return null
     const selected = await client.query<ArtifactRow>(`
       SELECT ${artifactColumns}
-      FROM relay_artifacts
+      FROM cosmos_artifacts
       WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
         AND id = $4 AND removed_at IS NULL
       FOR UPDATE
@@ -432,7 +432,7 @@ export class PostgresArtifactRepository implements ArtifactRepository {
 
     const occurredAt = this.now().toISOString()
     const updated = await client.query<ArtifactRow>(`
-      UPDATE relay_artifacts
+      UPDATE cosmos_artifacts
       SET label = $5, url = $6, status = $7, attributes = $8::jsonb,
         updated_at = $9, version = version + 1
       WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
@@ -479,7 +479,7 @@ export class PostgresArtifactRepository implements ArtifactRepository {
     }
     const selected = await client.query<ArtifactRow>(`
       SELECT ${artifactColumns}
-      FROM relay_artifacts
+      FROM cosmos_artifacts
       WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
         AND id = $4 AND removed_at IS NULL
       FOR UPDATE
@@ -491,7 +491,7 @@ export class PostgresArtifactRepository implements ArtifactRepository {
     }
     const occurredAt = idempotency.now.toISOString()
     const updated = await client.query<ArtifactRow>(`
-      UPDATE relay_artifacts
+      UPDATE cosmos_artifacts
       SET removed_at = $5, removed_by = $6, updated_at = $5, version = version + 1
       WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
       RETURNING ${artifactColumns}
@@ -547,7 +547,7 @@ export class PostgresArtifactRepository implements ArtifactRepository {
       removedAt: artifact.removedAt,
     })
     const reservation = await client.query<{ sequence: string }>(`
-      UPDATE relay_sessions
+      UPDATE cosmos_sessions
       SET last_event_sequence = last_event_sequence + 1
       WHERE organization_id = $1 AND space_id = $2 AND id = $3
       RETURNING last_event_sequence AS sequence
@@ -560,7 +560,7 @@ export class PostgresArtifactRepository implements ArtifactRepository {
     }[input.action]
     const afterState = projection(input.artifact)
     await client.query(`
-      INSERT INTO relay_session_events (
+      INSERT INTO cosmos_session_events (
         organization_id, space_id, session_id, event_id, sequence,
         event_type, resource_type, resource_id, payload, actor_id,
         actor_kind, artifact_id, command_id, request_id, occurred_at
@@ -583,7 +583,7 @@ export class PostgresArtifactRepository implements ArtifactRepository {
       input.occurredAt,
     ])
     await client.query(`
-      INSERT INTO relay_audit_events (
+      INSERT INTO cosmos_audit_events (
         organization_id, audit_event_id, space_id, session_id,
         actor_id, actor_kind, delegation_chain, action,
         target_type, target_id, result, request_id, idempotency_key_hash,
@@ -610,7 +610,7 @@ export class PostgresArtifactRepository implements ArtifactRepository {
       input.occurredAt,
     ])
     await client.query(`
-      INSERT INTO relay_outbox_events (
+      INSERT INTO cosmos_outbox_events (
         id, organization_id, space_id, session_id, aggregate_type,
         aggregate_id, event_type, payload, occurred_at
       ) VALUES ($1, $2, $3, $4, 'artifact', $5, $6, $7::jsonb, $8)
@@ -647,8 +647,8 @@ export class PostgresArtifactRepository implements ArtifactRepository {
     const now = this.now()
     const existing = await client.query<{ request_hash: string; response_body: unknown | null }>(`
       SELECT idempotency.request_hash, response.response_body
-      FROM relay_idempotency_records idempotency
-      LEFT JOIN relay_idempotency_responses response
+      FROM cosmos_idempotency_records idempotency
+      LEFT JOIN cosmos_idempotency_responses response
         ON response.organization_id = idempotency.organization_id
         AND response.actor_id = idempotency.actor_id
         AND response.method = idempotency.method
@@ -680,7 +680,7 @@ export class PostgresArtifactRepository implements ArtifactRepository {
       }
     }
     await client.query(`
-      DELETE FROM relay_idempotency_responses
+      DELETE FROM cosmos_idempotency_responses
       WHERE organization_id = $1 AND actor_id = $2 AND method = $3
         AND canonical_path = $4 AND idempotency_key_hash = $5 AND expires_at <= $6
     `, [
@@ -688,7 +688,7 @@ export class PostgresArtifactRepository implements ArtifactRepository {
       keyHash, now.toISOString(),
     ])
     await client.query(`
-      DELETE FROM relay_idempotency_records
+      DELETE FROM cosmos_idempotency_records
       WHERE organization_id = $1 AND actor_id = $2 AND method = $3
         AND canonical_path = $4 AND idempotency_key_hash = $5 AND expires_at <= $6
     `, [
@@ -721,7 +721,7 @@ export class PostgresArtifactRepository implements ArtifactRepository {
     },
   ) {
     await client.query(`
-      INSERT INTO relay_idempotency_records (
+      INSERT INTO cosmos_idempotency_records (
         organization_id, space_id, actor_id, method, canonical_path,
         idempotency_key_hash, request_hash, session_id, expires_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -730,7 +730,7 @@ export class PostgresArtifactRepository implements ArtifactRepository {
       input.canonicalPath, input.keyHash, input.requestHash, input.sessionId, input.expiresAt,
     ])
     await client.query(`
-      INSERT INTO relay_idempotency_responses (
+      INSERT INTO cosmos_idempotency_responses (
         organization_id, actor_id, method, canonical_path, idempotency_key_hash,
         status_code, response_body, response_headers, expires_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9)

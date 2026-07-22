@@ -11,16 +11,16 @@ const databaseUrl = process.env.TEST_DATABASE_URL
 const describeWithDatabase = databaseUrl ? describe : describe.skip
 
 describeWithDatabase('Advisor controlled execution under restricted runtime roles', () => {
-  const schema = `relay_advisor_${crypto.randomUUID().replaceAll('-', '')}`
+  const schema = `cosmos_advisor_${crypto.randomUUID().replaceAll('-', '')}`
   const adminPool = new Pool({ connectionString: databaseUrl })
   const migrationPool = new Pool({ connectionString: databaseUrl, options: `-c search_path=${schema}` })
   const apiPool = new Pool({
     connectionString: databaseUrl,
-    options: `-c role=relay_api_runtime -c search_path=${schema}`,
+    options: `-c role=cosmos_api_runtime -c search_path=${schema}`,
   })
   const workerPool = new Pool({
     connectionString: databaseUrl,
-    options: `-c role=relay_worker_runtime -c search_path=${schema}`,
+    options: `-c role=cosmos_worker_runtime -c search_path=${schema}`,
   })
   let sequence = 0
   let sessionId = ''
@@ -34,7 +34,7 @@ describeWithDatabase('Advisor controlled execution under restricted runtime role
       createId: () => `advisor-fixture-${++sequence}`,
       now: () => new Date('2026-07-22T02:00:00.000Z'),
     }).create({
-      organizationId: 'relay',
+      organizationId: 'cosmos',
       spaceId: 'space-platform',
       actorId: 'user-local-admin',
       actorKind: 'user',
@@ -76,12 +76,12 @@ describeWithDatabase('Advisor controlled execution under restricted runtime role
       }],
     }
     const first = await repository.proposePlan({
-      organizationId: 'relay', spaceId: 'space-platform', sessionId,
+      organizationId: 'cosmos', spaceId: 'space-platform', sessionId,
       actorId: 'user-local-admin', requestId: 'advisor-proposal-request',
       providerToolCallId: 'provider-advisor-plan-1', proposal,
     })
     const replay = await repository.proposePlan({
-      organizationId: 'relay', spaceId: 'space-platform', sessionId,
+      organizationId: 'cosmos', spaceId: 'space-platform', sessionId,
       actorId: 'user-local-admin', requestId: 'advisor-proposal-replay',
       providerToolCallId: 'provider-advisor-plan-1', proposal,
     })
@@ -106,10 +106,10 @@ describeWithDatabase('Advisor controlled execution under restricted runtime role
       createId: () => `advisor-api-${++sequence}`,
       now: () => new Date('2026-07-22T02:02:00.000Z'),
     })
-    const proposed = await plans.getPlan('relay', 'space-platform', sessionId, planId, 'user-local-admin')
+    const proposed = await plans.getPlan('cosmos', 'space-platform', sessionId, planId, 'user-local-admin')
     if (!proposed) throw new Error('Expected the Advisor plan fixture.')
     const decision = await plans.decidePlan({
-      organizationId: 'relay', spaceId: 'space-platform', sessionId, planId,
+      organizationId: 'cosmos', spaceId: 'space-platform', sessionId, planId,
       actorId: 'user-local-admin', requestId: 'advisor-confirm-request',
       expectedVersion: proposed.version, idempotencyKey: 'advisor-confirm-key',
       request: { decision: 'confirmed', note: 'The diff is bounded and expected.' },
@@ -122,20 +122,20 @@ describeWithDatabase('Advisor controlled execution under restricted runtime role
         now: () => new Date('2026-07-22T02:03:00.000Z'),
       }),
     ).execute({
-      organizationId: 'relay', spaceId: 'space-platform', sessionId, planId,
+      organizationId: 'cosmos', spaceId: 'space-platform', sessionId, planId,
       actorId: 'user-local-admin', requestId: 'advisor-execute-request',
     })
     expect(executed).toMatchObject({
       status: 'succeeded', steps: [{ status: 'succeeded' }],
     })
     await expect(new PostgresSpaceRepository(apiPool).getSpace(
-      'relay', 'space-platform', 'user-local-admin',
+      'cosmos', 'space-platform', 'user-local-admin',
     )).resolves.toMatchObject({
       description: 'Platform delivery and runtime ownership.', version: 2,
     })
 
     const replay = await plans.decidePlan({
-      organizationId: 'relay', spaceId: 'space-platform', sessionId, planId,
+      organizationId: 'cosmos', spaceId: 'space-platform', sessionId, planId,
       actorId: 'user-local-admin', requestId: 'advisor-confirm-replay',
       expectedVersion: proposed.version, idempotencyKey: 'advisor-confirm-key',
       request: { decision: 'confirmed', note: 'The diff is bounded and expected.' },
@@ -144,9 +144,9 @@ describeWithDatabase('Advisor controlled execution under restricted runtime role
 
     const evidence = await migrationPool.query<{ advisor_audits: number; space_audits: number }>(`
       SELECT
-        (SELECT count(*)::integer FROM relay_audit_events
+        (SELECT count(*)::integer FROM cosmos_audit_events
           WHERE target_type = 'advisor_plan' AND target_id = $1) AS advisor_audits,
-        (SELECT count(*)::integer FROM relay_space_audit_events
+        (SELECT count(*)::integer FROM cosmos_space_audit_events
           WHERE space_id = 'space-platform' AND action = 'space.updated') AS space_audits
     `, [planId])
     expect(evidence.rows[0]).toMatchObject({ advisor_audits: 3, space_audits: 1 })
@@ -158,7 +158,7 @@ describeWithDatabase('Advisor controlled execution under restricted runtime role
       now: () => new Date('2026-07-22T02:04:00.000Z'),
     })
     const manual = await workerRepository.proposePlan({
-      organizationId: 'relay', spaceId: 'space-platform', sessionId,
+      organizationId: 'cosmos', spaceId: 'space-platform', sessionId,
       actorId: 'user-local-admin', requestId: 'advisor-manual-proposal',
       providerToolCallId: 'provider-advisor-manual-1',
       proposal: {
@@ -175,13 +175,13 @@ describeWithDatabase('Advisor controlled execution under restricted runtime role
       now: () => new Date('2026-07-22T02:05:00.000Z'),
     })
     await plans.decidePlan({
-      organizationId: 'relay', spaceId: 'space-platform', sessionId, planId: manual.id,
+      organizationId: 'cosmos', spaceId: 'space-platform', sessionId, planId: manual.id,
       actorId: 'user-local-admin', requestId: 'advisor-manual-confirm',
       expectedVersion: manual.version, idempotencyKey: 'advisor-manual-confirm-key',
       request: { decision: 'confirmed' },
     })
     const result = await new AdvisorPlanExecutor(plans, new PostgresSpaceRepository(apiPool)).execute({
-      organizationId: 'relay', spaceId: 'space-platform', sessionId, planId: manual.id,
+      organizationId: 'cosmos', spaceId: 'space-platform', sessionId, planId: manual.id,
       actorId: 'user-local-admin', requestId: 'advisor-manual-execute',
     })
     expect(result).toMatchObject({

@@ -23,15 +23,15 @@ const workspace = {
   me: {
     actor: { id: 'user-local-admin', kind: 'user' as const },
     organizations: [{
-      id: 'relay',
-      name: 'Relay',
+      id: 'cosmos',
+      name: 'Cosmos',
       role: 'organization_owner' as const,
       spaces: [{ id: 'platform', name: 'Platform', role: 'space_manager' as const }],
     }],
   },
   activeOrganization: {
-    id: 'relay',
-    name: 'Relay',
+    id: 'cosmos',
+    name: 'Cosmos',
     role: 'organization_owner' as const,
     spaces: [{ id: 'platform', name: 'Platform', role: 'space_manager' as const }],
   },
@@ -48,8 +48,8 @@ function renderPage() {
         <WorkspaceContext.Provider value={workspace}>
           <ContextWorkspacePage
             repositories={[
-              { id: 'repo-platform', fullName: 'relay/platform', defaultBranch: 'main' },
-              { id: 'repo-web', fullName: 'relay/web', defaultBranch: 'main' },
+              { id: 'repo-platform', fullName: 'cosmos/platform', defaultBranch: 'main' },
+              { id: 'repo-web', fullName: 'cosmos/web', defaultBranch: 'main' },
             ]}
             demoMode
             contextEnabled={false}
@@ -96,9 +96,9 @@ describe('Context workspace', () => {
       expect.objectContaining({ hits: expect.arrayContaining([expect.objectContaining({ path: 'src/retry/policy.ts' })]) }),
     )
 
-    await user.selectOptions(screen.getByRole('combobox', { name: '代码库' }), 'relay/web')
+    await user.selectOptions(screen.getByRole('combobox', { name: '代码库' }), 'cosmos/web')
     expect(screen.queryByRole('heading', { name: '5 项高相关证据' })).not.toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: '代码库' })).toHaveValue('relay/web')
+    expect(screen.getByRole('combobox', { name: '代码库' })).toHaveValue('cosmos/web')
   })
 
   it('hides stale evidence as soon as the search inputs change', async () => {

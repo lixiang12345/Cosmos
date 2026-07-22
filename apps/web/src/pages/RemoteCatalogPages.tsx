@@ -10,7 +10,7 @@ import {
   type ExpertRevisionListResponse,
   type ExpertStatus,
   type ExpertSummaryDto,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 import {
   AlertTriangle,
   ArrowLeft,
@@ -43,7 +43,7 @@ import { GlobalControls } from '../components/GlobalControls'
 import { IconButton } from '../components/ui'
 import { usePreferences, type Locale } from '../preferences'
 import {
-  RelayApiError,
+  CosmosApiError,
   archiveExpert,
   archiveEnvironment,
   createEnvironment,
@@ -58,8 +58,8 @@ import {
   retryEnvironment,
   updateEnvironment,
   updateExpert,
-  type RelayApiAuthContext,
-} from '../services/relayApi'
+  type CosmosApiAuthContext,
+} from '../services/cosmosApi'
 
 type RemoteCatalogListState<T> = {
   items: T[]
@@ -72,7 +72,7 @@ type RemoteCatalogListState<T> = {
 type RemoteCatalogRequestProps = {
   organizationId: string
   spaceId: string
-  auth: RelayApiAuthContext
+  auth: CosmosApiAuthContext
   credentialVersion: number
 }
 
@@ -155,7 +155,7 @@ function useRemoteDetail<T>(
           : new Error('Unable to load the Catalog resource.')
         setSnapshot({
           identity,
-          status: cause instanceof RelayApiError && cause.status === 404 ? 'not_found' : 'error',
+          status: cause instanceof CosmosApiError && cause.status === 404 ? 'not_found' : 'error',
           error,
         })
       },
@@ -386,7 +386,7 @@ export function RemoteExpertDetailPage({
   onEdit,
 }: RemoteExpertDetailPageProps) {
   const { locale } = usePreferences()
-  const requestAuth = useMemo<RelayApiAuthContext>(() => ({
+  const requestAuth = useMemo<CosmosApiAuthContext>(() => ({
     accessToken: auth.accessToken,
     requestIdentity: auth.requestIdentity,
     onUnauthorized: auth.onUnauthorized,
@@ -536,7 +536,7 @@ export function RemoteExpertEditorPage({
   onCatalogChange,
 }: RemoteExpertEditorPageProps) {
   const { locale } = usePreferences()
-  const requestAuth = useMemo<RelayApiAuthContext>(() => ({
+  const requestAuth = useMemo<CosmosApiAuthContext>(() => ({
     accessToken: auth.accessToken,
     requestIdentity: auth.requestIdentity,
     onUnauthorized: auth.onUnauthorized,
@@ -718,7 +718,7 @@ export function RemoteExpertEditorPage({
         <button type="button" className="remote-catalog-back" onClick={onBack}>
           <ArrowLeft aria-hidden="true" />{text(locale, '返回专家库', 'Back to Experts')}
         </button>
-        {error ? <div className="remote-expert-editor__error" role="alert"><AlertTriangle aria-hidden="true" /><span><strong>{text(locale, '操作未完成', 'Operation not completed')}</strong><small>{error.message}</small></span>{error instanceof RelayApiError && error.status === 412 ? <button type="button" className="cosmos-button cosmos-button--secondary" onClick={() => { setSavedExpert(undefined); detail.retry() }}>{text(locale, '重新加载', 'Reload')}</button> : null}</div> : null}
+        {error ? <div className="remote-expert-editor__error" role="alert"><AlertTriangle aria-hidden="true" /><span><strong>{text(locale, '操作未完成', 'Operation not completed')}</strong><small>{error.message}</small></span>{error instanceof CosmosApiError && error.status === 412 ? <button type="button" className="cosmos-button cosmos-button--secondary" onClick={() => { setSavedExpert(undefined); detail.retry() }}>{text(locale, '重新加载', 'Reload')}</button> : null}</div> : null}
         <div className="remote-expert-editor__layout">
           <div className="remote-expert-editor__main">
             <section className="cosmos-panel remote-expert-form-section">
@@ -788,7 +788,7 @@ export function RemoteEnvironmentsPage({
   const state = listState(loading, ready, error)
   const selectedSummary = items.find((item) => item.id === selectedId) ?? items[0]
   const selectedEnvironmentId = state === 'ready' ? selectedSummary?.id : undefined
-  const requestAuth = useMemo<RelayApiAuthContext>(() => ({
+  const requestAuth = useMemo<CosmosApiAuthContext>(() => ({
     accessToken: auth.accessToken,
     requestIdentity: auth.requestIdentity,
     onUnauthorized: auth.onUnauthorized,
@@ -967,7 +967,7 @@ function EnvironmentEditor({
   environment?: EnvironmentDetailDto
   organizationId: string
   spaceId: string
-  auth: RelayApiAuthContext
+  auth: CosmosApiAuthContext
   onCancel: () => void
   onSaved: (environment: EnvironmentDetailDto) => void
 }) {

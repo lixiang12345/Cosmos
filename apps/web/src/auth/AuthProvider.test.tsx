@@ -5,7 +5,7 @@ import type { User } from 'oidc-client-ts'
 import { AuthProvider } from './AuthProvider'
 import type { OidcAuthConfig } from './config'
 import { useAuth } from './context'
-import { getMe } from '../services/relayApi'
+import { getMe } from '../services/cosmosApi'
 
 const authTestState = vi.hoisted(() => ({
   config: undefined as unknown,
@@ -97,7 +97,7 @@ function configure(path: string) {
   const config: OidcAuthConfig = {
     mode: 'oidc',
     authority: 'https://identity.example.com/',
-    clientId: `relay-web-${configSequence}`,
+    clientId: `cosmos-web-${configSequence}`,
     redirectUri: `${origin}/auth/callback`,
     postLogoutRedirectUri: `${origin}/`,
     scope: 'openid profile email',

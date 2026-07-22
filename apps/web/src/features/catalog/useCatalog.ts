@@ -1,10 +1,10 @@
-import type { EnvironmentSummaryDto, ExpertSummaryDto } from '@relay/contracts'
+import type { EnvironmentSummaryDto, ExpertSummaryDto } from '@cosmos/contracts'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   listEnvironments,
   listExperts,
-  type RelayApiAuthContext,
-} from '../../services/relayApi'
+  type CosmosApiAuthContext,
+} from '../../services/cosmosApi'
 
 type CatalogPage<T> = {
   items: T[]
@@ -34,14 +34,14 @@ async function loadCatalogPages<T extends { id: string }>(
     if (!response.page.hasMore) return { items }
     const nextCursor = response.page.nextCursor
     if (!nextCursor || cursors.has(nextCursor)) {
-      throw new Error('Relay API returned an invalid Catalog pagination sequence.')
+      throw new Error('Cosmos API returned an invalid Catalog pagination sequence.')
     }
     cursors.add(nextCursor)
     cursor = nextCursor
     if (signal.aborted) throw new DOMException('The request was aborted.', 'AbortError')
   }
 
-  throw new Error('Relay API Catalog pagination exceeded the supported limit.')
+  throw new Error('Cosmos API Catalog pagination exceeded the supported limit.')
 }
 
 export type CatalogRequestInput = {
@@ -49,7 +49,7 @@ export type CatalogRequestInput = {
   spaceId: string
   accessToken?: string
   credentialVersion: number
-  onUnauthorized: NonNullable<RelayApiAuthContext['onUnauthorized']>
+  onUnauthorized: NonNullable<CosmosApiAuthContext['onUnauthorized']>
   enabled: boolean
 }
 
@@ -152,7 +152,7 @@ export function useCatalog({
     requestEnabled,
     spaceId,
   }), [credentialIdentity, handleUnauthorized, organizationId, requestEnabled, spaceId])
-  const auth = useMemo<RelayApiAuthContext>(() => ({
+  const auth = useMemo<CosmosApiAuthContext>(() => ({
     accessToken,
     onUnauthorized: handleUnauthorized,
   }), [accessToken, handleUnauthorized])

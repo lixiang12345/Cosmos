@@ -14,7 +14,7 @@ const claim: EnvironmentProvisioningClaim = {
   environmentId: 'environment-a',
   environmentRevisionId: 'revision-1',
   environmentType: 'cloud',
-  image: 'ghcr.io/relay/runtime:stable',
+  image: 'ghcr.io/cosmos/runtime:stable',
   daemonPoolId: null,
   attempt: 1,
   maxAttempts: 3,

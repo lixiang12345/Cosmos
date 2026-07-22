@@ -15,7 +15,7 @@ const databaseUrl = process.env.TEST_DATABASE_URL
 const describeWithDatabase = databaseUrl ? describe : describe.skip
 
 describeWithDatabase('restricted runtime roles and tenant RLS', () => {
-  const schema = `relay_runtime_rls_${crypto.randomUUID().replaceAll('-', '')}`
+  const schema = `cosmos_runtime_rls_${crypto.randomUUID().replaceAll('-', '')}`
   const adminPool = new Pool({ connectionString: databaseUrl })
   const migrationPool = new Pool({
     connectionString: databaseUrl,
@@ -24,17 +24,17 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
   const apiPool = new Pool({
     connectionString: databaseUrl,
     max: 1,
-    options: `-c role=relay_api_runtime -c search_path=${schema}`,
+    options: `-c role=cosmos_api_runtime -c search_path=${schema}`,
   })
   const workerPool = new Pool({
     connectionString: databaseUrl,
     max: 1,
-    options: `-c role=relay_worker_runtime -c search_path=${schema}`,
+    options: `-c role=cosmos_worker_runtime -c search_path=${schema}`,
   })
   const observerPool = new Pool({
     connectionString: databaseUrl,
     max: 1,
-    options: `-c role=relay_observer_runtime -c search_path=${schema}`,
+    options: `-c role=cosmos_observer_runtime -c search_path=${schema}`,
   })
   const sessions = new PostgresSessionRepository(apiPool)
   const artifacts = new PostgresArtifactRepository(apiPool)
@@ -51,16 +51,16 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
     await adminPool.query(`CREATE SCHEMA ${schema}`)
     await runMigrations(migrationPool)
     await migrationPool.query(`
-      INSERT INTO relay_organizations (id, name) VALUES
+      INSERT INTO cosmos_organizations (id, name) VALUES
         ('rls-org-a', 'RLS Organization A'),
         ('rls-org-b', 'RLS Organization B');
-      INSERT INTO relay_spaces (organization_id, id, name) VALUES
+      INSERT INTO cosmos_spaces (organization_id, id, name) VALUES
         ('rls-org-a', 'rls-space-a', 'RLS Space A'),
         ('rls-org-b', 'rls-space-b', 'RLS Space B');
-      INSERT INTO relay_organization_memberships (organization_id, actor_id, role) VALUES
+      INSERT INTO cosmos_organization_memberships (organization_id, actor_id, role) VALUES
         ('rls-org-a', 'rls-user-a', 'member'),
         ('rls-org-b', 'rls-user-b', 'member');
-      INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role) VALUES
+      INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role) VALUES
         ('rls-org-a', 'rls-space-a', 'rls-user-a', 'member'),
         ('rls-org-b', 'rls-space-b', 'rls-user-b', 'member');
     `)
@@ -75,12 +75,12 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
       SELECT current_user AS role, current_schema() AS schema,
         has_table_privilege(
           current_user,
-          format('%I.relay_organization_memberships', current_schema()),
+          format('%I.cosmos_organization_memberships', current_schema()),
           'SELECT'
         ) AS membership_select
     `)
     expect(runtimeConnection.rows[0]).toEqual({
-      role: 'relay_api_runtime',
+      role: 'cosmos_api_runtime',
       schema,
       membership_select: true,
     })
@@ -114,9 +114,9 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
   })
 
   it('forces RLS on every tenant table and assumes non-bypass runtime roles', async () => {
-    await expect(assertRuntimeDatabaseRole(apiPool, 'relay_api_runtime')).resolves.toBeUndefined()
-    await expect(assertRuntimeDatabaseRole(workerPool, 'relay_worker_runtime')).resolves.toBeUndefined()
-    await expect(assertRuntimeDatabaseRole(observerPool, 'relay_observer_runtime')).resolves.toBeUndefined()
+    await expect(assertRuntimeDatabaseRole(apiPool, 'cosmos_api_runtime')).resolves.toBeUndefined()
+    await expect(assertRuntimeDatabaseRole(workerPool, 'cosmos_worker_runtime')).resolves.toBeUndefined()
+    await expect(assertRuntimeDatabaseRole(observerPool, 'cosmos_observer_runtime')).resolves.toBeUndefined()
 
     const roleRows = await adminPool.query<{
       rolname: string
@@ -127,26 +127,26 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
     }>(`
       SELECT rolname, rolsuper, rolbypassrls, rolcanlogin, rolinherit
       FROM pg_roles
-      WHERE rolname IN ('relay_api_runtime', 'relay_worker_runtime', 'relay_observer_runtime')
+      WHERE rolname IN ('cosmos_api_runtime', 'cosmos_worker_runtime', 'cosmos_observer_runtime')
       ORDER BY rolname
     `)
     expect(roleRows.rows).toEqual([
       {
-        rolname: 'relay_api_runtime',
+        rolname: 'cosmos_api_runtime',
         rolsuper: false,
         rolbypassrls: false,
         rolcanlogin: false,
         rolinherit: false,
       },
       {
-        rolname: 'relay_observer_runtime',
+        rolname: 'cosmos_observer_runtime',
         rolsuper: false,
         rolbypassrls: false,
         rolcanlogin: false,
         rolinherit: false,
       },
       {
-        rolname: 'relay_worker_runtime',
+        rolname: 'cosmos_worker_runtime',
         rolsuper: false,
         rolbypassrls: false,
         rolcanlogin: false,
@@ -165,9 +165,9 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
         count(*) FILTER (WHERE relforcerowsecurity)::text AS forced_tables
       FROM pg_class
       WHERE relnamespace = current_schema()::regnamespace
-        AND relname LIKE 'relay_%'
+        AND relname LIKE 'cosmos_%'
         AND relkind = 'r'
-        AND relname NOT IN ('relay_schema_migrations', 'relay_worker_heartbeats', 'relay_object_storage_gc_runs')
+        AND relname NOT IN ('cosmos_schema_migrations', 'cosmos_worker_heartbeats', 'cosmos_object_storage_gc_runs')
     `)
     expect(protection.rows[0]).toEqual({
       protected_tables: '50',
@@ -186,12 +186,12 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
       job_updated_at: boolean
     }>(`
       SELECT
-        has_column_privilege(current_user, 'relay_commands', 'status', 'SELECT') AS command_status,
-        has_column_privilege(current_user, 'relay_commands', 'started_at', 'SELECT') AS command_started_at,
-        has_column_privilege(current_user, 'relay_worker_heartbeats', 'last_seen_at', 'SELECT') AS heartbeat_time,
-        has_column_privilege(current_user, 'relay_worker_heartbeats', 'worker_id', 'SELECT') AS heartbeat_id,
-        has_column_privilege(current_user, 'relay_environment_provisioning_jobs', 'created_at', 'SELECT') AS job_created_at,
-        has_column_privilege(current_user, 'relay_environment_provisioning_jobs', 'updated_at', 'SELECT') AS job_updated_at
+        has_column_privilege(current_user, 'cosmos_commands', 'status', 'SELECT') AS command_status,
+        has_column_privilege(current_user, 'cosmos_commands', 'started_at', 'SELECT') AS command_started_at,
+        has_column_privilege(current_user, 'cosmos_worker_heartbeats', 'last_seen_at', 'SELECT') AS heartbeat_time,
+        has_column_privilege(current_user, 'cosmos_worker_heartbeats', 'worker_id', 'SELECT') AS heartbeat_id,
+        has_column_privilege(current_user, 'cosmos_environment_provisioning_jobs', 'created_at', 'SELECT') AS job_created_at,
+        has_column_privilege(current_user, 'cosmos_environment_provisioning_jobs', 'updated_at', 'SELECT') AS job_updated_at
     `)
     expect(privileges.rows[0]).toEqual({
       command_status: true,
@@ -203,21 +203,21 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
     })
     const commands = await observerPool.query<{ status: string; count: string }>(`
       SELECT status, count(*)::text AS count
-      FROM relay_commands
+      FROM cosmos_commands
       GROUP BY status
       ORDER BY status
     `)
     expect(commands.rows).toEqual([{ status: 'accepted', count: '2' }])
 
     const outbox = await observerPool.query<{ count: string }>(
-      'SELECT count(*)::text AS count FROM relay_outbox_events WHERE published_at IS NULL',
+      'SELECT count(*)::text AS count FROM cosmos_outbox_events WHERE published_at IS NULL',
     )
     expect(outbox.rows[0]).toEqual({ count: '2' })
-    await expect(observerPool.query('SELECT organization_id FROM relay_commands'))
+    await expect(observerPool.query('SELECT organization_id FROM cosmos_commands'))
       .rejects.toMatchObject({ code: '42501' })
-    await expect(observerPool.query('SELECT payload FROM relay_outbox_events'))
+    await expect(observerPool.query('SELECT payload FROM cosmos_outbox_events'))
       .rejects.toMatchObject({ code: '42501' })
-    await expect(observerPool.query('UPDATE relay_commands SET status = status'))
+    await expect(observerPool.query('UPDATE cosmos_commands SET status = status'))
       .rejects.toMatchObject({ code: '42501' })
   })
 
@@ -249,7 +249,7 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
       space_fingerprint: string
       target_fingerprint: string
       user_agent_fingerprint: string
-    }>('SELECT * FROM relay_security_audit_events WHERE audit_event_id = $1', ['security-audit-1'])
+    }>('SELECT * FROM cosmos_security_audit_events WHERE audit_event_id = $1', ['security-audit-1'])
     expect(rows.rows[0]).toMatchObject({
       error_code: 'RESOURCE_NOT_FOUND',
       hmac_key_id: 'integration-v1',
@@ -266,10 +266,10 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
     expect(JSON.stringify(rows.rows[0])).not.toContain('rls-user-a')
     expect(JSON.stringify(rows.rows[0])).not.toContain('private-session-that-must-not-leak')
     expect(JSON.stringify(rows.rows[0])).not.toContain('never-store-this-key')
-    await expect(apiPool.query('SELECT * FROM relay_security_audit_events'))
+    await expect(apiPool.query('SELECT * FROM cosmos_security_audit_events'))
       .rejects.toMatchObject({ code: '42501' })
     await expect(workerPool.query(`
-      INSERT INTO relay_security_audit_events (
+      INSERT INTO cosmos_security_audit_events (
         audit_event_id, request_id, hmac_key_id, method, route_pattern, outcome, status_code,
         error_code, client_ip_fingerprint, occurred_at
       ) VALUES (
@@ -277,11 +277,11 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
         'INTERNAL_ERROR', repeat('0', 64), clock_timestamp()
       )
     `)).rejects.toMatchObject({ code: '42501' })
-    await expect(migrationPool.query('UPDATE relay_security_audit_events SET error_code = error_code'))
+    await expect(migrationPool.query('UPDATE cosmos_security_audit_events SET error_code = error_code'))
       .rejects.toMatchObject({ code: '55000' })
-    await expect(migrationPool.query('DELETE FROM relay_security_audit_events'))
+    await expect(migrationPool.query('DELETE FROM cosmos_security_audit_events'))
       .rejects.toMatchObject({ code: '55000' })
-    await expect(migrationPool.query('TRUNCATE relay_security_audit_events'))
+    await expect(migrationPool.query('TRUNCATE cosmos_security_audit_events'))
       .rejects.toMatchObject({ code: '55000' })
   })
 
@@ -295,20 +295,20 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
       },
     ])
 
-    const unscoped = await apiPool.query<{ count: string }>('SELECT count(*)::text AS count FROM relay_sessions')
+    const unscoped = await apiPool.query<{ count: string }>('SELECT count(*)::text AS count FROM cosmos_sessions')
     expect(unscoped.rows[0]?.count).toBe('0')
 
     const visible = await withApiDatabaseContext(
       apiPool,
       { organizationId: 'rls-org-a', spaceId: 'rls-space-a', actorId: 'rls-user-a' },
-      (client) => client.query<{ id: string }>('SELECT id FROM relay_sessions ORDER BY id'),
+      (client) => client.query<{ id: string }>('SELECT id FROM cosmos_sessions ORDER BY id'),
     )
     expect(visible.rows).toEqual([{ id: sessionA }])
 
     const spoofed = await withApiDatabaseContext(
       apiPool,
       { organizationId: 'rls-org-b', spaceId: 'rls-space-b', actorId: 'rls-user-a' },
-      (client) => client.query<{ count: string }>('SELECT count(*)::text AS count FROM relay_sessions'),
+      (client) => client.query<{ count: string }>('SELECT count(*)::text AS count FROM cosmos_sessions'),
     )
     expect(spoofed.rows[0]?.count).toBe('0')
 
@@ -316,7 +316,7 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
       apiPool,
       { organizationId: 'rls-org-a', spaceId: 'rls-space-a', actorId: 'rls-user-a' },
       (client) => client.query(`
-        INSERT INTO relay_session_share_grants (
+        INSERT INTO cosmos_session_share_grants (
           organization_id, space_id, session_id, id, principal_type,
           principal_id, role, created_at, created_by
         ) VALUES (
@@ -330,14 +330,14 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
       apiPool,
       { organizationId: 'rls-org-a', spaceId: 'rls-space-a', actorId: 'rls-user-a' },
       (client) => client.query(`
-        UPDATE relay_organization_memberships
+        UPDATE cosmos_organization_memberships
         SET role = 'viewer'
         WHERE organization_id = 'rls-org-a' AND actor_id = 'rls-user-a'
       `),
     )).rejects.toMatchObject({ code: '42501' })
 
     const afterRelease = await apiPool.query<{ count: string }>(
-      'SELECT count(*)::text AS count FROM relay_sessions',
+      'SELECT count(*)::text AS count FROM cosmos_sessions',
     )
     expect(afterRelease.rows[0]?.count).toBe('0')
   })
@@ -364,7 +364,7 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
     })
 
     const unscoped = await apiPool.query<{ count: string }>(
-      'SELECT count(*)::text AS count FROM relay_artifacts',
+      'SELECT count(*)::text AS count FROM cosmos_artifacts',
     )
     expect(unscoped.rows[0]?.count).toBe('0')
 
@@ -372,7 +372,7 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
       apiPool,
       { organizationId: 'rls-org-a', spaceId: 'rls-space-a', actorId: 'rls-user-a' },
       (client) => client.query<{ count: string }>(
-        'SELECT count(*)::text AS count FROM relay_artifacts',
+        'SELECT count(*)::text AS count FROM cosmos_artifacts',
       ),
     )
     expect(visible.rows[0]?.count).toBe('1')
@@ -381,7 +381,7 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
       apiPool,
       { organizationId: 'rls-org-b', spaceId: 'rls-space-b', actorId: 'rls-user-a' },
       (client) => client.query<{ count: string }>(
-        'SELECT count(*)::text AS count FROM relay_artifacts',
+        'SELECT count(*)::text AS count FROM cosmos_artifacts',
       ),
     )
     expect(spoofed.rows[0]?.count).toBe('0')
@@ -399,19 +399,19 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
     })
 
     const sessionsVisible = await workerPool.query<{ count: string }>(
-      'SELECT count(*)::text AS count FROM relay_sessions',
+      'SELECT count(*)::text AS count FROM cosmos_sessions',
     )
     expect(sessionsVisible.rows[0]?.count).toBe('2')
 
     const serviceAccountsVisible = await workerPool.query<{ count: string }>(
-      'SELECT count(*)::text AS count FROM relay_service_accounts',
+      'SELECT count(*)::text AS count FROM cosmos_service_accounts',
     )
     expect(serviceAccountsVisible.rows[0]?.count).toBe('0')
-    await expect(apiPool.query('SELECT * FROM relay_audit_events'))
+    await expect(apiPool.query('SELECT * FROM cosmos_audit_events'))
       .rejects.toMatchObject({ code: '42501' })
     await expect(workerPool.query(`
-      UPDATE relay_messages SET actor_id = 'runtime-mutation'
-      WHERE id = (SELECT id FROM relay_messages LIMIT 1)
+      UPDATE cosmos_messages SET actor_id = 'runtime-mutation'
+      WHERE id = (SELECT id FROM cosmos_messages LIMIT 1)
     `)).rejects.toMatchObject({ code: '42501' })
   })
 })

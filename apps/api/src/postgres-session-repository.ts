@@ -18,7 +18,7 @@ import {
   type ShareGrantDto,
   type SendSessionMessageResponse,
   type StartSessionResponse,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 import type { Pool, PoolClient } from 'pg'
 import {
   queryWithApiDatabaseContext,
@@ -289,13 +289,13 @@ export class PostgresSessionRepository implements SessionRepository {
         organization_membership.role AS organization_role,
         space.id AS space_id, space.name AS space_name, space_membership.role AS space_role,
         (organization.default_space_id = space.id) AS space_is_default
-      FROM relay_organization_memberships organization_membership
-      JOIN relay_organizations organization
+      FROM cosmos_organization_memberships organization_membership
+      JOIN cosmos_organizations organization
         ON organization.id = organization_membership.organization_id
-      LEFT JOIN relay_space_memberships space_membership
+      LEFT JOIN cosmos_space_memberships space_membership
         ON space_membership.organization_id = organization_membership.organization_id
         AND space_membership.actor_id = organization_membership.actor_id
-      LEFT JOIN relay_spaces space
+      LEFT JOIN cosmos_spaces space
         ON space.organization_id = space_membership.organization_id
         AND space.id = space_membership.space_id
       WHERE organization_membership.actor_id = $1
@@ -334,8 +334,8 @@ export class PostgresSessionRepository implements SessionRepository {
       space_role: SpaceRole
     }>(this.pool, { organizationId, spaceId, actorId }, `
       SELECT organization_membership.role AS organization_role, space_membership.role AS space_role
-      FROM relay_organization_memberships organization_membership
-      JOIN relay_space_memberships space_membership
+      FROM cosmos_organization_memberships organization_membership
+      JOIN cosmos_space_memberships space_membership
         ON space_membership.organization_id = organization_membership.organization_id
         AND space_membership.actor_id = organization_membership.actor_id
       WHERE organization_membership.organization_id = $1
@@ -362,7 +362,7 @@ export class PostgresSessionRepository implements SessionRepository {
       OR session.created_by = $3
       OR EXISTS (
         SELECT 1
-        FROM relay_session_share_grants share_grant
+        FROM cosmos_session_share_grants share_grant
         WHERE share_grant.organization_id = session.organization_id
           AND share_grant.space_id = session.space_id
           AND share_grant.session_id = session.id
@@ -373,7 +373,7 @@ export class PostgresSessionRepository implements SessionRepository {
             OR (
               share_grant.principal_type = 'group'
               AND EXISTS (
-                SELECT 1 FROM relay_group_memberships group_membership
+                SELECT 1 FROM cosmos_group_memberships group_membership
                 WHERE group_membership.organization_id = share_grant.organization_id
                   AND group_membership.group_id = share_grant.principal_id
                   AND group_membership.actor_id = $3
@@ -420,11 +420,11 @@ export class PostgresSessionRepository implements SessionRepository {
           session.last_activity_at AT TIME ZONE 'UTC',
           'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
         ) AS cursor_last_activity_at
-      FROM relay_sessions session
-      JOIN relay_organization_memberships organization_membership
+      FROM cosmos_sessions session
+      JOIN cosmos_organization_memberships organization_membership
         ON organization_membership.organization_id = session.organization_id
         AND organization_membership.actor_id = $3
-      JOIN relay_space_memberships space_membership
+      JOIN cosmos_space_memberships space_membership
         ON space_membership.organization_id = session.organization_id
         AND space_membership.space_id = session.space_id
         AND space_membership.actor_id = $3
@@ -460,11 +460,11 @@ export class PostgresSessionRepository implements SessionRepository {
       { organizationId, spaceId, actorId },
       `
       SELECT ${sessionColumns.split(',').map((column) => `session.${column.trim()}`).join(', ')}
-      FROM relay_sessions session
-      JOIN relay_organization_memberships organization_membership
+      FROM cosmos_sessions session
+      JOIN cosmos_organization_memberships organization_membership
         ON organization_membership.organization_id = session.organization_id
         AND organization_membership.actor_id = $4
-      JOIN relay_space_memberships space_membership
+      JOIN cosmos_space_memberships space_membership
         ON space_membership.organization_id = session.organization_id
         AND space_membership.space_id = session.space_id
         AND space_membership.actor_id = $4
@@ -476,7 +476,7 @@ export class PostgresSessionRepository implements SessionRepository {
           OR session.created_by = $4
           OR EXISTS (
             SELECT 1
-            FROM relay_session_share_grants share_grant
+            FROM cosmos_session_share_grants share_grant
             WHERE share_grant.organization_id = session.organization_id
               AND share_grant.space_id = session.space_id
               AND share_grant.session_id = session.id
@@ -487,7 +487,7 @@ export class PostgresSessionRepository implements SessionRepository {
                 OR (
                   share_grant.principal_type = 'group'
                   AND EXISTS (
-                    SELECT 1 FROM relay_group_memberships group_membership
+                    SELECT 1 FROM cosmos_group_memberships group_membership
                     WHERE group_membership.organization_id = share_grant.organization_id
                       AND group_membership.group_id = share_grant.principal_id
                       AND group_membership.actor_id = $4
@@ -542,7 +542,7 @@ export class PostgresSessionRepository implements SessionRepository {
       { organizationId, spaceId, actorId },
       `
       SELECT ${shareGrantColumns}
-      FROM relay_session_share_grants
+      FROM cosmos_session_share_grants
       WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
         ${cursorClause}
       ORDER BY created_at DESC, id DESC
@@ -722,7 +722,7 @@ export class PostgresSessionRepository implements SessionRepository {
         session.created_by, space_membership.role AS space_role,
         (
           SELECT share_grant.role
-          FROM relay_session_share_grants share_grant
+          FROM cosmos_session_share_grants share_grant
           WHERE share_grant.organization_id = session.organization_id
             AND share_grant.space_id = session.space_id
             AND share_grant.session_id = session.id
@@ -733,7 +733,7 @@ export class PostgresSessionRepository implements SessionRepository {
               OR (
                 share_grant.principal_type = 'group'
                 AND EXISTS (
-                  SELECT 1 FROM relay_group_memberships group_membership
+                  SELECT 1 FROM cosmos_group_memberships group_membership
                   WHERE group_membership.organization_id = share_grant.organization_id
                     AND group_membership.group_id = share_grant.principal_id
                     AND group_membership.actor_id = $4
@@ -743,11 +743,11 @@ export class PostgresSessionRepository implements SessionRepository {
           ORDER BY CASE share_grant.role WHEN 'collaborator' THEN 0 ELSE 1 END
           LIMIT 1
         ) AS active_share_role
-      FROM relay_sessions session
-      JOIN relay_organization_memberships organization_membership
+      FROM cosmos_sessions session
+      JOIN cosmos_organization_memberships organization_membership
         ON organization_membership.organization_id = session.organization_id
         AND organization_membership.actor_id = $4
-      JOIN relay_space_memberships space_membership
+      JOIN cosmos_space_memberships space_membership
         ON space_membership.organization_id = session.organization_id
         AND space_membership.space_id = session.space_id
         AND space_membership.actor_id = $4
@@ -769,8 +769,8 @@ export class PostgresSessionRepository implements SessionRepository {
     const result = record.request.principalType === 'user'
       ? await client.query(`
           SELECT 1
-          FROM relay_organization_memberships organization_membership
-          JOIN relay_space_memberships space_membership
+          FROM cosmos_organization_memberships organization_membership
+          JOIN cosmos_space_memberships space_membership
             ON space_membership.organization_id = organization_membership.organization_id
             AND space_membership.actor_id = organization_membership.actor_id
           WHERE organization_membership.organization_id = $1
@@ -779,16 +779,16 @@ export class PostgresSessionRepository implements SessionRepository {
         `, [record.organizationId, record.spaceId, record.request.principalId])
       : await client.query(`
           SELECT 1
-          FROM relay_groups relay_group
-          WHERE relay_group.organization_id = $1 AND relay_group.id = $3
+          FROM cosmos_groups cosmos_group
+          WHERE cosmos_group.organization_id = $1 AND cosmos_group.id = $3
             AND EXISTS (
               SELECT 1
-              FROM relay_group_memberships group_membership
-              JOIN relay_space_memberships space_membership
+              FROM cosmos_group_memberships group_membership
+              JOIN cosmos_space_memberships space_membership
                 ON space_membership.organization_id = group_membership.organization_id
                 AND space_membership.actor_id = group_membership.actor_id
-              WHERE group_membership.organization_id = relay_group.organization_id
-                AND group_membership.group_id = relay_group.id
+              WHERE group_membership.organization_id = cosmos_group.organization_id
+                AND group_membership.group_id = cosmos_group.id
                 AND space_membership.space_id = $2
             )
         `, [record.organizationId, record.spaceId, record.request.principalId])
@@ -808,7 +808,7 @@ export class PostgresSessionRepository implements SessionRepository {
     },
   ) {
     await client.query(`
-      INSERT INTO relay_audit_events (
+      INSERT INTO cosmos_audit_events (
         organization_id, audit_event_id, space_id, session_id,
         actor_id, actor_kind, delegation_chain, action,
         target_type, target_id, result, request_id, idempotency_key_hash,
@@ -843,7 +843,7 @@ export class PostgresSessionRepository implements SessionRepository {
     occurredAt: string,
   ) {
     await client.query(`
-      INSERT INTO relay_outbox_events (
+      INSERT INTO cosmos_outbox_events (
         id, organization_id, space_id, session_id, aggregate_type,
         aggregate_id, event_type, payload, occurred_at
       ) VALUES ($1, $2, $3, $4, 'share_grant', $5, $6, $7::jsonb, $8)
@@ -898,7 +898,7 @@ export class PostgresSessionRepository implements SessionRepository {
 
     const expired = await client.query<ShareGrantRow>(`
       SELECT ${shareGrantColumns}
-      FROM relay_session_share_grants
+      FROM cosmos_session_share_grants
       WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
         AND principal_type = $4 AND principal_id = $5
         AND revoked_at IS NULL AND expires_at IS NOT NULL AND expires_at <= $6
@@ -914,7 +914,7 @@ export class PostgresSessionRepository implements SessionRepository {
     if (expired.rows[0]) {
       const before = mapShareGrant(expired.rows[0])
       const normalized = await client.query<ShareGrantRow>(`
-        UPDATE relay_session_share_grants
+        UPDATE cosmos_session_share_grants
         SET revoked_at = $6, revoked_by = $7, version = version + 1
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
           AND principal_type = $4 AND principal_id = $5 AND revoked_at IS NULL
@@ -945,7 +945,7 @@ export class PostgresSessionRepository implements SessionRepository {
     let inserted
     try {
       inserted = await client.query<ShareGrantRow>(`
-        INSERT INTO relay_session_share_grants (
+        INSERT INTO cosmos_session_share_grants (
           organization_id, space_id, session_id, id, principal_type, principal_id,
           role, expires_at, created_at, created_by, revoked_at, revoked_by, version
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, NULL, 1)
@@ -1023,7 +1023,7 @@ export class PostgresSessionRepository implements SessionRepository {
 
     const selected = await client.query<ShareGrantRow>(`
       SELECT ${shareGrantColumns}
-      FROM relay_session_share_grants
+      FROM cosmos_session_share_grants
       WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
       FOR UPDATE
     `, [record.organizationId, record.spaceId, record.sessionId, record.shareId])
@@ -1035,7 +1035,7 @@ export class PostgresSessionRepository implements SessionRepository {
     if (before.revokedAt !== null) throw new ShareGrantConflictError('The ShareGrant is already revoked.')
     const occurredAt = idempotency.now.toISOString()
     const updated = await client.query<ShareGrantRow>(`
-      UPDATE relay_session_share_grants
+      UPDATE cosmos_session_share_grants
       SET revoked_at = $5, revoked_by = $6, version = version + 1
       WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
       RETURNING ${shareGrantColumns}
@@ -1071,8 +1071,8 @@ export class PostgresSessionRepository implements SessionRepository {
   ): Promise<{ session: SessionDto; policyReason: string } | null> {
     const access = await client.query<SpaceAccess>(`
       SELECT organization_membership.role AS "organizationRole", space_membership.role AS "spaceRole"
-      FROM relay_organization_memberships organization_membership
-      JOIN relay_space_memberships space_membership
+      FROM cosmos_organization_memberships organization_membership
+      JOIN cosmos_space_memberships space_membership
         ON space_membership.organization_id = organization_membership.organization_id
         AND space_membership.actor_id = organization_membership.actor_id
       WHERE organization_membership.organization_id = $1
@@ -1090,7 +1090,7 @@ export class PostgresSessionRepository implements SessionRepository {
         session.created_by,
         (
           SELECT share_grant.role
-          FROM relay_session_share_grants share_grant
+          FROM cosmos_session_share_grants share_grant
           WHERE share_grant.organization_id = session.organization_id
             AND share_grant.space_id = session.space_id
             AND share_grant.session_id = session.id
@@ -1101,7 +1101,7 @@ export class PostgresSessionRepository implements SessionRepository {
               OR (
                 share_grant.principal_type = 'group'
                 AND EXISTS (
-                  SELECT 1 FROM relay_group_memberships group_membership
+                  SELECT 1 FROM cosmos_group_memberships group_membership
                   WHERE group_membership.organization_id = share_grant.organization_id
                     AND group_membership.group_id = share_grant.principal_id
                     AND group_membership.actor_id = $4
@@ -1111,7 +1111,7 @@ export class PostgresSessionRepository implements SessionRepository {
           ORDER BY CASE share_grant.role WHEN 'collaborator' THEN 0 ELSE 1 END
           LIMIT 1
         ) AS active_share_role
-      FROM relay_sessions session
+      FROM cosmos_sessions session
       WHERE session.organization_id = $1 AND session.space_id = $2 AND session.id = $3
       FOR UPDATE OF session
     `, [record.organizationId, record.spaceId, record.sessionId, record.actorId])
@@ -1161,8 +1161,8 @@ export class PostgresSessionRepository implements SessionRepository {
     if (!record.actorAudience) throw new AuthorizationChangedError()
     const binding = await client.query(`
       SELECT 1
-      FROM relay_service_accounts service_account
-      JOIN relay_service_account_bindings binding
+      FROM cosmos_service_accounts service_account
+      JOIN cosmos_service_account_bindings binding
         ON binding.organization_id = service_account.organization_id
         AND binding.service_account_id = service_account.id
       WHERE service_account.organization_id = $1
@@ -1203,7 +1203,7 @@ export class PostgresSessionRepository implements SessionRepository {
     if (before.title === record.request.title) return before
 
     const updated = await client.query<SessionRow>(`
-      UPDATE relay_sessions
+      UPDATE cosmos_sessions
       SET title = $4, updated_at = $5, version = version + 1
       WHERE organization_id = $1 AND space_id = $2 AND id = $3
       RETURNING ${sessionColumns}
@@ -1243,8 +1243,8 @@ export class PostgresSessionRepository implements SessionRepository {
     const now = this.now()
     const existing = await client.query<{ request_hash: string; response_body: unknown | null }>(`
       SELECT idempotency.request_hash, response.response_body
-      FROM relay_idempotency_records idempotency
-      LEFT JOIN relay_idempotency_responses response
+      FROM cosmos_idempotency_records idempotency
+      LEFT JOIN cosmos_idempotency_responses response
         ON response.organization_id = idempotency.organization_id
         AND response.actor_id = idempotency.actor_id
         AND response.method = idempotency.method
@@ -1262,13 +1262,13 @@ export class PostgresSessionRepository implements SessionRepository {
     }
 
     await client.query(`
-      DELETE FROM relay_idempotency_responses
+      DELETE FROM cosmos_idempotency_responses
       WHERE organization_id = $1 AND actor_id = $2 AND method = 'POST'
         AND canonical_path = $3 AND idempotency_key_hash = $4
         AND expires_at <= $5
     `, [record.organizationId, record.actorId, canonicalPath, keyHash, now.toISOString()])
     await client.query(`
-      DELETE FROM relay_idempotency_records
+      DELETE FROM cosmos_idempotency_records
       WHERE organization_id = $1 AND actor_id = $2 AND method = 'POST'
         AND canonical_path = $3 AND idempotency_key_hash = $4
         AND expires_at <= $5
@@ -1284,7 +1284,7 @@ export class PostgresSessionRepository implements SessionRepository {
     let session = before
     if (!alreadyInTargetState) {
       const updated = await client.query<SessionRow>(`
-        UPDATE relay_sessions
+        UPDATE cosmos_sessions
         SET archived_at = $4, updated_at = $5, version = version + 1
         WHERE organization_id = $1 AND space_id = $2 AND id = $3
         RETURNING ${sessionColumns}
@@ -1309,7 +1309,7 @@ export class PostgresSessionRepository implements SessionRepository {
 
     const expiresAt = new Date(now.getTime() + this.idempotencyTtlMs).toISOString()
     await client.query(`
-      INSERT INTO relay_idempotency_records (
+      INSERT INTO cosmos_idempotency_records (
         organization_id, space_id, actor_id, method, canonical_path,
         idempotency_key_hash, request_hash, session_id, expires_at
       ) VALUES ($1, $2, $3, 'POST', $4, $5, $6, $7, $8)
@@ -1324,7 +1324,7 @@ export class PostgresSessionRepository implements SessionRepository {
       expiresAt,
     ])
     await client.query(`
-      INSERT INTO relay_idempotency_responses (
+      INSERT INTO cosmos_idempotency_responses (
         organization_id, actor_id, method, canonical_path, idempotency_key_hash,
         status_code, response_body, response_headers, expires_at
       ) VALUES ($1, $2, 'POST', $3, $4, 200, $5::jsonb, $6::jsonb, $7)
@@ -1362,8 +1362,8 @@ export class PostgresSessionRepository implements SessionRepository {
     const now = this.now()
     const existing = await client.query<{ request_hash: string; response_body: unknown | null }>(`
       SELECT idempotency.request_hash, response.response_body
-      FROM relay_idempotency_records idempotency
-      LEFT JOIN relay_idempotency_responses response
+      FROM cosmos_idempotency_records idempotency
+      LEFT JOIN cosmos_idempotency_responses response
         ON response.organization_id = idempotency.organization_id
         AND response.actor_id = idempotency.actor_id
         AND response.method = idempotency.method
@@ -1387,13 +1387,13 @@ export class PostgresSessionRepository implements SessionRepository {
     }
 
     await client.query(`
-      DELETE FROM relay_idempotency_responses
+      DELETE FROM cosmos_idempotency_responses
       WHERE organization_id = $1 AND actor_id = $2 AND method = $3
         AND canonical_path = $4 AND idempotency_key_hash = $5
         AND expires_at <= $6
     `, [input.organizationId, input.actorId, method, input.canonicalPath, keyHash, now.toISOString()])
     await client.query(`
-      DELETE FROM relay_idempotency_records
+      DELETE FROM cosmos_idempotency_records
       WHERE organization_id = $1 AND actor_id = $2 AND method = $3
         AND canonical_path = $4 AND idempotency_key_hash = $5
         AND expires_at <= $6
@@ -1428,7 +1428,7 @@ export class PostgresSessionRepository implements SessionRepository {
     const method = input.method ?? 'POST'
     const statusCode = input.statusCode ?? 202
     await client.query(`
-      INSERT INTO relay_idempotency_records (
+      INSERT INTO cosmos_idempotency_records (
         organization_id, space_id, actor_id, method, canonical_path,
         idempotency_key_hash, request_hash, session_id, expires_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -1444,7 +1444,7 @@ export class PostgresSessionRepository implements SessionRepository {
       input.expiresAt,
     ])
     await client.query(`
-      INSERT INTO relay_idempotency_responses (
+      INSERT INTO cosmos_idempotency_responses (
         organization_id, actor_id, method, canonical_path, idempotency_key_hash,
         status_code, response_body, response_headers, expires_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9)
@@ -1492,7 +1492,7 @@ export class PostgresSessionRepository implements SessionRepository {
     let canceledAttempts: Array<{ id: string; turn_id: string; number: number }> = []
     if (record.action === 'pause') {
       const attempts = await client.query<{ id: string; turn_id: string; number: number }>(`
-        UPDATE relay_attempts
+        UPDATE cosmos_attempts
         SET status = 'canceled', completed_at = $4,
             failure_code = NULL, failure_message = NULL
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
@@ -1501,7 +1501,7 @@ export class PostgresSessionRepository implements SessionRepository {
       `, [record.organizationId, record.spaceId, record.sessionId, occurredAt])
       canceledAttempts = attempts.rows
       await client.query(`
-        UPDATE relay_commands
+        UPDATE cosmos_commands
         SET status = 'queued', available_at = $4, queued_at = COALESCE(queued_at, $4),
             started_at = NULL, heartbeat_at = NULL, completed_at = NULL,
             lease_owner = NULL, lease_expires_at = NULL,
@@ -1510,7 +1510,7 @@ export class PostgresSessionRepository implements SessionRepository {
           AND resource_type = 'turn' AND status = 'running'
       `, [record.organizationId, record.spaceId, record.sessionId, occurredAt])
       await client.query(`
-        UPDATE relay_turns
+        UPDATE cosmos_turns
         SET status = 'queued', started_at = NULL, heartbeat_at = NULL,
             completed_at = NULL, failure_code = NULL, failure_message = NULL,
             version = version + 1
@@ -1519,7 +1519,7 @@ export class PostgresSessionRepository implements SessionRepository {
       `, [record.organizationId, record.spaceId, record.sessionId])
     } else if (record.action === 'cancel') {
       const attempts = await client.query<{ id: string; turn_id: string; number: number }>(`
-        UPDATE relay_attempts
+        UPDATE cosmos_attempts
         SET status = 'canceled', completed_at = $4,
             failure_code = NULL, failure_message = NULL
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
@@ -1528,7 +1528,7 @@ export class PostgresSessionRepository implements SessionRepository {
       `, [record.organizationId, record.spaceId, record.sessionId, occurredAt])
       canceledAttempts = attempts.rows
       await client.query(`
-        UPDATE relay_commands
+        UPDATE cosmos_commands
         SET status = 'canceled', completed_at = $4,
             lease_owner = NULL, lease_expires_at = NULL,
             failure_code = NULL, failure_message = NULL
@@ -1536,7 +1536,7 @@ export class PostgresSessionRepository implements SessionRepository {
           AND status IN ('accepted', 'queued', 'running')
       `, [record.organizationId, record.spaceId, record.sessionId, occurredAt])
       await client.query(`
-        UPDATE relay_turns
+        UPDATE cosmos_turns
         SET status = 'canceled', completed_at = $4,
             failure_code = NULL, failure_message = NULL,
             version = version + 1
@@ -1551,7 +1551,7 @@ export class PostgresSessionRepository implements SessionRepository {
         ? 'queued'
         : 'canceled'
     const updated = await client.query<SessionRow>(`
-      UPDATE relay_sessions
+      UPDATE cosmos_sessions
       SET status = $4, updated_at = $5, last_activity_at = $5, version = version + 1
       WHERE organization_id = $1 AND space_id = $2 AND id = $3
       RETURNING ${sessionColumns}
@@ -1566,7 +1566,7 @@ export class PostgresSessionRepository implements SessionRepository {
       acceptedAt: occurredAt,
     })
     await client.query(`
-      INSERT INTO relay_commands (
+      INSERT INTO cosmos_commands (
         id, organization_id, space_id, session_id, type, status,
         resource_type, resource_id, payload, accepted_at, available_at,
         protocol_version, requested_by, request_id, max_attempts, attempts,
@@ -1589,7 +1589,7 @@ export class PostgresSessionRepository implements SessionRepository {
 
     const eventCount = 1 + canceledAttempts.length
     const sequence = await client.query<{ first_sequence: string }>(`
-      UPDATE relay_sessions
+      UPDATE cosmos_sessions
       SET last_event_sequence = last_event_sequence + $4
       WHERE organization_id = $1 AND space_id = $2 AND id = $3
       RETURNING last_event_sequence - $4 + 1 AS first_sequence
@@ -1599,7 +1599,7 @@ export class PostgresSessionRepository implements SessionRepository {
       throw new Error('The Session control event sequence could not be reserved.')
     }
     await client.query(`
-      INSERT INTO relay_session_events (
+      INSERT INTO cosmos_session_events (
         organization_id, space_id, session_id, event_id, sequence,
         event_type, resource_type, resource_id, payload, actor_id,
         actor_kind, message_id, turn_id, command_id, request_id, occurred_at
@@ -1622,7 +1622,7 @@ export class PostgresSessionRepository implements SessionRepository {
     ])
     for (const [index, attempt] of canceledAttempts.entries()) {
       await client.query(`
-        INSERT INTO relay_session_events (
+        INSERT INTO cosmos_session_events (
           organization_id, space_id, session_id, event_id, sequence,
           event_type, resource_type, resource_id, payload, actor_id,
           actor_kind, message_id, turn_id, attempt_id, command_id, request_id, occurred_at
@@ -1653,7 +1653,7 @@ export class PostgresSessionRepository implements SessionRepository {
       ])
     }
     await client.query(`
-      INSERT INTO relay_outbox_events (
+      INSERT INTO cosmos_outbox_events (
         id, organization_id, space_id, session_id, aggregate_type,
         aggregate_id, event_type, payload, occurred_at
       ) VALUES ($1, $2, $3, $4, 'session', $4, $5, $6::jsonb, $7)
@@ -1671,7 +1671,7 @@ export class PostgresSessionRepository implements SessionRepository {
       occurredAt,
     ])
     await client.query(`
-      INSERT INTO relay_audit_events (
+      INSERT INTO cosmos_audit_events (
         organization_id, audit_event_id, space_id, session_id, actor_id,
         actor_kind, action, target_type, target_id, result, request_id,
         idempotency_key_hash, policy_decision, policy_reason, before_state,
@@ -1736,7 +1736,7 @@ export class PostgresSessionRepository implements SessionRepository {
       version: number
     }>(`
       SELECT status, version
-      FROM relay_turns
+      FROM cosmos_turns
       WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
       FOR UPDATE
     `, [record.organizationId, record.spaceId, record.sessionId, record.turnId])
@@ -1747,13 +1747,13 @@ export class PostgresSessionRepository implements SessionRepository {
       SELECT
         COALESCE(MAX(attempt.number), 0) + 1 AS next_number,
         expert_revision.model
-      FROM relay_sessions session
-      JOIN relay_expert_revisions expert_revision
+      FROM cosmos_sessions session
+      JOIN cosmos_expert_revisions expert_revision
         ON expert_revision.organization_id = session.organization_id
         AND expert_revision.space_id = session.space_id
         AND expert_revision.expert_id = session.expert_id
         AND expert_revision.id = session.expert_revision_id
-      LEFT JOIN relay_attempts attempt
+      LEFT JOIN cosmos_attempts attempt
         ON attempt.organization_id = session.organization_id
         AND attempt.space_id = session.space_id
         AND attempt.session_id = session.id
@@ -1769,14 +1769,14 @@ export class PostgresSessionRepository implements SessionRepository {
     const occurredAt = idempotency.now.toISOString()
     const attemptId = this.createId()
     await client.query(`
-      UPDATE relay_turns
+      UPDATE cosmos_turns
       SET status = 'queued', started_at = NULL, heartbeat_at = NULL,
           completed_at = NULL, failure_code = NULL, failure_message = NULL,
           version = version + 1
       WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
     `, [record.organizationId, record.spaceId, record.sessionId, record.turnId])
     await client.query(`
-      INSERT INTO relay_attempts (
+      INSERT INTO cosmos_attempts (
         organization_id, space_id, session_id, turn_id, id, number,
         status, model, provider_model, runtime_id, created_at
       ) VALUES ($1, $2, $3, $4, $5, $6, 'queued', $7, NULL, NULL, $8)
@@ -1799,7 +1799,7 @@ export class PostgresSessionRepository implements SessionRepository {
       acceptedAt: occurredAt,
     })
     await client.query(`
-      INSERT INTO relay_commands (
+      INSERT INTO cosmos_commands (
         id, organization_id, space_id, session_id, type, status,
         resource_type, resource_id, payload, accepted_at, available_at,
         protocol_version, requested_by, request_id, max_attempts, attempts, queued_at
@@ -1821,7 +1821,7 @@ export class PostgresSessionRepository implements SessionRepository {
       attemptNumber - 1,
     ])
     const updated = await client.query<SessionRow>(`
-      UPDATE relay_sessions
+      UPDATE cosmos_sessions
       SET status = 'queued', updated_at = $4, last_activity_at = $4,
           version = version + 1, last_event_sequence = last_event_sequence + 3
       WHERE organization_id = $1 AND space_id = $2 AND id = $3
@@ -1868,7 +1868,7 @@ export class PostgresSessionRepository implements SessionRepository {
     ] as const
     for (const [index, event] of eventDrafts.entries()) {
       await client.query(`
-        INSERT INTO relay_session_events (
+        INSERT INTO cosmos_session_events (
           organization_id, space_id, session_id, event_id, sequence,
           event_type, resource_type, resource_id, payload, actor_id,
           actor_kind, message_id, turn_id, attempt_id, command_id, request_id, occurred_at
@@ -1896,7 +1896,7 @@ export class PostgresSessionRepository implements SessionRepository {
       ])
     }
     await client.query(`
-      INSERT INTO relay_outbox_events (
+      INSERT INTO cosmos_outbox_events (
         id, organization_id, space_id, session_id, aggregate_type,
         aggregate_id, event_type, payload, occurred_at
       ) VALUES ($1, $2, $3, $4, 'turn', $5, 'turn.retry_queued', $6::jsonb, $7)
@@ -1915,7 +1915,7 @@ export class PostgresSessionRepository implements SessionRepository {
       occurredAt,
     ])
     await client.query(`
-      INSERT INTO relay_audit_events (
+      INSERT INTO cosmos_audit_events (
         organization_id, audit_event_id, space_id, session_id, actor_id,
         actor_kind, action, target_type, target_id, result, request_id,
         idempotency_key_hash, policy_decision, policy_reason, before_state,
@@ -1977,7 +1977,7 @@ export class PostgresSessionRepository implements SessionRepository {
       ? { title: session.title, version: session.version }
       : { archivedAt: session.archivedAt, version: session.version }
     const sequence = await client.query<{ sequence: string }>(`
-      UPDATE relay_sessions
+      UPDATE cosmos_sessions
       SET last_event_sequence = last_event_sequence + 1
       WHERE organization_id = $1 AND space_id = $2 AND id = $3
       RETURNING last_event_sequence AS sequence
@@ -1985,7 +1985,7 @@ export class PostgresSessionRepository implements SessionRepository {
     if (!sequence.rowCount) throw new Error('The Session event sequence could not be reserved.')
 
     await client.query(`
-      INSERT INTO relay_session_events (
+      INSERT INTO cosmos_session_events (
         organization_id, space_id, session_id, event_id, sequence,
         event_type, resource_type, resource_id, payload, actor_id,
         actor_kind, message_id, turn_id, command_id, request_id, occurred_at
@@ -2014,7 +2014,7 @@ export class PostgresSessionRepository implements SessionRepository {
       ? { title: session.title, version: session.version }
       : { archivedAt: session.archivedAt, version: session.version }
     await client.query(`
-      INSERT INTO relay_audit_events (
+      INSERT INTO cosmos_audit_events (
         organization_id, audit_event_id, space_id, session_id, actor_id,
         actor_kind, action, target_type, target_id, result, request_id,
         idempotency_key_hash, policy_decision, policy_reason, before_state,
@@ -2046,8 +2046,8 @@ export class PostgresSessionRepository implements SessionRepository {
   ): Promise<SendSessionMessageResult | null> {
     const access = await client.query<SpaceAccess>(`
       SELECT organization_membership.role AS "organizationRole", space_membership.role AS "spaceRole"
-      FROM relay_organization_memberships organization_membership
-      JOIN relay_space_memberships space_membership
+      FROM cosmos_organization_memberships organization_membership
+      JOIN cosmos_space_memberships space_membership
         ON space_membership.organization_id = organization_membership.organization_id
         AND space_membership.actor_id = organization_membership.actor_id
       WHERE organization_membership.organization_id = $1
@@ -2072,7 +2072,7 @@ export class PostgresSessionRepository implements SessionRepository {
         session.created_by,
         (
           SELECT share_grant.role
-          FROM relay_session_share_grants share_grant
+          FROM cosmos_session_share_grants share_grant
           WHERE share_grant.organization_id = session.organization_id
             AND share_grant.space_id = session.space_id
             AND share_grant.session_id = session.id
@@ -2083,7 +2083,7 @@ export class PostgresSessionRepository implements SessionRepository {
               OR (
                 share_grant.principal_type = 'group'
                 AND EXISTS (
-                  SELECT 1 FROM relay_group_memberships group_membership
+                  SELECT 1 FROM cosmos_group_memberships group_membership
                   WHERE group_membership.organization_id = share_grant.organization_id
                     AND group_membership.group_id = share_grant.principal_id
                     AND group_membership.actor_id = $4
@@ -2093,7 +2093,7 @@ export class PostgresSessionRepository implements SessionRepository {
           ORDER BY CASE share_grant.role WHEN 'collaborator' THEN 0 ELSE 1 END
           LIMIT 1
         ) AS active_share_role
-      FROM relay_sessions session
+      FROM cosmos_sessions session
       WHERE session.organization_id = $1 AND session.space_id = $2 AND session.id = $3
       FOR UPDATE OF session
     `, [record.organizationId, record.spaceId, record.sessionId, record.actorId])
@@ -2131,8 +2131,8 @@ export class PostgresSessionRepository implements SessionRepository {
     const now = this.now()
     const existing = await client.query<{ request_hash: string; response_body: unknown | null }>(`
       SELECT idempotency.request_hash, response.response_body
-      FROM relay_idempotency_records idempotency
-      LEFT JOIN relay_idempotency_responses response
+      FROM cosmos_idempotency_records idempotency
+      LEFT JOIN cosmos_idempotency_responses response
         ON response.organization_id = idempotency.organization_id
         AND response.actor_id = idempotency.actor_id
         AND response.method = idempotency.method
@@ -2153,13 +2153,13 @@ export class PostgresSessionRepository implements SessionRepository {
     }
 
     await client.query(`
-      DELETE FROM relay_idempotency_responses
+      DELETE FROM cosmos_idempotency_responses
       WHERE organization_id = $1 AND actor_id = $2 AND method = 'POST'
         AND canonical_path = $3 AND idempotency_key_hash = $4
         AND expires_at <= $5
     `, [record.organizationId, record.actorId, canonicalPath, keyHash, now.toISOString()])
     await client.query(`
-      DELETE FROM relay_idempotency_records
+      DELETE FROM cosmos_idempotency_records
       WHERE organization_id = $1 AND actor_id = $2 AND method = 'POST'
         AND canonical_path = $3 AND idempotency_key_hash = $4
         AND expires_at <= $5
@@ -2175,10 +2175,10 @@ export class PostgresSessionRepository implements SessionRepository {
 
     const counters = await client.query<{ message_sequence: string; turn_ordinal: number }>(`
       SELECT
-        COALESCE((SELECT MAX(sequence) FROM relay_messages
+        COALESCE((SELECT MAX(sequence) FROM cosmos_messages
           WHERE organization_id = $1 AND space_id = $2 AND session_id = $3), 0) + 1
           AS message_sequence,
-        COALESCE((SELECT MAX(ordinal) FROM relay_turns
+        COALESCE((SELECT MAX(ordinal) FROM cosmos_turns
           WHERE organization_id = $1 AND space_id = $2 AND session_id = $3), 0) + 1
           AS turn_ordinal
     `, [record.organizationId, record.spaceId, record.sessionId])
@@ -2192,7 +2192,7 @@ export class PostgresSessionRepository implements SessionRepository {
       ? 'queued'
       : before.status
     const updated = await client.query<SessionRow>(`
-      UPDATE relay_sessions
+      UPDATE cosmos_sessions
       SET status = $4, updated_at = $5, last_activity_at = $5, version = version + 1
       WHERE organization_id = $1 AND space_id = $2 AND id = $3
       RETURNING ${sessionColumns}
@@ -2206,7 +2206,7 @@ export class PostgresSessionRepository implements SessionRepository {
     })
 
     await client.query(`
-      INSERT INTO relay_messages (
+      INSERT INTO cosmos_messages (
         id, organization_id, space_id, session_id, sequence, role,
         actor_id, content, attachments, created_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10)
@@ -2216,7 +2216,7 @@ export class PostgresSessionRepository implements SessionRepository {
       records.message.content, JSON.stringify(records.message.attachments), records.message.createdAt,
     ])
     await client.query(`
-      INSERT INTO relay_turns (
+      INSERT INTO cosmos_turns (
         id, organization_id, space_id, session_id, ordinal, initiator_type,
         initiator_id, input_message_id, status, queued_at, version
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
@@ -2226,7 +2226,7 @@ export class PostgresSessionRepository implements SessionRepository {
       records.turn.inputMessageId, records.turn.status, records.turn.queuedAt, records.turn.version,
     ])
     await client.query(`
-      INSERT INTO relay_commands (
+      INSERT INTO cosmos_commands (
         id, organization_id, space_id, session_id, type, status,
         resource_type, resource_id, payload, accepted_at, available_at,
         protocol_version, requested_by, request_id, max_attempts
@@ -2251,7 +2251,7 @@ export class PostgresSessionRepository implements SessionRepository {
       this.executionMaxAttempts,
     ])
     await client.query(`
-      INSERT INTO relay_outbox_events (
+      INSERT INTO cosmos_outbox_events (
         id, organization_id, space_id, session_id, aggregate_type,
         aggregate_id, event_type, payload, occurred_at
       ) VALUES ($1, $2, $3, $4, 'session', $4, 'session.message_sent', $5::jsonb, $6)
@@ -2270,7 +2270,7 @@ export class PostgresSessionRepository implements SessionRepository {
     const response = SendSessionMessageResponseSchema.parse({ session, ...records })
     const expiresAt = new Date(now.getTime() + this.idempotencyTtlMs).toISOString()
     await client.query(`
-      INSERT INTO relay_idempotency_records (
+      INSERT INTO cosmos_idempotency_records (
         organization_id, space_id, actor_id, method, canonical_path,
         idempotency_key_hash, request_hash, session_id, expires_at
       ) VALUES ($1, $2, $3, 'POST', $4, $5, $6, $7, $8)
@@ -2279,7 +2279,7 @@ export class PostgresSessionRepository implements SessionRepository {
       requestHash, session.id, expiresAt,
     ])
     await client.query(`
-      INSERT INTO relay_idempotency_responses (
+      INSERT INTO cosmos_idempotency_responses (
         organization_id, actor_id, method, canonical_path, idempotency_key_hash,
         status_code, response_body, response_headers, expires_at
       ) VALUES ($1, $2, 'POST', $3, $4, 202, $5::jsonb, $6::jsonb, $7)
@@ -2296,8 +2296,8 @@ export class PostgresSessionRepository implements SessionRepository {
   ): Promise<StartSessionResult | null> {
     const access = await client.query<SpaceAccess>(`
       SELECT organization_membership.role AS "organizationRole", space_membership.role AS "spaceRole"
-      FROM relay_organization_memberships organization_membership
-      JOIN relay_space_memberships space_membership
+      FROM cosmos_organization_memberships organization_membership
+      JOIN cosmos_space_memberships space_membership
         ON space_membership.organization_id = organization_membership.organization_id
         AND space_membership.actor_id = organization_membership.actor_id
       WHERE organization_membership.organization_id = $1
@@ -2315,7 +2315,7 @@ export class PostgresSessionRepository implements SessionRepository {
         session.created_by,
         (
           SELECT share_grant.role
-          FROM relay_session_share_grants share_grant
+          FROM cosmos_session_share_grants share_grant
           WHERE share_grant.organization_id = session.organization_id
             AND share_grant.space_id = session.space_id
             AND share_grant.session_id = session.id
@@ -2326,7 +2326,7 @@ export class PostgresSessionRepository implements SessionRepository {
               OR (
                 share_grant.principal_type = 'group'
                 AND EXISTS (
-                  SELECT 1 FROM relay_group_memberships group_membership
+                  SELECT 1 FROM cosmos_group_memberships group_membership
                   WHERE group_membership.organization_id = share_grant.organization_id
                     AND group_membership.group_id = share_grant.principal_id
                     AND group_membership.actor_id = $4
@@ -2336,7 +2336,7 @@ export class PostgresSessionRepository implements SessionRepository {
           ORDER BY CASE share_grant.role WHEN 'collaborator' THEN 0 ELSE 1 END
           LIMIT 1
         ) AS active_share_role
-      FROM relay_sessions session
+      FROM cosmos_sessions session
       WHERE session.organization_id = $1 AND session.space_id = $2 AND session.id = $3
       FOR UPDATE OF session
     `, [record.organizationId, record.spaceId, record.sessionId, record.actorId])
@@ -2361,8 +2361,8 @@ export class PostgresSessionRepository implements SessionRepository {
       response_body: unknown | null
     }>(`
       SELECT idempotency.request_hash, response.response_body
-      FROM relay_idempotency_records idempotency
-      LEFT JOIN relay_idempotency_responses response
+      FROM cosmos_idempotency_records idempotency
+      LEFT JOIN cosmos_idempotency_responses response
         ON response.organization_id = idempotency.organization_id
         AND response.actor_id = idempotency.actor_id
         AND response.method = idempotency.method
@@ -2380,13 +2380,13 @@ export class PostgresSessionRepository implements SessionRepository {
     }
 
     await client.query(`
-      DELETE FROM relay_idempotency_responses
+      DELETE FROM cosmos_idempotency_responses
       WHERE organization_id = $1 AND actor_id = $2 AND method = 'POST'
         AND canonical_path = $3 AND idempotency_key_hash = $4
         AND expires_at <= $5
     `, [record.organizationId, record.actorId, canonicalPath, keyHash, now.toISOString()])
     await client.query(`
-      DELETE FROM relay_idempotency_records
+      DELETE FROM cosmos_idempotency_records
       WHERE organization_id = $1 AND actor_id = $2 AND method = 'POST'
         AND canonical_path = $3 AND idempotency_key_hash = $4
         AND expires_at <= $5
@@ -2403,7 +2403,7 @@ export class PostgresSessionRepository implements SessionRepository {
 
     const initialMessage = await client.query<{ id: string }>(`
       SELECT id
-      FROM relay_messages
+      FROM cosmos_messages
       WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
         AND sequence = 1 AND role = 'user'
       FOR UPDATE
@@ -2413,7 +2413,7 @@ export class PostgresSessionRepository implements SessionRepository {
     const message = { id: messageRow.id }
 
     const updated = await client.query<SessionRow>(`
-      UPDATE relay_sessions
+      UPDATE cosmos_sessions
       SET status = 'queued', updated_at = $4, last_activity_at = $4, version = version + 1
       WHERE organization_id = $1 AND space_id = $2 AND id = $3
       RETURNING ${sessionColumns}
@@ -2425,7 +2425,7 @@ export class PostgresSessionRepository implements SessionRepository {
     })
 
     await client.query(`
-      INSERT INTO relay_turns (
+      INSERT INTO cosmos_turns (
         id, organization_id, space_id, session_id, ordinal, initiator_type,
         initiator_id, input_message_id, status, queued_at, version
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
@@ -2435,7 +2435,7 @@ export class PostgresSessionRepository implements SessionRepository {
       records.turn.inputMessageId, records.turn.status, records.turn.queuedAt, records.turn.version,
     ])
     await client.query(`
-      INSERT INTO relay_commands (
+      INSERT INTO cosmos_commands (
         id, organization_id, space_id, session_id, type, status,
         resource_type, resource_id, payload, accepted_at, available_at,
         protocol_version, requested_by, request_id, max_attempts
@@ -2459,7 +2459,7 @@ export class PostgresSessionRepository implements SessionRepository {
       this.executionMaxAttempts,
     ])
     await client.query(`
-      INSERT INTO relay_outbox_events (
+      INSERT INTO cosmos_outbox_events (
         id, organization_id, space_id, session_id, aggregate_type,
         aggregate_id, event_type, payload, occurred_at
       ) VALUES ($1, $2, $3, $4, 'session', $4, 'session.started', $5::jsonb, $6)
@@ -2482,7 +2482,7 @@ export class PostgresSessionRepository implements SessionRepository {
     const response = StartSessionResponseSchema.parse({ session, ...records })
     const expiresAt = new Date(now.getTime() + this.idempotencyTtlMs).toISOString()
     await client.query(`
-      INSERT INTO relay_idempotency_records (
+      INSERT INTO cosmos_idempotency_records (
         organization_id, space_id, actor_id, method, canonical_path,
         idempotency_key_hash, request_hash, session_id, expires_at
       ) VALUES ($1, $2, $3, 'POST', $4, $5, $6, $7, $8)
@@ -2491,7 +2491,7 @@ export class PostgresSessionRepository implements SessionRepository {
       requestHash, session.id, expiresAt,
     ])
     await client.query(`
-      INSERT INTO relay_idempotency_responses (
+      INSERT INTO cosmos_idempotency_responses (
         organization_id, actor_id, method, canonical_path, idempotency_key_hash,
         status_code, response_body, response_headers, expires_at
       ) VALUES ($1, $2, 'POST', $3, $4, 202, $5::jsonb, $6::jsonb, $7)
@@ -2511,8 +2511,8 @@ export class PostgresSessionRepository implements SessionRepository {
     }
     const access = await client.query<SpaceAccess>(`
       SELECT organization_membership.role AS "organizationRole", space_membership.role AS "spaceRole"
-      FROM relay_organization_memberships organization_membership
-      JOIN relay_space_memberships space_membership
+      FROM cosmos_organization_memberships organization_membership
+      JOIN cosmos_space_memberships space_membership
         ON space_membership.organization_id = organization_membership.organization_id
         AND space_membership.actor_id = organization_membership.actor_id
       WHERE organization_membership.organization_id = $1
@@ -2543,8 +2543,8 @@ export class PostgresSessionRepository implements SessionRepository {
       response_body: unknown | null
     }>(`
       SELECT idempotency.request_hash, idempotency.session_id, response.response_body
-      FROM relay_idempotency_records idempotency
-      LEFT JOIN relay_idempotency_responses response
+      FROM cosmos_idempotency_records idempotency
+      LEFT JOIN cosmos_idempotency_responses response
         ON response.organization_id = idempotency.organization_id
         AND response.actor_id = idempotency.actor_id
         AND response.method = idempotency.method
@@ -2576,13 +2576,13 @@ export class PostgresSessionRepository implements SessionRepository {
     }
 
     await client.query(`
-      DELETE FROM relay_idempotency_responses
+      DELETE FROM cosmos_idempotency_responses
       WHERE organization_id = $1 AND actor_id = $2 AND method = 'POST'
         AND canonical_path = $3 AND idempotency_key_hash = $4
         AND expires_at <= $5
     `, [record.organizationId, record.actorId, canonicalPath, keyHash, now.toISOString()])
     await client.query(`
-      DELETE FROM relay_idempotency_records
+      DELETE FROM cosmos_idempotency_records
       WHERE organization_id = $1 AND actor_id = $2 AND method = 'POST'
         AND canonical_path = $3 AND idempotency_key_hash = $4
         AND expires_at <= $5
@@ -2606,7 +2606,7 @@ export class PostgresSessionRepository implements SessionRepository {
         throw new Error('Resolved Session configuration is missing its execution snapshot fields.')
       }
       await client.query(`
-        INSERT INTO relay_execution_snapshots (
+        INSERT INTO cosmos_execution_snapshots (
           organization_id, space_id, id, environment_id, environment_revision_id,
           environment_type, image, repository_id, repository, base_branch,
           variable_references, network_policy, checksum, created_at
@@ -2621,7 +2621,7 @@ export class PostgresSessionRepository implements SessionRepository {
       ])
     }
     await client.query(`
-      INSERT INTO relay_sessions (
+      INSERT INTO cosmos_sessions (
         ${sessionColumns}, automation_auto_archive, created_by
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
@@ -2640,7 +2640,7 @@ export class PostgresSessionRepository implements SessionRepository {
     ])
     if (startRecords.message) {
       await client.query(`
-        INSERT INTO relay_messages (
+        INSERT INTO cosmos_messages (
           id, organization_id, space_id, session_id, sequence, role,
           actor_id, content, attachments, created_at
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10)
@@ -2653,7 +2653,7 @@ export class PostgresSessionRepository implements SessionRepository {
     }
     if (startRecords.message && startRecords.turn && startRecords.command) {
       await client.query(`
-        INSERT INTO relay_turns (
+        INSERT INTO cosmos_turns (
           id, organization_id, space_id, session_id, ordinal, initiator_type,
           initiator_id, input_message_id, status, queued_at, version
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
@@ -2664,7 +2664,7 @@ export class PostgresSessionRepository implements SessionRepository {
         startRecords.turn.version,
       ])
       await client.query(`
-        INSERT INTO relay_commands (
+        INSERT INTO cosmos_commands (
           id, organization_id, space_id, session_id, type, status,
           resource_type, resource_id, payload, accepted_at, available_at,
           protocol_version, requested_by, request_id, max_attempts
@@ -2688,7 +2688,7 @@ export class PostgresSessionRepository implements SessionRepository {
         this.executionMaxAttempts,
       ])
       await client.query(`
-        INSERT INTO relay_outbox_events (
+        INSERT INTO cosmos_outbox_events (
           id, organization_id, space_id, session_id, aggregate_type,
           aggregate_id, event_type, payload, occurred_at
         ) VALUES ($1, $2, $3, $4, 'session', $4, 'session.created', $5::jsonb, $6)
@@ -2711,7 +2711,7 @@ export class PostgresSessionRepository implements SessionRepository {
     const response = CreateSessionResponseSchema.parse({ session, ...startRecords })
     const expiresAt = new Date(now.getTime() + this.idempotencyTtlMs).toISOString()
     await client.query(`
-      INSERT INTO relay_idempotency_records (
+      INSERT INTO cosmos_idempotency_records (
         organization_id, space_id, actor_id, method, canonical_path,
         idempotency_key_hash, request_hash, session_id, expires_at
       ) VALUES ($1, $2, $3, 'POST', $4, $5, $6, $7, $8)
@@ -2720,7 +2720,7 @@ export class PostgresSessionRepository implements SessionRepository {
       expiresAt,
     ])
     await client.query(`
-      INSERT INTO relay_idempotency_responses (
+      INSERT INTO cosmos_idempotency_responses (
         organization_id, actor_id, method, canonical_path, idempotency_key_hash,
         status_code, response_body, response_headers, expires_at
       ) VALUES ($1, $2, 'POST', $3, $4, 201, $5::jsonb, $6::jsonb, $7)
@@ -2776,7 +2776,7 @@ export class PostgresSessionRepository implements SessionRepository {
     }
 
     const reservation = await client.query<{ first_sequence: string }>(`
-      UPDATE relay_sessions
+      UPDATE cosmos_sessions
       SET last_event_sequence = last_event_sequence + $4
       WHERE organization_id = $1 AND space_id = $2 AND id = $3
       RETURNING last_event_sequence - $4 + 1 AS first_sequence
@@ -2786,7 +2786,7 @@ export class PostgresSessionRepository implements SessionRepository {
 
     for (const [index, draft] of drafts.entries()) {
       await client.query(`
-        INSERT INTO relay_session_events (
+        INSERT INTO cosmos_session_events (
           organization_id, space_id, session_id, event_id, sequence,
           event_type, resource_type, resource_id, payload, actor_id,
           actor_kind, message_id, turn_id, command_id, request_id, occurred_at
@@ -2815,7 +2815,7 @@ export class PostgresSessionRepository implements SessionRepository {
     }
 
     await client.query(`
-      INSERT INTO relay_audit_events (
+      INSERT INTO cosmos_audit_events (
         organization_id, audit_event_id, space_id, session_id, actor_id,
         actor_kind, action, target_type, target_id, result, request_id,
         idempotency_key_hash, policy_decision, policy_reason, before_state,
@@ -2875,7 +2875,7 @@ export class PostgresSessionRepository implements SessionRepository {
       },
     ]
     const reservation = await client.query<{ first_sequence: string }>(`
-      UPDATE relay_sessions
+      UPDATE cosmos_sessions
       SET last_event_sequence = last_event_sequence + $4
       WHERE organization_id = $1 AND space_id = $2 AND id = $3
       RETURNING last_event_sequence - $4 + 1 AS first_sequence
@@ -2885,7 +2885,7 @@ export class PostgresSessionRepository implements SessionRepository {
 
     for (const [index, draft] of drafts.entries()) {
       await client.query(`
-        INSERT INTO relay_session_events (
+        INSERT INTO cosmos_session_events (
           organization_id, space_id, session_id, event_id, sequence,
           event_type, resource_type, resource_id, payload, actor_id,
           actor_kind, message_id, turn_id, command_id, request_id, occurred_at
@@ -2913,7 +2913,7 @@ export class PostgresSessionRepository implements SessionRepository {
     }
 
     await client.query(`
-      INSERT INTO relay_audit_events (
+      INSERT INTO cosmos_audit_events (
         organization_id, audit_event_id, space_id, session_id, actor_id,
         actor_kind, action, target_type, target_id, result, request_id,
         idempotency_key_hash, policy_decision, policy_reason, before_state,
@@ -2977,7 +2977,7 @@ export class PostgresSessionRepository implements SessionRepository {
       },
     ]
     const reservation = await client.query<{ first_sequence: string }>(`
-      UPDATE relay_sessions
+      UPDATE cosmos_sessions
       SET last_event_sequence = last_event_sequence + $4
       WHERE organization_id = $1 AND space_id = $2 AND id = $3
       RETURNING last_event_sequence - $4 + 1 AS first_sequence
@@ -2987,7 +2987,7 @@ export class PostgresSessionRepository implements SessionRepository {
 
     for (const [index, draft] of drafts.entries()) {
       await client.query(`
-        INSERT INTO relay_session_events (
+        INSERT INTO cosmos_session_events (
           organization_id, space_id, session_id, event_id, sequence,
           event_type, resource_type, resource_id, payload, actor_id,
           actor_kind, message_id, turn_id, command_id, request_id, occurred_at
@@ -3016,7 +3016,7 @@ export class PostgresSessionRepository implements SessionRepository {
     }
 
     await client.query(`
-      INSERT INTO relay_audit_events (
+      INSERT INTO cosmos_audit_events (
         organization_id, audit_event_id, space_id, session_id, actor_id,
         actor_kind, action, target_type, target_id, result, request_id,
         idempotency_key_hash, policy_decision, policy_reason, before_state,
@@ -3059,7 +3059,7 @@ export class PostgresSessionRepository implements SessionRepository {
       published_revision_id: string | null
     }>(`
       SELECT name, status, visibility, created_by, published_revision_id
-      FROM relay_experts
+      FROM cosmos_experts
       WHERE organization_id = $1 AND space_id = $2 AND id = $3
       FOR UPDATE
     `, [record.organizationId, record.spaceId, record.request.expertId])
@@ -3083,7 +3083,7 @@ export class PostgresSessionRepository implements SessionRepository {
     }>(`
       SELECT id, revision, status, environment_id, environment_revision_id,
         allow_repository_override, allow_base_branch_override
-      FROM relay_expert_revisions
+      FROM cosmos_expert_revisions
       WHERE organization_id = $1 AND space_id = $2 AND expert_id = $3 AND id = $4
       FOR UPDATE
     `, [
@@ -3101,7 +3101,7 @@ export class PostgresSessionRepository implements SessionRepository {
       active_revision_id: string | null
     }>(`
       SELECT type, status, active_revision_id
-      FROM relay_environments
+      FROM cosmos_environments
       WHERE organization_id = $1 AND space_id = $2 AND id = $3
       FOR UPDATE
     `, [record.organizationId, record.spaceId, expertRevisionRow.environment_id])
@@ -3120,7 +3120,7 @@ export class PostgresSessionRepository implements SessionRepository {
       checksum: string
     }>(`
       SELECT status, configuration, checksum
-      FROM relay_environment_revisions
+      FROM cosmos_environment_revisions
       WHERE organization_id = $1 AND space_id = $2 AND environment_id = $3 AND id = $4
       FOR UPDATE
     `, [
@@ -3139,7 +3139,7 @@ export class PostgresSessionRepository implements SessionRepository {
       is_default: boolean
     }>(`
       SELECT repository_id, repository, base_branch, is_default
-      FROM relay_environment_revision_repositories
+      FROM cosmos_environment_revision_repositories
       WHERE organization_id = $1 AND space_id = $2
         AND environment_id = $3 AND environment_revision_id = $4
       FOR UPDATE
@@ -3194,7 +3194,7 @@ export class PostgresSessionRepository implements SessionRepository {
   ) {
     const result = await client.query<SessionRow>(`
       SELECT ${sessionColumns}
-      FROM relay_sessions
+      FROM cosmos_sessions
       WHERE organization_id = $1 AND space_id = $2 AND id = $3
     `, [organizationId, spaceId, sessionId])
     if (!result.rowCount) throw new Error('The idempotent Session no longer exists.')

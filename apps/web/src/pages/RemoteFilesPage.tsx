@@ -1,4 +1,4 @@
-import type { FileDto, FileScope, FileVersionDto } from '@relay/contracts'
+import type { FileDto, FileScope, FileVersionDto } from '@cosmos/contracts'
 import {
   AlertTriangle,
   ArrowLeft,
@@ -36,16 +36,16 @@ import {
   getFileContent,
   listFiles,
   listFileVersions,
-  type RelayApiAuthContext,
-  type RelayFileContent,
-} from '../services/relayApi'
+  type CosmosApiAuthContext,
+  type CosmosFileContent,
+} from '../services/cosmosApi'
 
 export type RemoteFilesPageProps = {
   organizationId: string
   spaceId: string
   scope: FileScope
   sessionId?: string
-  auth: RelayApiAuthContext
+  auth: CosmosApiAuthContext
   credentialVersion: number
   sessionCreationEnabled: boolean
   onOpenNavigation?: () => void
@@ -78,7 +78,7 @@ type VersionSnapshot = {
 type ContentSnapshot = {
   identity: string
   status: 'ready' | 'error'
-  response?: RelayFileContent
+  response?: CosmosFileContent
   text?: string
   error?: Error
 }
@@ -136,7 +136,7 @@ async function copyValue(value: string) {
   await navigator.clipboard.writeText(value)
 }
 
-function downloadBlob(content: RelayFileContent, fallbackName: string) {
+function downloadBlob(content: CosmosFileContent, fallbackName: string) {
   const url = URL.createObjectURL(content.blob)
   const anchor = document.createElement('a')
   anchor.href = url
@@ -161,7 +161,7 @@ export function RemoteFilesPage({
 }: RemoteFilesPageProps) {
   const { locale } = usePreferences()
   const navigate = useNavigate()
-  const requestAuth = useMemo<RelayApiAuthContext>(() => ({
+  const requestAuth = useMemo<CosmosApiAuthContext>(() => ({
     accessToken: auth.accessToken,
     requestIdentity: auth.requestIdentity,
     onUnauthorized: auth.onUnauthorized,

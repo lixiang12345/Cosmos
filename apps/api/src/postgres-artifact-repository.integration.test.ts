@@ -16,7 +16,7 @@ const databaseUrl = process.env.TEST_DATABASE_URL
 const describeWithDatabase = databaseUrl ? describe : describe.skip
 
 describeWithDatabase('PostgresArtifactRepository', () => {
-  const schema = `relay_artifact_${crypto.randomUUID().replaceAll('-', '')}`
+  const schema = `cosmos_artifact_${crypto.randomUUID().replaceAll('-', '')}`
   const adminPool = new Pool({ connectionString: databaseUrl })
   const pool = new Pool({ connectionString: databaseUrl, options: `-c search_path=${schema}` })
   let now = new Date('2026-07-13T01:00:00.000Z')
@@ -33,17 +33,17 @@ describeWithDatabase('PostgresArtifactRepository', () => {
     await adminPool.query(`CREATE SCHEMA ${schema}`)
     await runMigrations(pool)
     await pool.query(`
-      INSERT INTO relay_organizations (id, name)
+      INSERT INTO cosmos_organizations (id, name)
       VALUES ('artifact-org', 'Artifact Organization');
-      INSERT INTO relay_spaces (organization_id, id, name)
+      INSERT INTO cosmos_spaces (organization_id, id, name)
       VALUES ('artifact-org', 'artifact-space', 'Artifact Space');
-      INSERT INTO relay_organization_memberships (organization_id, actor_id, role)
+      INSERT INTO cosmos_organization_memberships (organization_id, actor_id, role)
       VALUES
         ('artifact-org', 'artifact-owner', 'member'),
         ('artifact-org', 'artifact-reader', 'member'),
         ('artifact-org', 'artifact-manager', 'member'),
         ('artifact-org', 'artifact-shared', 'member');
-      INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
+      INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role)
       VALUES
         ('artifact-org', 'artifact-space', 'artifact-owner', 'member'),
         ('artifact-org', 'artifact-space', 'artifact-reader', 'member'),
@@ -95,9 +95,9 @@ describeWithDatabase('PostgresArtifactRepository', () => {
       turnId,
       type: 'pull_request' as const,
       provider: 'github',
-      externalId: 'relay/cosmos#42',
+      externalId: 'cosmos/cosmos#42',
       label: 'Production checkout fix',
-      url: 'https://github.com/relay/cosmos/pull/42',
+      url: 'https://github.com/cosmos/cosmos/pull/42',
       status: 'open',
       attributes: { draft: false, checks: 7 },
     },
@@ -115,8 +115,8 @@ describeWithDatabase('PostgresArtifactRepository', () => {
 
     const counts = await pool.query<{ artifacts: string; events: string }>(`
       SELECT
-        (SELECT count(*)::text FROM relay_artifacts) AS artifacts,
-        (SELECT count(*)::text FROM relay_session_events
+        (SELECT count(*)::text FROM cosmos_artifacts) AS artifacts,
+        (SELECT count(*)::text FROM cosmos_session_events
           WHERE event_type LIKE 'artifact.%') AS events
     `)
     expect(counts.rows[0]).toEqual({ artifacts: '0', events: '0' })
@@ -131,7 +131,7 @@ describeWithDatabase('PostgresArtifactRepository', () => {
         turnId,
         type: 'pull_request',
         provider: 'github',
-        externalId: 'relay/cosmos#42',
+        externalId: 'cosmos/cosmos#42',
         version: 1,
         removedAt: null,
       },
@@ -162,7 +162,7 @@ describeWithDatabase('PostgresArtifactRepository', () => {
 
   it('allows shared reads but reserves manual mutation for the creator or Space manager', async () => {
     await pool.query(`
-      INSERT INTO relay_session_share_grants (
+      INSERT INTO cosmos_session_share_grants (
         organization_id, space_id, session_id, id, principal_type,
         principal_id, role, created_at, created_by
       ) VALUES (
@@ -265,12 +265,12 @@ describeWithDatabase('PostgresArtifactRepository', () => {
       'artifact-org', 'artifact-space', sessionId, 'artifact-owner',
     )).resolves.toMatchObject({ items: [] })
     await expect(pool.query(`
-      UPDATE relay_artifacts SET label = 'Forbidden', version = version + 1
+      UPDATE cosmos_artifacts SET label = 'Forbidden', version = version + 1
       WHERE organization_id = 'artifact-org' AND space_id = 'artifact-space'
         AND session_id = $1 AND id = 'artifact-runtime-1'
     `, [sessionId])).rejects.toMatchObject({ code: '55000' })
     await expect(pool.query(`
-      DELETE FROM relay_artifacts
+      DELETE FROM cosmos_artifacts
       WHERE organization_id = 'artifact-org' AND space_id = 'artifact-space'
         AND session_id = $1 AND id = 'artifact-runtime-1'
     `, [sessionId])).rejects.toMatchObject({ code: '55000' })
@@ -286,17 +286,17 @@ describeWithDatabase('PostgresArtifactRepository', () => {
       outbox_payloads: unknown
     }>(`
       SELECT
-        (SELECT count(*)::text FROM relay_session_events
+        (SELECT count(*)::text FROM cosmos_session_events
           WHERE event_type LIKE 'artifact.%') AS event_count,
-        (SELECT count(*)::text FROM relay_audit_events
+        (SELECT count(*)::text FROM cosmos_audit_events
           WHERE action LIKE 'artifact.%') AS audit_count,
-        (SELECT count(*)::text FROM relay_outbox_events
+        (SELECT count(*)::text FROM cosmos_outbox_events
           WHERE aggregate_type = 'artifact') AS outbox_count,
-        (SELECT jsonb_agg(payload ORDER BY occurred_at) FROM relay_session_events
+        (SELECT jsonb_agg(payload ORDER BY occurred_at) FROM cosmos_session_events
           WHERE event_type LIKE 'artifact.%') AS event_payloads,
-        (SELECT jsonb_agg(after_state ORDER BY occurred_at) FROM relay_audit_events
+        (SELECT jsonb_agg(after_state ORDER BY occurred_at) FROM cosmos_audit_events
           WHERE action LIKE 'artifact.%') AS audit_states,
-        (SELECT jsonb_agg(payload ORDER BY occurred_at) FROM relay_outbox_events
+        (SELECT jsonb_agg(payload ORDER BY occurred_at) FROM cosmos_outbox_events
           WHERE aggregate_type = 'artifact') AS outbox_payloads
     `)
     expect(rows.rows[0]).toMatchObject({
@@ -306,7 +306,7 @@ describeWithDatabase('PostgresArtifactRepository', () => {
     })
     const serialized = JSON.stringify(rows.rows[0])
     expect(serialized).not.toContain('github.com')
-    expect(serialized).not.toContain('relay/cosmos#42')
+    expect(serialized).not.toContain('cosmos/cosmos#42')
     expect(serialized).not.toContain('checks')
     expect(serialized).toContain('artifact-runtime-1')
   })

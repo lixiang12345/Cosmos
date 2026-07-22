@@ -48,7 +48,7 @@ function assertOptions(options: ObjectStorageGcOptions) {
 
 async function persist(client: PoolClient, result: ObjectStorageGcResult) {
   await client.query(`
-    INSERT INTO relay_object_storage_gc_runs (
+    INSERT INTO cosmos_object_storage_gc_runs (
       id, mode, status, min_age_seconds, scanned_objects, referenced_objects,
       eligible_objects, deleted_objects, failed_deletions, started_at, completed_at, error_code
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
@@ -84,7 +84,7 @@ export async function runObjectStorageGc(options: ObjectStorageGcOptions): Promi
   })
   try {
     const lock = await client.query<{ acquired: boolean }>(
-      "SELECT pg_try_advisory_lock(hashtextextended('relay-object-storage-gc', 0)) AS acquired",
+      "SELECT pg_try_advisory_lock(hashtextextended('cosmos-object-storage-gc', 0)) AS acquired",
     )
     lockAcquired = Boolean(lock.rows[0]?.acquired)
     if (!lockAcquired) throw new Error('OBJECT_STORAGE_GC_ALREADY_RUNNING')
@@ -105,7 +105,7 @@ export async function runObjectStorageGc(options: ObjectStorageGcOptions): Promi
       if (batch.length === 0) continue
       const rows = await client.query<{ object_key: string }>(`
         SELECT object_key
-        FROM relay_file_versions
+        FROM cosmos_file_versions
         WHERE storage_backend = 'object' AND object_key = ANY($1::text[])
       `, [batch])
       rows.rows.forEach((row) => referenced.add(row.object_key))
@@ -152,7 +152,7 @@ export async function runObjectStorageGc(options: ObjectStorageGcOptions): Promi
     throw Object.assign(new Error(errorCode), { result })
   } finally {
     if (lockAcquired) {
-      await client.query("SELECT pg_advisory_unlock(hashtextextended('relay-object-storage-gc', 0))")
+      await client.query("SELECT pg_advisory_unlock(hashtextextended('cosmos-object-storage-gc', 0))")
     }
     client.release()
   }

@@ -1,4 +1,4 @@
-import type { MeOrganization, MeResponse } from '@relay/contracts'
+import type { MeOrganization, MeResponse } from '@cosmos/contracts'
 import {
   useCallback,
   useEffect,
@@ -8,10 +8,10 @@ import {
   type ReactNode,
 } from 'react'
 import { useAuth } from '../auth/context'
-import { getMe } from '../services/relayApi'
+import { getMe } from '../services/cosmosApi'
 import { WorkspaceContext, type WorkspaceContextValue, type WorkspaceStatus } from './context'
 
-const SELECTION_STORAGE_KEY = 'relay.workspace.selection.v1'
+const SELECTION_STORAGE_KEY = 'cosmos.workspace.selection.v1'
 
 type Selection = {
   actorId: string

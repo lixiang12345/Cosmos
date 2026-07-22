@@ -1,7 +1,7 @@
 SET LOCAL lock_timeout = '5s';
 
-CREATE TABLE relay_files (
-  organization_id text NOT NULL REFERENCES relay_organizations(id) ON DELETE RESTRICT,
+CREATE TABLE cosmos_files (
+  organization_id text NOT NULL REFERENCES cosmos_organizations(id) ON DELETE RESTRICT,
   space_id text,
   id text NOT NULL,
   scope text NOT NULL CHECK (scope IN ('workspace', 'user', 'organization')),
@@ -19,11 +19,11 @@ CREATE TABLE relay_files (
   version integer NOT NULL DEFAULT 0,
   PRIMARY KEY (organization_id, id),
   FOREIGN KEY (organization_id, space_id)
-    REFERENCES relay_spaces(organization_id, id) ON DELETE RESTRICT,
+    REFERENCES cosmos_spaces(organization_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (organization_id, owner_user_id)
-    REFERENCES relay_organization_memberships(organization_id, actor_id) ON DELETE RESTRICT,
+    REFERENCES cosmos_organization_memberships(organization_id, actor_id) ON DELETE RESTRICT,
   FOREIGN KEY (organization_id, space_id, session_id)
-    REFERENCES relay_sessions(organization_id, space_id, id) ON DELETE RESTRICT,
+    REFERENCES cosmos_sessions(organization_id, space_id, id) ON DELETE RESTRICT,
   CHECK (
     (scope = 'workspace' AND space_id IS NOT NULL AND session_id IS NOT NULL
       AND owner_user_id IS NULL)
@@ -56,23 +56,23 @@ CREATE TABLE relay_files (
   CHECK (archived_at IS NULL OR archived_at >= created_at)
 );
 
-CREATE UNIQUE INDEX relay_files_organization_path_idx
-  ON relay_files (organization_id, path)
+CREATE UNIQUE INDEX cosmos_files_organization_path_idx
+  ON cosmos_files (organization_id, path)
   WHERE scope = 'organization';
 
-CREATE UNIQUE INDEX relay_files_user_path_idx
-  ON relay_files (organization_id, owner_user_id, path)
+CREATE UNIQUE INDEX cosmos_files_user_path_idx
+  ON cosmos_files (organization_id, owner_user_id, path)
   WHERE scope = 'user';
 
-CREATE UNIQUE INDEX relay_files_workspace_path_idx
-  ON relay_files (organization_id, space_id, session_id, path)
+CREATE UNIQUE INDEX cosmos_files_workspace_path_idx
+  ON cosmos_files (organization_id, space_id, session_id, path)
   WHERE scope = 'workspace';
 
-CREATE INDEX relay_files_scope_page_idx
-  ON relay_files (organization_id, scope, path, id)
+CREATE INDEX cosmos_files_scope_page_idx
+  ON cosmos_files (organization_id, scope, path, id)
   WHERE archived_at IS NULL AND version > 0;
 
-CREATE TABLE relay_file_versions (
+CREATE TABLE cosmos_file_versions (
   organization_id text NOT NULL,
   space_id text,
   file_id text NOT NULL,
@@ -89,33 +89,33 @@ CREATE TABLE relay_file_versions (
   PRIMARY KEY (organization_id, file_id, id),
   UNIQUE (organization_id, file_id, version),
   FOREIGN KEY (organization_id, file_id)
-    REFERENCES relay_files(organization_id, id) ON DELETE RESTRICT,
+    REFERENCES cosmos_files(organization_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (organization_id, source_space_id, source_session_id)
-    REFERENCES relay_sessions(organization_id, space_id, id) ON DELETE RESTRICT,
+    REFERENCES cosmos_sessions(organization_id, space_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (organization_id, source_space_id, source_session_id, source_turn_id)
-    REFERENCES relay_turns(organization_id, space_id, session_id, id) ON DELETE RESTRICT,
+    REFERENCES cosmos_turns(organization_id, space_id, session_id, id) ON DELETE RESTRICT,
   CHECK (version > 0),
   CHECK (content_hash ~ '^[a-f0-9]{64}$'),
   CHECK (size = octet_length(content) AND size BETWEEN 0 AND 1048576),
   CHECK ((space_id IS NULL) OR (space_id = source_space_id))
 );
 
-ALTER TABLE relay_files
-  ADD CONSTRAINT relay_files_latest_version_fk
+ALTER TABLE cosmos_files
+  ADD CONSTRAINT cosmos_files_latest_version_fk
   FOREIGN KEY (organization_id, id, latest_version_id)
-  REFERENCES relay_file_versions(organization_id, file_id, id)
+  REFERENCES cosmos_file_versions(organization_id, file_id, id)
   ON DELETE RESTRICT NOT VALID;
 
-CREATE INDEX relay_file_versions_page_idx
-  ON relay_file_versions (organization_id, file_id, version DESC, id DESC);
+CREATE INDEX cosmos_file_versions_page_idx
+  ON cosmos_file_versions (organization_id, file_id, version DESC, id DESC);
 
-CREATE OR REPLACE FUNCTION relay_protect_file_history()
+CREATE OR REPLACE FUNCTION cosmos_protect_file_history()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
   IF TG_OP = 'DELETE' THEN
-    RAISE EXCEPTION 'Relay File rows cannot be deleted'
+    RAISE EXCEPTION 'Cosmos File rows cannot be deleted'
       USING ERRCODE = '55000';
   END IF;
 
@@ -126,22 +126,22 @@ BEGIN
     OLD.organization_id, OLD.space_id, OLD.id, OLD.scope,
     OLD.owner_user_id, OLD.session_id, OLD.path, OLD.created_at
   ) THEN
-    RAISE EXCEPTION 'Relay File identity and scope are immutable'
+    RAISE EXCEPTION 'Cosmos File identity and scope are immutable'
       USING ERRCODE = '55000';
   END IF;
 
   IF OLD.archived_at IS NOT NULL THEN
-    RAISE EXCEPTION 'Archived Relay File rows are immutable'
+    RAISE EXCEPTION 'Archived Cosmos File rows are immutable'
       USING ERRCODE = '55000';
   END IF;
 
   IF NEW.version <> OLD.version + 1 THEN
-    RAISE EXCEPTION 'Relay File updates must advance version by one'
+    RAISE EXCEPTION 'Cosmos File updates must advance version by one'
       USING ERRCODE = '23514';
   END IF;
 
   IF NEW.updated_at < OLD.updated_at THEN
-    RAISE EXCEPTION 'Relay File updated_at cannot move backwards'
+    RAISE EXCEPTION 'Cosmos File updated_at cannot move backwards'
       USING ERRCODE = '23514';
   END IF;
 
@@ -149,49 +149,49 @@ BEGIN
 END;
 $$;
 
-CREATE TRIGGER relay_files_protect_history
-  BEFORE UPDATE OR DELETE ON relay_files
-  FOR EACH ROW EXECUTE FUNCTION relay_protect_file_history();
+CREATE TRIGGER cosmos_files_protect_history
+  BEFORE UPDATE OR DELETE ON cosmos_files
+  FOR EACH ROW EXECUTE FUNCTION cosmos_protect_file_history();
 
-CREATE TRIGGER relay_files_reject_truncate
-  BEFORE TRUNCATE ON relay_files
-  FOR EACH STATEMENT EXECUTE FUNCTION relay_reject_ledger_mutation();
+CREATE TRIGGER cosmos_files_reject_truncate
+  BEFORE TRUNCATE ON cosmos_files
+  FOR EACH STATEMENT EXECUTE FUNCTION cosmos_reject_ledger_mutation();
 
-CREATE TRIGGER relay_file_versions_reject_update_delete
-  BEFORE UPDATE OR DELETE ON relay_file_versions
-  FOR EACH STATEMENT EXECUTE FUNCTION relay_reject_ledger_mutation();
+CREATE TRIGGER cosmos_file_versions_reject_update_delete
+  BEFORE UPDATE OR DELETE ON cosmos_file_versions
+  FOR EACH STATEMENT EXECUTE FUNCTION cosmos_reject_ledger_mutation();
 
-CREATE TRIGGER relay_file_versions_reject_truncate
-  BEFORE TRUNCATE ON relay_file_versions
-  FOR EACH STATEMENT EXECUTE FUNCTION relay_reject_ledger_mutation();
+CREATE TRIGGER cosmos_file_versions_reject_truncate
+  BEFORE TRUNCATE ON cosmos_file_versions
+  FOR EACH STATEMENT EXECUTE FUNCTION cosmos_reject_ledger_mutation();
 
-REVOKE DELETE, TRUNCATE ON relay_files FROM PUBLIC;
-REVOKE UPDATE, DELETE, TRUNCATE ON relay_file_versions FROM PUBLIC;
+REVOKE DELETE, TRUNCATE ON cosmos_files FROM PUBLIC;
+REVOKE UPDATE, DELETE, TRUNCATE ON cosmos_file_versions FROM PUBLIC;
 
-ALTER TABLE relay_session_events
+ALTER TABLE cosmos_session_events
   ADD COLUMN file_id text,
   ADD COLUMN file_version_id text,
-  ADD CONSTRAINT relay_session_events_file_tenant_fk
+  ADD CONSTRAINT cosmos_session_events_file_tenant_fk
   FOREIGN KEY (organization_id, file_id)
-  REFERENCES relay_files(organization_id, id)
+  REFERENCES cosmos_files(organization_id, id)
   ON DELETE RESTRICT NOT VALID,
-  ADD CONSTRAINT relay_session_events_file_version_tenant_fk
+  ADD CONSTRAINT cosmos_session_events_file_version_tenant_fk
   FOREIGN KEY (organization_id, file_id, file_version_id)
-  REFERENCES relay_file_versions(organization_id, file_id, id)
+  REFERENCES cosmos_file_versions(organization_id, file_id, id)
   ON DELETE RESTRICT NOT VALID,
-  DROP CONSTRAINT relay_session_events_runtime_event_type_check,
-  ADD CONSTRAINT relay_session_events_runtime_event_type_check
+  DROP CONSTRAINT cosmos_session_events_runtime_event_type_check,
+  ADD CONSTRAINT cosmos_session_events_runtime_event_type_check
   CHECK (event_type IN (
     'session.created', 'session.updated', 'session.renamed',
     'session.archived', 'session.restored', 'message.created',
     'turn.queued', 'attempt.updated', 'artifact.created',
     'artifact.updated', 'artifact.removed', 'file.version.created'
   )) NOT VALID,
-  DROP CONSTRAINT relay_session_events_runtime_resource_type_check,
-  ADD CONSTRAINT relay_session_events_runtime_resource_type_check
+  DROP CONSTRAINT cosmos_session_events_runtime_resource_type_check,
+  ADD CONSTRAINT cosmos_session_events_runtime_resource_type_check
   CHECK (resource_type IN ('session', 'message', 'turn', 'attempt', 'artifact', 'file')) NOT VALID,
-  DROP CONSTRAINT relay_session_events_runtime_typed_resource_check,
-  ADD CONSTRAINT relay_session_events_runtime_typed_resource_check
+  DROP CONSTRAINT cosmos_session_events_runtime_typed_resource_check,
+  ADD CONSTRAINT cosmos_session_events_runtime_typed_resource_check
   CHECK (
     (
       event_type IN (
@@ -235,9 +235,9 @@ ALTER TABLE relay_session_events
     )
   ) NOT VALID;
 
-ALTER TABLE relay_audit_events
-  DROP CONSTRAINT relay_audit_events_action_check,
-  ADD CONSTRAINT relay_audit_events_action_check
+ALTER TABLE cosmos_audit_events
+  DROP CONSTRAINT cosmos_audit_events_action_check,
+  ADD CONSTRAINT cosmos_audit_events_action_check
     CHECK (action IN (
       'session.create', 'session.start', 'session.send',
       'session.rename', 'session.archive', 'session.restore',
@@ -246,8 +246,8 @@ ALTER TABLE relay_audit_events
       'artifact.create', 'artifact.update', 'artifact.remove',
       'file.version.create'
     )) NOT VALID,
-  DROP CONSTRAINT relay_audit_events_before_state_check,
-  ADD CONSTRAINT relay_audit_events_before_state_check
+  DROP CONSTRAINT cosmos_audit_events_before_state_check,
+  ADD CONSTRAINT cosmos_audit_events_before_state_check
     CHECK (
       (action IN ('session.create', 'session.share.create', 'artifact.create')
         AND before_state IS NULL)
@@ -263,11 +263,11 @@ ALTER TABLE relay_audit_events
         AND before_state IS NOT NULL AND jsonb_typeof(before_state) = 'object'
       )
     ) NOT VALID,
-  DROP CONSTRAINT relay_audit_events_target_type_check,
-  ADD CONSTRAINT relay_audit_events_target_type_check
+  DROP CONSTRAINT cosmos_audit_events_target_type_check,
+  ADD CONSTRAINT cosmos_audit_events_target_type_check
     CHECK (target_type IN ('session', 'turn', 'share_grant', 'artifact', 'file')) NOT VALID,
-  DROP CONSTRAINT relay_audit_events_target_check,
-  ADD CONSTRAINT relay_audit_events_target_check
+  DROP CONSTRAINT cosmos_audit_events_target_check,
+  ADD CONSTRAINT cosmos_audit_events_target_check
     CHECK (
       (action = 'turn.retry' AND target_type = 'turn')
       OR (action IN ('session.share.create', 'session.share.revoke')
@@ -285,64 +285,64 @@ ALTER TABLE relay_audit_events
       )
     ) NOT VALID;
 
-GRANT SELECT ON relay_files, relay_file_versions TO relay_api_runtime;
-GRANT SELECT, INSERT, UPDATE ON relay_files TO relay_worker_runtime;
-GRANT SELECT, INSERT ON relay_file_versions TO relay_worker_runtime;
-GRANT INSERT ON relay_audit_events, relay_outbox_events TO relay_worker_runtime;
+GRANT SELECT ON cosmos_files, cosmos_file_versions TO cosmos_api_runtime;
+GRANT SELECT, INSERT, UPDATE ON cosmos_files TO cosmos_worker_runtime;
+GRANT SELECT, INSERT ON cosmos_file_versions TO cosmos_worker_runtime;
+GRANT INSERT ON cosmos_audit_events, cosmos_outbox_events TO cosmos_worker_runtime;
 
-ALTER TABLE relay_files ENABLE ROW LEVEL SECURITY;
-ALTER TABLE relay_files FORCE ROW LEVEL SECURITY;
-ALTER TABLE relay_file_versions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE relay_file_versions FORCE ROW LEVEL SECURITY;
+ALTER TABLE cosmos_files ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cosmos_files FORCE ROW LEVEL SECURITY;
+ALTER TABLE cosmos_file_versions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cosmos_file_versions FORCE ROW LEVEL SECURITY;
 
-CREATE POLICY relay_migration_admin ON relay_files TO CURRENT_USER
+CREATE POLICY cosmos_migration_admin ON cosmos_files TO CURRENT_USER
   USING (true) WITH CHECK (true);
-CREATE POLICY relay_migration_admin ON relay_file_versions TO CURRENT_USER
+CREATE POLICY cosmos_migration_admin ON cosmos_file_versions TO CURRENT_USER
   USING (true) WITH CHECK (true);
 
-CREATE POLICY relay_api_tenant_select ON relay_files
-  FOR SELECT TO relay_api_runtime
+CREATE POLICY cosmos_api_tenant_select ON cosmos_files
+  FOR SELECT TO cosmos_api_runtime
   USING (
-    organization_id = NULLIF(current_setting('relay.organization_id', true), '')
-    AND (space_id IS NULL OR space_id = NULLIF(current_setting('relay.space_id', true), ''))
+    organization_id = NULLIF(current_setting('cosmos.organization_id', true), '')
+    AND (space_id IS NULL OR space_id = NULLIF(current_setting('cosmos.space_id', true), ''))
     AND EXISTS (
-      SELECT 1 FROM relay_organization_memberships actor_organization
-      WHERE actor_organization.organization_id = relay_files.organization_id
-        AND actor_organization.actor_id = NULLIF(current_setting('relay.actor_id', true), '')
+      SELECT 1 FROM cosmos_organization_memberships actor_organization
+      WHERE actor_organization.organization_id = cosmos_files.organization_id
+        AND actor_organization.actor_id = NULLIF(current_setting('cosmos.actor_id', true), '')
     )
     AND EXISTS (
-      SELECT 1 FROM relay_space_memberships actor_space
-      WHERE actor_space.organization_id = relay_files.organization_id
-        AND actor_space.space_id = NULLIF(current_setting('relay.space_id', true), '')
-        AND actor_space.actor_id = NULLIF(current_setting('relay.actor_id', true), '')
+      SELECT 1 FROM cosmos_space_memberships actor_space
+      WHERE actor_space.organization_id = cosmos_files.organization_id
+        AND actor_space.space_id = NULLIF(current_setting('cosmos.space_id', true), '')
+        AND actor_space.actor_id = NULLIF(current_setting('cosmos.actor_id', true), '')
     )
     AND (
-      relay_files.scope = 'organization'
+      cosmos_files.scope = 'organization'
       OR (
-        relay_files.scope = 'user'
+        cosmos_files.scope = 'user'
         AND (
-          relay_files.owner_user_id = NULLIF(current_setting('relay.actor_id', true), '')
+          cosmos_files.owner_user_id = NULLIF(current_setting('cosmos.actor_id', true), '')
           OR EXISTS (
-            SELECT 1 FROM relay_organization_memberships privileged_actor
-            WHERE privileged_actor.organization_id = relay_files.organization_id
-              AND privileged_actor.actor_id = NULLIF(current_setting('relay.actor_id', true), '')
+            SELECT 1 FROM cosmos_organization_memberships privileged_actor
+            WHERE privileged_actor.organization_id = cosmos_files.organization_id
+              AND privileged_actor.actor_id = NULLIF(current_setting('cosmos.actor_id', true), '')
               AND privileged_actor.role IN ('organization_admin', 'organization_owner')
           )
         )
       )
       OR (
-        relay_files.scope = 'workspace'
-        AND relay_files.space_id = NULLIF(current_setting('relay.space_id', true), '')
+        cosmos_files.scope = 'workspace'
+        AND cosmos_files.space_id = NULLIF(current_setting('cosmos.space_id', true), '')
         AND EXISTS (
-          SELECT 1 FROM relay_sessions file_session
-          WHERE file_session.organization_id = relay_files.organization_id
-            AND file_session.space_id = relay_files.space_id
-            AND file_session.id = relay_files.session_id
+          SELECT 1 FROM cosmos_sessions file_session
+          WHERE file_session.organization_id = cosmos_files.organization_id
+            AND file_session.space_id = cosmos_files.space_id
+            AND file_session.id = cosmos_files.session_id
             AND (
               file_session.visibility = 'space'
-              OR file_session.created_by = NULLIF(current_setting('relay.actor_id', true), '')
+              OR file_session.created_by = NULLIF(current_setting('cosmos.actor_id', true), '')
               OR EXISTS (
-                SELECT 1 FROM relay_session_share_grants file_share
+                SELECT 1 FROM cosmos_session_share_grants file_share
                 WHERE file_share.organization_id = file_session.organization_id
                   AND file_share.space_id = file_session.space_id
                   AND file_share.session_id = file_session.id
@@ -351,14 +351,14 @@ CREATE POLICY relay_api_tenant_select ON relay_files
                     OR file_share.expires_at > transaction_timestamp())
                   AND (
                     (file_share.principal_type = 'user'
-                      AND file_share.principal_id = NULLIF(current_setting('relay.actor_id', true), ''))
+                      AND file_share.principal_id = NULLIF(current_setting('cosmos.actor_id', true), ''))
                     OR (
                       file_share.principal_type = 'group'
                       AND EXISTS (
-                        SELECT 1 FROM relay_group_memberships file_group
+                        SELECT 1 FROM cosmos_group_memberships file_group
                         WHERE file_group.organization_id = file_share.organization_id
                           AND file_group.group_id = file_share.principal_id
-                          AND file_group.actor_id = NULLIF(current_setting('relay.actor_id', true), '')
+                          AND file_group.actor_id = NULLIF(current_setting('cosmos.actor_id', true), '')
                       )
                     )
                   )
@@ -369,27 +369,27 @@ CREATE POLICY relay_api_tenant_select ON relay_files
     )
   );
 
-CREATE POLICY relay_api_tenant_select ON relay_file_versions
-  FOR SELECT TO relay_api_runtime
+CREATE POLICY cosmos_api_tenant_select ON cosmos_file_versions
+  FOR SELECT TO cosmos_api_runtime
   USING (
     EXISTS (
-      SELECT 1 FROM relay_files visible_file
-      WHERE visible_file.organization_id = relay_file_versions.organization_id
-        AND visible_file.id = relay_file_versions.file_id
+      SELECT 1 FROM cosmos_files visible_file
+      WHERE visible_file.organization_id = cosmos_file_versions.organization_id
+        AND visible_file.id = cosmos_file_versions.file_id
     )
   );
 
-CREATE POLICY relay_worker_select ON relay_files
-  FOR SELECT TO relay_worker_runtime USING (true);
-CREATE POLICY relay_worker_insert ON relay_files
-  FOR INSERT TO relay_worker_runtime WITH CHECK (true);
-CREATE POLICY relay_worker_update ON relay_files
-  FOR UPDATE TO relay_worker_runtime USING (true) WITH CHECK (true);
-CREATE POLICY relay_worker_select ON relay_file_versions
-  FOR SELECT TO relay_worker_runtime USING (true);
-CREATE POLICY relay_worker_insert ON relay_file_versions
-  FOR INSERT TO relay_worker_runtime WITH CHECK (true);
-CREATE POLICY relay_worker_insert ON relay_audit_events
-  FOR INSERT TO relay_worker_runtime WITH CHECK (true);
-CREATE POLICY relay_worker_insert ON relay_outbox_events
-  FOR INSERT TO relay_worker_runtime WITH CHECK (true);
+CREATE POLICY cosmos_worker_select ON cosmos_files
+  FOR SELECT TO cosmos_worker_runtime USING (true);
+CREATE POLICY cosmos_worker_insert ON cosmos_files
+  FOR INSERT TO cosmos_worker_runtime WITH CHECK (true);
+CREATE POLICY cosmos_worker_update ON cosmos_files
+  FOR UPDATE TO cosmos_worker_runtime USING (true) WITH CHECK (true);
+CREATE POLICY cosmos_worker_select ON cosmos_file_versions
+  FOR SELECT TO cosmos_worker_runtime USING (true);
+CREATE POLICY cosmos_worker_insert ON cosmos_file_versions
+  FOR INSERT TO cosmos_worker_runtime WITH CHECK (true);
+CREATE POLICY cosmos_worker_insert ON cosmos_audit_events
+  FOR INSERT TO cosmos_worker_runtime WITH CHECK (true);
+CREATE POLICY cosmos_worker_insert ON cosmos_outbox_events
+  FOR INSERT TO cosmos_worker_runtime WITH CHECK (true);

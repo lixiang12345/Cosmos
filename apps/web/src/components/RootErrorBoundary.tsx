@@ -1,6 +1,6 @@
 import { Component, Fragment, type ReactNode } from 'react'
 
-const SAFE_REFRESH_STORAGE_KEY = 'relay.root-error.safe-refresh'
+const SAFE_REFRESH_STORAGE_KEY = 'cosmos.root-error.safe-refresh'
 const SAFE_REFRESH_WINDOW_MS = 30_000
 
 type StorageLike = Pick<Storage, 'getItem' | 'setItem'>
@@ -29,7 +29,7 @@ type SafeRefreshRecord = {
 
 const copy = {
   zh: {
-    eyebrow: 'RELAY RECOVERY',
+    eyebrow: 'COSMOS RECOVERY',
     renderTitle: '页面暂时无法显示',
     renderBody: '应用遇到了意外错误。你可以先重试当前界面；若仍无法恢复，请进行一次安全刷新。',
     chunkTitle: '应用更新未能加载',
@@ -43,7 +43,7 @@ const copy = {
     renderReference: '界面渲染',
   },
   en: {
-    eyebrow: 'RELAY RECOVERY',
+    eyebrow: 'COSMOS RECOVERY',
     renderTitle: 'This page is temporarily unavailable',
     renderBody: 'The application encountered an unexpected error. Retry this view first, then use one safe refresh if it still cannot recover.',
     chunkTitle: 'The application update could not be loaded',
@@ -60,7 +60,7 @@ const copy = {
 
 function resolveLocale(): keyof typeof copy {
   try {
-    const storedLocale = window.localStorage.getItem('relay.locale')
+    const storedLocale = window.localStorage.getItem('cosmos.locale')
     if (storedLocale === 'zh' || storedLocale === 'en') return storedLocale
   } catch {
     // Continue with browser-provided language signals.
@@ -72,7 +72,7 @@ function resolveLocale(): keyof typeof copy {
 
 function resolveTheme() {
   try {
-    const storedTheme = window.localStorage.getItem('relay.theme')
+    const storedTheme = window.localStorage.getItem('cosmos.theme')
     if (storedTheme === 'dark' || storedTheme === 'light') return storedTheme
   } catch {
     // Continue with browser-provided theme signals.

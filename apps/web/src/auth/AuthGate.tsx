@@ -10,12 +10,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   const copy = locale === 'zh'
     ? {
-        loading: '正在恢复安全会话...', title: '登录 Relay',
+        loading: '正在恢复安全会话...', title: '登录 Cosmos',
         body: '使用组织身份登录后继续访问你的 Space 和 Sessions。',
         signIn: '使用 SSO 登录', config: '身份配置不可用',
       }
     : {
-        loading: 'Restoring your secure session...', title: 'Sign in to Relay',
+        loading: 'Restoring your secure session...', title: 'Sign in to Cosmos',
         body: 'Use your organization identity to access your Spaces and Sessions.',
         signIn: 'Sign in with SSO', config: 'Identity configuration unavailable',
       }

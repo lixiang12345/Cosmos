@@ -4,7 +4,7 @@ import { ContextEngineGatewayError, HttpContextEngineGateway } from './context-e
 const options = {
   baseUrl: 'https://context.example/api',
   apiKey: 'context-secret',
-  workspaces: { 'relay/platform': 'workspace-platform' },
+  workspaces: { 'cosmos/platform': 'workspace-platform' },
 }
 
 function jsonResponse(body: unknown, status = 200) {
@@ -30,9 +30,9 @@ describe('HttpContextEngineGateway', () => {
     }))
     const gateway = new HttpContextEngineGateway({ ...options, fetchImpl: fetchMock as typeof fetch })
 
-    await expect(gateway.status('relay/platform')).resolves.toEqual({
+    await expect(gateway.status('cosmos/platform')).resolves.toEqual({
       provider: 'contextengine-plugin',
-      repository: 'relay/platform',
+      repository: 'cosmos/platform',
       available: true,
       indexed: true,
       revision: 3,
@@ -71,7 +71,7 @@ describe('HttpContextEngineGateway', () => {
     const gateway = new HttpContextEngineGateway({ ...options, fetchImpl: fetchMock as typeof fetch })
 
     const result = await gateway.search({
-      repository: 'relay/platform',
+      repository: 'cosmos/platform',
       query: 'context retrieval',
       topK: 8,
       mode: 'hybrid',
@@ -103,7 +103,7 @@ describe('HttpContextEngineGateway', () => {
       retryable: false,
     })
     await expect(gateway.search({
-      repository: 'relay/platform',
+      repository: 'cosmos/platform',
       query: 'test',
       topK: 5,
       mode: 'auto',
@@ -129,7 +129,7 @@ describe('HttpContextEngineGateway', () => {
     })) as typeof fetch
     const gateway = new HttpContextEngineGateway({ ...options, timeoutMs: 100, fetchImpl })
 
-    await expect(gateway.status('relay/platform')).rejects.toEqual(expect.objectContaining<Partial<ContextEngineGatewayError>>({
+    await expect(gateway.status('cosmos/platform')).rejects.toEqual(expect.objectContaining<Partial<ContextEngineGatewayError>>({
       code: 'service_unavailable',
       retryable: true,
       message: 'Context Engine request timed out.',
@@ -145,7 +145,7 @@ describe('HttpContextEngineGateway', () => {
       })) as typeof fetch,
     })
 
-    await expect(gateway.status('relay/platform')).rejects.toMatchObject({
+    await expect(gateway.status('cosmos/platform')).rejects.toMatchObject({
       code: 'invalid_response',
       retryable: false,
     })
@@ -163,7 +163,7 @@ describe('HttpContextEngineGateway', () => {
       }), { status: 200 })) as typeof fetch,
     })
 
-    await expect(gateway.status('relay/platform')).rejects.toMatchObject({
+    await expect(gateway.status('cosmos/platform')).rejects.toMatchObject({
       code: 'invalid_response',
       retryable: false,
     })

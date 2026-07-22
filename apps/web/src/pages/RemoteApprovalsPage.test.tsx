@@ -1,19 +1,19 @@
-import type { ApprovalDto } from '@relay/contracts'
+import type { ApprovalDto } from '@cosmos/contracts'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PREFERENCE_STORAGE_KEYS, PreferencesProvider } from '../preferences'
-import { decideApproval, listApprovals } from '../services/relayApi'
+import { decideApproval, listApprovals } from '../services/cosmosApi'
 import { RemoteApprovalsPage, type RemoteApprovalsPageProps } from './RemoteApprovalsPage'
 
-vi.mock('../services/relayApi', async (importOriginal) => ({
-  ...await importOriginal<typeof import('../services/relayApi')>(),
+vi.mock('../services/cosmosApi', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../services/cosmosApi')>(),
   decideApproval: vi.fn(),
   listApprovals: vi.fn(),
 }))
 
 const approval: ApprovalDto = {
-  organizationId: 'relay',
+  organizationId: 'cosmos',
   spaceId: 'platform',
   id: 'approval-1',
   sessionId: 'session-1',

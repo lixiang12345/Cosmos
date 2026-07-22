@@ -2,7 +2,7 @@ import type {
   MeOrganization,
   SessionEventPage,
   SessionMessagePage,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.js'
 import { AuthenticationError, createDevelopmentAuthenticator } from './auth.js'
@@ -15,14 +15,14 @@ import {
 } from './session-timeline-repository.js'
 
 const timestamp = '2026-07-13T00:00:00.000Z'
-const organizationId = 'relay'
+const organizationId = 'cosmos'
 const spaceId = 'platform'
 const sessionId = 'session-1'
 const actorId = 'user-1'
 const scope = { organizationId, spaceId, sessionId }
 const organizations: MeOrganization[] = [{
   id: organizationId,
-  name: 'Relay',
+  name: 'Cosmos',
   role: 'member',
   spaces: [{ id: spaceId, name: 'Platform', role: 'member' }],
 }]

@@ -14,8 +14,8 @@ export type Theme = 'dark' | 'light'
 export type Locale = 'zh' | 'en'
 
 export const PREFERENCE_STORAGE_KEYS = {
-  theme: 'relay.theme',
-  locale: 'relay.locale',
+  theme: 'cosmos.theme',
+  locale: 'cosmos.locale',
 } as const
 
 const zh = {

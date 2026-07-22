@@ -1,4 +1,4 @@
-import { ApiErrorSchema, CreateSessionResponseSchema, SendSessionMessageResponseSchema } from '@relay/contracts'
+import { ApiErrorSchema, CreateSessionResponseSchema, SendSessionMessageResponseSchema } from '@cosmos/contracts'
 import { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createApp } from './app.js'
@@ -11,7 +11,7 @@ const databaseUrl = process.env.TEST_DATABASE_URL
 const describeWithDatabase = databaseUrl ? describe : describe.skip
 
 describeWithDatabase('ServiceAccount Session operation policy', () => {
-  const schema = `relay_service_policy_${crypto.randomUUID().replaceAll('-', '')}`
+  const schema = `cosmos_service_policy_${crypto.randomUUID().replaceAll('-', '')}`
   const adminPool = new Pool({ connectionString: databaseUrl })
   const pool = new Pool({ connectionString: databaseUrl, options: `-c search_path=${schema}` })
   const sessionRepository = new PostgresSessionRepository(pool)
@@ -21,18 +21,18 @@ describeWithDatabase('ServiceAccount Session operation policy', () => {
     await adminPool.query(`CREATE SCHEMA ${schema}`)
     await runMigrations(pool)
     await pool.query(`
-      INSERT INTO relay_organizations (id, name) VALUES ('automation-org', 'Automation Org');
-      INSERT INTO relay_spaces (organization_id, id, name)
+      INSERT INTO cosmos_organizations (id, name) VALUES ('automation-org', 'Automation Org');
+      INSERT INTO cosmos_spaces (organization_id, id, name)
       VALUES ('automation-org', 'automation-space', 'Automation Space');
-      INSERT INTO relay_organization_memberships (organization_id, actor_id, role) VALUES
+      INSERT INTO cosmos_organization_memberships (organization_id, actor_id, role) VALUES
         ('automation-org', 'service-automation', 'member'),
         ('automation-org', 'automation-owner', 'member');
-      INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role) VALUES
+      INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role) VALUES
         ('automation-org', 'automation-space', 'service-automation', 'member'),
         ('automation-org', 'automation-space', 'automation-owner', 'space_manager');
-      INSERT INTO relay_service_accounts (organization_id, id, audience, status)
-      VALUES ('automation-org', 'service-automation', 'relay-api', 'active');
-      INSERT INTO relay_service_account_bindings (
+      INSERT INTO cosmos_service_accounts (organization_id, id, audience, status)
+      VALUES ('automation-org', 'service-automation', 'cosmos-api', 'active');
+      INSERT INTO cosmos_service_account_bindings (
         organization_id, space_id, service_account_id, id, scope, resource_type, resource_id
       ) VALUES (
         'automation-org', 'automation-space', 'service-automation', 'binding-create',
@@ -53,7 +53,7 @@ describeWithDatabase('ServiceAccount Session operation policy', () => {
       sessionRepository,
       serviceAccountPolicyRepository: policyRepository,
       authenticate: async () => ({
-        id: 'service-automation', kind: 'service_account', audience: 'relay-api',
+        id: 'service-automation', kind: 'service_account', audience: 'cosmos-api',
       }),
       executionEnabled: true,
       executionReadinessCheck: async () => true,
@@ -86,7 +86,7 @@ describeWithDatabase('ServiceAccount Session operation policy', () => {
       expect(unboundSend.statusCode).toBe(403)
 
       await pool.query(`
-        INSERT INTO relay_service_account_bindings (
+        INSERT INTO cosmos_service_account_bindings (
           organization_id, space_id, service_account_id, id, scope, resource_type, resource_id
         ) VALUES
           ('automation-org', 'automation-space', 'service-automation', 'binding-send',
@@ -132,7 +132,7 @@ describeWithDatabase('ServiceAccount Session operation policy', () => {
       expect(archive.json()).toMatchObject({ archivedAt: expect.any(String) })
 
       await pool.query(`
-        UPDATE relay_service_account_bindings
+        UPDATE cosmos_service_account_bindings
         SET revoked_at = now(), version = version + 1
         WHERE organization_id = 'automation-org' AND space_id = 'automation-space'
           AND service_account_id = 'service-automation' AND id = 'binding-send'
@@ -147,7 +147,7 @@ describeWithDatabase('ServiceAccount Session operation policy', () => {
 
       const audits = await pool.query<{ action: string; actor_kind: string; policy_reason: string }>(`
         SELECT action, actor_kind, policy_reason
-        FROM relay_audit_events
+        FROM cosmos_audit_events
         WHERE organization_id = 'automation-org' AND session_id = $1
         ORDER BY occurred_at, action
       `, [creation.session.id])
@@ -184,7 +184,7 @@ describeWithDatabase('ServiceAccount Session operation policy', () => {
       resourceId: 'expert-pr-author',
     })).resolves.toBe(false)
     await expect(pool.query(`
-      INSERT INTO relay_service_account_bindings (
+      INSERT INTO cosmos_service_account_bindings (
         organization_id, space_id, service_account_id, id, scope, resource_type, resource_id
       ) VALUES (
         'automation-org', 'automation-space', 'service-automation', 'binding-wildcard',

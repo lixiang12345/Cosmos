@@ -3,7 +3,7 @@ import type {
   ApprovalEvidence,
   ToolCallDto,
   ToolRiskLevel,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 
 export type CreateToolCallRecord = {
   organizationId: string

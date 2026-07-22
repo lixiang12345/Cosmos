@@ -1,4 +1,4 @@
-import type { ApprovalDecisionValue, ApprovalDto, ApprovalStatus } from '@relay/contracts'
+import type { ApprovalDecisionValue, ApprovalDto, ApprovalStatus } from '@cosmos/contracts'
 import {
   AlertTriangle,
   Check,
@@ -19,16 +19,16 @@ import { GlobalControls } from '../components/GlobalControls'
 import { IconButton } from '../components/ui'
 import { usePreferences, type Locale } from '../preferences'
 import {
-  RelayApiError,
+  CosmosApiError,
   decideApproval,
   listApprovals,
-  type RelayApiAuthContext,
-} from '../services/relayApi'
+  type CosmosApiAuthContext,
+} from '../services/cosmosApi'
 
 export type RemoteApprovalsPageProps = {
   organizationId: string
   spaceId: string
-  auth: RelayApiAuthContext
+  auth: CosmosApiAuthContext
   credentialVersion: number
   onOpenNavigation?: () => void
   onOpenSession: (sessionId: string) => void
@@ -93,7 +93,7 @@ export function RemoteApprovalsPage({
   onOpenSession,
 }: RemoteApprovalsPageProps) {
   const { locale } = usePreferences()
-  const requestAuth = useMemo<RelayApiAuthContext>(() => ({
+  const requestAuth = useMemo<CosmosApiAuthContext>(() => ({
     accessToken: auth.accessToken,
     requestIdentity: auth.requestIdentity,
     onUnauthorized: auth.onUnauthorized,
@@ -198,7 +198,7 @@ export function RemoteApprovalsPage({
         ? text(locale, '你的批准已记录，仍在等待另一位审批人。', 'Your approval was recorded; another approver is still required.')
         : text(locale, '决策已记录，门禁状态已更新。', 'Decision recorded and the gate was updated.'))
     } catch (cause) {
-      if (cause instanceof RelayApiError && [409, 412].includes(cause.status ?? 0)) refresh()
+      if (cause instanceof CosmosApiError && [409, 412].includes(cause.status ?? 0)) refresh()
       setNotice(errorValue(cause, 'Unable to record the Approval decision.').message)
     } finally {
       setSubmitting(undefined)

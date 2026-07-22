@@ -1,8 +1,8 @@
-ALTER TABLE relay_sessions
-  ADD CONSTRAINT relay_sessions_tenant_identity_unique
+ALTER TABLE cosmos_sessions
+  ADD CONSTRAINT cosmos_sessions_tenant_identity_unique
   UNIQUE (organization_id, space_id, id);
 
-CREATE TABLE relay_messages (
+CREATE TABLE cosmos_messages (
   id text PRIMARY KEY,
   organization_id text NOT NULL,
   space_id text NOT NULL,
@@ -15,10 +15,10 @@ CREATE TABLE relay_messages (
   created_at timestamptz NOT NULL,
   UNIQUE (session_id, sequence),
   FOREIGN KEY (organization_id, space_id, session_id)
-    REFERENCES relay_sessions(organization_id, space_id, id) ON DELETE RESTRICT
+    REFERENCES cosmos_sessions(organization_id, space_id, id) ON DELETE RESTRICT
 );
 
-CREATE TABLE relay_turns (
+CREATE TABLE cosmos_turns (
   id text PRIMARY KEY,
   organization_id text NOT NULL,
   space_id text NOT NULL,
@@ -26,7 +26,7 @@ CREATE TABLE relay_turns (
   ordinal integer NOT NULL CHECK (ordinal > 0),
   initiator_type text NOT NULL CHECK (initiator_type IN ('user', 'event', 'system')),
   initiator_id text,
-  input_message_id text NOT NULL REFERENCES relay_messages(id) ON DELETE RESTRICT,
+  input_message_id text NOT NULL REFERENCES cosmos_messages(id) ON DELETE RESTRICT,
   status text NOT NULL CHECK (status IN ('queued', 'running', 'waiting_tool', 'waiting_approval', 'completed', 'failed', 'canceled')),
   queued_at timestamptz NOT NULL,
   started_at timestamptz,
@@ -34,10 +34,10 @@ CREATE TABLE relay_turns (
   version integer NOT NULL CHECK (version > 0),
   UNIQUE (session_id, ordinal),
   FOREIGN KEY (organization_id, space_id, session_id)
-    REFERENCES relay_sessions(organization_id, space_id, id) ON DELETE RESTRICT
+    REFERENCES cosmos_sessions(organization_id, space_id, id) ON DELETE RESTRICT
 );
 
-CREATE TABLE relay_commands (
+CREATE TABLE cosmos_commands (
   id text PRIMARY KEY,
   organization_id text NOT NULL,
   space_id text NOT NULL,
@@ -53,14 +53,14 @@ CREATE TABLE relay_commands (
   lease_expires_at timestamptz,
   attempts integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
   FOREIGN KEY (organization_id, space_id, session_id)
-    REFERENCES relay_sessions(organization_id, space_id, id) ON DELETE RESTRICT
+    REFERENCES cosmos_sessions(organization_id, space_id, id) ON DELETE RESTRICT
 );
 
-CREATE INDEX relay_commands_available_idx
-  ON relay_commands (status, available_at, accepted_at)
+CREATE INDEX cosmos_commands_available_idx
+  ON cosmos_commands (status, available_at, accepted_at)
   WHERE status IN ('accepted', 'queued');
 
-CREATE TABLE relay_outbox_events (
+CREATE TABLE cosmos_outbox_events (
   id text PRIMARY KEY,
   organization_id text NOT NULL,
   space_id text NOT NULL,
@@ -73,14 +73,14 @@ CREATE TABLE relay_outbox_events (
   published_at timestamptz,
   attempts integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
   FOREIGN KEY (organization_id, space_id, session_id)
-    REFERENCES relay_sessions(organization_id, space_id, id) ON DELETE RESTRICT
+    REFERENCES cosmos_sessions(organization_id, space_id, id) ON DELETE RESTRICT
 );
 
-CREATE INDEX relay_outbox_unpublished_idx
-  ON relay_outbox_events (occurred_at, id)
+CREATE INDEX cosmos_outbox_unpublished_idx
+  ON cosmos_outbox_events (occurred_at, id)
   WHERE published_at IS NULL;
 
-CREATE TABLE relay_idempotency_responses (
+CREATE TABLE cosmos_idempotency_responses (
   organization_id text NOT NULL,
   actor_id text NOT NULL,
   method text NOT NULL,
@@ -94,5 +94,5 @@ CREATE TABLE relay_idempotency_responses (
   PRIMARY KEY (organization_id, actor_id, method, canonical_path, idempotency_key_hash)
 );
 
-CREATE INDEX relay_idempotency_responses_expiry_idx
-  ON relay_idempotency_responses (expires_at);
+CREATE INDEX cosmos_idempotency_responses_expiry_idx
+  ON cosmos_idempotency_responses (expires_at);

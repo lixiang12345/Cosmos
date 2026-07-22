@@ -4,7 +4,7 @@ import type {
   AutomationRunDto,
   AutomationSource,
   ExpertSummaryDto,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 import {
   Activity,
   AlertTriangle,
@@ -38,13 +38,13 @@ import {
   testAutomation,
   updateAutomation,
   archiveAutomation,
-  type RelayApiAuthContext,
-} from '../services/relayApi'
+  type CosmosApiAuthContext,
+} from '../services/cosmosApi'
 
 type CommonProps = {
   organizationId: string
   spaceId: string
-  auth: RelayApiAuthContext
+  auth: CosmosApiAuthContext
   credentialVersion: number
   canManage?: boolean
   onOpenNavigation?: () => void
@@ -68,8 +68,8 @@ const sourceOptions: Array<{ value: AutomationSource; label: string }> = [
 ]
 
 const samplePayloads: Record<AutomationSource, { eventType: string; payload: Record<string, unknown> }> = {
-  github: { eventType: 'pull_request.opened', payload: { action: 'opened', repository: { full_name: 'relay/platform' } } },
-  slack: { eventType: 'message.posted', payload: { channel: 'platform', text: '@Relay investigate the failure' } },
+  github: { eventType: 'pull_request.opened', payload: { action: 'opened', repository: { full_name: 'cosmos/platform' } } },
+  slack: { eventType: 'message.posted', payload: { channel: 'platform', text: '@Cosmos investigate the failure' } },
   webhook: { eventType: 'alert.created', payload: { severity: 'high', service: 'platform', message: 'Queue is saturated' } },
   schedule: { eventType: 'schedule.tick', payload: { schedule: 'daily-platform-check' } },
 }
@@ -151,7 +151,7 @@ function PageHeader({ title, description, onOpenNavigation }: { title: string; d
   return <header className="cosmos-page-header">
     <div className="cosmos-page-header__leading">
       <IconButton icon={Workflow} label={label(locale, '打开导航', 'Open navigation')} onClick={onOpenNavigation} />
-      <div><p>Relay · Control Plane</p><h1>{title}</h1><span>{description}</span></div>
+      <div><p>Cosmos · Control Plane</p><h1>{title}</h1><span>{description}</span></div>
     </div>
     <GlobalControls />
   </header>

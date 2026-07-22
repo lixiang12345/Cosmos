@@ -20,15 +20,15 @@ describe('JWT authentication', () => {
     const { privateKey, publicKey } = await generateKeyPair('RS256')
     const jwk = await exportJWK(publicKey)
     authenticate = createJwtAuthenticator({
-      issuer: 'https://identity.relay.test/',
-      audience: 'relay-api',
-      jwksUri: 'https://identity.relay.test/.well-known/jwks.json',
+      issuer: 'https://identity.cosmos.test/',
+      audience: 'cosmos-api',
+      jwksUri: 'https://identity.cosmos.test/.well-known/jwks.json',
       getKey: async () => publicKey,
     })
     sign = async (overrides = {}) => new SignJWT({ actor_type: 'user' })
       .setProtectedHeader({ alg: 'RS256', kid: jwk.kid ?? 'test-key', typ: 'at+jwt' })
-      .setIssuer(overrides.issuer ?? 'https://identity.relay.test/')
-      .setAudience(overrides.audience ?? 'relay-api')
+      .setIssuer(overrides.issuer ?? 'https://identity.cosmos.test/')
+      .setAudience(overrides.audience ?? 'cosmos-api')
       .setSubject(overrides.subject ?? 'user-1')
       .setIssuedAt(overrides.issuedAt)
       .setExpirationTime(overrides.expiresIn ?? '5m')
@@ -42,16 +42,16 @@ describe('JWT authentication', () => {
   it('maps an explicitly typed service account without trusting unknown actor types', async () => {
     const { privateKey, publicKey } = await generateKeyPair('RS256')
     const serviceAuthenticate = createJwtAuthenticator({
-      issuer: 'https://identity.relay.test/', audience: 'relay-api',
-      jwksUri: 'https://identity.relay.test/.well-known/jwks.json', getKey: async () => publicKey,
+      issuer: 'https://identity.cosmos.test/', audience: 'cosmos-api',
+      jwksUri: 'https://identity.cosmos.test/.well-known/jwks.json', getKey: async () => publicKey,
     })
     const token = await new SignJWT({ actor_type: 'service_account' })
       .setProtectedHeader({ alg: 'RS256', typ: 'at+jwt' })
-      .setIssuer('https://identity.relay.test/').setAudience('relay-api').setSubject('service-1')
+      .setIssuer('https://identity.cosmos.test/').setAudience('cosmos-api').setSubject('service-1')
       .setIssuedAt().setExpirationTime('5m').sign(privateKey)
 
     await expect(serviceAuthenticate(`Bearer ${token}`)).resolves.toEqual({
-      id: 'service-1', kind: 'service_account', audience: 'relay-api',
+      id: 'service-1', kind: 'service_account', audience: 'cosmos-api',
     })
   })
 
@@ -81,28 +81,28 @@ describe('JWT authentication', () => {
   it('rejects tokens without required access-token claims or with an unknown actor type', async () => {
     const { privateKey, publicKey } = await generateKeyPair('RS256')
     const strictAuthenticate = createJwtAuthenticator({
-      issuer: 'https://identity.relay.test/', audience: 'relay-api',
-      jwksUri: 'https://identity.relay.test/.well-known/jwks.json', getKey: async () => publicKey,
+      issuer: 'https://identity.cosmos.test/', audience: 'cosmos-api',
+      jwksUri: 'https://identity.cosmos.test/.well-known/jwks.json', getKey: async () => publicKey,
     })
     const noExpiry = await new SignJWT({ actor_type: 'user' })
       .setProtectedHeader({ alg: 'RS256', typ: 'at+jwt' })
-      .setIssuer('https://identity.relay.test/').setAudience('relay-api').setSubject('user-1').setIssuedAt()
+      .setIssuer('https://identity.cosmos.test/').setAudience('cosmos-api').setSubject('user-1').setIssuedAt()
       .sign(privateKey)
     const unknownActor = await new SignJWT({ actor_type: 'root' })
       .setProtectedHeader({ alg: 'RS256', typ: 'at+jwt' })
-      .setIssuer('https://identity.relay.test/').setAudience('relay-api').setSubject('user-1').setIssuedAt().setExpirationTime('5m')
+      .setIssuer('https://identity.cosmos.test/').setAudience('cosmos-api').setSubject('user-1').setIssuedAt().setExpirationTime('5m')
       .sign(privateKey)
     const noActorType = await new SignJWT({})
       .setProtectedHeader({ alg: 'RS256', typ: 'at+jwt' })
-      .setIssuer('https://identity.relay.test/').setAudience('relay-api').setSubject('user-1').setIssuedAt().setExpirationTime('5m')
+      .setIssuer('https://identity.cosmos.test/').setAudience('cosmos-api').setSubject('user-1').setIssuedAt().setExpirationTime('5m')
       .sign(privateKey)
     const noIssuedAt = await new SignJWT({ actor_type: 'user' })
       .setProtectedHeader({ alg: 'RS256', typ: 'at+jwt' })
-      .setIssuer('https://identity.relay.test/').setAudience('relay-api').setSubject('user-1').setExpirationTime('5m')
+      .setIssuer('https://identity.cosmos.test/').setAudience('cosmos-api').setSubject('user-1').setExpirationTime('5m')
       .sign(privateKey)
     const wrongType = await new SignJWT({ actor_type: 'user' })
       .setProtectedHeader({ alg: 'RS256', typ: 'JWT' })
-      .setIssuer('https://identity.relay.test/').setAudience('relay-api').setSubject('user-1').setIssuedAt().setExpirationTime('5m')
+      .setIssuer('https://identity.cosmos.test/').setAudience('cosmos-api').setSubject('user-1').setIssuedAt().setExpirationTime('5m')
       .sign(privateKey)
 
     await expect(strictAuthenticate(`Bearer ${noExpiry}`)).rejects.toBeInstanceOf(AuthenticationError)

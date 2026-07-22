@@ -1,6 +1,6 @@
-# Relay Agent Platform
+# Cosmos Agent Platform
 
-Relay 是一个面向研发组织的 AI 软件交付编排与治理产品。当前仓库在完整交互原型之上，以共享契约驱动的前后端分离架构实现了权威 Session、Expert/Environment 只读 Catalog，以及可恢复的基础对话执行纵向链路。
+Cosmos 是一个面向研发组织的 AI 软件交付编排与治理产品。当前仓库在完整交互原型之上，以共享契约驱动的前后端分离架构实现了权威 Session、Expert/Environment 只读 Catalog，以及可恢复的基础对话执行纵向链路。
 
 ## 工程结构
 
@@ -39,41 +39,41 @@ PORT=8790 VITE_API_PROXY_TARGET=http://127.0.0.1:8790 pnpm dev
 
 ```bash
 pnpm db:up
-DATABASE_URL=postgres://relay:relay-local-only@127.0.0.1:55432/relay pnpm dev:api
-TEST_DATABASE_URL=postgres://relay:relay-local-only@127.0.0.1:55432/relay pnpm test:integration
+DATABASE_URL=postgres://cosmos:cosmos-local-only@127.0.0.1:55432/cosmos pnpm dev:api
+TEST_DATABASE_URL=postgres://cosmos:cosmos-local-only@127.0.0.1:55432/cosmos pnpm test:integration
 ```
 
-开发环境默认自动执行版本化 SQL migration；也可显式运行 `AUTH_MODE=development DATABASE_URL=... pnpm db:migrate`。staging/production 禁止 API 启动时迁移，发布流程必须先以独立 migration job 运行同一镜像的 `node dist/migrate.js`。migration 身份必须拥有目标 schema 及创建/加固 `relay_api_runtime`、`relay_worker_runtime` NOLOGIN 角色所需的 `CREATEROLE`；API/Worker 登录身份只授予对应角色 membership，不能拥有表 ownership、superuser 或 `BYPASSRLS`。运行进程会 `SET ROLE` 并在启动时验证实际 `current_user`，角色或 migration 不正确时 fail closed。`/api/health` 是唯一公开的进程存活探针；`/api/ready` 受鉴权保护并检查 API 的 PostgreSQL 与 migration 依赖，但不会因执行 Worker 下线而关闭只读控制面。内部 `/api/metrics` 仅在配置 Secret Manager 注入的 `METRICS_SCRAPE_TOKEN` 时开放，输出低基数 HTTP/SSE 指标；规则与通知处置见 [Observability、SLO 与告警 Runbook](./docs/observability-slo-runbook.md)。生产 API 必须显式设置 `NODE_ENV=production`、`AUTH_MODE=oidc`、`DATABASE_URL`、`CORS_ORIGIN`、`OIDC_ISSUER`、`OIDC_AUDIENCE`、`OIDC_JWKS_URI` 和来自 Secret Manager 的 `SECURITY_AUDIT_HMAC_KEY`；生产 Web 必须设置 `VITE_AUTH_MODE=oidc` 与 OIDC public-client 配置，Organization/Space 由受鉴权的 `/api/v1/me` membership discovery 返回，缺失身份配置时显示错误而非进入 demo。
+开发环境默认自动执行版本化 SQL migration；也可显式运行 `AUTH_MODE=development DATABASE_URL=... pnpm db:migrate`。staging/production 禁止 API 启动时迁移，发布流程必须先以独立 migration job 运行同一镜像的 `node dist/migrate.js`。migration 身份必须拥有目标 schema 及创建/加固 `cosmos_api_runtime`、`cosmos_worker_runtime` NOLOGIN 角色所需的 `CREATEROLE`；API/Worker 登录身份只授予对应角色 membership，不能拥有表 ownership、superuser 或 `BYPASSRLS`。运行进程会 `SET ROLE` 并在启动时验证实际 `current_user`，角色或 migration 不正确时 fail closed。`/api/health` 是唯一公开的进程存活探针；`/api/ready` 受鉴权保护并检查 API 的 PostgreSQL 与 migration 依赖，但不会因执行 Worker 下线而关闭只读控制面。内部 `/api/metrics` 仅在配置 Secret Manager 注入的 `METRICS_SCRAPE_TOKEN` 时开放，输出低基数 HTTP/SSE 指标；规则与通知处置见 [Observability、SLO 与告警 Runbook](./docs/observability-slo-runbook.md)。生产 API 必须显式设置 `NODE_ENV=production`、`AUTH_MODE=oidc`、`DATABASE_URL`、`CORS_ORIGIN`、`OIDC_ISSUER`、`OIDC_AUDIENCE`、`OIDC_JWKS_URI` 和来自 Secret Manager 的 `SECURITY_AUDIT_HMAC_KEY`；生产 Web 必须设置 `VITE_AUTH_MODE=oidc` 与 OIDC public-client 配置，Organization/Space 由受鉴权的 `/api/v1/me` membership discovery 返回，缺失身份配置时显示错误而非进入 demo。
 
 `SECURITY_AUDIT_HMAC_KEY` 必须配套稳定、非 Secret 的 `SECURITY_AUDIT_HMAC_KEY_ID`，轮换时先发布新 ID/key，再按保留策略保管旧 key 以便合规关联。migration job 只需要数据库连接与超时配置，不接收 OIDC、provider 或安全审计 HMAC 凭据；API readiness 会同时拒绝 pending 与未知 migration 历史，避免静默接受已改名或缺失的 schema 版本。
 
 要运行 protocol-1 基础对话 Worker，还需配置 `.env.example` 中的 Worker 与 OpenAI-compatible provider 变量，并在 migration 完成后启动独立进程：
 
-要启用代码库上下文检索，可部署 [ContextEngine-plugin](https://github.com/lixiang12345/ContextEngine-plugin) 作为内网服务，并在 API 侧成组配置 `CONTEXT_ENGINE_BASE_URL`、`CONTEXT_ENGINE_API_KEY`、`CONTEXT_ENGINE_WORKSPACES_JSON` 和可选的 `CONTEXT_ENGINE_TIMEOUT_MS`。Compose 中访问宿主机插件可使用 `http://host.docker.internal:8790`，并仅在本地 `.env.local` 设置 `CONTEXT_ENGINE_ALLOW_INSECURE_HTTP=true`；staging/production 始终要求 HTTPS。浏览器只访问 Relay 的 `/api/v1/organizations/:organizationId/spaces/:spaceId/context-engine/*` 代理，不接触插件密钥。Relay 会先验证当前 Space 的 active Environment revision 是否绑定请求仓库，再允许状态查询、混合检索和上下文打包；Home 启动器可在真实部署中预检证据，用户确认后才将其以“非可信仓库证据”附加到 Session 首条消息。
+要启用代码库上下文检索，可部署 [ContextEngine-plugin](https://github.com/lixiang12345/ContextEngine-plugin) 作为内网服务，并在 API 侧成组配置 `CONTEXT_ENGINE_BASE_URL`、`CONTEXT_ENGINE_API_KEY`、`CONTEXT_ENGINE_WORKSPACES_JSON` 和可选的 `CONTEXT_ENGINE_TIMEOUT_MS`。Compose 中访问宿主机插件可使用 `http://host.docker.internal:8790`，并仅在本地 `.env.local` 设置 `CONTEXT_ENGINE_ALLOW_INSECURE_HTTP=true`；staging/production 始终要求 HTTPS。浏览器只访问 Cosmos 的 `/api/v1/organizations/:organizationId/spaces/:spaceId/context-engine/*` 代理，不接触插件密钥。Cosmos 会先验证当前 Space 的 active Environment revision 是否绑定请求仓库，再允许状态查询、混合检索和上下文打包；Home 启动器可在真实部署中预检证据，用户确认后才将其以“非可信仓库证据”附加到 Session 首条消息。
 
 ```bash
-pnpm --filter @relay/api build
-pnpm --filter @relay/api start:worker
+pnpm --filter @cosmos/api build
+pnpm --filter @cosmos/api start:worker
 ```
 
 生产必须为每个 Worker 设置唯一且稳定的 `WORKER_ID`，并从 Secret Manager 注入 `AGENT_PROVIDER_GPT_API_KEY`、`AGENT_PROVIDER_CLAUDE_API_KEY` 和 `AGENT_PROVIDER_GROK_API_KEY`，不能使用 `.env.example` 的本地占位值；`AGENT_PROVIDER_API_KEY` 仅保留为单密钥兼容回退。Worker 只接受共享目录中的五个模型，并按模型族选择凭据。Worker 会周期性写 PostgreSQL 心跳，容器 `HEALTHCHECK` 通过 `dist/worker-health.js` 核验当前 `WORKER_ID` 的新鲜心跳。API 只有在 `EXECUTION_ENABLED=true` 且至少一个 Worker 的心跳未超过 `WORKER_READINESS_MAX_AGE_MS` 时才向 Web 宣告执行能力并接受新的 `start=true` 或后续消息；既有成功请求仍可按相同 `Idempotency-Key` 重放。Worker 下线时 Web 仍可读取控制面并保存 draft，不把未运行的 Session 表示成执行成功。
 
-当前模型目录固定为 `gpt-5.6-sol`、`claude-fable-5`、`claude-opus-4-8`、`claude-sonnet-5` 和 `grok-4.5`。目录由 `@relay/contracts` 共享给 Expert 编辑器与 Worker；不在目录中的 pinned model 会在任何 Provider 网络请求之前失败关闭。
+当前模型目录固定为 `gpt-5.6-sol`、`claude-fable-5`、`claude-opus-4-8`、`claude-sonnet-5` 和 `grok-4.5`。目录由 `@cosmos/contracts` 共享给 Expert 编辑器与 Worker；不在目录中的 pinned model 会在任何 Provider 网络请求之前失败关闭。
 
 生产容器从仓库根目录构建：
 
 ```bash
-docker build -f apps/api/Dockerfile -t relay-api .
-docker build -f apps/web/Dockerfile -t relay-web \
+docker build -f apps/api/Dockerfile -t cosmos-api .
+docker build -f apps/web/Dockerfile -t cosmos-web \
   --build-arg VITE_OIDC_AUTHORITY=https://identity.example.com/ \
-  --build-arg VITE_OIDC_CLIENT_ID=relay-web \
-  --build-arg VITE_OIDC_AUDIENCE=relay-api \
-  --build-arg VITE_OIDC_REDIRECT_URI=https://relay.example.com/auth/callback \
-  --build-arg VITE_OIDC_POST_LOGOUT_REDIRECT_URI=https://relay.example.com/ \
-  --build-arg VITE_OIDC_SILENT_REDIRECT_URI=https://relay.example.com/auth/silent-callback .
+  --build-arg VITE_OIDC_CLIENT_ID=cosmos-web \
+  --build-arg VITE_OIDC_AUDIENCE=cosmos-api \
+  --build-arg VITE_OIDC_REDIRECT_URI=https://cosmos.example.com/auth/callback \
+  --build-arg VITE_OIDC_POST_LOGOUT_REDIRECT_URI=https://cosmos.example.com/ \
+  --build-arg VITE_OIDC_SILENT_REDIRECT_URI=https://cosmos.example.com/auth/silent-callback .
 ```
 
-API 与 Web 运行镜像均使用非 root 用户并包含健康检查。Web 容器在启动时把同源 `/api/*` 反向代理到 `RELAY_API_UPSTREAM`（默认 `http://api:8787`）；部署时必须按服务发现地址覆盖该变量，并用 `RELAY_CSP_CONNECT_SRC`、`RELAY_CSP_FRAME_SRC` 明确列出 IdP/API 所需 HTTPS origin，例如 `RELAY_CSP_CONNECT_SRC="'self' https://identity.example.com"`。TLS、WAF、全局限流和镜像签名仍由生产 Edge/IaC 落地。API 默认把数据库连接、客户端查询和 PostgreSQL statement 超时分别限制为 5s/20s/15s，并启用每实例有界限流、安全响应头和 1 MiB body 边界；只有显式列入 `TRUST_PROXY` 的 IP/CIDR 才能影响客户端地址。所有边界都可通过 `.env.example` 中的变量收紧但不能禁用。
+API 与 Web 运行镜像均使用非 root 用户并包含健康检查。Web 容器在启动时把同源 `/api/*` 反向代理到 `COSMOS_API_UPSTREAM`（默认 `http://api:8787`）；部署时必须按服务发现地址覆盖该变量，并用 `COSMOS_CSP_CONNECT_SRC`、`COSMOS_CSP_FRAME_SRC` 明确列出 IdP/API 所需 HTTPS origin，例如 `COSMOS_CSP_CONNECT_SRC="'self' https://identity.example.com"`。TLS、WAF、全局限流和镜像签名仍由生产 Edge/IaC 落地。API 默认把数据库连接、客户端查询和 PostgreSQL statement 超时分别限制为 5s/20s/15s，并启用每实例有界限流、安全响应头和 1 MiB body 边界；只有显式列入 `TRUST_PROXY` 的 IP/CIDR 才能影响客户端地址。所有边界都可通过 `.env.example` 中的变量收紧但不能禁用。
 
 质量检查：
 
@@ -83,7 +83,7 @@ pnpm openapi:lint
 pnpm openapi:bundle
 ```
 
-也可单独执行 `pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm test:ops` 或 `pnpm build`。根命令会先构建 `@relay/contracts`，确保 API 与 Web 使用同一份生成类型。Pull Request 和主分支推送必须通过 `.github/workflows/required-checks.yml`：Node 22 + pnpm 11.7.0 冻结锁文件安装、生产依赖审计、全量检查、PostgreSQL 17 集成测试、OpenAPI lint/bundle、带 checksum 和 release/RLS/ACL/数据约束验证的逻辑备份与隔离恢复、连续 WAL 归档 live preflight、生产 migration/API/Web 容器与同源代理 smoke、CycloneDX SBOM、HIGH/CRITICAL 镜像扫描、空白错误检查和脱敏 Secret 扫描。生产恢复边界与季度演练步骤见 [PostgreSQL 备份与恢复 Runbook](./docs/postgres-recovery-runbook.md)；有界负载、Session journey 与依赖故障步骤见 [Load/Soak 与依赖故障演练 Runbook](./docs/load-failure-runbook.md)；跨租户低基数数据库运维指标使用独立 `pnpm metrics:database` observer 链路，规则与权限边界见 [Observability、SLO 与告警 Runbook](./docs/observability-slo-runbook.md)。
+也可单独执行 `pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm test:ops` 或 `pnpm build`。根命令会先构建 `@cosmos/contracts`，确保 API 与 Web 使用同一份生成类型。Pull Request 和主分支推送必须通过 `.github/workflows/required-checks.yml`：Node 22 + pnpm 11.7.0 冻结锁文件安装、生产依赖审计、全量检查、PostgreSQL 17 集成测试、OpenAPI lint/bundle、带 checksum 和 release/RLS/ACL/数据约束验证的逻辑备份与隔离恢复、连续 WAL 归档 live preflight、生产 migration/API/Web 容器与同源代理 smoke、CycloneDX SBOM、HIGH/CRITICAL 镜像扫描、空白错误检查和脱敏 Secret 扫描。生产恢复边界与季度演练步骤见 [PostgreSQL 备份与恢复 Runbook](./docs/postgres-recovery-runbook.md)；有界负载、Session journey 与依赖故障步骤见 [Load/Soak 与依赖故障演练 Runbook](./docs/load-failure-runbook.md)；跨租户低基数数据库运维指标使用独立 `pnpm metrics:database` observer 链路，规则与权限边界见 [Observability、SLO 与告警 Runbook](./docs/observability-slo-runbook.md)。
 
 ## 当前后端范围
 
@@ -112,7 +112,7 @@ pnpm openapi:bundle
 - 创建时只把 `expertId` 和允许的 `advancedOverrides` 作为选择输入；服务端解析当前 Published ExpertRevision、Active/Ready EnvironmentRevision 和 Repository binding，并把不可变 ID 与展示快照固定到 Session。
 - `start=true` 在同一 PostgreSQL 事务中写入 Session、首条 Message、Turn、Command、Outbox、连续 SessionEvent、脱敏 create success AuditEvent 和完整幂等响应；返回状态为 `queued`，不冒充 Agent 已执行。相同 key 重放不重复领域或审计事实。
 - 单 Session 响应和创建响应返回版本 `ETag`；Web 规范详情路由为 `/sessions/:sessionId`，旧 `/runs/:id` 只做兼容重定向。
-- API 成功响应与结构化错误均由 `@relay/contracts` 校验。
+- API 成功响应与结构化错误均由 `@cosmos/contracts` 校验。
 - Expert/Environment Catalog 使用 keyset cursor 分页；详情返回资源版本 `ETag`。生产 Web 只使用服务端 Published Expert 启动或保存 Session；当部署未显式开启基础执行时仅保存 draft，不提供本地假编辑或伪执行。
 - `start=false` 会原子持久化 draft Session、首条 Message、2 条连续 SessionEvent 与 1 条脱敏成功审计，但不会创建 Turn、Command 或 Outbox；用户输入不会被静默丢弃，也不会误入执行队列。
 - draft start 要求 `If-Match` 和 `Idempotency-Key`，复用已保存的首条 Message，并在单一事务中把 Session 更新为 `queued`、创建首个 Turn/Command/Outbox、追加连续 SessionEvent 与脱敏 AuditEvent；不会重复 Message 或执行事实。
@@ -124,7 +124,7 @@ pnpm openapi:bundle
 
 ## 原型范围
 
-- Session 管理：显式 demo 模式提供活跃、收藏、归档、搜索、重命名、恢复和删除，状态写入隔离的 `relay.demo.sessions`；生产模式不会读取该缓存，列表使用服务端 cursor 分页，并开放带 CAS/幂等保护的重命名、归档和恢复。收藏与删除仍只在 demo 模式显示。
+- Session 管理：显式 demo 模式提供活跃、收藏、归档、搜索、重命名、恢复和删除，状态写入隔离的 `cosmos.demo.sessions`；生产模式不会读取该缓存，列表使用服务端 cursor 分页，并开放带 CAS/幂等保护的重命名、归档和恢复。收藏与删除仍只在 demo 模式显示。
 - Session 工作台：demo 模式提供阶段轨道、事件时间线、追加指令、终端回放、文件 Diff 和审批决策；生产模式显示 canonical Session metadata、Message、Attempt/Session/ToolCall/Approval 事件与真实执行终态，并在执行能力可用时通过幂等 API 发送后续消息。Conversation、Session Workspace Files 与 Worker tree 使用精确 Session scope 的权威页面；Workspace 文件可带安全的预填消息返回对应 Session 请求修改，不把路径或草稿写入 URL。独立 Tool、Terminal 和 Changes 操作尚未服务化，不会冒充生产事实。
 - 控制平面：demo 模式包含运行记录、自动化、代码仓库、集成、治理中心和事件日志；生产 capability allowlist 当前开放 Sessions、Approvals、Experts、Environments 和只读 Files，其他直达路由不渲染模拟操作。
 - 关键交互：新建任务、切换证据视图、批准或退回、失败步骤重试、侧栏折叠和移动端抽屉。

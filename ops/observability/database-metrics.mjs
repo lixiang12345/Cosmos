@@ -18,7 +18,7 @@ if (!Number.isSafeInteger(workerFreshnessSeconds) || workerFreshnessSeconds < 5 
 
 const pool = new Pool({
   connectionString: databaseUrl,
-  options: '-c role=relay_observer_runtime',
+  options: '-c role=cosmos_observer_runtime',
   connectionTimeoutMillis: 5_000,
   query_timeout: 10_000,
   statement_timeout: 10_000,

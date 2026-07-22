@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { loadWorkerConfig, loadWorkerHealthConfig } from './worker-config.js'
 
 const required = {
-  DATABASE_URL: 'postgres://relay',
+  DATABASE_URL: 'postgres://cosmos',
   WORKER_ID: 'worker-a:1',
   AGENT_PROVIDER_BASE_URL: 'https://provider.example/v1/',
   AGENT_PROVIDER_API_KEY: 'provider-secret',
@@ -11,7 +11,7 @@ const required = {
 describe('execution worker configuration', () => {
   it('loads bounded defaults without exposing an implicit provider', () => {
     expect(loadWorkerConfig(required)).toEqual({
-      databaseUrl: 'postgres://relay',
+      databaseUrl: 'postgres://cosmos',
       databaseConnectionTimeoutMs: 5_000,
       databaseQueryTimeoutMs: 20_000,
       databaseStatementTimeoutMs: 15_000,

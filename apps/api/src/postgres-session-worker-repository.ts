@@ -3,7 +3,7 @@ import {
   SessionWorkerDtoSchema,
   type SessionWorkerDto,
   type SessionWorkerStatus,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 import type { Pool, PoolClient } from 'pg'
 import { setLocalApiDatabaseContext } from './postgres-runtime-database.js'
 import {
@@ -113,7 +113,7 @@ export class PostgresSessionWorkerRepository implements SessionWorkerRepository 
       await setLocalApiDatabaseContext(client, { organizationId, spaceId, actorId })
       const session = await client.query(`
         SELECT 1
-        FROM relay_sessions session
+        FROM cosmos_sessions session
         WHERE session.organization_id = $1
           AND session.space_id = $2
           AND session.id = $3
@@ -121,7 +121,7 @@ export class PostgresSessionWorkerRepository implements SessionWorkerRepository 
             session.visibility = 'space'
             OR session.created_by = $4
             OR EXISTS (
-              SELECT 1 FROM relay_session_share_grants share_grant
+              SELECT 1 FROM cosmos_session_share_grants share_grant
               WHERE share_grant.organization_id = session.organization_id
                 AND share_grant.space_id = session.space_id
                 AND share_grant.session_id = session.id
@@ -133,7 +133,7 @@ export class PostgresSessionWorkerRepository implements SessionWorkerRepository 
                   OR (
                     share_grant.principal_type = 'group'
                     AND EXISTS (
-                      SELECT 1 FROM relay_group_memberships group_membership
+                      SELECT 1 FROM cosmos_group_memberships group_membership
                       WHERE group_membership.organization_id = share_grant.organization_id
                         AND group_membership.group_id = share_grant.principal_id
                         AND group_membership.actor_id = $4
@@ -146,7 +146,7 @@ export class PostgresSessionWorkerRepository implements SessionWorkerRepository 
       if (!session.rowCount) return null
       const rows = await client.query<SessionWorkerRow>(`
         SELECT ${sessionWorkerColumns}
-        FROM relay_session_workers
+        FROM cosmos_session_workers
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
           AND ($4::timestamptz IS NULL OR (created_at, id) > ($4, $5))
         ORDER BY created_at, id
@@ -202,7 +202,7 @@ export class PostgresSessionWorkerWriterRepository implements SessionWorkerWrite
         await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [lockKey])
         const parent = record.parentWorkerId
           ? await client.query<{ depth: number }>(`
-              SELECT depth FROM relay_session_workers
+              SELECT depth FROM cosmos_session_workers
               WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
             `, [record.organizationId, record.spaceId, record.sessionId, record.parentWorkerId])
           : null
@@ -213,12 +213,12 @@ export class PostgresSessionWorkerWriterRepository implements SessionWorkerWrite
         if (depth > 16) throw new SessionWorkerConflictError('The Session Worker tree cannot exceed depth 16.')
         const ordinal = await client.query<{ ordinal: number }>(`
           SELECT COALESCE(max(ordinal), 0)::integer + 1 AS ordinal
-          FROM relay_session_workers
+          FROM cosmos_session_workers
           WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
             AND parent_worker_id IS NOT DISTINCT FROM $4::text
         `, [record.organizationId, record.spaceId, record.sessionId, record.parentWorkerId ?? null])
         const result = await client.query<SessionWorkerRow>(`
-          INSERT INTO relay_session_workers (
+          INSERT INTO cosmos_session_workers (
             organization_id, space_id, session_id, id, parent_turn_id,
             parent_worker_id, expert_revision_id, name, instructions, status,
             depth, ordinal, result_summary, created_by_worker_id,
@@ -271,7 +271,7 @@ export class PostgresSessionWorkerWriterRepository implements SessionWorkerWrite
       return await transaction(this.pool, async (client) => {
         const current = await client.query<SessionWorkerRow>(`
           SELECT ${sessionWorkerColumns}
-          FROM relay_session_workers
+          FROM cosmos_session_workers
           WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
           FOR UPDATE
         `, [record.organizationId, record.spaceId, record.sessionId, record.workerId])
@@ -281,7 +281,7 @@ export class PostgresSessionWorkerWriterRepository implements SessionWorkerWrite
           throw new SessionWorkerVersionConflictError(record.expectedVersion, existing.version)
         }
         const updated = await client.query<SessionWorkerRow>(`
-          UPDATE relay_session_workers
+          UPDATE cosmos_session_workers
           SET status = $5,
             result_summary = $6,
             updated_by_worker_id = $7,

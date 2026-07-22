@@ -4,7 +4,7 @@ import {
   SpaceMigrationPreviewSchema,
   SpaceMutationResponseSchema,
   type SpaceDto,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 import type { Pool, PoolClient } from 'pg'
 import { queryWithApiDatabaseContext, withApiDatabaseContext } from './postgres-runtime-database.js'
 import {
@@ -108,7 +108,7 @@ export class PostgresSpaceRepository implements SpaceRepository {
       JSON.stringify([input.organizationId, input.actorId, input.method, input.canonicalPath, keyHash]),
     ])
     const existing = await client.query<{ request_hash: string; response_body: unknown }>(`
-      SELECT request_hash, response_body FROM relay_space_idempotency
+      SELECT request_hash, response_body FROM cosmos_space_idempotency
       WHERE organization_id = $1 AND actor_id = $2 AND method = $3
         AND canonical_path = $4 AND idempotency_key_hash = $5 AND expires_at > $6
     `, [input.organizationId, input.actorId, input.method, input.canonicalPath, keyHash, now.toISOString()])
@@ -116,7 +116,7 @@ export class PostgresSpaceRepository implements SpaceRepository {
       if (existing.rows[0].request_hash !== requestHash) throw new SpaceIdempotencyConflictError()
       return { keyHash, requestHash, now, replay: existing.rows[0].response_body }
     }
-    await client.query(`DELETE FROM relay_space_idempotency
+    await client.query(`DELETE FROM cosmos_space_idempotency
       WHERE organization_id = $1 AND actor_id = $2 AND method = $3
         AND canonical_path = $4 AND idempotency_key_hash = $5 AND expires_at <= $6`,
     [input.organizationId, input.actorId, input.method, input.canonicalPath, keyHash, now.toISOString()])
@@ -127,7 +127,7 @@ export class PostgresSpaceRepository implements SpaceRepository {
     method: 'POST' | 'PATCH'; canonicalPath: string; keyHash: string; requestHash: string
     responseBody: unknown; statusCode: number
   }) {
-    await client.query(`INSERT INTO relay_space_idempotency (
+    await client.query(`INSERT INTO cosmos_space_idempotency (
       organization_id, actor_id, method, canonical_path, idempotency_key_hash,
       request_hash, status_code, response_body, expires_at
     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9)`, [
@@ -141,14 +141,14 @@ export class PostgresSpaceRepository implements SpaceRepository {
     spaceId: string; action: string; version: number; keyHash?: string
   }) {
     const occurredAt = this.now().toISOString()
-    await client.query(`INSERT INTO relay_space_audit_events (
+    await client.query(`INSERT INTO cosmos_space_audit_events (
       organization_id,id,space_id,actor_id,action,resource_version,request_id,
       idempotency_key_hash,occurred_at
     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [
       input.organizationId, this.createId(), input.spaceId, input.actorId,
       input.action, input.version, input.requestId, input.keyHash ?? null, occurredAt,
     ])
-    await client.query(`INSERT INTO relay_space_outbox_events (
+    await client.query(`INSERT INTO cosmos_space_outbox_events (
       organization_id,id,space_id,event_type,payload,occurred_at
     ) VALUES ($1,$2,$3,$4,'{}'::jsonb,$5)`, [
       input.organizationId, this.createId(), input.spaceId, input.action, occurredAt,
@@ -156,16 +156,16 @@ export class PostgresSpaceRepository implements SpaceRepository {
   }
 
   private selectOne(client: PoolClient, organizationId: string, spaceId: string, lock = false) {
-    return client.query<SpaceRow>(`SELECT ${columns} FROM relay_spaces space
-      JOIN relay_organizations organization ON organization.id = space.organization_id
+    return client.query<SpaceRow>(`SELECT ${columns} FROM cosmos_spaces space
+      JOIN cosmos_organizations organization ON organization.id = space.organization_id
       WHERE space.organization_id = $1 AND space.id = $2${lock ? ' FOR UPDATE OF space' : ''}`,
     [organizationId, spaceId])
   }
 
   async listSpaces(organizationId: string, actorId: string) {
     const result = await queryWithApiDatabaseContext<SpaceRow>(this.pool, { organizationId, actorId }, `
-      SELECT ${columns} FROM relay_spaces space
-      JOIN relay_organizations organization ON organization.id = space.organization_id
+      SELECT ${columns} FROM cosmos_spaces space
+      JOIN cosmos_organizations organization ON organization.id = space.organization_id
       WHERE space.organization_id = $1 AND space.status <> 'archived'
       ORDER BY is_default DESC, space.name, space.id
     `, [organizationId])
@@ -175,8 +175,8 @@ export class PostgresSpaceRepository implements SpaceRepository {
   async getSpace(organizationId: string, spaceId: string, actorId: string) {
     const result = await queryWithApiDatabaseContext<SpaceRow>(this.pool, {
       organizationId, spaceId, actorId,
-    }, `SELECT ${columns} FROM relay_spaces space
-      JOIN relay_organizations organization ON organization.id = space.organization_id
+    }, `SELECT ${columns} FROM cosmos_spaces space
+      JOIN cosmos_organizations organization ON organization.id = space.organization_id
       WHERE space.organization_id = $1 AND space.id = $2`, [organizationId, spaceId])
     return result.rows[0] ? mapSpace(result.rows[0]) : null
   }
@@ -191,7 +191,7 @@ export class PostgresSpaceRepository implements SpaceRepository {
         const response = SpaceMutationResponseSchema.parse(idempotency.replay)
         return { space: response.space, replayed: true }
       }
-      const role = await client.query<{ role: string }>(`SELECT role FROM relay_organization_memberships
+      const role = await client.query<{ role: string }>(`SELECT role FROM cosmos_organization_memberships
         WHERE organization_id = $1 AND actor_id = $2`, [record.organizationId, record.actorId])
       if (!['organization_owner', 'organization_admin'].includes(role.rows[0]?.role ?? '')) {
         throw new SpacePermissionError('Only Organization owners and admins can create Spaces.')
@@ -200,7 +200,7 @@ export class PostgresSpaceRepository implements SpaceRepository {
       const now = idempotency.now.toISOString()
       const slug = record.request.slug ?? slugify(record.request.name)
       try {
-        await client.query(`INSERT INTO relay_spaces (
+        await client.query(`INSERT INTO cosmos_spaces (
           organization_id,id,name,slug,description,status,settings,version,created_at,updated_at
         ) VALUES ($1,$2,$3,$4,$5,'active','{}'::jsonb,1,$6,$6)
         `, [
@@ -210,10 +210,10 @@ export class PostgresSpaceRepository implements SpaceRepository {
         if ((error as { code?: string }).code === '23505') throw new SpaceValidationError('Space slug already exists.', 'slug')
         throw error
       }
-      await client.query(`INSERT INTO relay_space_memberships (
+      await client.query(`INSERT INTO cosmos_space_memberships (
         organization_id,space_id,actor_id,role,created_at
       ) VALUES ($1,$2,$3,'space_manager',$4)`, [record.organizationId, id, record.actorId, now])
-      await client.query(`UPDATE relay_organizations SET default_space_id = COALESCE(default_space_id, $2)
+      await client.query(`UPDATE cosmos_organizations SET default_space_id = COALESCE(default_space_id, $2)
         WHERE id = $1`, [record.organizationId, id])
       const selected = await this.selectOne(client, record.organizationId, id)
       const space = mapSpace(selected.rows[0]!)
@@ -239,14 +239,14 @@ export class PostgresSpaceRepository implements SpaceRepository {
     request: { defaultExpertId?: string | null; defaultEnvironmentId?: string | null }
   }) {
     if (record.request.defaultExpertId) {
-      const expert = await client.query(`SELECT 1 FROM relay_experts WHERE organization_id=$1 AND space_id=$2
+      const expert = await client.query(`SELECT 1 FROM cosmos_experts WHERE organization_id=$1 AND space_id=$2
         AND id=$3 AND status='published' AND published_revision_id IS NOT NULL`, [
         record.organizationId, record.spaceId, record.request.defaultExpertId,
       ])
       if (!expert.rows[0]) throw new SpaceValidationError('Default Expert must be published in this Space.', 'defaultExpertId')
     }
     if (record.request.defaultEnvironmentId) {
-      const environment = await client.query(`SELECT 1 FROM relay_environments WHERE organization_id=$1 AND space_id=$2
+      const environment = await client.query(`SELECT 1 FROM cosmos_environments WHERE organization_id=$1 AND space_id=$2
         AND id=$3 AND status='ready' AND active_revision_id IS NOT NULL`, [
         record.organizationId, record.spaceId, record.request.defaultEnvironmentId,
       ])
@@ -276,12 +276,12 @@ export class PostgresSpaceRepository implements SpaceRepository {
       if (current.status !== 'active') throw new SpaceValidationError('Only active Spaces can be updated.')
       await this.validateDefaults(client, record)
       const now = idempotency.now.toISOString()
-      const result = await client.query<SpaceRow>(`UPDATE relay_spaces space SET
+      const result = await client.query<SpaceRow>(`UPDATE cosmos_spaces space SET
         name=COALESCE($3,space.name), description=COALESCE($4,space.description),
         default_expert_id=CASE WHEN $5 THEN $6 ELSE space.default_expert_id END,
         default_environment_id=CASE WHEN $7 THEN $8 ELSE space.default_environment_id END,
         settings=COALESCE($9::jsonb,space.settings), version=space.version+1, updated_at=$10
-        FROM relay_organizations organization
+        FROM cosmos_organizations organization
         WHERE space.organization_id=$1 AND space.id=$2 AND organization.id=space.organization_id
         RETURNING ${columns}
       `, [record.organizationId, record.spaceId, record.request.name ?? null,
@@ -311,15 +311,15 @@ export class PostgresSpaceRepository implements SpaceRepository {
       const current = await this.lockSpace(client, record)
       if (!current) return null
       if (current.status !== 'active') throw new SpaceValidationError('Only an active Space can become the Default Space.')
-      const role = await client.query<{ role: string }>(`SELECT role FROM relay_organization_memberships
+      const role = await client.query<{ role: string }>(`SELECT role FROM cosmos_organization_memberships
         WHERE organization_id=$1 AND actor_id=$2`, [record.organizationId, record.actorId])
       if (!['organization_owner', 'organization_admin'].includes(role.rows[0]?.role ?? '')) {
         throw new SpacePermissionError('Only Organization owners and admins can change the Default Space.')
       }
-      await client.query('UPDATE relay_organizations SET default_space_id=$2 WHERE id=$1', [record.organizationId, record.spaceId])
+      await client.query('UPDATE cosmos_organizations SET default_space_id=$2 WHERE id=$1', [record.organizationId, record.spaceId])
       const now = idempotency.now.toISOString()
-      const updated = await client.query<SpaceRow>(`UPDATE relay_spaces space SET version=version+1,updated_at=$3
-        FROM relay_organizations organization WHERE space.organization_id=$1 AND space.id=$2
+      const updated = await client.query<SpaceRow>(`UPDATE cosmos_spaces space SET version=version+1,updated_at=$3
+        FROM cosmos_organizations organization WHERE space.organization_id=$1 AND space.id=$2
           AND organization.id=space.organization_id RETURNING ${columns}`,
       [record.organizationId, record.spaceId, now])
       const space = mapSpace(updated.rows[0]!)
@@ -343,11 +343,11 @@ export class PostgresSpaceRepository implements SpaceRepository {
       const target = mapSpace(targetResult.rows[0])
       const counts = await client.query<{ sessions: string; experts: string; environments: string; automations: string; files: string }>(`
         SELECT
-          (SELECT count(*) FROM relay_sessions WHERE organization_id=$1 AND space_id=$2)::text AS sessions,
-          (SELECT count(*) FROM relay_experts WHERE organization_id=$1 AND space_id=$2)::text AS experts,
-          (SELECT count(*) FROM relay_environments WHERE organization_id=$1 AND space_id=$2)::text AS environments,
-          (SELECT count(*) FROM relay_expert_triggers WHERE organization_id=$1 AND space_id=$2)::text AS automations,
-          (SELECT count(*) FROM relay_files WHERE organization_id=$1 AND space_id=$2)::text AS files
+          (SELECT count(*) FROM cosmos_sessions WHERE organization_id=$1 AND space_id=$2)::text AS sessions,
+          (SELECT count(*) FROM cosmos_experts WHERE organization_id=$1 AND space_id=$2)::text AS experts,
+          (SELECT count(*) FROM cosmos_environments WHERE organization_id=$1 AND space_id=$2)::text AS environments,
+          (SELECT count(*) FROM cosmos_expert_triggers WHERE organization_id=$1 AND space_id=$2)::text AS automations,
+          (SELECT count(*) FROM cosmos_files WHERE organization_id=$1 AND space_id=$2)::text AS files
       `, [organizationId, spaceId])
       const blockingReasons = [
         ...(source.isDefault ? ['The Default Space cannot be migrated or deleted. Select another Default Space first.'] : []),

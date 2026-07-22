@@ -5,7 +5,7 @@ import type {
   SessionMessageDto,
   SessionStatus,
   SessionVisibility,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 import {
   Activity,
   ArrowLeft,

@@ -4,12 +4,12 @@ BEGIN
   FOR constraint_record IN
     SELECT conrelid::regclass AS table_name, conname
     FROM pg_constraint
-    WHERE conrelid = 'relay_session_events'::regclass
+    WHERE conrelid = 'cosmos_session_events'::regclass
       AND conname IN (
-        'relay_session_events_message_tenant_fk',
-        'relay_session_events_turn_tenant_fk',
-        'relay_session_events_command_tenant_fk',
-        'relay_session_events_typed_resource_check'
+        'cosmos_session_events_message_tenant_fk',
+        'cosmos_session_events_turn_tenant_fk',
+        'cosmos_session_events_command_tenant_fk',
+        'cosmos_session_events_typed_resource_check'
       )
       AND NOT convalidated
   LOOP

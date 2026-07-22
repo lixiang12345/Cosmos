@@ -1,6 +1,6 @@
 SET LOCAL lock_timeout = '5s';
 
-CREATE TABLE relay_session_workers (
+CREATE TABLE cosmos_session_workers (
   organization_id text NOT NULL,
   space_id text NOT NULL,
   session_id text NOT NULL,
@@ -23,7 +23,7 @@ CREATE TABLE relay_session_workers (
   version integer NOT NULL DEFAULT 1 CHECK (version > 0),
   PRIMARY KEY (organization_id, space_id, session_id, id),
   FOREIGN KEY (organization_id, space_id, session_id)
-    REFERENCES relay_sessions(organization_id, space_id, id) ON DELETE RESTRICT,
+    REFERENCES cosmos_sessions(organization_id, space_id, id) ON DELETE RESTRICT,
   CHECK (btrim(name) <> '' AND char_length(name) <= 240),
   CHECK (btrim(instructions) <> '' AND char_length(instructions) <= 20000),
   CHECK (result_summary IS NULL
@@ -37,35 +37,35 @@ CREATE TABLE relay_session_workers (
   CHECK (completed_at IS NULL OR completed_at >= created_at)
 );
 
-ALTER TABLE relay_session_workers
-  ADD CONSTRAINT relay_session_workers_turn_tenant_fk
+ALTER TABLE cosmos_session_workers
+  ADD CONSTRAINT cosmos_session_workers_turn_tenant_fk
   FOREIGN KEY (organization_id, space_id, session_id, parent_turn_id)
-  REFERENCES relay_turns(organization_id, space_id, session_id, id)
+  REFERENCES cosmos_turns(organization_id, space_id, session_id, id)
   ON DELETE RESTRICT NOT VALID,
-  ADD CONSTRAINT relay_session_workers_parent_tenant_fk
+  ADD CONSTRAINT cosmos_session_workers_parent_tenant_fk
   FOREIGN KEY (organization_id, space_id, session_id, parent_worker_id)
-  REFERENCES relay_session_workers(organization_id, space_id, session_id, id)
+  REFERENCES cosmos_session_workers(organization_id, space_id, session_id, id)
   ON DELETE RESTRICT NOT VALID;
 
-ALTER TABLE relay_session_workers
-  ADD CONSTRAINT relay_session_workers_sibling_ordinal_unique
+ALTER TABLE cosmos_session_workers
+  ADD CONSTRAINT cosmos_session_workers_sibling_ordinal_unique
   UNIQUE NULLS NOT DISTINCT (
     organization_id, space_id, session_id, parent_worker_id, ordinal
   );
 
-CREATE INDEX relay_session_workers_page_idx
-  ON relay_session_workers (
+CREATE INDEX cosmos_session_workers_page_idx
+  ON cosmos_session_workers (
     organization_id, space_id, session_id, created_at, id
   );
 
-CREATE OR REPLACE FUNCTION relay_validate_session_worker()
+CREATE OR REPLACE FUNCTION cosmos_validate_session_worker()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 DECLARE parent_depth integer;
 BEGIN
   IF TG_OP = 'DELETE' THEN
-    RAISE EXCEPTION 'Relay Session Worker rows cannot be deleted'
+    RAISE EXCEPTION 'Cosmos Session Worker rows cannot be deleted'
       USING ERRCODE = '55000';
   END IF;
 
@@ -77,7 +77,7 @@ BEGIN
       END IF;
     ELSE
       SELECT worker.depth INTO parent_depth
-      FROM relay_session_workers worker
+      FROM cosmos_session_workers worker
       WHERE worker.organization_id = NEW.organization_id
         AND worker.space_id = NEW.space_id
         AND worker.session_id = NEW.session_id
@@ -94,8 +94,8 @@ BEGIN
 
     IF NEW.expert_revision_id IS NOT NULL AND NOT EXISTS (
       SELECT 1
-      FROM relay_sessions session
-      JOIN relay_expert_revisions revision
+      FROM cosmos_sessions session
+      JOIN cosmos_expert_revisions revision
         ON revision.organization_id = session.organization_id
         AND revision.space_id = session.space_id
         AND revision.expert_id = session.expert_id
@@ -121,12 +121,12 @@ BEGIN
     OLD.name, OLD.instructions, OLD.depth, OLD.ordinal,
     OLD.created_by_worker_id, OLD.created_at
   ) THEN
-    RAISE EXCEPTION 'Relay Session Worker identity and instructions are immutable'
+    RAISE EXCEPTION 'Cosmos Session Worker identity and instructions are immutable'
       USING ERRCODE = '55000';
   END IF;
 
   IF OLD.status IN ('completed', 'failed', 'canceled') THEN
-    RAISE EXCEPTION 'Terminal Relay Session Workers are immutable'
+    RAISE EXCEPTION 'Terminal Cosmos Session Workers are immutable'
       USING ERRCODE = '55000';
   END IF;
   IF NOT (
@@ -134,55 +134,55 @@ BEGIN
     OR (OLD.status = 'running' AND NEW.status IN ('waiting', 'completed', 'failed', 'canceled'))
     OR (OLD.status = 'waiting' AND NEW.status IN ('running', 'completed', 'failed', 'canceled'))
   ) THEN
-    RAISE EXCEPTION 'Invalid Relay Session Worker status transition % -> %', OLD.status, NEW.status
+    RAISE EXCEPTION 'Invalid Cosmos Session Worker status transition % -> %', OLD.status, NEW.status
       USING ERRCODE = '23514';
   END IF;
   IF NEW.version <> OLD.version + 1 THEN
-    RAISE EXCEPTION 'Relay Session Worker updates must advance version by one'
+    RAISE EXCEPTION 'Cosmos Session Worker updates must advance version by one'
       USING ERRCODE = '23514';
   END IF;
   IF NEW.updated_at < OLD.updated_at THEN
-    RAISE EXCEPTION 'Relay Session Worker updated_at cannot move backwards'
+    RAISE EXCEPTION 'Cosmos Session Worker updated_at cannot move backwards'
       USING ERRCODE = '23514';
   END IF;
   RETURN NEW;
 END;
 $$;
 
-CREATE TRIGGER relay_session_workers_validate
-  BEFORE INSERT OR UPDATE OR DELETE ON relay_session_workers
-  FOR EACH ROW EXECUTE FUNCTION relay_validate_session_worker();
+CREATE TRIGGER cosmos_session_workers_validate
+  BEFORE INSERT OR UPDATE OR DELETE ON cosmos_session_workers
+  FOR EACH ROW EXECUTE FUNCTION cosmos_validate_session_worker();
 
-CREATE TRIGGER relay_session_workers_reject_truncate
-  BEFORE TRUNCATE ON relay_session_workers
-  FOR EACH STATEMENT EXECUTE FUNCTION relay_reject_ledger_mutation();
+CREATE TRIGGER cosmos_session_workers_reject_truncate
+  BEFORE TRUNCATE ON cosmos_session_workers
+  FOR EACH STATEMENT EXECUTE FUNCTION cosmos_reject_ledger_mutation();
 
-REVOKE DELETE, TRUNCATE ON relay_session_workers FROM PUBLIC;
-GRANT SELECT ON relay_session_workers TO relay_api_runtime;
-GRANT SELECT, INSERT, UPDATE ON relay_session_workers TO relay_worker_runtime;
+REVOKE DELETE, TRUNCATE ON cosmos_session_workers FROM PUBLIC;
+GRANT SELECT ON cosmos_session_workers TO cosmos_api_runtime;
+GRANT SELECT, INSERT, UPDATE ON cosmos_session_workers TO cosmos_worker_runtime;
 
-ALTER TABLE relay_session_workers ENABLE ROW LEVEL SECURITY;
-ALTER TABLE relay_session_workers FORCE ROW LEVEL SECURITY;
+ALTER TABLE cosmos_session_workers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cosmos_session_workers FORCE ROW LEVEL SECURITY;
 
-CREATE POLICY relay_migration_admin ON relay_session_workers TO CURRENT_USER
+CREATE POLICY cosmos_migration_admin ON cosmos_session_workers TO CURRENT_USER
   USING (true) WITH CHECK (true);
 
-CREATE POLICY relay_api_tenant_select ON relay_session_workers
-  FOR SELECT TO relay_api_runtime
+CREATE POLICY cosmos_api_tenant_select ON cosmos_session_workers
+  FOR SELECT TO cosmos_api_runtime
   USING (
-    organization_id = NULLIF(current_setting('relay.organization_id', true), '')
-    AND space_id = NULLIF(current_setting('relay.space_id', true), '')
+    organization_id = NULLIF(current_setting('cosmos.organization_id', true), '')
+    AND space_id = NULLIF(current_setting('cosmos.space_id', true), '')
     AND EXISTS (
-      SELECT 1 FROM relay_sessions visible_session
-      WHERE visible_session.organization_id = relay_session_workers.organization_id
-        AND visible_session.space_id = relay_session_workers.space_id
-        AND visible_session.id = relay_session_workers.session_id
+      SELECT 1 FROM cosmos_sessions visible_session
+      WHERE visible_session.organization_id = cosmos_session_workers.organization_id
+        AND visible_session.space_id = cosmos_session_workers.space_id
+        AND visible_session.id = cosmos_session_workers.session_id
     )
   );
 
-CREATE POLICY relay_worker_select ON relay_session_workers
-  FOR SELECT TO relay_worker_runtime USING (true);
-CREATE POLICY relay_worker_insert ON relay_session_workers
-  FOR INSERT TO relay_worker_runtime WITH CHECK (true);
-CREATE POLICY relay_worker_update ON relay_session_workers
-  FOR UPDATE TO relay_worker_runtime USING (true) WITH CHECK (true);
+CREATE POLICY cosmos_worker_select ON cosmos_session_workers
+  FOR SELECT TO cosmos_worker_runtime USING (true);
+CREATE POLICY cosmos_worker_insert ON cosmos_session_workers
+  FOR INSERT TO cosmos_worker_runtime WITH CHECK (true);
+CREATE POLICY cosmos_worker_update ON cosmos_session_workers
+  FOR UPDATE TO cosmos_worker_runtime USING (true) WITH CHECK (true);

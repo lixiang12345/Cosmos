@@ -31,34 +31,34 @@ async function applyMigrations(pool: Pool, migrations: string[]) {
 
 async function seedLegacyTenantReferences(pool: Pool) {
   await pool.query(`
-    INSERT INTO relay_organizations (id, name)
+    INSERT INTO cosmos_organizations (id, name)
     VALUES ('organization-a', 'Organization A'), ('organization-b', 'Organization B');
 
-    INSERT INTO relay_spaces (organization_id, id, name)
+    INSERT INTO cosmos_spaces (organization_id, id, name)
     VALUES
       ('organization-a', 'space-a', 'Space A'),
       ('organization-a', 'space-b', 'Space B'),
       ('organization-b', 'space-a', 'Space A');
 
-    INSERT INTO relay_sessions (
+    INSERT INTO cosmos_sessions (
       id, organization_id, space_id, title, summary, expert_id, expert_name,
       repository, base_branch, visibility, status, source, created_by,
       created_at, updated_at, last_activity_at, version
     ) VALUES
       ('session-a', 'organization-a', 'space-a', 'Session A', '', 'expert-a',
-        'Expert A', 'relay/repository', 'main', 'private', 'active', 'manual',
+        'Expert A', 'cosmos/repository', 'main', 'private', 'active', 'manual',
         'test-actor', now(), now(), now(), 1),
       ('session-sibling', 'organization-a', 'space-a', 'Sibling Session', '',
-        'expert-a', 'Expert A', 'relay/repository', 'main', 'private', 'active',
+        'expert-a', 'Expert A', 'cosmos/repository', 'main', 'private', 'active',
         'manual', 'test-actor', now(), now(), now(), 1),
       ('session-space-b', 'organization-a', 'space-b', 'Space B Session', '',
-        'expert-a', 'Expert A', 'relay/repository', 'main', 'private', 'active',
+        'expert-a', 'Expert A', 'cosmos/repository', 'main', 'private', 'active',
         'manual', 'test-actor', now(), now(), now(), 1),
       ('session-organization-b', 'organization-b', 'space-a', 'Organization B Session', '',
-        'expert-a', 'Expert A', 'relay/repository', 'main', 'private', 'active',
+        'expert-a', 'Expert A', 'cosmos/repository', 'main', 'private', 'active',
         'manual', 'test-actor', now(), now(), now(), 1);
 
-    INSERT INTO relay_messages (
+    INSERT INTO cosmos_messages (
       id, organization_id, space_id, session_id, sequence, role, content, created_at
     ) VALUES
       ('message-a', 'organization-a', 'space-a', 'session-a', 1, 'user', 'A', now()),
@@ -75,7 +75,7 @@ async function preparePreIntegritySchema(pool: Pool) {
 }
 
 describeWithDatabase('008-013 tenant reference integrity migrations', () => {
-  const schema = `relay_tenant_integrity_${crypto.randomUUID().replaceAll('-', '')}`
+  const schema = `cosmos_tenant_integrity_${crypto.randomUUID().replaceAll('-', '')}`
   const adminPool = new Pool({ connectionString: databaseUrl })
   const migrationPool = new Pool({
     connectionString: databaseUrl,
@@ -107,15 +107,15 @@ describeWithDatabase('008-013 tenant reference integrity migrations', () => {
       FROM pg_constraint
       WHERE connamespace = $1::regnamespace
         AND conname IN (
-          'relay_turns_input_message_tenant_fk',
-          'relay_idempotency_records_session_tenant_fk'
+          'cosmos_turns_input_message_tenant_fk',
+          'cosmos_idempotency_records_session_tenant_fk'
         )
       ORDER BY conname
     `, [schema])
 
     expect(constraints.rows).toEqual([
-      { conname: 'relay_idempotency_records_session_tenant_fk', convalidated: true },
-      { conname: 'relay_turns_input_message_tenant_fk', convalidated: true },
+      { conname: 'cosmos_idempotency_records_session_tenant_fk', convalidated: true },
+      { conname: 'cosmos_turns_input_message_tenant_fk', convalidated: true },
     ])
   })
 
@@ -127,7 +127,7 @@ describeWithDatabase('008-013 tenant reference integrity migrations', () => {
   })
 
   it('repairs an already-versioned legacy schema that lacks composite Session constraints', async () => {
-    const legacySchema = `relay_legacy_integrity_${crypto.randomUUID().replaceAll('-', '')}`
+    const legacySchema = `cosmos_legacy_integrity_${crypto.randomUUID().replaceAll('-', '')}`
     const legacyPool = new Pool({
       connectionString: databaseUrl,
       options: `-c search_path=${legacySchema}`,
@@ -141,17 +141,17 @@ describeWithDatabase('008-013 tenant reference integrity migrations', () => {
         DECLARE constraint_name text;
         BEGIN
           FOREACH table_name IN ARRAY ARRAY[
-            'relay_messages'::regclass,
-            'relay_turns'::regclass,
-            'relay_commands'::regclass,
-            'relay_outbox_events'::regclass,
-            'relay_idempotency_records'::regclass
+            'cosmos_messages'::regclass,
+            'cosmos_turns'::regclass,
+            'cosmos_commands'::regclass,
+            'cosmos_outbox_events'::regclass,
+            'cosmos_idempotency_records'::regclass
           ]
           LOOP
             FOR constraint_name IN
               SELECT conname FROM pg_constraint
               WHERE conrelid = table_name
-                AND confrelid IN ('relay_sessions'::regclass, 'relay_messages'::regclass)
+                AND confrelid IN ('cosmos_sessions'::regclass, 'cosmos_messages'::regclass)
                 AND contype = 'f'
             LOOP
               EXECUTE format('ALTER TABLE %s DROP CONSTRAINT %I', table_name, constraint_name);
@@ -159,8 +159,8 @@ describeWithDatabase('008-013 tenant reference integrity migrations', () => {
           END LOOP;
         END;
         $$;
-        ALTER TABLE relay_sessions
-          DROP CONSTRAINT relay_sessions_tenant_identity_unique;
+        ALTER TABLE cosmos_sessions
+          DROP CONSTRAINT cosmos_sessions_tenant_identity_unique;
       `)
 
       await applyMigrations(legacyPool, [
@@ -176,13 +176,13 @@ describeWithDatabase('008-013 tenant reference integrity migrations', () => {
         FROM pg_constraint
         WHERE connamespace = $1::regnamespace
           AND conname IN (
-            'relay_sessions_tenant_identity_unique',
-            'relay_messages_session_tenant_fk',
-            'relay_turns_session_tenant_fk',
-            'relay_turns_input_message_tenant_fk',
-            'relay_commands_session_tenant_fk',
-            'relay_outbox_events_session_tenant_fk',
-            'relay_idempotency_records_session_tenant_fk'
+            'cosmos_sessions_tenant_identity_unique',
+            'cosmos_messages_session_tenant_fk',
+            'cosmos_turns_session_tenant_fk',
+            'cosmos_turns_input_message_tenant_fk',
+            'cosmos_commands_session_tenant_fk',
+            'cosmos_outbox_events_session_tenant_fk',
+            'cosmos_idempotency_records_session_tenant_fk'
           )
         ORDER BY conname
       `, [legacySchema])
@@ -195,8 +195,8 @@ describeWithDatabase('008-013 tenant reference integrity migrations', () => {
   })
 
   it('validates only the active schema and does not trust a custom unvalidated FK', async () => {
-    const cleanSchema = `relay_clean_validation_${crypto.randomUUID().replaceAll('-', '')}`
-    const dirtySchema = `relay_other_validation_${crypto.randomUUID().replaceAll('-', '')}`
+    const cleanSchema = `cosmos_clean_validation_${crypto.randomUUID().replaceAll('-', '')}`
+    const dirtySchema = `cosmos_other_validation_${crypto.randomUUID().replaceAll('-', '')}`
     const cleanPool = new Pool({
       connectionString: databaseUrl,
       options: `-c search_path=${cleanSchema}`,
@@ -219,14 +219,14 @@ describeWithDatabase('008-013 tenant reference integrity migrations', () => {
       await applyMigrations(cleanPool, indexMigrations)
       await applyMigrations(dirtyPool, indexMigrations)
       await cleanPool.query(`
-        ALTER TABLE relay_idempotency_records
+        ALTER TABLE cosmos_idempotency_records
           ADD CONSTRAINT custom_unvalidated_session_tenant_fk
           FOREIGN KEY (organization_id, space_id, session_id)
-          REFERENCES relay_sessions(organization_id, space_id, id)
+          REFERENCES cosmos_sessions(organization_id, space_id, id)
           NOT VALID
       `)
       await dirtyPool.query(`
-        INSERT INTO relay_idempotency_records (
+        INSERT INTO cosmos_idempotency_records (
           organization_id, space_id, actor_id, method, canonical_path,
           idempotency_key_hash, request_hash, session_id, expires_at
         ) VALUES (
@@ -242,8 +242,8 @@ describeWithDatabase('008-013 tenant reference integrity migrations', () => {
         .resolves.toBeUndefined()
       const cleanConstraint = await cleanPool.query<{ convalidated: boolean }>(`
         SELECT convalidated FROM pg_constraint
-        WHERE conrelid = 'relay_idempotency_records'::regclass
-          AND conname = 'relay_idempotency_records_session_tenant_fk'
+        WHERE conrelid = 'cosmos_idempotency_records'::regclass
+          AND conname = 'cosmos_idempotency_records_session_tenant_fk'
       `)
       expect(cleanConstraint.rows).toEqual([{ convalidated: true }])
       await expectForeignKeyViolation(
@@ -259,7 +259,7 @@ describeWithDatabase('008-013 tenant reference integrity migrations', () => {
 
   it('allows same-tenant Turn and idempotency references', async () => {
     await expect(migrationPool.query(`
-      INSERT INTO relay_turns (
+      INSERT INTO cosmos_turns (
         id, organization_id, space_id, session_id, ordinal, initiator_type,
         input_message_id, status, queued_at, version
       ) VALUES (
@@ -267,7 +267,7 @@ describeWithDatabase('008-013 tenant reference integrity migrations', () => {
         'message-a', 'queued', now(), 1
       );
 
-      INSERT INTO relay_idempotency_records (
+      INSERT INTO cosmos_idempotency_records (
         organization_id, space_id, actor_id, method, canonical_path,
         idempotency_key_hash, request_hash, session_id, expires_at
       ) VALUES (
@@ -284,7 +284,7 @@ describeWithDatabase('008-013 tenant reference integrity migrations', () => {
     ['another Organization', 'message-organization-b'],
   ])('rejects a Turn input Message from %s', async (_label, messageId) => {
     await expectForeignKeyViolation(migrationPool.query(`
-      INSERT INTO relay_turns (
+      INSERT INTO cosmos_turns (
         id, organization_id, space_id, session_id, ordinal, initiator_type,
         input_message_id, status, queued_at, version
       ) VALUES (
@@ -299,7 +299,7 @@ describeWithDatabase('008-013 tenant reference integrity migrations', () => {
     ['another Organization', 'session-organization-b'],
   ])('rejects an idempotency Session from %s', async (_label, sessionId) => {
     await expectForeignKeyViolation(migrationPool.query(`
-      INSERT INTO relay_idempotency_records (
+      INSERT INTO cosmos_idempotency_records (
         organization_id, space_id, actor_id, method, canonical_path,
         idempotency_key_hash, request_hash, session_id, expires_at
       ) VALUES (
@@ -313,32 +313,32 @@ describeWithDatabase('008-013 tenant reference integrity migrations', () => {
   it.each([
     [
       'Turn input Message',
-      `INSERT INTO relay_turns (
+      `INSERT INTO cosmos_turns (
         id, organization_id, space_id, session_id, ordinal, initiator_type,
         input_message_id, status, queued_at, version
       ) VALUES (
         'dirty-turn', 'organization-a', 'space-a', 'session-a', 1, 'user',
         'message-organization-b', 'queued', now(), 1
       )`,
-      "DELETE FROM relay_turns WHERE id = 'dirty-turn'",
+      "DELETE FROM cosmos_turns WHERE id = 'dirty-turn'",
     ],
     [
       'idempotency Session',
-      `INSERT INTO relay_idempotency_records (
+      `INSERT INTO cosmos_idempotency_records (
         organization_id, space_id, actor_id, method, canonical_path,
         idempotency_key_hash, request_hash, session_id, expires_at
       ) VALUES (
         'organization-a', 'space-a', 'test-actor', 'POST', '/sessions',
         'dirty-key', 'dirty-request', 'session-organization-b', now() + interval '1 day'
       )`,
-      "DELETE FROM relay_idempotency_records WHERE idempotency_key_hash = 'dirty-key'",
+      "DELETE FROM cosmos_idempotency_records WHERE idempotency_key_hash = 'dirty-key'",
     ],
   ])('refuses to validate an existing cross-tenant %s reference', async (
     _label,
     dirtyInsert,
     removeDirtyRow,
   ) => {
-    const dirtySchema = `relay_dirty_integrity_${crypto.randomUUID().replaceAll('-', '')}`
+    const dirtySchema = `cosmos_dirty_integrity_${crypto.randomUUID().replaceAll('-', '')}`
     const dirtyPool = new Pool({
       connectionString: databaseUrl,
       options: `-c search_path=${dirtySchema}`,

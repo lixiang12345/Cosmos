@@ -1,4 +1,4 @@
-import type { ContextPackResponse } from '@relay/contracts'
+import type { ContextPackResponse } from '@cosmos/contracts'
 import {
   AlertTriangle,
   Bot,

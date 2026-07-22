@@ -25,7 +25,7 @@ describe('control plane operations', () => {
     const initial = createSeededControlPlaneState()
     const created = createEnvironment(initial, {
       name: 'Payment verification',
-      image: 'relay-ubuntu-22.04',
+      image: 'cosmos-ubuntu-22.04',
     }, '2026-07-12T04:00:00.000Z')
 
     const pulling = advanceEnvironmentProvisioning(created.state, created.value.id, '2026-07-12T04:00:01.000Z')

@@ -22,8 +22,8 @@ function BrokenView({ error }: { error: Error }): never {
 
 describe('RootErrorBoundary', () => {
   it('shows an English asset-loading recovery screen for lazy chunk failures', () => {
-    window.localStorage.setItem('relay.locale', 'en')
-    window.localStorage.setItem('relay.theme', 'light')
+    window.localStorage.setItem('cosmos.locale', 'en')
+    window.localStorage.setItem('cosmos.theme', 'light')
 
     render(
       <RootErrorBoundary>
@@ -39,7 +39,7 @@ describe('RootErrorBoundary', () => {
   })
 
   it('re-mounts the child tree when the user retries a render error', async () => {
-    window.localStorage.setItem('relay.locale', 'zh')
+    window.localStorage.setItem('cosmos.locale', 'zh')
     let broken = true
 
     function RecoverableView() {
@@ -60,7 +60,7 @@ describe('RootErrorBoundary', () => {
   })
 
   it('allows one safe refresh per location inside the safety window', async () => {
-    window.localStorage.setItem('relay.locale', 'en')
+    window.localStorage.setItem('cosmos.locale', 'en')
     const reloadPage = vi.fn()
     const now = 1_800_000_000_000
 

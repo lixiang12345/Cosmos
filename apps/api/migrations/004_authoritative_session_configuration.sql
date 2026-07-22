@@ -1,4 +1,4 @@
-CREATE TABLE relay_environments (
+CREATE TABLE cosmos_environments (
   organization_id text NOT NULL,
   space_id text NOT NULL,
   id text NOT NULL,
@@ -12,11 +12,11 @@ CREATE TABLE relay_environments (
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (organization_id, space_id, id),
   FOREIGN KEY (organization_id, space_id)
-    REFERENCES relay_spaces(organization_id, id) ON DELETE RESTRICT,
+    REFERENCES cosmos_spaces(organization_id, id) ON DELETE RESTRICT,
   CHECK (status <> 'ready' OR active_revision_id IS NOT NULL)
 );
 
-CREATE TABLE relay_environment_revisions (
+CREATE TABLE cosmos_environment_revisions (
   organization_id text NOT NULL,
   space_id text NOT NULL,
   environment_id text NOT NULL,
@@ -30,16 +30,16 @@ CREATE TABLE relay_environment_revisions (
   PRIMARY KEY (organization_id, space_id, environment_id, id),
   UNIQUE (organization_id, space_id, environment_id, revision),
   FOREIGN KEY (organization_id, space_id, environment_id)
-    REFERENCES relay_environments(organization_id, space_id, id) ON DELETE RESTRICT
+    REFERENCES cosmos_environments(organization_id, space_id, id) ON DELETE RESTRICT
 );
 
-ALTER TABLE relay_environments
-  ADD CONSTRAINT relay_environments_active_revision_fk
+ALTER TABLE cosmos_environments
+  ADD CONSTRAINT cosmos_environments_active_revision_fk
   FOREIGN KEY (organization_id, space_id, id, active_revision_id)
-  REFERENCES relay_environment_revisions(organization_id, space_id, environment_id, id)
+  REFERENCES cosmos_environment_revisions(organization_id, space_id, environment_id, id)
   ON DELETE RESTRICT;
 
-CREATE TABLE relay_environment_revision_repositories (
+CREATE TABLE cosmos_environment_revision_repositories (
   organization_id text NOT NULL,
   space_id text NOT NULL,
   environment_id text NOT NULL,
@@ -57,12 +57,12 @@ CREATE TABLE relay_environment_revision_repositories (
     repository_id
   ),
   FOREIGN KEY (organization_id, space_id, environment_id, environment_revision_id)
-    REFERENCES relay_environment_revisions(organization_id, space_id, environment_id, id)
+    REFERENCES cosmos_environment_revisions(organization_id, space_id, environment_id, id)
     ON DELETE CASCADE
 );
 
-CREATE UNIQUE INDEX relay_environment_revision_one_default_repository_idx
-  ON relay_environment_revision_repositories (
+CREATE UNIQUE INDEX cosmos_environment_revision_one_default_repository_idx
+  ON cosmos_environment_revision_repositories (
     organization_id,
     space_id,
     environment_id,
@@ -70,7 +70,7 @@ CREATE UNIQUE INDEX relay_environment_revision_one_default_repository_idx
   )
   WHERE is_default;
 
-CREATE TABLE relay_experts (
+CREATE TABLE cosmos_experts (
   organization_id text NOT NULL,
   space_id text NOT NULL,
   id text NOT NULL,
@@ -85,11 +85,11 @@ CREATE TABLE relay_experts (
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (organization_id, space_id, id),
   FOREIGN KEY (organization_id, space_id)
-    REFERENCES relay_spaces(organization_id, id) ON DELETE RESTRICT,
+    REFERENCES cosmos_spaces(organization_id, id) ON DELETE RESTRICT,
   CHECK (status <> 'published' OR published_revision_id IS NOT NULL)
 );
 
-CREATE TABLE relay_expert_revisions (
+CREATE TABLE cosmos_expert_revisions (
   organization_id text NOT NULL,
   space_id text NOT NULL,
   expert_id text NOT NULL,
@@ -117,19 +117,19 @@ CREATE TABLE relay_expert_revisions (
     environment_revision_id
   ),
   FOREIGN KEY (organization_id, space_id, expert_id)
-    REFERENCES relay_experts(organization_id, space_id, id) ON DELETE RESTRICT,
+    REFERENCES cosmos_experts(organization_id, space_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (organization_id, space_id, environment_id, environment_revision_id)
-    REFERENCES relay_environment_revisions(organization_id, space_id, environment_id, id)
+    REFERENCES cosmos_environment_revisions(organization_id, space_id, environment_id, id)
     ON DELETE RESTRICT
 );
 
-ALTER TABLE relay_experts
-  ADD CONSTRAINT relay_experts_published_revision_fk
+ALTER TABLE cosmos_experts
+  ADD CONSTRAINT cosmos_experts_published_revision_fk
   FOREIGN KEY (organization_id, space_id, id, published_revision_id)
-  REFERENCES relay_expert_revisions(organization_id, space_id, expert_id, id)
+  REFERENCES cosmos_expert_revisions(organization_id, space_id, expert_id, id)
   ON DELETE RESTRICT;
 
-CREATE FUNCTION relay_protect_final_revision()
+CREATE FUNCTION cosmos_protect_final_revision()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
@@ -147,15 +147,15 @@ BEGIN
 END;
 $$;
 
-CREATE TRIGGER relay_environment_revisions_protect_final
-  BEFORE UPDATE OR DELETE ON relay_environment_revisions
-  FOR EACH ROW EXECUTE FUNCTION relay_protect_final_revision('ready');
+CREATE TRIGGER cosmos_environment_revisions_protect_final
+  BEFORE UPDATE OR DELETE ON cosmos_environment_revisions
+  FOR EACH ROW EXECUTE FUNCTION cosmos_protect_final_revision('ready');
 
-CREATE TRIGGER relay_expert_revisions_protect_final
-  BEFORE UPDATE OR DELETE ON relay_expert_revisions
-  FOR EACH ROW EXECUTE FUNCTION relay_protect_final_revision('published');
+CREATE TRIGGER cosmos_expert_revisions_protect_final
+  BEFORE UPDATE OR DELETE ON cosmos_expert_revisions
+  FOR EACH ROW EXECUTE FUNCTION cosmos_protect_final_revision('published');
 
-CREATE FUNCTION relay_protect_environment_repository_binding()
+CREATE FUNCTION cosmos_protect_environment_repository_binding()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
@@ -164,7 +164,7 @@ DECLARE
 BEGIN
   IF TG_OP IN ('UPDATE', 'DELETE') THEN
     SELECT status INTO revision_status
-    FROM relay_environment_revisions
+    FROM cosmos_environment_revisions
     WHERE organization_id = OLD.organization_id
       AND space_id = OLD.space_id
       AND environment_id = OLD.environment_id
@@ -180,7 +180,7 @@ BEGIN
 
   IF TG_OP IN ('INSERT', 'UPDATE') THEN
     SELECT status INTO revision_status
-    FROM relay_environment_revisions
+    FROM cosmos_environment_revisions
     WHERE organization_id = NEW.organization_id
       AND space_id = NEW.space_id
       AND environment_id = NEW.environment_id
@@ -201,11 +201,11 @@ BEGIN
 END;
 $$;
 
-CREATE TRIGGER relay_environment_revision_repositories_protect_ready
-  BEFORE INSERT OR UPDATE OR DELETE ON relay_environment_revision_repositories
-  FOR EACH ROW EXECUTE FUNCTION relay_protect_environment_repository_binding();
+CREATE TRIGGER cosmos_environment_revision_repositories_protect_ready
+  BEFORE INSERT OR UPDATE OR DELETE ON cosmos_environment_revision_repositories
+  FOR EACH ROW EXECUTE FUNCTION cosmos_protect_environment_repository_binding();
 
-CREATE FUNCTION relay_validate_ready_environment_revision()
+CREATE FUNCTION cosmos_validate_ready_environment_revision()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
@@ -214,7 +214,7 @@ DECLARE
 BEGIN
   IF NEW.status = 'ready' AND (TG_OP = 'INSERT' OR OLD.status <> 'ready') THEN
     SELECT count(*) INTO default_repository_count
-    FROM relay_environment_revision_repositories
+    FROM cosmos_environment_revision_repositories
     WHERE organization_id = NEW.organization_id
       AND space_id = NEW.space_id
       AND environment_id = NEW.environment_id
@@ -230,18 +230,18 @@ BEGIN
 END;
 $$;
 
-CREATE TRIGGER relay_environment_revisions_validate_ready
-  BEFORE INSERT OR UPDATE OF status ON relay_environment_revisions
-  FOR EACH ROW EXECUTE FUNCTION relay_validate_ready_environment_revision();
+CREATE TRIGGER cosmos_environment_revisions_validate_ready
+  BEFORE INSERT OR UPDATE OF status ON cosmos_environment_revisions
+  FOR EACH ROW EXECUTE FUNCTION cosmos_validate_ready_environment_revision();
 
-CREATE FUNCTION relay_validate_environment_active_revision()
+CREATE FUNCTION cosmos_validate_environment_active_revision()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
   IF NEW.active_revision_id IS NOT NULL AND NOT EXISTS (
     SELECT 1
-    FROM relay_environment_revisions
+    FROM cosmos_environment_revisions
     WHERE organization_id = NEW.organization_id
       AND space_id = NEW.space_id
       AND environment_id = NEW.id
@@ -255,19 +255,19 @@ BEGIN
 END;
 $$;
 
-CREATE TRIGGER relay_environments_validate_active_revision
-  BEFORE INSERT OR UPDATE OF active_revision_id ON relay_environments
-  FOR EACH ROW EXECUTE FUNCTION relay_validate_environment_active_revision();
+CREATE TRIGGER cosmos_environments_validate_active_revision
+  BEFORE INSERT OR UPDATE OF active_revision_id ON cosmos_environments
+  FOR EACH ROW EXECUTE FUNCTION cosmos_validate_environment_active_revision();
 
-CREATE FUNCTION relay_validate_expert_revision()
+CREATE FUNCTION cosmos_validate_expert_revision()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
   IF NEW.status = 'published' AND NOT EXISTS (
     SELECT 1
-    FROM relay_environments environment
-    JOIN relay_environment_revisions environment_revision
+    FROM cosmos_environments environment
+    JOIN cosmos_environment_revisions environment_revision
       ON environment_revision.organization_id = environment.organization_id
       AND environment_revision.space_id = environment.space_id
       AND environment_revision.environment_id = environment.id
@@ -286,19 +286,19 @@ BEGIN
 END;
 $$;
 
-CREATE TRIGGER relay_expert_revisions_validate_environment
+CREATE TRIGGER cosmos_expert_revisions_validate_environment
   BEFORE INSERT OR UPDATE OF status, environment_id, environment_revision_id
-  ON relay_expert_revisions
-  FOR EACH ROW EXECUTE FUNCTION relay_validate_expert_revision();
+  ON cosmos_expert_revisions
+  FOR EACH ROW EXECUTE FUNCTION cosmos_validate_expert_revision();
 
-CREATE FUNCTION relay_validate_expert_published_revision()
+CREATE FUNCTION cosmos_validate_expert_published_revision()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
   IF NEW.published_revision_id IS NOT NULL AND NOT EXISTS (
     SELECT 1
-    FROM relay_expert_revisions
+    FROM cosmos_expert_revisions
     WHERE organization_id = NEW.organization_id
       AND space_id = NEW.space_id
       AND expert_id = NEW.id
@@ -312,16 +312,16 @@ BEGIN
 END;
 $$;
 
-CREATE TRIGGER relay_experts_validate_published_revision
-  BEFORE INSERT OR UPDATE OF published_revision_id ON relay_experts
-  FOR EACH ROW EXECUTE FUNCTION relay_validate_expert_published_revision();
+CREATE TRIGGER cosmos_experts_validate_published_revision
+  BEFORE INSERT OR UPDATE OF published_revision_id ON cosmos_experts
+  FOR EACH ROW EXECUTE FUNCTION cosmos_validate_expert_published_revision();
 
-ALTER TABLE relay_sessions
+ALTER TABLE cosmos_sessions
   ADD COLUMN expert_revision_id text,
   ADD COLUMN environment_revision_id text,
   ADD COLUMN repository_id text,
   ADD COLUMN configuration_resolution_version integer NOT NULL DEFAULT 0,
-  ADD CONSTRAINT relay_sessions_configuration_resolution_check CHECK (
+  ADD CONSTRAINT cosmos_sessions_configuration_resolution_check CHECK (
     (
       configuration_resolution_version = 0
       AND expert_revision_id IS NULL
@@ -337,7 +337,7 @@ ALTER TABLE relay_sessions
       AND repository_id IS NOT NULL
     )
   ),
-  ADD CONSTRAINT relay_sessions_authoritative_expert_revision_fk
+  ADD CONSTRAINT cosmos_sessions_authoritative_expert_revision_fk
     FOREIGN KEY (
       organization_id,
       space_id,
@@ -346,7 +346,7 @@ ALTER TABLE relay_sessions
       environment_id,
       environment_revision_id
     )
-    REFERENCES relay_expert_revisions (
+    REFERENCES cosmos_expert_revisions (
       organization_id,
       space_id,
       expert_id,
@@ -355,7 +355,7 @@ ALTER TABLE relay_sessions
       environment_revision_id
     )
     ON DELETE RESTRICT,
-  ADD CONSTRAINT relay_sessions_authoritative_repository_fk
+  ADD CONSTRAINT cosmos_sessions_authoritative_repository_fk
     FOREIGN KEY (
       organization_id,
       space_id,
@@ -363,7 +363,7 @@ ALTER TABLE relay_sessions
       environment_revision_id,
       repository_id
     )
-    REFERENCES relay_environment_revision_repositories (
+    REFERENCES cosmos_environment_revision_repositories (
       organization_id,
       space_id,
       environment_id,
@@ -372,7 +372,7 @@ ALTER TABLE relay_sessions
     )
     ON DELETE RESTRICT;
 
-CREATE FUNCTION relay_validate_authoritative_session_configuration()
+CREATE FUNCTION cosmos_validate_authoritative_session_configuration()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
@@ -440,26 +440,26 @@ BEGIN
     repository_is_default,
     repository_override_allowed,
     base_branch_override_allowed
-  FROM relay_experts expert
-  JOIN relay_expert_revisions expert_revision
+  FROM cosmos_experts expert
+  JOIN cosmos_expert_revisions expert_revision
     ON expert_revision.organization_id = expert.organization_id
     AND expert_revision.space_id = expert.space_id
     AND expert_revision.expert_id = expert.id
     AND expert_revision.id = NEW.expert_revision_id
     AND expert_revision.status = 'published'
-  JOIN relay_environments environment
+  JOIN cosmos_environments environment
     ON environment.organization_id = expert_revision.organization_id
     AND environment.space_id = expert_revision.space_id
     AND environment.id = expert_revision.environment_id
     AND environment.status = 'ready'
     AND environment.active_revision_id = expert_revision.environment_revision_id
-  JOIN relay_environment_revisions environment_revision
+  JOIN cosmos_environment_revisions environment_revision
     ON environment_revision.organization_id = environment.organization_id
     AND environment_revision.space_id = environment.space_id
     AND environment_revision.environment_id = environment.id
     AND environment_revision.id = expert_revision.environment_revision_id
     AND environment_revision.status = 'ready'
-  JOIN relay_environment_revision_repositories repository_binding
+  JOIN cosmos_environment_revision_repositories repository_binding
     ON repository_binding.organization_id = environment_revision.organization_id
     AND repository_binding.space_id = environment_revision.space_id
     AND repository_binding.environment_id = environment_revision.environment_id
@@ -500,7 +500,7 @@ BEGIN
 END;
 $$;
 
-CREATE TRIGGER relay_sessions_validate_authoritative_configuration
+CREATE TRIGGER cosmos_sessions_validate_authoritative_configuration
   BEFORE INSERT OR UPDATE OF
     organization_id,
     space_id,
@@ -514,8 +514,8 @@ CREATE TRIGGER relay_sessions_validate_authoritative_configuration
     repository_id,
     repository,
     base_branch
-  ON relay_sessions
-  FOR EACH ROW EXECUTE FUNCTION relay_validate_authoritative_session_configuration();
+  ON cosmos_sessions
+  FOR EACH ROW EXECUTE FUNCTION cosmos_validate_authoritative_session_configuration();
 
-ALTER TABLE relay_sessions
+ALTER TABLE cosmos_sessions
   ALTER COLUMN configuration_resolution_version DROP DEFAULT;

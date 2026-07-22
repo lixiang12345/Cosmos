@@ -35,17 +35,17 @@ export async function seedSessionConfiguration(
   const actorId = options.expertCreatedBy ?? 'system:test-fixture'
 
   await pool.query(`
-    INSERT INTO relay_environments (
+    INSERT INTO cosmos_environments (
       organization_id, space_id, id, name, status, created_by
     ) VALUES ($1, $2, $3, 'Default Environment', 'draft', $4)
   `, [organizationId, spaceId, configuration.environmentId, actorId])
   await pool.query(`
-    INSERT INTO relay_environment_revisions (
+    INSERT INTO cosmos_environment_revisions (
       organization_id, space_id, environment_id, id, revision, status, created_by
     ) VALUES ($1, $2, $3, $4, 1, 'draft', $5)
   `, [organizationId, spaceId, configuration.environmentId, configuration.environmentRevisionId, actorId])
   await pool.query(`
-    INSERT INTO relay_environment_revision_repositories (
+    INSERT INTO cosmos_environment_revision_repositories (
       organization_id, space_id, environment_id, environment_revision_id,
       repository_id, repository, base_branch, is_default
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, true)
@@ -59,16 +59,16 @@ export async function seedSessionConfiguration(
     configuration.baseBranch,
   ])
   await pool.query(`
-    UPDATE relay_environment_revisions SET status = 'ready'
+    UPDATE cosmos_environment_revisions SET status = 'ready'
     WHERE organization_id = $1 AND space_id = $2 AND environment_id = $3 AND id = $4
   `, [organizationId, spaceId, configuration.environmentId, configuration.environmentRevisionId])
   await pool.query(`
-    UPDATE relay_environments
+    UPDATE cosmos_environments
     SET status = 'ready', active_revision_id = $4, updated_at = now()
     WHERE organization_id = $1 AND space_id = $2 AND id = $3
   `, [organizationId, spaceId, configuration.environmentId, configuration.environmentRevisionId])
   await pool.query(`
-    INSERT INTO relay_experts (
+    INSERT INTO cosmos_experts (
       organization_id, space_id, id, name, status, visibility, created_by
     ) VALUES ($1, $2, $3, 'Authoritative PR Author', 'draft', $4, $5)
   `, [
@@ -79,7 +79,7 @@ export async function seedSessionConfiguration(
     actorId,
   ])
   await pool.query(`
-    INSERT INTO relay_expert_revisions (
+    INSERT INTO cosmos_expert_revisions (
       organization_id, space_id, expert_id, id, revision, status,
       environment_id, environment_revision_id, allow_repository_override,
       allow_base_branch_override, created_by
@@ -96,11 +96,11 @@ export async function seedSessionConfiguration(
     actorId,
   ])
   await pool.query(`
-    UPDATE relay_expert_revisions SET status = 'published'
+    UPDATE cosmos_expert_revisions SET status = 'published'
     WHERE organization_id = $1 AND space_id = $2 AND expert_id = $3 AND id = $4
   `, [organizationId, spaceId, configuration.expertId, configuration.expertRevisionId])
   await pool.query(`
-    UPDATE relay_experts
+    UPDATE cosmos_experts
     SET status = 'published', published_revision_id = $4, updated_at = now()
     WHERE organization_id = $1 AND space_id = $2 AND id = $3
   `, [organizationId, spaceId, configuration.expertId, configuration.expertRevisionId])

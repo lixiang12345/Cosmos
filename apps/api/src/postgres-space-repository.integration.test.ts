@@ -9,10 +9,10 @@ const databaseUrl = process.env.TEST_DATABASE_URL
 const describeWithDatabase = databaseUrl ? describe : describe.skip
 
 describeWithDatabase('Space authority under the restricted API runtime role', () => {
-  const schema = `relay_space_${randomUUID().replaceAll('-', '')}`
+  const schema = `cosmos_space_${randomUUID().replaceAll('-', '')}`
   const adminPool = new Pool({ connectionString: databaseUrl })
   const migrationPool = new Pool({ connectionString: databaseUrl, options: `-c search_path=${schema}` })
-  const apiPool = new Pool({ connectionString: databaseUrl, max: 1, options: `-c role=relay_api_runtime -c search_path=${schema}` })
+  const apiPool = new Pool({ connectionString: databaseUrl, max: 1, options: `-c role=cosmos_api_runtime -c search_path=${schema}` })
   let sequence = 0
   const repository = new PostgresSpaceRepository(apiPool, { createId: () => `space-generated-${++sequence}` })
 
@@ -20,17 +20,17 @@ describeWithDatabase('Space authority under the restricted API runtime role', ()
     await adminPool.query(`CREATE SCHEMA ${schema}`)
     await runMigrations(migrationPool)
     await migrationPool.query(`
-      INSERT INTO relay_organizations (id,name) VALUES ('space-org','Space Organization'),('other-org','Other');
-      INSERT INTO relay_spaces (organization_id,id,name) VALUES
+      INSERT INTO cosmos_organizations (id,name) VALUES ('space-org','Space Organization'),('other-org','Other');
+      INSERT INTO cosmos_spaces (organization_id,id,name) VALUES
         ('space-org','space-default','Default Space'),
         ('space-org','space-target','Target Space'),
         ('other-org','space-hidden','Hidden Space');
-      UPDATE relay_organizations SET default_space_id='space-default' WHERE id='space-org';
-      INSERT INTO relay_organization_memberships (organization_id,actor_id,role) VALUES
+      UPDATE cosmos_organizations SET default_space_id='space-default' WHERE id='space-org';
+      INSERT INTO cosmos_organization_memberships (organization_id,actor_id,role) VALUES
         ('space-org','space-owner','organization_owner'),
         ('space-org','space-member','member'),
         ('other-org','other-owner','organization_owner');
-      INSERT INTO relay_space_memberships (organization_id,space_id,actor_id,role) VALUES
+      INSERT INTO cosmos_space_memberships (organization_id,space_id,actor_id,role) VALUES
         ('space-org','space-default','space-owner','space_manager'),
         ('space-org','space-target','space-owner','space_manager'),
         ('space-org','space-default','space-member','member'),

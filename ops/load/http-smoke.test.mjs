@@ -19,13 +19,13 @@ describe('HTTP load smoke', () => {
       authToken: undefined,
     })
     assert.throws(
-      () => loadHttpSmokeConfig({ LOAD_URL: 'https://relay.example/api/v1/me' }),
+      () => loadHttpSmokeConfig({ LOAD_URL: 'https://cosmos.example/api/v1/me' }),
       /LOAD_ALLOW_REMOTE/,
     )
     assert.equal(loadHttpSmokeConfig({
-      LOAD_URL: 'https://relay.example/api/v1/me',
+      LOAD_URL: 'https://cosmos.example/api/v1/me',
       LOAD_ALLOW_REMOTE: 'true',
-    }).url, 'https://relay.example/api/v1/me')
+    }).url, 'https://cosmos.example/api/v1/me')
   })
 
   it('computes nearest-rank percentiles and threshold failures', () => {

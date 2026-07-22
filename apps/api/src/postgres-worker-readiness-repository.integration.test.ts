@@ -7,7 +7,7 @@ const databaseUrl = process.env.TEST_DATABASE_URL
 const describeWithDatabase = databaseUrl ? describe : describe.skip
 
 describeWithDatabase('PostgresWorkerReadinessRepository', () => {
-  const schema = `relay_worker_readiness_${crypto.randomUUID().replaceAll('-', '')}`
+  const schema = `cosmos_worker_readiness_${crypto.randomUUID().replaceAll('-', '')}`
   const adminPool = new Pool({ connectionString: databaseUrl })
   const pool = new Pool({
     connectionString: databaseUrl,
@@ -21,7 +21,7 @@ describeWithDatabase('PostgresWorkerReadinessRepository', () => {
   })
 
   beforeEach(async () => {
-    await pool.query('TRUNCATE relay_worker_heartbeats')
+    await pool.query('TRUNCATE cosmos_worker_heartbeats')
   })
 
   afterAll(async () => {
@@ -48,7 +48,7 @@ describeWithDatabase('PostgresWorkerReadinessRepository', () => {
     await repository.recordHeartbeat('worker-a', new Date('2026-07-13T08:00:00.000Z'))
     await repository.recordHeartbeat('worker-a', new Date('2026-07-13T08:00:05.000Z'))
     const rows = await pool.query<{ worker_id: string; last_seen_at: Date }>(`
-      SELECT worker_id, last_seen_at FROM relay_worker_heartbeats
+      SELECT worker_id, last_seen_at FROM cosmos_worker_heartbeats
     `)
 
     expect(rows.rows).toHaveLength(1)

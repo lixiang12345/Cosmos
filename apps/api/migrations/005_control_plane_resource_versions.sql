@@ -1,10 +1,10 @@
-ALTER TABLE relay_experts
+ALTER TABLE cosmos_experts
   ADD COLUMN version integer NOT NULL DEFAULT 1 CHECK (version > 0);
 
-ALTER TABLE relay_environments
+ALTER TABLE cosmos_environments
   ADD COLUMN version integer NOT NULL DEFAULT 1 CHECK (version > 0);
 
-CREATE FUNCTION relay_increment_control_plane_resource_version()
+CREATE FUNCTION cosmos_increment_control_plane_resource_version()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
@@ -15,10 +15,10 @@ BEGIN
 END;
 $$;
 
-CREATE TRIGGER relay_experts_increment_version
-  BEFORE UPDATE ON relay_experts
-  FOR EACH ROW EXECUTE FUNCTION relay_increment_control_plane_resource_version();
+CREATE TRIGGER cosmos_experts_increment_version
+  BEFORE UPDATE ON cosmos_experts
+  FOR EACH ROW EXECUTE FUNCTION cosmos_increment_control_plane_resource_version();
 
-CREATE TRIGGER relay_environments_increment_version
-  BEFORE UPDATE ON relay_environments
-  FOR EACH ROW EXECUTE FUNCTION relay_increment_control_plane_resource_version();
+CREATE TRIGGER cosmos_environments_increment_version
+  BEFORE UPDATE ON cosmos_environments
+  FOR EACH ROW EXECUTE FUNCTION cosmos_increment_control_plane_resource_version();

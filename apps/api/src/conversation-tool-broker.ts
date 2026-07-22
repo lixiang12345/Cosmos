@@ -1,4 +1,4 @@
-import { AdvisorPlanProposalSchema, FilePrefixSchema, type FileDto } from '@relay/contracts'
+import { AdvisorPlanProposalSchema, FilePrefixSchema, type FileDto } from '@cosmos/contracts'
 import type { AdvisorPlanRepository } from './advisor-plan-repository.js'
 import type {
   ConversationAgentToolCall,
@@ -66,7 +66,7 @@ const workspaceDefinitions = [
 
 const advisorDefinition = {
   name: 'advisor_plan_propose',
-  description: 'Propose a bounded Relay control-plane plan for explicit human confirmation. This tool never applies the change. Use manual_action steps for OAuth or Secret work and never request Secret values or OAuth tokens.',
+  description: 'Propose a bounded Cosmos control-plane plan for explicit human confirmation. This tool never applies the change. Use manual_action steps for OAuth or Secret work and never request Secret values or OAuth tokens.',
   inputSchema: {
     type: 'object',
     properties: {

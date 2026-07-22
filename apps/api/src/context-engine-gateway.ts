@@ -9,7 +9,7 @@ import {
   type ContextPackResponse,
   type ContextSearchRequest,
   type ContextSearchResponse,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 
 export type ContextEngineGatewayErrorCode =
   | 'repository_not_configured'

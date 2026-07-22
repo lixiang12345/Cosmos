@@ -4,7 +4,7 @@ import type {
   ApprovalStatus,
   ToolCallDto,
   ToolCallStatus,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 
 export type ToolCallListCursor = { createdAt: string; id: string }
 export type ToolCallListOptions = {

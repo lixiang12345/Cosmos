@@ -16,16 +16,16 @@ const databaseUrl = process.env.TEST_DATABASE_URL
 const describeWithDatabase = databaseUrl ? describe : describe.skip
 
 describeWithDatabase('Postgres Session Worker repositories', () => {
-  const schema = `relay_session_worker_${crypto.randomUUID().replaceAll('-', '')}`
+  const schema = `cosmos_session_worker_${crypto.randomUUID().replaceAll('-', '')}`
   const adminPool = new Pool({ connectionString: databaseUrl })
   const migrationPool = new Pool({ connectionString: databaseUrl, options: `-c search_path=${schema}` })
   const apiPool = new Pool({
     connectionString: databaseUrl,
-    options: `-c role=relay_api_runtime -c search_path=${schema}`,
+    options: `-c role=cosmos_api_runtime -c search_path=${schema}`,
   })
   const workerPool = new Pool({
     connectionString: databaseUrl,
-    options: `-c role=relay_worker_runtime -c search_path=${schema}`,
+    options: `-c role=cosmos_worker_runtime -c search_path=${schema}`,
   })
   let now = new Date('2026-07-13T08:00:00.000Z')
   let nextId = 0
@@ -41,14 +41,14 @@ describeWithDatabase('Postgres Session Worker repositories', () => {
     await adminPool.query(`CREATE SCHEMA ${schema}`)
     await runMigrations(migrationPool)
     await migrationPool.query(`
-      INSERT INTO relay_organizations (id, name) VALUES ('worker-org', 'Worker Organization');
-      INSERT INTO relay_spaces (organization_id, id, name)
+      INSERT INTO cosmos_organizations (id, name) VALUES ('worker-org', 'Worker Organization');
+      INSERT INTO cosmos_spaces (organization_id, id, name)
       VALUES ('worker-org', 'worker-space', 'Worker Space');
-      INSERT INTO relay_organization_memberships (organization_id, actor_id, role)
+      INSERT INTO cosmos_organization_memberships (organization_id, actor_id, role)
       VALUES
         ('worker-org', 'worker-owner', 'organization_owner'),
         ('worker-org', 'worker-reader', 'member');
-      INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
+      INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role)
       VALUES
         ('worker-org', 'worker-space', 'worker-owner', 'space_manager'),
         ('worker-org', 'worker-space', 'worker-reader', 'member');

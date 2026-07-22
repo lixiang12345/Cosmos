@@ -84,10 +84,10 @@ export const expertTemplates: ExpertTemplate[] = [
     sourcePath: '/workflows/devops/personal-assistant',
   },
   {
-    id: 'relay-analyst',
+    id: 'cosmos-analyst',
     category: 'Data',
-    name: "Measure Relay's impact on your team",
-    description: 'Analyzes PR or MR activity and cost data to show how Relay changes team throughput relative to operating cost.',
+    name: "Measure Cosmos's impact on your team",
+    description: 'Analyzes PR or MR activity and cost data to show how Cosmos changes team throughput relative to operating cost.',
     sourcePath: '/workflows/data/cosmos-analyst',
   },
   {

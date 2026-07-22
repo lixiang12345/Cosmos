@@ -38,7 +38,7 @@ RUN VITE_AUTH_MODE=$VITE_AUTH_MODE \
   VITE_OIDC_SILENT_REDIRECT_URI=$VITE_OIDC_SILENT_REDIRECT_URI \
   VITE_API_BASE_URL=$VITE_API_BASE_URL \
   VITE_API_ALLOWED_ORIGINS=$VITE_API_ALLOWED_ORIGINS \
-  sh -c 'pnpm --filter @relay/contracts build && pnpm --filter @relay/web build'
+  sh -c 'pnpm --filter @cosmos/contracts build && pnpm --filter @cosmos/web build'
 
 FROM nginxinc/nginx-unprivileged:1.29.5-alpine-slim AS runtime
 
@@ -46,10 +46,10 @@ USER root
 RUN apk upgrade --no-cache
 USER nginx
 
-ENV RELAY_API_UPSTREAM=http://api:8787 \
-  RELAY_CSP_CONNECT_SRC="'self'" \
-  RELAY_CSP_FRAME_SRC="'self'" \
-  NGINX_ENVSUBST_FILTER="^(RELAY_API_UPSTREAM|RELAY_CSP_CONNECT_SRC|RELAY_CSP_FRAME_SRC)$"
+ENV COSMOS_API_UPSTREAM=http://api:8787 \
+  COSMOS_CSP_CONNECT_SRC="'self'" \
+  COSMOS_CSP_FRAME_SRC="'self'" \
+  NGINX_ENVSUBST_FILTER="^(COSMOS_API_UPSTREAM|COSMOS_CSP_CONNECT_SRC|COSMOS_CSP_FRAME_SRC)$"
 
 COPY apps/web/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /workspace/apps/web/dist /usr/share/nginx/html

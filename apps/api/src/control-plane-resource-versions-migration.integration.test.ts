@@ -13,7 +13,7 @@ async function expectSqlState(query: Promise<unknown>, code: string) {
 }
 
 describeWithDatabase('005-007 control-plane resource versions migrations', () => {
-  const schema = `relay_resource_versions_${crypto.randomUUID().replaceAll('-', '')}`
+  const schema = `cosmos_resource_versions_${crypto.randomUUID().replaceAll('-', '')}`
   const adminPool = new Pool({ connectionString: databaseUrl })
   const migrationPool = new Pool({
     connectionString: databaseUrl,
@@ -33,20 +33,20 @@ describeWithDatabase('005-007 control-plane resource versions migrations', () =>
     }
 
     await migrationPool.query(`
-      INSERT INTO relay_organizations (id, name)
+      INSERT INTO cosmos_organizations (id, name)
       VALUES ('organization-a', 'Organization A');
 
-      INSERT INTO relay_spaces (organization_id, id, name)
+      INSERT INTO cosmos_spaces (organization_id, id, name)
       VALUES ('organization-a', 'space-a', 'Space A');
 
-      INSERT INTO relay_environments (
+      INSERT INTO cosmos_environments (
         organization_id, space_id, id, name, created_by, updated_at
       ) VALUES (
         'organization-a', 'space-a', 'environment-a', 'Environment A',
         'test-actor', '2020-01-01T00:00:00Z'
       );
 
-      INSERT INTO relay_experts (
+      INSERT INTO cosmos_experts (
         organization_id, space_id, id, name, created_by, updated_at
       ) VALUES (
         'organization-a', 'space-a', 'expert-a', 'Expert A',
@@ -77,14 +77,14 @@ describeWithDatabase('005-007 control-plane resource versions migrations', () =>
   it('defaults Expert and Environment versions to one', async () => {
     const experts = await migrationPool.query<{ version: number }>(`
       SELECT version
-      FROM relay_experts
+      FROM cosmos_experts
       WHERE organization_id = 'organization-a'
         AND space_id = 'space-a'
         AND id = 'expert-a'
     `)
     const environments = await migrationPool.query<{ version: number }>(`
       SELECT version
-      FROM relay_environments
+      FROM cosmos_environments
       WHERE organization_id = 'organization-a'
         AND space_id = 'space-a'
         AND id = 'environment-a'
@@ -95,8 +95,8 @@ describeWithDatabase('005-007 control-plane resource versions migrations', () =>
   })
 
   it.each([
-    ['relay_experts', 'expert-a'],
-    ['relay_environments', 'environment-a'],
+    ['cosmos_experts', 'expert-a'],
+    ['cosmos_environments', 'environment-a'],
   ])('increments version and advances updated_at on every update to %s', async (table, id) => {
     const initial = await migrationPool.query<{ updated_at: Date; version: number }>(`
       SELECT updated_at, version
@@ -136,8 +136,8 @@ describeWithDatabase('005-007 control-plane resource versions migrations', () =>
   })
 
   it.each([
-    ['relay_experts', 'invalid-expert'],
-    ['relay_environments', 'invalid-environment'],
+    ['cosmos_experts', 'invalid-expert'],
+    ['cosmos_environments', 'invalid-environment'],
   ])('rejects non-positive versions in %s', async (table, id) => {
     await expectSqlState(migrationPool.query(`
       INSERT INTO ${table} (
@@ -154,21 +154,21 @@ describeWithDatabase('005-007 control-plane resource versions migrations', () =>
       FROM pg_indexes
       WHERE schemaname = $1
         AND indexname IN (
-          'relay_experts_space_updated_idx',
-          'relay_environments_space_updated_idx'
+          'cosmos_experts_space_updated_idx',
+          'cosmos_environments_space_updated_idx'
         )
       ORDER BY indexname
     `, [schema])
 
     expect(indexes.rows).toEqual([
       {
-        indexname: 'relay_environments_space_updated_idx',
+        indexname: 'cosmos_environments_space_updated_idx',
         indexdef: expect.stringContaining(
           '(organization_id, space_id, updated_at DESC, id DESC)',
         ),
       },
       {
-        indexname: 'relay_experts_space_updated_idx',
+        indexname: 'cosmos_experts_space_updated_idx',
         indexdef: expect.stringContaining(
           '(organization_id, space_id, updated_at DESC, id DESC)',
         ),

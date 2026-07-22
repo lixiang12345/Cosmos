@@ -1,4 +1,4 @@
-import type { SpaceDto, SpaceMigrationPreview } from '@relay/contracts'
+import type { SpaceDto, SpaceMigrationPreview } from '@cosmos/contracts'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -9,18 +9,18 @@ import {
   previewSpaceMigration,
   setDefaultSpace,
   updateSpace,
-} from '../services/relayApi'
+} from '../services/cosmosApi'
 import { RemoteSpacesPage } from './RemoteSpacesPage'
 
-vi.mock('../services/relayApi', async (importOriginal) => ({
-  ...await importOriginal<typeof import('../services/relayApi')>(),
+vi.mock('../services/cosmosApi', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../services/cosmosApi')>(),
   createSpace: vi.fn(), listSpaces: vi.fn(), previewSpaceMigration: vi.fn(),
   setDefaultSpace: vi.fn(), updateSpace: vi.fn(),
 }))
 
 const now = '2026-07-22T00:00:00.000Z'
 const platform: SpaceDto = {
-  id: 'space-platform', organizationId: 'relay', name: 'Platform', slug: 'platform',
+  id: 'space-platform', organizationId: 'cosmos', name: 'Platform', slug: 'platform',
   description: 'Platform work.', isDefault: true, status: 'active', defaultExpertId: null,
   defaultEnvironmentId: null, settings: {}, version: 1, createdAt: now, updatedAt: now,
 }
@@ -31,7 +31,7 @@ const preview: SpaceMigrationPreview = {
   canMigrate: false, blockingReasons: ['The Default Space cannot be migrated.'],
 }
 const props = {
-  organizationId: 'relay', activeSpaceId: platform.id,
+  organizationId: 'cosmos', activeSpaceId: platform.id,
   accessibleSpaces: [
     { id: platform.id, name: platform.name, role: 'space_manager' as const, isDefault: true },
     { id: commerce.id, name: commerce.name, role: 'space_manager' as const },
@@ -81,7 +81,7 @@ describe('Remote Spaces page', () => {
     await user.type(within(createForm).getByLabelText('名称'), 'Release')
     await user.click(within(createForm).getByRole('button', { name: '保存 Space' }))
     expect(await screen.findByRole('status')).toHaveTextContent('Space 已创建。')
-    expect(createSpace).toHaveBeenCalledWith('relay', expect.objectContaining({ name: 'Release' }), expect.stringMatching(/^space-create-/), props.auth)
+    expect(createSpace).toHaveBeenCalledWith('cosmos', expect.objectContaining({ name: 'Release' }), expect.stringMatching(/^space-create-/), props.auth)
 
     const commerceCard = screen.getByRole('heading', { name: 'Commerce' }).closest('article')!
     await user.click(within(commerceCard).getByRole('button', { name: '编辑' }))
@@ -89,11 +89,11 @@ describe('Remote Spaces page', () => {
     const description = within(editForm).getByLabelText('描述')
     await user.clear(description); await user.type(description, 'Updated commerce.')
     await user.click(within(editForm).getByRole('button', { name: '保存 Space' }))
-    await waitFor(() => expect(updateSpace).toHaveBeenCalledWith('relay', commerce.id, expect.objectContaining({ description: 'Updated commerce.' }), 1, expect.stringMatching(/^space-update-/), props.auth))
+    await waitFor(() => expect(updateSpace).toHaveBeenCalledWith('cosmos', commerce.id, expect.objectContaining({ description: 'Updated commerce.' }), 1, expect.stringMatching(/^space-update-/), props.auth))
 
     const updatedCard = screen.getByRole('heading', { name: 'Commerce' }).closest('article')!
     await user.click(within(updatedCard).getByRole('button', { name: '设为默认' }))
-    await waitFor(() => expect(setDefaultSpace).toHaveBeenCalledWith('relay', commerce.id, 2, expect.stringMatching(/^space-default-/), props.auth))
+    await waitFor(() => expect(setDefaultSpace).toHaveBeenCalledWith('cosmos', commerce.id, 2, expect.stringMatching(/^space-default-/), props.auth))
     expect(props.onWorkspaceRefresh).toHaveBeenCalled()
   })
 

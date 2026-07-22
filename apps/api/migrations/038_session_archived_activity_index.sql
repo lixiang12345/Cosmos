@@ -1,5 +1,5 @@
--- relay-migration: non-transactional
--- relay-migration: concurrent-index relay_sessions_archived_activity_idx
-CREATE INDEX CONCURRENTLY relay_sessions_archived_activity_idx
-  ON relay_sessions (organization_id, space_id, last_activity_at DESC, id DESC)
+-- cosmos-migration: non-transactional
+-- cosmos-migration: concurrent-index cosmos_sessions_archived_activity_idx
+CREATE INDEX CONCURRENTLY cosmos_sessions_archived_activity_idx
+  ON cosmos_sessions (organization_id, space_id, last_activity_at DESC, id DESC)
   WHERE archived_at IS NOT NULL;

@@ -1,5 +1,5 @@
 {
-  "name": "@relay/web",
+  "name": "@cosmos/web",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -15,7 +15,7 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
-    "@relay/contracts": "workspace:*",
+    "@cosmos/contracts": "workspace:*",
     "lucide-react": "^1.24.0",
     "oidc-client-ts": "^3.5.0",
     "react": "^19.2.7",

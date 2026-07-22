@@ -25,7 +25,7 @@ const publishedRevisionSummary = {
 
 const expertSummary = {
   id: 'expert-incident-investigator',
-  organizationId: 'organization-relay',
+  organizationId: 'organization-cosmos',
   spaceId: 'space-platform',
   kind: 'custom' as const,
   name: 'Incident Investigator',

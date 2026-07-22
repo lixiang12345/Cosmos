@@ -26,7 +26,7 @@ function key(method: string, route: string, status: string) {
   return `${method}\u0000${route}\u0000${status}`
 }
 
-export class RelayMetrics {
+export class CosmosMetrics {
   private readonly requests = new Map<string, number>()
   private readonly durations = new Map<string, DurationSeries>()
   private activeSseConnections = 0
@@ -75,41 +75,41 @@ export class RelayMetrics {
 
   renderPrometheus() {
     const lines = [
-      '# HELP relay_http_requests_total HTTP requests completed by route template and status class.',
-      '# TYPE relay_http_requests_total counter',
+      '# HELP cosmos_http_requests_total HTTP requests completed by route template and status class.',
+      '# TYPE cosmos_http_requests_total counter',
     ]
     for (const [requestKey, count] of [...this.requests.entries()].sort(([left], [right]) => left.localeCompare(right))) {
       const [method, route, status] = requestKey.split('\u0000')
-      lines.push(`relay_http_requests_total{method="${label(method ?? '')}",route="${label(route ?? '')}",status_class="${label(status ?? '')}"} ${count}`)
+      lines.push(`cosmos_http_requests_total{method="${label(method ?? '')}",route="${label(route ?? '')}",status_class="${label(status ?? '')}"} ${count}`)
     }
 
     lines.push(
-      '# HELP relay_http_request_duration_ms HTTP request duration in milliseconds.',
-      '# TYPE relay_http_request_duration_ms histogram',
+      '# HELP cosmos_http_request_duration_ms HTTP request duration in milliseconds.',
+      '# TYPE cosmos_http_request_duration_ms histogram',
     )
     for (const [durationKey, series] of [...this.durations.entries()].sort(([left], [right]) => left.localeCompare(right))) {
       const [method, route] = durationKey.split('\u0000')
       for (let index = 0; index < DURATION_BUCKETS_MS.length; index += 1) {
-        lines.push(`relay_http_request_duration_ms_bucket{method="${label(method ?? '')}",route="${label(route ?? '')}",le="${DURATION_BUCKETS_MS[index]}"} ${series.buckets[index]}`)
+        lines.push(`cosmos_http_request_duration_ms_bucket{method="${label(method ?? '')}",route="${label(route ?? '')}",le="${DURATION_BUCKETS_MS[index]}"} ${series.buckets[index]}`)
       }
-      lines.push(`relay_http_request_duration_ms_bucket{method="${label(method ?? '')}",route="${label(route ?? '')}",le="+Inf"} ${series.count}`)
-      lines.push(`relay_http_request_duration_ms_sum{method="${label(method ?? '')}",route="${label(route ?? '')}"} ${series.sumMs}`)
-      lines.push(`relay_http_request_duration_ms_count{method="${label(method ?? '')}",route="${label(route ?? '')}"} ${series.count}`)
+      lines.push(`cosmos_http_request_duration_ms_bucket{method="${label(method ?? '')}",route="${label(route ?? '')}",le="+Inf"} ${series.count}`)
+      lines.push(`cosmos_http_request_duration_ms_sum{method="${label(method ?? '')}",route="${label(route ?? '')}"} ${series.sumMs}`)
+      lines.push(`cosmos_http_request_duration_ms_count{method="${label(method ?? '')}",route="${label(route ?? '')}"} ${series.count}`)
     }
 
     lines.push(
-      '# HELP relay_sse_connections_active Current active Session event streams.',
-      '# TYPE relay_sse_connections_active gauge',
-      `relay_sse_connections_active ${this.activeSseConnections}`,
-      '# HELP relay_sse_connections_limit Configured per-instance Session event stream limit.',
-      '# TYPE relay_sse_connections_limit gauge',
-      `relay_sse_connections_limit ${this.sseConnectionLimit}`,
-      '# HELP relay_execution_enabled Whether Agent execution is enabled for this API instance.',
-      '# TYPE relay_execution_enabled gauge',
-      `relay_execution_enabled ${this.executionEnabled ? 1 : 0}`,
-      '# HELP relay_worker_execution_ready Whether a recent Worker heartbeat permits new execution.',
-      '# TYPE relay_worker_execution_ready gauge',
-      `relay_worker_execution_ready ${this.workerExecutionReady ? 1 : 0}`,
+      '# HELP cosmos_sse_connections_active Current active Session event streams.',
+      '# TYPE cosmos_sse_connections_active gauge',
+      `cosmos_sse_connections_active ${this.activeSseConnections}`,
+      '# HELP cosmos_sse_connections_limit Configured per-instance Session event stream limit.',
+      '# TYPE cosmos_sse_connections_limit gauge',
+      `cosmos_sse_connections_limit ${this.sseConnectionLimit}`,
+      '# HELP cosmos_execution_enabled Whether Agent execution is enabled for this API instance.',
+      '# TYPE cosmos_execution_enabled gauge',
+      `cosmos_execution_enabled ${this.executionEnabled ? 1 : 0}`,
+      '# HELP cosmos_worker_execution_ready Whether a recent Worker heartbeat permits new execution.',
+      '# TYPE cosmos_worker_execution_ready gauge',
+      `cosmos_worker_execution_ready ${this.workerExecutionReady ? 1 : 0}`,
       '',
     )
     return `${lines.join('\n')}\n`

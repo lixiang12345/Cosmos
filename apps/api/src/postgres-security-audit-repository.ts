@@ -49,7 +49,7 @@ export class PostgresSecurityAuditRepository implements SecurityAuditRepository 
       ))))
       : undefined
     await this.pool.query(`
-      INSERT INTO relay_security_audit_events (
+      INSERT INTO cosmos_security_audit_events (
         audit_event_id, request_id, hmac_key_id, actor_fingerprint, actor_kind,
         method, route_pattern, outcome, status_code, error_code,
         organization_fingerprint, space_fingerprint, target_fingerprint,

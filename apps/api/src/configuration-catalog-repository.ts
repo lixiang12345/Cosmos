@@ -10,7 +10,7 @@ import type {
   ExpertPublishedRevisionDto,
   UpdateEnvironmentRequest,
   UpdateExpertRequest,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 
 export type ConfigurationCatalogCursor = {
   updatedAt: string

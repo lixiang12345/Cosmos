@@ -1,8 +1,8 @@
 SET LOCAL lock_timeout = '5s';
 
-ALTER TABLE relay_session_events
-  DROP CONSTRAINT relay_session_events_runtime_event_type_check,
-  ADD CONSTRAINT relay_session_events_runtime_event_type_check
+ALTER TABLE cosmos_session_events
+  DROP CONSTRAINT cosmos_session_events_runtime_event_type_check,
+  ADD CONSTRAINT cosmos_session_events_runtime_event_type_check
   CHECK (event_type IN (
     'session.created',
     'session.updated',
@@ -13,8 +13,8 @@ ALTER TABLE relay_session_events
     'turn.queued',
     'attempt.updated'
   )) NOT VALID,
-  DROP CONSTRAINT relay_session_events_runtime_typed_resource_check,
-  ADD CONSTRAINT relay_session_events_runtime_typed_resource_check
+  DROP CONSTRAINT cosmos_session_events_runtime_typed_resource_check,
+  ADD CONSTRAINT cosmos_session_events_runtime_typed_resource_check
   CHECK (
     (
       event_type IN (
@@ -46,10 +46,10 @@ ALTER TABLE relay_session_events
     )
   ) NOT VALID;
 
-ALTER TABLE relay_audit_events
+ALTER TABLE cosmos_audit_events
   ALTER COLUMN idempotency_key_hash DROP NOT NULL,
-  DROP CONSTRAINT relay_audit_events_action_check,
-  ADD CONSTRAINT relay_audit_events_action_check
+  DROP CONSTRAINT cosmos_audit_events_action_check,
+  ADD CONSTRAINT cosmos_audit_events_action_check
     CHECK (action IN (
       'session.create',
       'session.start',
@@ -58,8 +58,8 @@ ALTER TABLE relay_audit_events
       'session.archive',
       'session.restore'
     )) NOT VALID,
-  DROP CONSTRAINT relay_audit_events_before_state_check,
-  ADD CONSTRAINT relay_audit_events_before_state_check
+  DROP CONSTRAINT cosmos_audit_events_before_state_check,
+  ADD CONSTRAINT cosmos_audit_events_before_state_check
     CHECK (
       (action = 'session.create' AND before_state IS NULL)
       OR (

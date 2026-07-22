@@ -1,6 +1,6 @@
 import type { ContextEngineGateway } from './context-engine-gateway.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiErrorSchema } from '@relay/contracts'
+import { ApiErrorSchema } from '@cosmos/contracts'
 import { createApp } from './app.js'
 import { createDevelopmentAuthenticator, type AuthenticateRequest } from './auth.js'
 import { EmptyConfigurationCatalogRepository } from './configuration-catalog-repository.js'
@@ -8,21 +8,21 @@ import { InMemorySessionRepository } from './session-repository.js'
 
 const actorOrganizations = {
   'user-context': [{
-    id: 'relay',
-    name: 'Relay',
+    id: 'cosmos',
+    name: 'Cosmos',
     role: 'organization_owner' as const,
     spaces: [{ id: 'platform', name: 'Platform', role: 'space_manager' as const }],
   }],
   'service-context': [{
-    id: 'relay',
-    name: 'Relay',
+    id: 'cosmos',
+    name: 'Cosmos',
     role: 'organization_owner' as const,
     spaces: [{ id: 'platform', name: 'Platform', role: 'space_manager' as const }],
   }],
 }
 
 const gateway: ContextEngineGateway = {
-  hasRepository: (repository) => repository === 'relay/platform',
+  hasRepository: (repository) => repository === 'cosmos/platform',
   status: vi.fn(async (repository: string) => ({
     provider: 'contextengine-plugin' as const,
     repository,
@@ -77,23 +77,23 @@ describe('Context Engine routes', () => {
   it('allows a user only when the current Space active Environment binds the repository', async () => {
     const response = await appWithAccess(true).inject({
       method: 'GET',
-      url: '/api/v1/organizations/relay/spaces/platform/context-engine/status?repository=relay%2Fplatform',
+      url: '/api/v1/organizations/cosmos/spaces/platform/context-engine/status?repository=cosmos%2Fplatform',
     })
 
     expect(response.statusCode).toBe(200)
-    expect(response.json()).toMatchObject({ repository: 'relay/platform', indexed: true })
-    expect(gateway.status).toHaveBeenCalledWith('relay/platform')
+    expect(response.json()).toMatchObject({ repository: 'cosmos/platform', indexed: true })
+    expect(gateway.status).toHaveBeenCalledWith('cosmos/platform')
   })
 
   it('conceals cross-Space and unconfigured repository names with the same 404 envelope', async () => {
     const denied = await appWithAccess(false).inject({
       method: 'POST',
-      url: '/api/v1/organizations/relay/spaces/platform/context-engine/search',
-      payload: { repository: 'relay/platform', query: 'secret', topK: 5, mode: 'auto', expandGraph: true },
+      url: '/api/v1/organizations/cosmos/spaces/platform/context-engine/search',
+      payload: { repository: 'cosmos/platform', query: 'secret', topK: 5, mode: 'auto', expandGraph: true },
     })
     const unconfigured = await appWithAccess(true).inject({
       method: 'POST',
-      url: '/api/v1/organizations/relay/spaces/platform/context-engine/search',
+      url: '/api/v1/organizations/cosmos/spaces/platform/context-engine/search',
       payload: { repository: 'other/repository', query: 'secret', topK: 5, mode: 'auto', expandGraph: true },
     })
 
@@ -108,7 +108,7 @@ describe('Context Engine routes', () => {
     const catalog = new EmptyConfigurationCatalogRepository()
     const access = vi.spyOn(catalog, 'hasRepositoryAccess')
     const app = createApp({
-      authenticate: async () => ({ id: 'service-context', kind: 'service_account', audience: 'relay-api' }),
+      authenticate: async () => ({ id: 'service-context', kind: 'service_account', audience: 'cosmos-api' }),
       sessionRepository: new InMemorySessionRepository({ actorOrganizations }),
       configurationCatalogRepository: catalog,
       contextEngineGateway: gateway,
@@ -116,8 +116,8 @@ describe('Context Engine routes', () => {
     openApps.push(app)
     const response = await app.inject({
       method: 'POST',
-      url: '/api/v1/organizations/relay/spaces/platform/context-engine/context',
-      payload: { repository: 'relay/platform', task: 'inspect code', topK: 5, maxTokens: 1000 },
+      url: '/api/v1/organizations/cosmos/spaces/platform/context-engine/context',
+      payload: { repository: 'cosmos/platform', task: 'inspect code', topK: 5, maxTokens: 1000 },
     })
 
     expect(response.statusCode).toBe(403)

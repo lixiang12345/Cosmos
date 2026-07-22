@@ -42,17 +42,17 @@ if (poolConfig && (config.migrateOnStart || config.authentication.mode === 'deve
     await migrationPool.end()
   }
 }
-const pool = poolConfig ? createRuntimePool('relay_api_runtime', poolConfig, () => {
+const pool = poolConfig ? createRuntimePool('cosmos_api_runtime', poolConfig, () => {
   console.error(JSON.stringify({ level: 'error', event: 'api_database_client_error' }))
 }) : undefined
-if (pool) await assertRuntimeDatabaseRole(pool, 'relay_api_runtime')
+if (pool) await assertRuntimeDatabaseRole(pool, 'cosmos_api_runtime')
 const authenticate = config.authentication.mode === 'oidc'
   ? createJwtAuthenticator(config.authentication)
   : createDevelopmentAuthenticator(config.authentication.actorId)
 const developmentOrganizations = config.authentication.mode === 'development' ? {
   [config.authentication.actorId]: [{
-    id: 'relay',
-    name: 'Relay',
+    id: 'cosmos',
+    name: 'Cosmos',
     role: 'organization_owner' as const,
     spaces: [
       { id: 'space-commerce', name: 'Commerce Engineering', role: 'space_manager' as const },

@@ -11,7 +11,7 @@ import {
 } from '../src/index.js'
 
 const scope = {
-  organizationId: 'organization-relay',
+  organizationId: 'organization-cosmos',
   spaceId: 'space-commerce',
   sessionId: 'session-123',
 } as const

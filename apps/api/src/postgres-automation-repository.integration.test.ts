@@ -10,13 +10,13 @@ const databaseUrl = process.env.TEST_DATABASE_URL
 const describeWithDatabase = databaseUrl ? describe : describe.skip
 
 describeWithDatabase('Automation authority under the restricted API runtime role', () => {
-  const schema = `relay_automation_${randomUUID().replaceAll('-', '')}`
+  const schema = `cosmos_automation_${randomUUID().replaceAll('-', '')}`
   const adminPool = new Pool({ connectionString: databaseUrl })
   const migrationPool = new Pool({ connectionString: databaseUrl, options: `-c search_path=${schema}` })
   const apiPool = new Pool({
     connectionString: databaseUrl,
     max: 1,
-    options: `-c role=relay_api_runtime -c search_path=${schema}`,
+    options: `-c role=cosmos_api_runtime -c search_path=${schema}`,
   })
   const repository = new PostgresAutomationRepository(apiPool)
 
@@ -24,60 +24,60 @@ describeWithDatabase('Automation authority under the restricted API runtime role
     await adminPool.query(`CREATE SCHEMA ${schema}`)
     await runMigrations(migrationPool)
     await migrationPool.query(`
-      INSERT INTO relay_organizations (id, name) VALUES
+      INSERT INTO cosmos_organizations (id, name) VALUES
         ('automation-org', 'Automation Organization'),
         ('automation-other', 'Other Organization');
-      INSERT INTO relay_spaces (organization_id, id, name) VALUES
+      INSERT INTO cosmos_spaces (organization_id, id, name) VALUES
         ('automation-org', 'automation-space', 'Automation Space'),
         ('automation-other', 'automation-space', 'Other Space');
-      INSERT INTO relay_organization_memberships (organization_id, actor_id, role) VALUES
+      INSERT INTO cosmos_organization_memberships (organization_id, actor_id, role) VALUES
         ('automation-org', 'automation-owner', 'organization_owner'),
         ('automation-org', 'automation-member', 'member'),
         ('automation-org', 'automation-service', 'member'),
         ('automation-other', 'other-owner', 'organization_owner');
-      INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role) VALUES
+      INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role) VALUES
         ('automation-org', 'automation-space', 'automation-owner', 'space_manager'),
         ('automation-org', 'automation-space', 'automation-member', 'member'),
         ('automation-org', 'automation-space', 'automation-service', 'member'),
         ('automation-other', 'automation-space', 'other-owner', 'space_manager');
-      INSERT INTO relay_service_accounts (organization_id, id, audience, status)
+      INSERT INTO cosmos_service_accounts (organization_id, id, audience, status)
       VALUES ('automation-org', 'automation-service', 'automation-test-audience', 'active');
-      INSERT INTO relay_environments (
+      INSERT INTO cosmos_environments (
         organization_id, space_id, id, type, name, status, active_revision_id,
         latest_revision_id, created_by
       ) VALUES (
         'automation-org', 'automation-space', 'environment-ready', 'cloud',
         'Ready Environment', 'draft', NULL, NULL, 'automation-owner'
       );
-      INSERT INTO relay_environment_revisions (
+      INSERT INTO cosmos_environment_revisions (
         organization_id, space_id, environment_id, id, revision, status,
         configuration, checksum, created_by
       ) VALUES (
         'automation-org', 'automation-space', 'environment-ready',
         'environment-revision-ready', 1, 'draft',
-        '{"image":"ghcr.io/relay/runtime:test","variableReferences":[],"hooks":[],"networkPolicy":{"mode":"restricted","allowedHosts":[]},"sharing":"space","daemonPoolId":null}',
+        '{"image":"ghcr.io/cosmos/runtime:test","variableReferences":[],"hooks":[],"networkPolicy":{"mode":"restricted","allowedHosts":[]},"sharing":"space","daemonPoolId":null}',
         repeat('a', 64), 'automation-owner'
       );
-      INSERT INTO relay_environment_revision_repositories (
+      INSERT INTO cosmos_environment_revision_repositories (
         organization_id, space_id, environment_id, environment_revision_id,
         repository_id, repository, base_branch, is_default
       ) VALUES (
         'automation-org', 'automation-space', 'environment-ready',
-        'environment-revision-ready', 'repository-default', 'relay/platform', 'main', true
+        'environment-revision-ready', 'repository-default', 'cosmos/platform', 'main', true
       );
-      UPDATE relay_environment_revisions SET status = 'ready'
+      UPDATE cosmos_environment_revisions SET status = 'ready'
       WHERE organization_id = 'automation-org' AND id = 'environment-revision-ready';
-      UPDATE relay_environments SET status = 'ready',
+      UPDATE cosmos_environments SET status = 'ready',
         active_revision_id = 'environment-revision-ready',
         latest_revision_id = 'environment-revision-ready'
       WHERE organization_id = 'automation-org' AND id = 'environment-ready';
-      INSERT INTO relay_experts (
+      INSERT INTO cosmos_experts (
         organization_id, space_id, id, name, visibility, status, created_by
       ) VALUES (
         'automation-org', 'automation-space', 'expert-published',
         'Published Expert', 'space', 'draft', 'automation-owner'
       );
-      INSERT INTO relay_expert_revisions (
+      INSERT INTO cosmos_expert_revisions (
         organization_id, space_id, expert_id, id, revision, status,
         environment_id, environment_revision_id, allow_repository_override,
         allow_base_branch_override, instructions, model, configuration, created_by
@@ -87,11 +87,11 @@ describeWithDatabase('Automation authority under the restricted API runtime role
         'environment-revision-ready', false, false, 'Handle the event.',
         'gpt-5.6-sol', '{"capabilities":[],"launchGuidance":""}', 'automation-owner'
       );
-      UPDATE relay_expert_revisions SET status = 'published'
+      UPDATE cosmos_expert_revisions SET status = 'published'
       WHERE organization_id = 'automation-org' AND id = 'expert-revision-published';
-      UPDATE relay_experts SET status = 'published', published_revision_id = 'expert-revision-published'
+      UPDATE cosmos_experts SET status = 'published', published_revision_id = 'expert-revision-published'
       WHERE organization_id = 'automation-org' AND id = 'expert-published';
-      INSERT INTO relay_service_account_bindings (
+      INSERT INTO cosmos_service_account_bindings (
         organization_id, space_id, service_account_id, id,
         scope, resource_type, resource_id
       ) VALUES (
@@ -255,9 +255,9 @@ describeWithDatabase('Automation authority under the restricted API runtime role
 
     const facts = await migrationPool.query<{ audits: string; outbox: string }>(`
       SELECT
-        (SELECT count(*) FROM relay_automation_audit_events
+        (SELECT count(*) FROM cosmos_automation_audit_events
           WHERE automation_id = $1 AND action = 'automation.archive')::text AS audits,
-        (SELECT count(*) FROM relay_automation_outbox_events
+        (SELECT count(*) FROM cosmos_automation_outbox_events
           WHERE automation_id = $1 AND event_type = 'automation.archived')::text AS outbox
     `, [created.automation.id])
     expect(facts.rows[0]).toEqual({ audits: '1', outbox: '1' })
@@ -268,11 +268,11 @@ describeWithDatabase('Automation authority under the restricted API runtime role
       request: { name: 'Forbidden rename' },
     })).rejects.toBeInstanceOf(AutomationStateConflictError)
     await expect(migrationPool.query(
-      'UPDATE relay_expert_triggers SET name = name || \' changed\' WHERE id = $1',
+      'UPDATE cosmos_expert_triggers SET name = name || \' changed\' WHERE id = $1',
       [created.automation.id],
     )).rejects.toMatchObject({ code: '55000' })
     await expect(migrationPool.query(
-      'DELETE FROM relay_expert_triggers WHERE id = $1',
+      'DELETE FROM cosmos_expert_triggers WHERE id = $1',
       [created.automation.id],
     )).rejects.toMatchObject({ code: '55000' })
   })

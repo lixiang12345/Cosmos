@@ -17,16 +17,16 @@ const databaseUrl = process.env.TEST_DATABASE_URL
 const describeWithDatabase = databaseUrl ? describe : describe.skip
 
 describeWithDatabase('Postgres File repositories', () => {
-  const schema = `relay_file_${crypto.randomUUID().replaceAll('-', '')}`
+  const schema = `cosmos_file_${crypto.randomUUID().replaceAll('-', '')}`
   const adminPool = new Pool({ connectionString: databaseUrl })
   const migrationPool = new Pool({ connectionString: databaseUrl, options: `-c search_path=${schema}` })
   const apiPool = new Pool({
     connectionString: databaseUrl,
-    options: `-c role=relay_api_runtime -c search_path=${schema}`,
+    options: `-c role=cosmos_api_runtime -c search_path=${schema}`,
   })
   const workerPool = new Pool({
     connectionString: databaseUrl,
-    options: `-c role=relay_worker_runtime -c search_path=${schema}`,
+    options: `-c role=cosmos_worker_runtime -c search_path=${schema}`,
   })
   let now = new Date('2026-07-13T03:00:00.000Z')
   let id = 0
@@ -44,14 +44,14 @@ describeWithDatabase('Postgres File repositories', () => {
     await migrationPool.query(`SET search_path TO ${schema}`)
     await runMigrations(migrationPool)
     await migrationPool.query(`
-      INSERT INTO relay_organizations (id, name) VALUES ('file-org', 'File Organization');
-      INSERT INTO relay_spaces (organization_id, id, name)
+      INSERT INTO cosmos_organizations (id, name) VALUES ('file-org', 'File Organization');
+      INSERT INTO cosmos_spaces (organization_id, id, name)
       VALUES ('file-org', 'file-space', 'File Space');
-      INSERT INTO relay_organization_memberships (organization_id, actor_id, role)
+      INSERT INTO cosmos_organization_memberships (organization_id, actor_id, role)
       VALUES
         ('file-org', 'file-owner', 'organization_owner'),
         ('file-org', 'file-reader', 'member');
-      INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
+      INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role)
       VALUES
         ('file-org', 'file-space', 'file-owner', 'space_manager'),
         ('file-org', 'file-space', 'file-reader', 'member');
@@ -136,13 +136,13 @@ describeWithDatabase('Postgres File repositories', () => {
       payload: unknown
     }>(`
       SELECT
-        (SELECT count(*)::text FROM relay_session_events
+        (SELECT count(*)::text FROM cosmos_session_events
           WHERE event_type = 'file.version.created') AS events,
-        (SELECT count(*)::text FROM relay_audit_events
+        (SELECT count(*)::text FROM cosmos_audit_events
           WHERE action = 'file.version.create') AS audits,
-        (SELECT count(*)::text FROM relay_outbox_events
+        (SELECT count(*)::text FROM cosmos_outbox_events
           WHERE event_type = 'file.version.created') AS outbox,
-        (SELECT jsonb_agg(payload) FROM relay_session_events
+        (SELECT jsonb_agg(payload) FROM cosmos_session_events
           WHERE event_type = 'file.version.created') AS payload
     `)
     expect(ledgers.rows[0]).toMatchObject({ events: '3', audits: '3', outbox: '3' })
@@ -170,8 +170,8 @@ describeWithDatabase('Postgres File repositories', () => {
       { organizationId: 'file-org', spaceId: 'file-space', actorId: 'file-reader' },
       (client) => client.query<{ scope: string; files: string; versions: string }>(`
         SELECT scope, count(*)::text AS files,
-          (SELECT count(*)::text FROM relay_file_versions) AS versions
-        FROM relay_files GROUP BY scope ORDER BY scope
+          (SELECT count(*)::text FROM cosmos_file_versions) AS versions
+        FROM cosmos_files GROUP BY scope ORDER BY scope
       `),
     )
     expect(rawMemberVisibility.rows).toEqual([
@@ -182,7 +182,7 @@ describeWithDatabase('Postgres File repositories', () => {
       apiPool,
       { organizationId: 'file-org', spaceId: 'file-space', actorId: 'file-owner' },
       (client) => client.query<{ count: string }>(
-        `SELECT count(*)::text AS count FROM relay_files WHERE scope = 'user'`,
+        `SELECT count(*)::text AS count FROM cosmos_files WHERE scope = 'user'`,
       ),
     )
     expect(rawOwnerVisibility.rows[0]?.count).toBe('1')
@@ -268,7 +268,7 @@ describeWithDatabase('Postgres File repositories', () => {
       apiPool,
       { organizationId: 'file-org', spaceId: 'file-space', actorId: 'file-reader' },
       (client) => client.query<{ count: string }>(
-        'SELECT count(*)::text AS count FROM relay_files WHERE id = $1',
+        'SELECT count(*)::text AS count FROM cosmos_files WHERE id = $1',
         [written.file.id],
       ),
     )
@@ -277,7 +277,7 @@ describeWithDatabase('Postgres File repositories', () => {
       apiPool,
       { organizationId: 'file-org', spaceId: 'file-space', actorId: 'file-owner' },
       (client) => client.query<{ count: string }>(
-        'SELECT count(*)::text AS count FROM relay_file_versions WHERE file_id = $1',
+        'SELECT count(*)::text AS count FROM cosmos_file_versions WHERE file_id = $1',
         [written.file.id],
       ),
     )
@@ -286,7 +286,7 @@ describeWithDatabase('Postgres File repositories', () => {
 
   it('enforces Organization quota and database immutability', async () => {
     await migrationPool.query(`
-      UPDATE relay_organization_quotas
+      UPDATE cosmos_organization_quotas
       SET file_storage_bytes_limit = 1048576
       WHERE organization_id = 'file-org'
     `)
@@ -296,7 +296,7 @@ describeWithDatabase('Postgres File repositories', () => {
       content: Buffer.alloc(1_048_576),
     })).rejects.toBeInstanceOf(FileQuotaExceededError)
     await migrationPool.query(`
-      UPDATE relay_organization_quotas
+      UPDATE cosmos_organization_quotas
       SET file_storage_bytes_limit = 104857600
       WHERE organization_id = 'file-org'
     `)
@@ -309,13 +309,13 @@ describeWithDatabase('Postgres File repositories', () => {
       .rejects.toBeInstanceOf(FileQuotaExceededError)
 
     await expect(migrationPool.query(`
-      UPDATE relay_file_versions SET content = 'changed'
+      UPDATE cosmos_file_versions SET content = 'changed'
     `)).rejects.toMatchObject({ code: '55000' })
     await expect(migrationPool.query(`
-      DELETE FROM relay_file_versions
+      DELETE FROM cosmos_file_versions
     `)).rejects.toMatchObject({ code: '55000' })
     await expect(migrationPool.query(`
-      UPDATE relay_files SET path = 'moved.md', version = version + 1
+      UPDATE cosmos_files SET path = 'moved.md', version = version + 1
       WHERE scope = 'organization'
     `)).rejects.toMatchObject({ code: '55000' })
   })
@@ -337,7 +337,7 @@ describeWithDatabase('Postgres File repositories', () => {
       object_key: string | null
     }>(`
       SELECT content, storage_backend, object_key
-      FROM relay_file_versions WHERE id = $1
+      FROM cosmos_file_versions WHERE id = $1
     `, [appended.fileVersion.id])
     expect(metadata.rows[0]).toMatchObject({ content: null, storage_backend: 'object' })
     expect(metadata.rows[0]?.object_key).toMatch(/^organizations\/[a-f0-9]{64}\/file-versions\//)

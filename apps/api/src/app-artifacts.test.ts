@@ -1,4 +1,4 @@
-import type { ArtifactDto, MeOrganization } from '@relay/contracts'
+import type { ArtifactDto, MeOrganization } from '@cosmos/contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.js'
 import {
@@ -8,7 +8,7 @@ import {
 import { createDevelopmentAuthenticator } from './auth.js'
 import { InMemorySessionRepository } from './session-repository.js'
 
-const organizationId = 'relay'
+const organizationId = 'cosmos'
 const spaceId = 'platform'
 const sessionId = 'session-1'
 const actorId = 'user-1'
@@ -22,9 +22,9 @@ const artifact: ArtifactDto = {
   turnId: null,
   type: 'pull_request',
   provider: 'github',
-  externalId: 'relay/cosmos#42',
+  externalId: 'cosmos/cosmos#42',
   label: 'Production fix',
-  url: 'https://github.com/relay/cosmos/pull/42',
+  url: 'https://github.com/cosmos/cosmos/pull/42',
   status: 'open',
   attributes: { draft: false },
   createdByToolCallId: null,
@@ -37,7 +37,7 @@ const artifact: ArtifactDto = {
 
 const organizations: MeOrganization[] = [{
   id: organizationId,
-  name: 'Relay',
+  name: 'Cosmos',
   role: 'member',
   spaces: [{ id: spaceId, name: 'Platform', role: 'member' }],
 }]
@@ -151,7 +151,7 @@ describe('Artifact API', () => {
       payload: {
         type: 'pull_request',
         provider: 'github',
-        externalId: 'relay/cosmos#42',
+        externalId: 'cosmos/cosmos#42',
         label: 'Production fix',
         url: artifact.url,
       },
@@ -222,7 +222,7 @@ describe('Artifact API', () => {
   it('fails closed for Service Accounts without an exact Artifact operation policy', async () => {
     const list = vi.fn<ArtifactRepository['list']>()
     const app = createApp({
-      authenticate: async () => ({ id: actorId, kind: 'service_account', audience: 'relay-api' }),
+      authenticate: async () => ({ id: actorId, kind: 'service_account', audience: 'cosmos-api' }),
       artifactRepository: repository({ list }),
       sessionRepository: new InMemorySessionRepository({
         actorOrganizations: { [actorId]: organizations },

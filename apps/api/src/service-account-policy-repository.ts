@@ -41,15 +41,15 @@ export class PostgresServiceAccountPolicyRepository implements ServiceAccountPol
       },
       `
       SELECT 1
-      FROM relay_service_accounts service_account
-      JOIN relay_organization_memberships organization_membership
+      FROM cosmos_service_accounts service_account
+      JOIN cosmos_organization_memberships organization_membership
         ON organization_membership.organization_id = service_account.organization_id
         AND organization_membership.actor_id = service_account.id
-      JOIN relay_space_memberships space_membership
+      JOIN cosmos_space_memberships space_membership
         ON space_membership.organization_id = service_account.organization_id
         AND space_membership.actor_id = service_account.id
         AND space_membership.space_id = $2
-      JOIN relay_service_account_bindings binding
+      JOIN cosmos_service_account_bindings binding
         ON binding.organization_id = service_account.organization_id
         AND binding.space_id = space_membership.space_id
         AND binding.service_account_id = service_account.id

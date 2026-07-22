@@ -7,7 +7,7 @@ import type {
   ReceiveAutomationEventRequest,
   TestAutomationRequest,
   UpdateAutomationRequest,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 
 export type AutomationScope = {
   organizationId: string

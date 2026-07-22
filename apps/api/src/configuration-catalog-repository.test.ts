@@ -5,7 +5,7 @@ import { PostgresConfigurationCatalogRepository } from './postgres-configuration
 
 const expertRow = {
   id: 'expert-incident',
-  organization_id: 'organization-relay',
+  organization_id: 'organization-cosmos',
   space_id: 'space-platform',
   name: 'Incident Investigator',
   description: 'Investigates production incidents.',
@@ -31,7 +31,7 @@ const expertRow = {
 
 const environmentRow = {
   id: 'environment-production',
-  organization_id: 'organization-relay',
+  organization_id: 'organization-cosmos',
   space_id: 'space-platform',
   type: 'cloud',
   name: 'Production Environment',
@@ -49,7 +49,7 @@ const environmentRow = {
   revision_status: 'ready',
   revision_created_at: new Date('2026-07-12T08:30:00.000Z'),
   active_revision_configuration: {
-    image: 'ghcr.io/relay/runtime:stable',
+    image: 'ghcr.io/cosmos/runtime:stable',
     variableReferences: [],
     hooks: [],
     networkPolicy: { mode: 'restricted', allowedHosts: [] },
@@ -58,7 +58,7 @@ const environmentRow = {
   },
   active_revision_checksum: 'a'.repeat(64),
   default_repository_id: 'repository-default',
-  default_repository: 'relay/platform',
+  default_repository: 'cosmos/platform',
   default_base_branch: 'main',
   default_is_default: true,
   provisioning_job_id: null,
@@ -115,7 +115,7 @@ describe('PostgresConfigurationCatalogRepository', () => {
     const { query, repository } = repositoryReturning([expertRow, second, third])
 
     await expect(repository.listExperts(
-      'organization-relay',
+      'organization-cosmos',
       'space-platform',
       'user-admin',
       { limit: 2 },
@@ -126,7 +126,7 @@ describe('PostgresConfigurationCatalogRepository', () => {
     })
 
     const [sql, parameters] = query.mock.calls[0] as [string, unknown[]]
-    expect(parameters).toEqual(['organization-relay', 'space-platform', 'user-admin', 3])
+    expect(parameters).toEqual(['organization-cosmos', 'space-platform', 'user-admin', 3])
     expect(sql.match(/EXISTS \(/g)).toHaveLength(2)
     expect(sql).toContain("expert.visibility = 'space' OR expert.created_by = $3")
     expect(sql).toContain("expert.status = 'published'")
@@ -138,16 +138,16 @@ describe('PostgresConfigurationCatalogRepository', () => {
   it('uses a stable keyset cursor and distinguishes missing membership from an empty catalog', async () => {
     const missing = repositoryReturning([])
     await expect(missing.repository.listExperts(
-      'organization-relay', 'space-platform', 'user-missing',
+      'organization-cosmos', 'space-platform', 'user-missing',
     )).resolves.toBeNull()
 
     const empty = repositoryReturning([{ id: null, updated_at: null }])
     await expect(empty.repository.listExperts(
-      'organization-relay', 'space-platform', 'user-member',
+      'organization-cosmos', 'space-platform', 'user-member',
     )).resolves.toEqual({ items: [], hasMore: false, nextCursor: null })
 
     const paged = repositoryReturning([expertRow])
-    await paged.repository.listExperts('organization-relay', 'space-platform', 'user-member', {
+    await paged.repository.listExperts('organization-cosmos', 'space-platform', 'user-member', {
       limit: 25,
       cursor: { updatedAt: '2026-07-12T11:00:00.000Z', id: 'expert-z' },
     })
@@ -155,7 +155,7 @@ describe('PostgresConfigurationCatalogRepository', () => {
     expect(sql).toContain('(expert.updated_at, expert.id) < ($4::timestamptz, $5)')
     expect(sql).toContain('LIMIT $6')
     expect(parameters).toEqual([
-      'organization-relay', 'space-platform', 'user-member',
+      'organization-cosmos', 'space-platform', 'user-member',
       '2026-07-12T11:00:00.000Z', 'expert-z', 26,
     ])
   })
@@ -164,7 +164,7 @@ describe('PostgresConfigurationCatalogRepository', () => {
     const { query, repository } = repositoryReturning([expertRow])
 
     const expert = await repository.getExpert(
-      'organization-relay', 'space-platform', 'expert-incident', 'user-admin',
+      'organization-cosmos', 'space-platform', 'expert-incident', 'user-admin',
     )
     expect(expert).toMatchObject({
       id: 'expert-incident',
@@ -187,7 +187,7 @@ describe('PostgresConfigurationCatalogRepository', () => {
   it('maps Environment summaries and detail repository bindings from explicit columns', async () => {
     const listed = repositoryReturning([environmentRow])
     await expect(listed.repository.listEnvironments(
-      'organization-relay', 'space-platform', 'user-admin',
+      'organization-cosmos', 'space-platform', 'user-admin',
     )).resolves.toMatchObject({
       items: [{
         id: 'environment-production',
@@ -212,12 +212,12 @@ describe('PostgresConfigurationCatalogRepository', () => {
         latest_revision_checksum: environmentRow.active_revision_checksum,
         latest_revision_created_at: environmentRow.revision_created_at,
         latest_binding_repository_id: 'repository-default',
-        latest_binding_repository: 'relay/platform',
+        latest_binding_repository: 'cosmos/platform',
         latest_binding_base_branch: 'main',
         latest_binding_is_default: true,
         active_repository_bindings: [
-          { repositoryId: 'repository-default', repository: 'relay/platform', baseBranch: 'main', isDefault: true },
-          { repositoryId: 'repository-docs', repository: 'relay/docs', baseBranch: 'main', isDefault: false },
+          { repositoryId: 'repository-default', repository: 'cosmos/platform', baseBranch: 'main', isDefault: true },
+          { repositoryId: 'repository-docs', repository: 'cosmos/docs', baseBranch: 'main', isDefault: false },
         ],
         provisioning_history: [],
       },
@@ -230,23 +230,23 @@ describe('PostgresConfigurationCatalogRepository', () => {
         latest_revision_checksum: environmentRow.active_revision_checksum,
         latest_revision_created_at: environmentRow.revision_created_at,
         latest_binding_repository_id: 'repository-docs',
-        latest_binding_repository: 'relay/docs',
+        latest_binding_repository: 'cosmos/docs',
         latest_binding_base_branch: 'main',
         latest_binding_is_default: false,
         active_repository_bindings: [
-          { repositoryId: 'repository-default', repository: 'relay/platform', baseBranch: 'main', isDefault: true },
-          { repositoryId: 'repository-docs', repository: 'relay/docs', baseBranch: 'main', isDefault: false },
+          { repositoryId: 'repository-default', repository: 'cosmos/platform', baseBranch: 'main', isDefault: true },
+          { repositoryId: 'repository-docs', repository: 'cosmos/docs', baseBranch: 'main', isDefault: false },
         ],
         provisioning_history: [],
       },
     ]
     const detailed = repositoryReturning(detailRows)
     const environment = await detailed.repository.getEnvironment(
-      'organization-relay', 'space-platform', 'environment-production', 'user-admin',
+      'organization-cosmos', 'space-platform', 'environment-production', 'user-admin',
     )
     expect(environment?.activeRevision?.repositoryBindings).toEqual([
-      { repositoryId: 'repository-default', repository: 'relay/platform', baseBranch: 'main', isDefault: true },
-      { repositoryId: 'repository-docs', repository: 'relay/docs', baseBranch: 'main', isDefault: false },
+      { repositoryId: 'repository-default', repository: 'cosmos/platform', baseBranch: 'main', isDefault: true },
+      { repositoryId: 'repository-docs', repository: 'cosmos/docs', baseBranch: 'main', isDefault: false },
     ])
     const [sql] = detailed.query.mock.calls[0] as [string]
     expect(sql.match(/EXISTS \(/g)).toHaveLength(2)
@@ -258,10 +258,10 @@ describe('PostgresConfigurationCatalogRepository', () => {
   it('rejects invalid pagination before querying PostgreSQL', async () => {
     const { query, repository } = repositoryReturning([])
     await expect(repository.listExperts(
-      'organization-relay', 'space-platform', 'user-admin', { limit: 101 },
+      'organization-cosmos', 'space-platform', 'user-admin', { limit: 101 },
     )).rejects.toThrow(RangeError)
     await expect(repository.listEnvironments(
-      'organization-relay', 'space-platform', 'user-admin', {
+      'organization-cosmos', 'space-platform', 'user-admin', {
         cursor: { updatedAt: 'invalid', id: 'environment-production' },
       },
     )).rejects.toThrow(RangeError)

@@ -11,16 +11,16 @@ const databaseUrl = process.env.TEST_DATABASE_URL
 const describeWithDatabase = databaseUrl ? describe : describe.skip
 
 describeWithDatabase('Object Storage orphan GC', () => {
-  const schema = `relay_object_gc_${crypto.randomUUID().replaceAll('-', '')}`
+  const schema = `cosmos_object_gc_${crypto.randomUUID().replaceAll('-', '')}`
   const adminPool = new Pool({ connectionString: databaseUrl })
   const pool = new Pool({ connectionString: databaseUrl, options: `-c search_path=${schema}` })
   const apiPool = new Pool({
     connectionString: databaseUrl,
-    options: `-c role=relay_api_runtime -c search_path=${schema}`,
+    options: `-c role=cosmos_api_runtime -c search_path=${schema}`,
   })
   const workerPool = new Pool({
     connectionString: databaseUrl,
-    options: `-c role=relay_worker_runtime -c search_path=${schema}`,
+    options: `-c role=cosmos_worker_runtime -c search_path=${schema}`,
   })
   const storedAt = new Date('2026-07-01T00:00:00.000Z')
   const objectStore = new InMemoryObjectStore(() => storedAt)
@@ -33,11 +33,11 @@ describeWithDatabase('Object Storage orphan GC', () => {
     await adminPool.query(`CREATE SCHEMA ${schema}`)
     await runMigrations(pool)
     await pool.query(`
-      INSERT INTO relay_organizations (id, name) VALUES ('gc-org', 'GC Organization');
-      INSERT INTO relay_spaces (organization_id, id, name) VALUES ('gc-org', 'gc-space', 'GC Space');
-      INSERT INTO relay_organization_memberships (organization_id, actor_id, role)
+      INSERT INTO cosmos_organizations (id, name) VALUES ('gc-org', 'GC Organization');
+      INSERT INTO cosmos_spaces (organization_id, id, name) VALUES ('gc-org', 'gc-space', 'GC Space');
+      INSERT INTO cosmos_organization_memberships (organization_id, actor_id, role)
         VALUES ('gc-org', 'gc-owner', 'organization_owner');
-      INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
+      INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role)
         VALUES ('gc-org', 'gc-space', 'gc-owner', 'space_manager');
     `)
     await seedSessionConfiguration(pool, 'gc-org', 'gc-space')
@@ -66,7 +66,7 @@ describeWithDatabase('Object Storage orphan GC', () => {
       content: Buffer.from('referenced'), expertId: 'expert-pr-author', toolCallId: 'gc-tool-call',
     })
     const metadata = await pool.query<{ object_key: string }>(
-      'SELECT object_key FROM relay_file_versions WHERE id = $1',
+      'SELECT object_key FROM cosmos_file_versions WHERE id = $1',
       [appended.fileVersion.id],
     )
     referencedKey = metadata.rows[0]?.object_key ?? ''
@@ -111,12 +111,12 @@ describeWithDatabase('Object Storage orphan GC', () => {
       mode: string
       scanned_objects: number
       deleted_objects: number
-    }>('SELECT id, mode, scanned_objects, deleted_objects FROM relay_object_storage_gc_runs ORDER BY id')
+    }>('SELECT id, mode, scanned_objects, deleted_objects FROM cosmos_object_storage_gc_runs ORDER BY id')
     expect(rows.rows).toEqual([
       { id: 'gc-run-apply', mode: 'apply', scanned_objects: 2, deleted_objects: 1 },
       { id: 'gc-run-dry', mode: 'dry_run', scanned_objects: 2, deleted_objects: 0 },
     ])
-    await expect(pool.query('UPDATE relay_object_storage_gc_runs SET deleted_objects = 0'))
+    await expect(pool.query('UPDATE cosmos_object_storage_gc_runs SET deleted_objects = 0'))
       .rejects.toMatchObject({ code: '55000' })
   })
 })

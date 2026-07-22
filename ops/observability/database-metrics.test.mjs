@@ -13,12 +13,12 @@ describe('database observer metrics', () => {
     let index = 0
     const rendered = await renderDatabaseMetrics({ query: async () => results[index++] })
 
-    assert.match(rendered, /relay_observer_commands_total\{status="queued"\} 3/)
-    assert.match(rendered, /relay_observer_environment_jobs_total\{status="running"\} 1/)
-    assert.match(rendered, /relay_observer_environment_jobs_expired_leases_total\{status="running"\} 1/)
-    assert.match(rendered, /relay_observer_workers_total\{state="fresh"\} 2/)
-    assert.match(rendered, /relay_observer_workers_total\{state="stale"\} 1/)
-    assert.match(rendered, /relay_observer_outbox_pending_total\{stream="session"\} 5/)
+    assert.match(rendered, /cosmos_observer_commands_total\{status="queued"\} 3/)
+    assert.match(rendered, /cosmos_observer_environment_jobs_total\{status="running"\} 1/)
+    assert.match(rendered, /cosmos_observer_environment_jobs_expired_leases_total\{status="running"\} 1/)
+    assert.match(rendered, /cosmos_observer_workers_total\{state="fresh"\} 2/)
+    assert.match(rendered, /cosmos_observer_workers_total\{state="stale"\} 1/)
+    assert.match(rendered, /cosmos_observer_outbox_pending_total\{stream="session"\} 5/)
     assert.equal(rendered.includes('organization'), false)
     assert.equal(rendered.includes('payload'), false)
   })

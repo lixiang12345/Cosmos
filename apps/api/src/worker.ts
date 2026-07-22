@@ -24,7 +24,7 @@ const logger: ExecutionWorkerLogger = {
   },
 }
 const config = loadWorkerConfig()
-const pool = createRuntimePool('relay_worker_runtime', {
+const pool = createRuntimePool('cosmos_worker_runtime', {
   connectionString: config.databaseUrl,
   connectionTimeoutMillis: config.databaseConnectionTimeoutMs,
   query_timeout: config.databaseQueryTimeoutMs,
@@ -36,7 +36,7 @@ process.once('SIGINT', () => shutdown.abort())
 process.once('SIGTERM', () => shutdown.abort())
 
 try {
-  await assertRuntimeDatabaseRole(pool, 'relay_worker_runtime')
+  await assertRuntimeDatabaseRole(pool, 'cosmos_worker_runtime')
   await assertMigrationsCurrent(pool)
   const provider = new OpenAiCompatibleChatCompletionsProvider(config.provider)
   const objectStore = config.objectStorage ? new S3ObjectStore(config.objectStorage) : undefined

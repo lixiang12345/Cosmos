@@ -1,4 +1,4 @@
-import type { ContextPackResponse } from '@relay/contracts'
+import type { ContextPackResponse } from '@cosmos/contracts'
 import {
   Activity,
   AlertTriangle,
@@ -311,7 +311,7 @@ export function CosmosHomePage({
         <section className="home-launcher" aria-labelledby="home-launcher-title">
           <header>
             <span className="home-launcher__mark"><Sparkles aria-hidden="true" /></span>
-            <p>{localize(locale, 'Relay Agent OS', 'Relay Agent OS')}</p>
+            <p>{localize(locale, 'Cosmos Agent OS', 'Cosmos Agent OS')}</p>
             <h1 id="home-launcher-title">{executionEnabled
               ? localize(locale, '选择 Expert，开始一个会话', 'Choose an Expert and start a session')
               : localize(locale, '选择 Expert，保存会话草稿', 'Choose an Expert and save a Session draft')}</h1>
@@ -1093,7 +1093,7 @@ const sampleEvents: Record<CosmosEventSource, { type: string; payload: Record<st
   },
   slack: {
     type: 'message.posted',
-    payload: { channel: 'payments-alerts', mentionsRelay: 'true', text: '@Cosmos investigate payment timeouts', team_id: 'T-COMMERCE' },
+    payload: { channel: 'payments-alerts', mentionsCosmos: 'true', text: '@Cosmos investigate payment timeouts', team_id: 'T-COMMERCE' },
   },
   webhook: {
     type: 'custom.alert',

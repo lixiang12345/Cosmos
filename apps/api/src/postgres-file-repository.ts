@@ -6,7 +6,7 @@ import {
   type FileDto,
   type FileScope,
   type FileVersionDto,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 import type { Pool, PoolClient } from 'pg'
 import {
   FileQuotaExceededError,
@@ -146,11 +146,11 @@ async function canReadWorkspaceSession(
 ) {
   const result = await client.query(`
     SELECT 1
-    FROM relay_sessions session
-    JOIN relay_organization_memberships organization_membership
+    FROM cosmos_sessions session
+    JOIN cosmos_organization_memberships organization_membership
       ON organization_membership.organization_id = session.organization_id
       AND organization_membership.actor_id = $4
-    JOIN relay_space_memberships space_membership
+    JOIN cosmos_space_memberships space_membership
       ON space_membership.organization_id = session.organization_id
       AND space_membership.space_id = session.space_id
       AND space_membership.actor_id = $4
@@ -158,7 +158,7 @@ async function canReadWorkspaceSession(
       AND (
         session.visibility = 'space' OR session.created_by = $4
         OR EXISTS (
-          SELECT 1 FROM relay_session_share_grants share_grant
+          SELECT 1 FROM cosmos_session_share_grants share_grant
           WHERE share_grant.organization_id = session.organization_id
             AND share_grant.space_id = session.space_id
             AND share_grant.session_id = session.id
@@ -170,7 +170,7 @@ async function canReadWorkspaceSession(
               OR (
                 share_grant.principal_type = 'group'
                 AND EXISTS (
-                  SELECT 1 FROM relay_group_memberships group_membership
+                  SELECT 1 FROM cosmos_group_memberships group_membership
                   WHERE group_membership.organization_id = share_grant.organization_id
                     AND group_membership.group_id = share_grant.principal_id
                     AND group_membership.actor_id = $4
@@ -189,7 +189,7 @@ async function canReadOtherUserFiles(
   actorId: string,
 ) {
   const result = await client.query<{ role: string }>(`
-    SELECT role FROM relay_organization_memberships
+    SELECT role FROM cosmos_organization_memberships
     WHERE organization_id = $1 AND actor_id = $2
       AND role IN ('organization_admin', 'organization_owner')
   `, [organizationId, actorId])
@@ -205,7 +205,7 @@ async function readableFile(
 ): Promise<FileDto | null> {
   const result = await client.query<FileRow>(`
     SELECT ${fileColumns.split(',').map((column) => `file.${column.trim()}`).join(', ')}
-    FROM relay_files file
+    FROM cosmos_files file
     WHERE file.organization_id = $1 AND file.id = $2
       AND file.version > 0 AND file.archived_at IS NULL
   `, [organizationId, fileId])
@@ -280,7 +280,7 @@ export class PostgresFileRepository implements FileRepository {
         parameters.push(pageLimit + 1)
         const result = await client.query<FileRow>(`
           SELECT ${fileColumns.split(',').map((column) => `file.${column.trim()}`).join(', ')}
-          FROM relay_files file
+          FROM cosmos_files file
           WHERE ${clauses.join('\n            AND ')}
           ORDER BY file.path ASC, file.id ASC
           LIMIT $${parameters.length}
@@ -331,7 +331,7 @@ export class PostgresFileRepository implements FileRepository {
         parameters.push(pageLimit + 1)
         const result = await client.query<FileVersionRow>(`
           SELECT ${fileVersionColumns}
-          FROM relay_file_versions
+          FROM cosmos_file_versions
           WHERE organization_id = $1 AND file_id = $2 ${cursorClause}
           ORDER BY version DESC, id DESC
           LIMIT $${parameters.length}
@@ -364,7 +364,7 @@ export class PostgresFileRepository implements FileRepository {
         if (!file) return null
         const result = await client.query<FileContentRow>(`
           SELECT ${fileVersionColumns}, content
-          FROM relay_file_versions
+          FROM cosmos_file_versions
           WHERE organization_id = $1 AND file_id = $2
             AND version = $3
         `, [organizationId, fileId, version ?? file.version])
@@ -473,16 +473,16 @@ export class PostgresFileWriterRepository implements FileWriterRepository {
       SELECT organization_membership.role AS organization_role,
         space_membership.role AS space_role, session.created_by,
         session.visibility, session.expert_id
-      FROM relay_sessions session
-      JOIN relay_turns turn
+      FROM cosmos_sessions session
+      JOIN cosmos_turns turn
         ON turn.organization_id = session.organization_id
         AND turn.space_id = session.space_id
         AND turn.session_id = session.id
         AND turn.id = $4
-      JOIN relay_organization_memberships organization_membership
+      JOIN cosmos_organization_memberships organization_membership
         ON organization_membership.organization_id = session.organization_id
         AND organization_membership.actor_id = $5
-      JOIN relay_space_memberships space_membership
+      JOIN cosmos_space_memberships space_membership
         ON space_membership.organization_id = session.organization_id
         AND space_membership.space_id = session.space_id
         AND space_membership.actor_id = $5
@@ -507,11 +507,11 @@ export class PostgresFileWriterRepository implements FileWriterRepository {
     ])
     const quota = await client.query<{ bytes: string }>(`
       SELECT COALESCE(sum(size), 0)::text AS bytes
-      FROM relay_file_versions WHERE organization_id = $1
+      FROM cosmos_file_versions WHERE organization_id = $1
     `, [record.organizationId])
     const authority = await client.query<{ file_storage_bytes_limit: string }>(`
       SELECT file_storage_bytes_limit::text
-      FROM relay_organization_quotas WHERE organization_id = $1
+      FROM cosmos_organization_quotas WHERE organization_id = $1
     `, [record.organizationId])
     const limitBytes = this.maxOrganizationBytes
       ?? Number(authority.rows[0]?.file_storage_bytes_limit)
@@ -527,7 +527,7 @@ export class PostgresFileWriterRepository implements FileWriterRepository {
     const fileSessionId = record.scope === 'workspace' ? record.sessionId : null
     const selected = await client.query<FileRow>(`
       SELECT ${fileColumns}
-      FROM relay_files
+      FROM cosmos_files
       WHERE organization_id = $1 AND scope = $2 AND path = $3
         AND owner_user_id IS NOT DISTINCT FROM $4
         AND space_id IS NOT DISTINCT FROM $5
@@ -543,7 +543,7 @@ export class PostgresFileWriterRepository implements FileWriterRepository {
     if (previous?.archivedAt) throw new AuthorizationChangedError()
     if (!selected.rows[0]) {
       await client.query(`
-        INSERT INTO relay_files (
+        INSERT INTO cosmos_files (
           organization_id, space_id, id, scope, owner_user_id, session_id,
           path, mime_type, size, latest_version_id,
           last_written_by_tool_call_id, last_written_by_expert_id,
@@ -560,7 +560,7 @@ export class PostgresFileWriterRepository implements FileWriterRepository {
     const nextVersion = (previous?.version ?? 0) + 1
     const contentHash = createHash('sha256').update(record.content).digest('hex')
     await client.query(`
-      INSERT INTO relay_file_versions (
+      INSERT INTO cosmos_file_versions (
         organization_id, space_id, file_id, id, version, content,
         content_hash, size, created_by_tool_call_id, source_space_id,
         source_session_id, source_turn_id, created_at, storage_backend, object_key
@@ -575,7 +575,7 @@ export class PostgresFileWriterRepository implements FileWriterRepository {
       storage.backend, storage.objectKey,
     ])
     const updated = await client.query<FileRow>(`
-      UPDATE relay_files
+      UPDATE cosmos_files
       SET mime_type = $3, size = $4, latest_version_id = $5,
         last_written_by_tool_call_id = $6, last_written_by_expert_id = $7,
         updated_at = $8, version = version + 1
@@ -588,7 +588,7 @@ export class PostgresFileWriterRepository implements FileWriterRepository {
     const file = mapFile(updated.rows[0])
     const versionResult = await client.query<FileVersionRow>(`
       SELECT ${fileVersionColumns}
-      FROM relay_file_versions
+      FROM cosmos_file_versions
       WHERE organization_id = $1 AND file_id = $2 AND id = $3
     `, [record.organizationId, fileId, fileVersionId])
     const fileVersion = mapFileVersion(versionResult.rows[0])
@@ -613,13 +613,13 @@ export class PostgresFileWriterRepository implements FileWriterRepository {
       size: fileVersion.size,
     }
     const reservation = await client.query<{ sequence: string }>(`
-      UPDATE relay_sessions SET last_event_sequence = last_event_sequence + 1
+      UPDATE cosmos_sessions SET last_event_sequence = last_event_sequence + 1
       WHERE organization_id = $1 AND space_id = $2 AND id = $3
       RETURNING last_event_sequence AS sequence
     `, [record.organizationId, record.spaceId, record.sessionId])
     if (!reservation.rows[0]) throw new Error('The File event sequence could not be reserved.')
     await client.query(`
-      INSERT INTO relay_session_events (
+      INSERT INTO cosmos_session_events (
         organization_id, space_id, session_id, event_id, sequence,
         event_type, resource_type, resource_id, payload, actor_id,
         actor_kind, file_id, file_version_id, command_id, request_id, occurred_at
@@ -637,7 +637,7 @@ export class PostgresFileWriterRepository implements FileWriterRepository {
       version: before.version, size: before.size,
     }
     await client.query(`
-      INSERT INTO relay_audit_events (
+      INSERT INTO cosmos_audit_events (
         organization_id, audit_event_id, space_id, session_id,
         actor_id, actor_kind, delegation_chain, action,
         target_type, target_id, result, request_id, idempotency_key_hash,
@@ -653,7 +653,7 @@ export class PostgresFileWriterRepository implements FileWriterRepository {
       JSON.stringify(projection), occurredAt,
     ])
     await client.query(`
-      INSERT INTO relay_outbox_events (
+      INSERT INTO cosmos_outbox_events (
         id, organization_id, space_id, session_id, aggregate_type,
         aggregate_id, event_type, payload, occurred_at
       ) VALUES (

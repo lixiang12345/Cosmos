@@ -14,7 +14,7 @@ const describeWithDatabase = databaseUrl ? describe : describe.skip
 const longActorId = `worker-${'a'.repeat(249)}`
 
 describeWithDatabase('PostgresSessionTimelineRepository', () => {
-  const schema = `relay_timeline_${crypto.randomUUID().replaceAll('-', '')}`
+  const schema = `cosmos_timeline_${crypto.randomUUID().replaceAll('-', '')}`
   const adminPool = new Pool({ connectionString: databaseUrl })
   const pool = new Pool({ connectionString: databaseUrl, options: `-c search_path=${schema}` })
   const timelineRepository = new PostgresSessionTimelineRepository(pool)
@@ -27,14 +27,14 @@ describeWithDatabase('PostgresSessionTimelineRepository', () => {
     await adminPool.query(`CREATE SCHEMA ${schema}`)
     await runMigrations(pool)
     await pool.query(`
-      INSERT INTO relay_organizations (id, name) VALUES ('timeline-org', 'Timeline Org');
-      INSERT INTO relay_spaces (organization_id, id, name)
+      INSERT INTO cosmos_organizations (id, name) VALUES ('timeline-org', 'Timeline Org');
+      INSERT INTO cosmos_spaces (organization_id, id, name)
       VALUES ('timeline-org', 'timeline-space', 'Timeline Space');
-      INSERT INTO relay_organization_memberships (organization_id, actor_id, role)
+      INSERT INTO cosmos_organization_memberships (organization_id, actor_id, role)
       VALUES
         ('timeline-org', 'timeline-user', 'member'),
         ('timeline-org', 'timeline-peer', 'member');
-      INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
+      INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role)
       VALUES
         ('timeline-org', 'timeline-space', 'timeline-user', 'member'),
         ('timeline-org', 'timeline-space', 'timeline-peer', 'member');
@@ -70,7 +70,7 @@ describeWithDatabase('PostgresSessionTimelineRepository', () => {
     commandId = created.command.id
 
     await pool.query(`
-      INSERT INTO relay_messages (
+      INSERT INTO cosmos_messages (
         id, organization_id, space_id, session_id, sequence, role, actor_id,
         content, attachments, created_at
       ) VALUES
@@ -86,7 +86,7 @@ describeWithDatabase('PostgresSessionTimelineRepository', () => {
         )
     `, [sessionId])
     await pool.query(`
-      INSERT INTO relay_attempts (
+      INSERT INTO cosmos_attempts (
         organization_id, space_id, session_id, turn_id, id, number, status,
         model, runtime_id, created_at, started_at, heartbeat_at
       ) VALUES (
@@ -97,7 +97,7 @@ describeWithDatabase('PostgresSessionTimelineRepository', () => {
       )
     `, [sessionId, turnId])
     await pool.query(`
-      INSERT INTO relay_session_events (
+      INSERT INTO cosmos_session_events (
         organization_id, space_id, session_id, event_id, sequence, event_type,
         resource_type, resource_id, payload, actor_id, actor_kind, turn_id,
         attempt_id, command_id, request_id, occurred_at
@@ -118,7 +118,7 @@ describeWithDatabase('PostgresSessionTimelineRepository', () => {
       )
     `, [sessionId, turnId, commandId, longActorId])
     await pool.query(`
-      UPDATE relay_sessions SET last_event_sequence = 4
+      UPDATE cosmos_sessions SET last_event_sequence = 4
       WHERE organization_id = 'timeline-org' AND space_id = 'timeline-space' AND id = $1
     `, [sessionId])
   })
@@ -254,12 +254,12 @@ describeWithDatabase('PostgresSessionTimelineRepository', () => {
 
   it('fails closed when a database sequence exceeds JavaScript safe integers', async () => {
     await pool.query(`
-      UPDATE relay_sessions
+      UPDATE cosmos_sessions
       SET status = 'canceled', version = version + 1, last_event_sequence = 5
       WHERE organization_id = 'timeline-org' AND space_id = 'timeline-space' AND id = $1
     `, [sessionId])
     await pool.query(`
-      INSERT INTO relay_session_events (
+      INSERT INTO cosmos_session_events (
         organization_id, space_id, session_id, event_id, sequence, event_type,
         resource_type, resource_id, payload, actor_id, actor_kind, command_id,
         request_id, occurred_at
@@ -284,7 +284,7 @@ describeWithDatabase('PostgresSessionTimelineRepository', () => {
     })
 
     await pool.query(`
-      INSERT INTO relay_session_events (
+      INSERT INTO cosmos_session_events (
         organization_id, space_id, session_id, event_id, sequence, event_type,
         resource_type, resource_id, payload, actor_id, actor_kind, request_id,
         occurred_at
@@ -308,13 +308,13 @@ describeWithDatabase('PostgresSessionTimelineRepository', () => {
 
   it('fails closed for unknown Event and resource types', async () => {
     await pool.query(`
-      ALTER TABLE relay_session_events
-        DROP CONSTRAINT relay_session_events_runtime_event_type_check,
-        DROP CONSTRAINT relay_session_events_runtime_resource_type_check,
-        DROP CONSTRAINT relay_session_events_runtime_typed_resource_check
+      ALTER TABLE cosmos_session_events
+        DROP CONSTRAINT cosmos_session_events_runtime_event_type_check,
+        DROP CONSTRAINT cosmos_session_events_runtime_resource_type_check,
+        DROP CONSTRAINT cosmos_session_events_runtime_typed_resource_check
     `)
     await pool.query(`
-      INSERT INTO relay_session_events (
+      INSERT INTO cosmos_session_events (
         organization_id, space_id, session_id, event_id, sequence, event_type,
         resource_type, resource_id, payload, actor_id, actor_kind, request_id,
         occurred_at
@@ -326,7 +326,7 @@ describeWithDatabase('PostgresSessionTimelineRepository', () => {
       )
     `, [sessionId])
     await pool.query(`
-      INSERT INTO relay_session_events (
+      INSERT INTO cosmos_session_events (
         organization_id, space_id, session_id, event_id, sequence, event_type,
         resource_type, resource_id, payload, actor_id, actor_kind, turn_id,
         attempt_id, command_id, request_id, occurred_at
@@ -339,7 +339,7 @@ describeWithDatabase('PostgresSessionTimelineRepository', () => {
       )
     `, [sessionId, turnId, commandId])
     await pool.query(`
-      UPDATE relay_sessions SET last_event_sequence = 7
+      UPDATE cosmos_sessions SET last_event_sequence = 7
       WHERE organization_id = 'timeline-org' AND space_id = 'timeline-space' AND id = $1
     `, [sessionId])
 
@@ -368,7 +368,7 @@ describeWithDatabase('PostgresSessionTimelineRepository', () => {
 
   it('rechecks membership in the same query and conceals a revoked actor', async () => {
     await pool.query(`
-      DELETE FROM relay_space_memberships
+      DELETE FROM cosmos_space_memberships
       WHERE organization_id = 'timeline-org'
         AND space_id = 'timeline-space'
         AND actor_id = 'timeline-user'
@@ -379,7 +379,7 @@ describeWithDatabase('PostgresSessionTimelineRepository', () => {
       )).resolves.toBeNull()
     } finally {
       await pool.query(`
-        INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
+        INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role)
         VALUES ('timeline-org', 'timeline-space', 'timeline-user', 'member')
       `)
     }

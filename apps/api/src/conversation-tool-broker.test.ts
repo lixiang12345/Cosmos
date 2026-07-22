@@ -1,4 +1,4 @@
-import type { AdvisorPlanDto, FileDto, FileVersionDto, ToolCallDto } from '@relay/contracts'
+import type { AdvisorPlanDto, FileDto, FileVersionDto, ToolCallDto } from '@cosmos/contracts'
 import { describe, expect, it, vi } from 'vitest'
 import type { FileRepository } from './file-repository.js'
 import type { AdvisorPlanRepository } from './advisor-plan-repository.js'

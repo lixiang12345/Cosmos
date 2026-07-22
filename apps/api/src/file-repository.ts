@@ -2,7 +2,7 @@ import type {
   FileDto,
   FileScope,
   FileVersionDto,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 
 export type FileListCursor = { path: string; id: string }
 export type FileVersionListCursor = { version: number; id: string }

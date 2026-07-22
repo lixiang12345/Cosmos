@@ -1,4 +1,4 @@
-import { ApiErrorSchema, MeResponseSchema, SessionDtoSchema, SessionListResponseSchema } from '@relay/contracts'
+import { ApiErrorSchema, MeResponseSchema, SessionDtoSchema, SessionListResponseSchema } from '@cosmos/contracts'
 import { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createApp } from './app.js'
@@ -39,52 +39,52 @@ describeWithDatabase('HTTP authentication and tenant isolation', () => {
   beforeAll(async () => {
     await runMigrations(pool)
     await pool.query(`
-      ALTER TABLE relay_session_events DISABLE TRIGGER relay_session_events_reject_truncate;
-      ALTER TABLE relay_audit_events DISABLE TRIGGER relay_audit_events_reject_truncate;
-      ALTER TABLE relay_attempts DISABLE TRIGGER relay_attempts_reject_truncate;
-      ALTER TABLE relay_artifacts DISABLE TRIGGER relay_artifacts_reject_truncate;
-      ALTER TABLE relay_files DISABLE TRIGGER relay_files_reject_truncate;
-      ALTER TABLE relay_file_versions DISABLE TRIGGER relay_file_versions_reject_truncate;
-      ALTER TABLE relay_tool_calls DISABLE TRIGGER relay_tool_calls_reject_truncate;
-      ALTER TABLE relay_approvals DISABLE TRIGGER relay_approvals_reject_truncate;
-      ALTER TABLE relay_tool_side_effects DISABLE TRIGGER relay_tool_side_effects_reject_truncate;
-      ALTER TABLE relay_approval_assignments DISABLE TRIGGER relay_approval_assignments_reject_truncate;
-      ALTER TABLE relay_approval_decisions DISABLE TRIGGER relay_approval_decisions_reject_truncate;
-      ALTER TABLE relay_session_workers DISABLE TRIGGER relay_session_workers_reject_truncate;
-      ALTER TABLE relay_automation_audit_events DISABLE TRIGGER relay_automation_audit_events_reject_truncate;
-      ALTER TABLE relay_space_audit_events DISABLE TRIGGER relay_space_audit_events_reject_truncate;
+      ALTER TABLE cosmos_session_events DISABLE TRIGGER cosmos_session_events_reject_truncate;
+      ALTER TABLE cosmos_audit_events DISABLE TRIGGER cosmos_audit_events_reject_truncate;
+      ALTER TABLE cosmos_attempts DISABLE TRIGGER cosmos_attempts_reject_truncate;
+      ALTER TABLE cosmos_artifacts DISABLE TRIGGER cosmos_artifacts_reject_truncate;
+      ALTER TABLE cosmos_files DISABLE TRIGGER cosmos_files_reject_truncate;
+      ALTER TABLE cosmos_file_versions DISABLE TRIGGER cosmos_file_versions_reject_truncate;
+      ALTER TABLE cosmos_tool_calls DISABLE TRIGGER cosmos_tool_calls_reject_truncate;
+      ALTER TABLE cosmos_approvals DISABLE TRIGGER cosmos_approvals_reject_truncate;
+      ALTER TABLE cosmos_tool_side_effects DISABLE TRIGGER cosmos_tool_side_effects_reject_truncate;
+      ALTER TABLE cosmos_approval_assignments DISABLE TRIGGER cosmos_approval_assignments_reject_truncate;
+      ALTER TABLE cosmos_approval_decisions DISABLE TRIGGER cosmos_approval_decisions_reject_truncate;
+      ALTER TABLE cosmos_session_workers DISABLE TRIGGER cosmos_session_workers_reject_truncate;
+      ALTER TABLE cosmos_automation_audit_events DISABLE TRIGGER cosmos_automation_audit_events_reject_truncate;
+      ALTER TABLE cosmos_space_audit_events DISABLE TRIGGER cosmos_space_audit_events_reject_truncate;
     `)
     try {
       await pool.query(`
-        TRUNCATE relay_idempotency_responses, relay_idempotency_records, relay_sessions,
-          relay_space_memberships, relay_organization_memberships, relay_spaces, relay_organizations CASCADE
+        TRUNCATE cosmos_idempotency_responses, cosmos_idempotency_records, cosmos_sessions,
+          cosmos_space_memberships, cosmos_organization_memberships, cosmos_spaces, cosmos_organizations CASCADE
       `)
     } finally {
       await pool.query(`
-        ALTER TABLE relay_session_events ENABLE TRIGGER relay_session_events_reject_truncate;
-        ALTER TABLE relay_audit_events ENABLE TRIGGER relay_audit_events_reject_truncate;
-        ALTER TABLE relay_attempts ENABLE TRIGGER relay_attempts_reject_truncate;
-        ALTER TABLE relay_artifacts ENABLE TRIGGER relay_artifacts_reject_truncate;
-        ALTER TABLE relay_files ENABLE TRIGGER relay_files_reject_truncate;
-        ALTER TABLE relay_file_versions ENABLE TRIGGER relay_file_versions_reject_truncate;
-        ALTER TABLE relay_tool_calls ENABLE TRIGGER relay_tool_calls_reject_truncate;
-        ALTER TABLE relay_approvals ENABLE TRIGGER relay_approvals_reject_truncate;
-        ALTER TABLE relay_tool_side_effects ENABLE TRIGGER relay_tool_side_effects_reject_truncate;
-        ALTER TABLE relay_approval_assignments ENABLE TRIGGER relay_approval_assignments_reject_truncate;
-        ALTER TABLE relay_approval_decisions ENABLE TRIGGER relay_approval_decisions_reject_truncate;
-        ALTER TABLE relay_session_workers ENABLE TRIGGER relay_session_workers_reject_truncate;
-        ALTER TABLE relay_automation_audit_events ENABLE TRIGGER relay_automation_audit_events_reject_truncate;
-        ALTER TABLE relay_space_audit_events ENABLE TRIGGER relay_space_audit_events_reject_truncate;
+        ALTER TABLE cosmos_session_events ENABLE TRIGGER cosmos_session_events_reject_truncate;
+        ALTER TABLE cosmos_audit_events ENABLE TRIGGER cosmos_audit_events_reject_truncate;
+        ALTER TABLE cosmos_attempts ENABLE TRIGGER cosmos_attempts_reject_truncate;
+        ALTER TABLE cosmos_artifacts ENABLE TRIGGER cosmos_artifacts_reject_truncate;
+        ALTER TABLE cosmos_files ENABLE TRIGGER cosmos_files_reject_truncate;
+        ALTER TABLE cosmos_file_versions ENABLE TRIGGER cosmos_file_versions_reject_truncate;
+        ALTER TABLE cosmos_tool_calls ENABLE TRIGGER cosmos_tool_calls_reject_truncate;
+        ALTER TABLE cosmos_approvals ENABLE TRIGGER cosmos_approvals_reject_truncate;
+        ALTER TABLE cosmos_tool_side_effects ENABLE TRIGGER cosmos_tool_side_effects_reject_truncate;
+        ALTER TABLE cosmos_approval_assignments ENABLE TRIGGER cosmos_approval_assignments_reject_truncate;
+        ALTER TABLE cosmos_approval_decisions ENABLE TRIGGER cosmos_approval_decisions_reject_truncate;
+        ALTER TABLE cosmos_session_workers ENABLE TRIGGER cosmos_session_workers_reject_truncate;
+        ALTER TABLE cosmos_automation_audit_events ENABLE TRIGGER cosmos_automation_audit_events_reject_truncate;
+        ALTER TABLE cosmos_space_audit_events ENABLE TRIGGER cosmos_space_audit_events_reject_truncate;
       `)
     }
     await pool.query(`
-      INSERT INTO relay_organizations (id, name) VALUES ('org-a', 'Organization A'), ('org-b', 'Organization B');
-      INSERT INTO relay_spaces (organization_id, id, name)
+      INSERT INTO cosmos_organizations (id, name) VALUES ('org-a', 'Organization A'), ('org-b', 'Organization B');
+      INSERT INTO cosmos_spaces (organization_id, id, name)
         VALUES ('org-a', 'space-a', 'Space A'), ('org-a', 'space-b', 'Space B'), ('org-b', 'space-a', 'Space A');
-      INSERT INTO relay_organization_memberships (organization_id, actor_id, role) VALUES
+      INSERT INTO cosmos_organization_memberships (organization_id, actor_id, role) VALUES
         ('org-a', 'user-a', 'member'), ('org-a', 'user-b', 'member'), ('org-a', 'user-viewer', 'viewer'),
         ('org-b', 'user-a', 'viewer'), ('org-b', 'service-ci', 'organization_admin');
-      INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role) VALUES
+      INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role) VALUES
         ('org-a', 'space-a', 'user-a', 'member'), ('org-a', 'space-a', 'user-b', 'member'),
         ('org-a', 'space-a', 'user-viewer', 'viewer'), ('org-a', 'space-b', 'user-a', 'member');
     `)
@@ -206,7 +206,7 @@ describeWithDatabase('HTTP authentication and tenant isolation', () => {
     })
 
     await pool.query(`
-      DELETE FROM relay_space_memberships
+      DELETE FROM cosmos_space_memberships
       WHERE organization_id = 'org-a' AND space_id = 'space-a' AND actor_id = 'user-a'
     `)
     const revokedDetail = await app.inject({ method: 'GET', url: privateDetailUrl, headers: auth('token-a') })
@@ -215,7 +215,7 @@ describeWithDatabase('HTTP authentication and tenant isolation', () => {
       code: 'RESOURCE_NOT_FOUND', message: missingDetail.json().message,
     })
     await pool.query(`
-      INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
+      INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role)
       VALUES ('org-a', 'space-a', 'user-a', 'member')
     `)
   })

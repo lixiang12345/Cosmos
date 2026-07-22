@@ -12,11 +12,11 @@ import type {
   SessionEventPage,
   SessionDto,
   SessionMessagePage,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  RelayApiError,
-  RELAY_API_TIMEOUT_MS,
+  CosmosApiError,
+  COSMOS_API_TIMEOUT_MS,
   archiveSession,
   cancelSession,
   createSession,
@@ -31,7 +31,7 @@ import {
   getMe,
   getRuntimeCapabilities,
   getSession,
-  getRelayApiBaseUrl,
+  getCosmosApiBaseUrl,
   listEnvironments,
   listApprovals,
   listAdvisorPlans,
@@ -45,15 +45,15 @@ import {
   pauseSession,
   renameSession,
   resumeSession,
-  resolveRelayApiBaseUrl,
-  resolveRelayApiRequestUrl,
+  resolveCosmosApiBaseUrl,
+  resolveCosmosApiRequestUrl,
   restoreSession,
   retryAdvisorPlan,
   retrySessionTurn,
   sendSessionMessage,
   startSession,
   streamSessionEvents,
-} from './relayApi'
+} from './cosmosApi'
 
 const createInput = {
   title: 'Fix checkout race condition',
@@ -67,7 +67,7 @@ const createInput = {
 } satisfies CreateSessionRequestInput
 
 const session: SessionDto = {
-  id: 'session-1', organizationId: 'relay', spaceId: 'space-platform', title: createInput.title,
+  id: 'session-1', organizationId: 'cosmos', spaceId: 'space-platform', title: createInput.title,
   summary: createInput.message.content, expertId: createInput.expertId, expertName: createInput.expertName,
   expertVersion: createInput.expertVersion, environmentId: createInput.environmentId, repository: createInput.repository,
   configurationResolutionVersion: 1, expertRevisionId: 'expert-revision-3',
@@ -79,7 +79,7 @@ const session: SessionDto = {
 }
 
 const file: FileDto = {
-  organizationId: 'relay', spaceId: null, id: 'file-1', scope: 'user', ownerUserId: 'user-1',
+  organizationId: 'cosmos', spaceId: null, id: 'file-1', scope: 'user', ownerUserId: 'user-1',
   sessionId: null, path: 'knowledge/release.md', mimeType: 'text/markdown', size: 15,
   latestVersionId: 'file-version-2', lastWrittenByToolCallId: 'tool-2',
   lastWrittenByExpertId: 'expert-pr-author', createdAt: session.createdAt,
@@ -87,7 +87,7 @@ const file: FileDto = {
 }
 
 const fileVersion: FileVersionDto = {
-  organizationId: 'relay', spaceId: null, fileId: file.id, id: file.latestVersionId,
+  organizationId: 'cosmos', spaceId: null, fileId: file.id, id: file.latestVersionId,
   version: 2, contentHash: 'a'.repeat(64), size: file.size,
   createdByToolCallId: file.lastWrittenByToolCallId, sourceSessionId: session.id,
   sourceTurnId: 'turn-2', createdAt: session.updatedAt,
@@ -114,7 +114,7 @@ const sessionWorker: SessionWorkerDto = {
 }
 
 const approval: ApprovalDto = {
-  organizationId: 'relay', spaceId: 'space-platform', id: 'approval-1',
+  organizationId: 'cosmos', spaceId: 'space-platform', id: 'approval-1',
   sessionId: session.id, turnId: 'turn-1', toolCallId: 'tool-call-1',
   action: 'Merge pull request #42', riskLevel: 'high', reasons: ['Protected branch write'],
   evidence: [{ type: 'test', label: 'CI', value: 'Required checks passed' }],
@@ -125,7 +125,7 @@ const approval: ApprovalDto = {
 }
 
 const advisorPlan: AdvisorPlanDto = {
-  organizationId: 'relay', spaceId: 'space-platform', sessionId: session.id, id: 'advisor-plan-1',
+  organizationId: 'cosmos', spaceId: 'space-platform', sessionId: session.id, id: 'advisor-plan-1',
   summary: 'Update the Space description.', dependencies: [], risks: [], status: 'proposed',
   steps: [{
     id: 'advisor-step-1', ordinal: 1, kind: 'control_plane', operation: 'space.update',
@@ -140,12 +140,12 @@ const advisorPlan: AdvisorPlanDto = {
 }
 
 const messagePage: SessionMessagePage = {
-  organizationId: 'relay',
+  organizationId: 'cosmos',
   spaceId: 'space-platform',
   sessionId: session.id,
   items: [{
     id: 'message-1',
-    organizationId: 'relay',
+    organizationId: 'cosmos',
     spaceId: 'space-platform',
     sessionId: session.id,
     sequence: 1,
@@ -159,12 +159,12 @@ const messagePage: SessionMessagePage = {
 }
 
 const eventPage: SessionEventPage = {
-  organizationId: 'relay',
+  organizationId: 'cosmos',
   spaceId: 'space-platform',
   sessionId: session.id,
   items: [{
     eventId: 'event-2',
-    organizationId: 'relay',
+    organizationId: 'cosmos',
     spaceId: 'space-platform',
     sessionId: session.id,
     sequence: 2,
@@ -190,7 +190,7 @@ const expertRevisionSummary = {
   id: 'expert-revision-3',
   expertId: 'expert-pr-author',
   revision: 3,
-  model: 'relay-default',
+  model: 'cosmos-default',
   environmentId: 'environment-platform',
   environmentRevisionId: 'environment-revision-1',
   allowRepositoryOverride: true,
@@ -201,7 +201,7 @@ const expertRevisionSummary = {
 
 const expertSummary: ExpertSummaryDto = {
   id: 'expert-pr-author',
-  organizationId: 'relay',
+  organizationId: 'cosmos',
   spaceId: 'space-platform',
   kind: 'custom',
   name: 'PR Author',
@@ -245,7 +245,7 @@ const environmentRevisionSummary = {
 
 const environmentSummary: EnvironmentSummaryDto = {
   id: 'environment-platform',
-  organizationId: 'relay',
+  organizationId: 'cosmos',
   spaceId: 'space-platform',
   type: 'cloud',
   name: 'Platform runtime',
@@ -265,7 +265,7 @@ const environmentDetail: EnvironmentDetailDto = {
   activeRevision: {
     ...environmentRevisionSummary,
     repositoryBindings: [defaultRepository],
-    image: 'ghcr.io/relay/runtime:stable',
+    image: 'ghcr.io/cosmos/runtime:stable',
     variableReferences: [],
     hooks: [],
     networkPolicy: { mode: 'restricted', allowedHosts: [] },
@@ -276,7 +276,7 @@ const environmentDetail: EnvironmentDetailDto = {
   latestRevision: {
     id: environmentRevisionSummary.id, environmentId: environmentRevisionSummary.environmentId,
     revision: environmentRevisionSummary.revision, status: 'ready', repositoryBindings: [defaultRepository],
-    image: 'ghcr.io/relay/runtime:stable', variableReferences: [], hooks: [],
+    image: 'ghcr.io/cosmos/runtime:stable', variableReferences: [], hooks: [],
     networkPolicy: { mode: 'restricted', allowedHosts: [] }, sharing: 'space', daemonPoolId: null,
     checksum: 'a'.repeat(64), createdAt: environmentRevisionSummary.createdAt,
   },
@@ -294,25 +294,25 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('Relay API client', () => {
+describe('Cosmos API client', () => {
   it('uses the same-origin API by default', () => {
-    expect(getRelayApiBaseUrl()).toBe('/api')
-    expect(resolveRelayApiBaseUrl(
-      'https://relay.example/api/', 'https://relay.example', undefined,
-    )).toBe('https://relay.example/api')
+    expect(getCosmosApiBaseUrl()).toBe('/api')
+    expect(resolveCosmosApiBaseUrl(
+      'https://cosmos.example/api/', 'https://cosmos.example', undefined,
+    )).toBe('https://cosmos.example/api')
   })
 
   it('allows only explicitly trusted HTTPS cross-origin APIs', () => {
-    expect(resolveRelayApiBaseUrl(
-      'https://api.relay.example/v1/',
-      'https://app.relay.example',
-      'https://identity.example, https://api.relay.example',
-    )).toBe('https://api.relay.example/v1')
-    expect(() => resolveRelayApiBaseUrl(
-      'https://api.relay.example/v1', 'https://app.relay.example', undefined,
+    expect(resolveCosmosApiBaseUrl(
+      'https://api.cosmos.example/v1/',
+      'https://app.cosmos.example',
+      'https://identity.example, https://api.cosmos.example',
+    )).toBe('https://api.cosmos.example/v1')
+    expect(() => resolveCosmosApiBaseUrl(
+      'https://api.cosmos.example/v1', 'https://app.cosmos.example', undefined,
     )).toThrow(expect.objectContaining({ code: 'API_ORIGIN_NOT_ALLOWED' }))
-    expect(() => resolveRelayApiBaseUrl(
-      'http://api.relay.example/v1', 'https://app.relay.example', 'http://api.relay.example',
+    expect(() => resolveCosmosApiBaseUrl(
+      'http://api.cosmos.example/v1', 'https://app.cosmos.example', 'http://api.cosmos.example',
     )).toThrow(expect.objectContaining({ code: 'API_ORIGIN_NOT_ALLOWED' }))
   })
 
@@ -320,7 +320,7 @@ describe('Relay API client', () => {
     const fetchMock = vi.fn<typeof fetch>()
     vi.stubGlobal('fetch', fetchMock)
     vi.stubEnv('VITE_API_BASE_URL', 'https://untrusted.example/api')
-    await expect(listSessions('relay', 'space-platform', { accessToken: 'secret' }))
+    await expect(listSessions('cosmos', 'space-platform', { accessToken: 'secret' }))
       .rejects.toMatchObject({ code: 'API_ORIGIN_NOT_ALLOWED' })
     expect(fetchMock).not.toHaveBeenCalled()
   })
@@ -337,35 +337,35 @@ describe('Relay API client', () => {
     const fetchMock = vi.fn<typeof fetch>()
     vi.stubGlobal('fetch', fetchMock)
     vi.stubEnv('VITE_API_BASE_URL', baseUrl)
-    await expect(listSessions('relay', 'space-platform', { accessToken: 'secret' }))
+    await expect(listSessions('cosmos', 'space-platform', { accessToken: 'secret' }))
       .rejects.toMatchObject({ code: 'API_CONFIGURATION_ERROR' })
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('keeps a root-only API base on the application origin', () => {
-    expect(resolveRelayApiRequestUrl('/v1/sessions', {
-      configuredBaseUrl: '/', applicationOrigin: 'https://app.relay.example',
+    expect(resolveCosmosApiRequestUrl('/v1/sessions', {
+      configuredBaseUrl: '/', applicationOrigin: 'https://app.cosmos.example',
     })).toBe('/v1/sessions')
   })
 
   it('joins absolute root API bases without a double slash', () => {
-    expect(resolveRelayApiRequestUrl('/v1/sessions', {
-      configuredBaseUrl: 'https://app.relay.example/', applicationOrigin: 'https://app.relay.example',
-    })).toBe('https://app.relay.example/v1/sessions')
-    expect(resolveRelayApiRequestUrl('/v1/sessions', {
-      configuredBaseUrl: 'https://api.relay.example/',
-      applicationOrigin: 'https://app.relay.example',
-      allowedOrigins: 'https://api.relay.example',
-    })).toBe('https://api.relay.example/v1/sessions')
+    expect(resolveCosmosApiRequestUrl('/v1/sessions', {
+      configuredBaseUrl: 'https://app.cosmos.example/', applicationOrigin: 'https://app.cosmos.example',
+    })).toBe('https://app.cosmos.example/v1/sessions')
+    expect(resolveCosmosApiRequestUrl('/v1/sessions', {
+      configuredBaseUrl: 'https://api.cosmos.example/',
+      applicationOrigin: 'https://app.cosmos.example',
+      allowedOrigins: 'https://api.cosmos.example',
+    })).toBe('https://api.cosmos.example/v1/sessions')
   })
 
   it.each([
-    'https://user:password@api.relay.example/api',
-    'https://api.relay.example/api?target=other',
-    'https://api.relay.example/api#fragment',
+    'https://user:password@api.cosmos.example/api',
+    'https://api.cosmos.example/api?target=other',
+    'https://api.cosmos.example/api#fragment',
   ])('rejects unsafe absolute API configuration: %s', (baseUrl) => {
-    expect(() => resolveRelayApiBaseUrl(
-      baseUrl, 'https://app.relay.example', 'https://api.relay.example',
+    expect(() => resolveCosmosApiBaseUrl(
+      baseUrl, 'https://app.cosmos.example', 'https://api.cosmos.example',
     )).toThrow(expect.objectContaining({ code: 'API_CONFIGURATION_ERROR' }))
   })
 
@@ -374,10 +374,10 @@ describe('Relay API client', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(createSession(
-      'relay', 'space-platform', createInput, 'create-session-1', { accessToken: 'access-token' },
+      'cosmos', 'space-platform', createInput, 'create-session-1', { accessToken: 'access-token' },
     )).resolves.toEqual({ session })
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/v1/organizations/relay/spaces/space-platform/sessions',
+      '/api/v1/organizations/cosmos/spaces/space-platform/sessions',
       expect.objectContaining({ method: 'POST', headers: expect.any(Headers) }),
     )
     const requestHeaders = new Headers(fetchMock.mock.calls[0][1]?.headers)
@@ -390,9 +390,9 @@ describe('Relay API client', () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(response))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(listSessions('relay', 'space-platform')).resolves.toEqual(response)
+    await expect(listSessions('cosmos', 'space-platform')).resolves.toEqual(response)
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/v1/organizations/relay/spaces/space-platform/sessions',
+      '/api/v1/organizations/cosmos/spaces/space-platform/sessions',
       expect.objectContaining({ method: 'GET' }),
     )
   })
@@ -405,7 +405,7 @@ describe('Relay API client', () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(response))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(listSessions('relay', 'space-platform', undefined, {
+    await expect(listSessions('cosmos', 'space-platform', undefined, {
       cursor: 'current-page',
       limit: 10,
       status: 'paused',
@@ -413,7 +413,7 @@ describe('Relay API client', () => {
       search: 'checkout flow',
     })).resolves.toEqual(response)
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/v1/organizations/relay/spaces/space-platform/sessions?cursor=current-page&limit=10&status=paused&archived=all&search=checkout+flow',
+      '/api/v1/organizations/cosmos/spaces/space-platform/sessions?cursor=current-page&limit=10&status=paused&archived=all&search=checkout+flow',
       expect.objectContaining({ method: 'GET' }),
     )
   })
@@ -425,14 +425,14 @@ describe('Relay API client', () => {
       init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true })
     })))
 
-    const pending = listSessions('relay', 'space-timeout')
+    const pending = listSessions('cosmos', 'space-timeout')
     timeout.abort(new DOMException('Timed out', 'TimeoutError'))
 
     await expect(pending).rejects.toMatchObject({
       code: 'REQUEST_TIMEOUT',
       retryable: true,
     })
-    expect(timeoutSpy).toHaveBeenCalledWith(RELAY_API_TIMEOUT_MS)
+    expect(timeoutSpy).toHaveBeenCalledWith(COSMOS_API_TIMEOUT_MS)
   })
 
   it('classifies a stalled response body as a retryable timeout', async () => {
@@ -447,7 +447,7 @@ describe('Relay API client', () => {
       }),
     } as Response)))
 
-    const pending = listSessions('relay', 'space-slow-body')
+    const pending = listSessions('cosmos', 'space-slow-body')
     timeout.abort(new DOMException('Timed out', 'TimeoutError'))
 
     await expect(pending).rejects.toMatchObject({
@@ -463,7 +463,7 @@ describe('Relay API client', () => {
     }
     vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(response)))
 
-    await expect(listSessions('relay', 'space-platform')).rejects.toMatchObject({
+    await expect(listSessions('cosmos', 'space-platform')).rejects.toMatchObject({
       code: 'INVALID_RESPONSE', status: 200,
     })
   })
@@ -475,11 +475,11 @@ describe('Relay API client', () => {
     vi.stubGlobal('fetch', fetchMock)
     const controller = new AbortController()
 
-    await expect(getSession('relay', 'space-platform', 'session-1', {
+    await expect(getSession('cosmos', 'space-platform', 'session-1', {
       accessToken: 'access-token',
     }, controller.signal)).resolves.toEqual(session)
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/v1/organizations/relay/spaces/space-platform/sessions/session-1',
+      '/api/v1/organizations/cosmos/spaces/space-platform/sessions/session-1',
       expect.objectContaining({ method: 'GET' }),
     )
   })
@@ -516,12 +516,12 @@ describe('Relay API client', () => {
 
   it('loads scoped File metadata, pages, and immutable versions', async () => {
     const filePage = {
-      organizationId: 'relay', requestedSpaceId: 'space-platform', scope: 'user',
+      organizationId: 'cosmos', requestedSpaceId: 'space-platform', scope: 'user',
       ownerUserId: 'user-1', sessionId: null, items: [file],
       page: { nextCursor: null, hasMore: false },
     }
     const versionPage = {
-      organizationId: 'relay', requestedSpaceId: 'space-platform', fileId: file.id,
+      organizationId: 'cosmos', requestedSpaceId: 'space-platform', fileId: file.id,
       items: [fileVersion], page: { nextCursor: null, hasMore: false },
     }
     const fetchMock = vi.fn<typeof fetch>()
@@ -530,22 +530,22 @@ describe('Relay API client', () => {
       .mockResolvedValueOnce(jsonResponse(versionPage))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(listFiles('relay', 'space-platform', {
+    await expect(listFiles('cosmos', 'space-platform', {
       scope: 'user', search: 'release', limit: 25,
     })).resolves.toEqual(filePage)
-    await expect(getFile('relay', 'space-platform', file.id)).resolves.toEqual(file)
+    await expect(getFile('cosmos', 'space-platform', file.id)).resolves.toEqual(file)
     await expect(listFileVersions(
-      'relay', 'space-platform', file.id, undefined, undefined, { limit: 25 },
+      'cosmos', 'space-platform', file.id, undefined, undefined, { limit: 25 },
     )).resolves.toEqual(versionPage)
 
     const listUrl = new URL(String(fetchMock.mock.calls[0][0]), window.location.origin)
-    expect(listUrl.pathname).toBe('/api/v1/organizations/relay/spaces/space-platform/files')
+    expect(listUrl.pathname).toBe('/api/v1/organizations/cosmos/spaces/space-platform/files')
     expect(Object.fromEntries(listUrl.searchParams)).toMatchObject({
       scope: 'user', search: 'release', limit: '25',
     })
     expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual(expect.arrayContaining([
-      '/api/v1/organizations/relay/spaces/space-platform/files/file-1',
-      '/api/v1/organizations/relay/spaces/space-platform/files/file-1/versions?limit=25',
+      '/api/v1/organizations/cosmos/spaces/space-platform/files/file-1',
+      '/api/v1/organizations/cosmos/spaces/space-platform/files/file-1/versions?limit=25',
     ]))
   })
 
@@ -559,23 +559,23 @@ describe('Relay API client', () => {
     }
     const fetchMock = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(jsonResponse({
-        organizationId: 'relay', requestedSpaceId: 'space-platform', scope: 'workspace',
+        organizationId: 'cosmos', requestedSpaceId: 'space-platform', scope: 'workspace',
         ownerUserId: null, sessionId: session.id, items: [workspaceFile],
         page: { nextCursor: null, hasMore: false },
       }))
       .mockResolvedValueOnce(jsonResponse({
-        organizationId: 'relay', requestedSpaceId: 'space-platform', scope: 'workspace',
+        organizationId: 'cosmos', requestedSpaceId: 'space-platform', scope: 'workspace',
         ownerUserId: null, sessionId: 'session-other', items: [],
         page: { nextCursor: null, hasMore: false },
       }))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(listFiles('relay', 'space-platform', {
+    await expect(listFiles('cosmos', 'space-platform', {
       scope: 'workspace', sessionId: session.id,
     })).resolves.toMatchObject({ sessionId: session.id, items: [{ id: file.id }] })
     expect(String(fetchMock.mock.calls[0][0])).toContain(`scope=workspace&sessionId=${session.id}`)
 
-    await expect(listFiles('relay', 'space-platform', {
+    await expect(listFiles('cosmos', 'space-platform', {
       scope: 'workspace', sessionId: session.id,
     })).rejects.toMatchObject({ code: 'INVALID_RESPONSE', status: 200 })
   })
@@ -601,7 +601,7 @@ describe('Relay API client', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const content = await getFileContent(
-      'relay', 'space-platform', file.id,
+      'cosmos', 'space-platform', file.id,
       { accessToken: 'access-token', onUnauthorized }, undefined,
       { version: 2, disposition: 'attachment' },
     )
@@ -614,9 +614,9 @@ describe('Relay API client', () => {
     expect(Object.fromEntries(contentUrl.searchParams)).toEqual({ version: '2', disposition: 'attachment' })
     expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('Authorization')).toBe('Bearer access-token')
 
-    await expect(listFiles('relay', 'space-platform', { scope: 'user' }))
+    await expect(listFiles('cosmos', 'space-platform', { scope: 'user' }))
       .rejects.toMatchObject({ code: 'INVALID_RESPONSE', status: 200 })
-    await expect(getFileContent('relay', 'space-platform', file.id, {
+    await expect(getFileContent('cosmos', 'space-platform', file.id, {
       accessToken: 'expired', onUnauthorized,
     })).rejects.toMatchObject({ status: 401 })
     expect(onUnauthorized).toHaveBeenCalledWith('expired')
@@ -628,10 +628,10 @@ describe('Relay API client', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(renameSession(
-      'relay', 'space-platform', session.id, renamed.title, 1, { accessToken: 'access-token' },
+      'cosmos', 'space-platform', session.id, renamed.title, 1, { accessToken: 'access-token' },
     )).resolves.toEqual(renamed)
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/v1/organizations/relay/spaces/space-platform/sessions/session-1',
+      '/api/v1/organizations/cosmos/spaces/space-platform/sessions/session-1',
       expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ title: renamed.title }) }),
     )
     const headers = new Headers(fetchMock.mock.calls[0][1]?.headers)
@@ -648,14 +648,14 @@ describe('Relay API client', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(archiveSession(
-      'relay', 'space-platform', session.id, 1, 'archive-key', { accessToken: 'access-token' },
+      'cosmos', 'space-platform', session.id, 1, 'archive-key', { accessToken: 'access-token' },
     )).resolves.toEqual(archived)
     await expect(restoreSession(
-      'relay', 'space-platform', session.id, 2, 'restore-key', { accessToken: 'access-token' },
+      'cosmos', 'space-platform', session.id, 2, 'restore-key', { accessToken: 'access-token' },
     )).resolves.toEqual(restored)
     expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
-      ['/api/v1/organizations/relay/spaces/space-platform/sessions/session-1/archive', 'POST'],
-      ['/api/v1/organizations/relay/spaces/space-platform/sessions/session-1/restore', 'POST'],
+      ['/api/v1/organizations/cosmos/spaces/space-platform/sessions/session-1/archive', 'POST'],
+      ['/api/v1/organizations/cosmos/spaces/space-platform/sessions/session-1/restore', 'POST'],
     ])
     const archiveHeaders = new Headers(fetchMock.mock.calls[0][1]?.headers)
     expect(archiveHeaders.get('If-Match')).toBe('"1"')
@@ -685,7 +685,7 @@ describe('Relay API client', () => {
         turnId,
         number: 2,
         status: 'queued' as const,
-        model: 'relay-default',
+        model: 'cosmos-default',
         providerModel: null,
         runtimeId: null,
         failureCode: null,
@@ -709,22 +709,22 @@ describe('Relay API client', () => {
       .mockResolvedValueOnce(jsonResponse(retried, 202))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(pauseSession('relay', 'space-platform', session.id, 1, 'pause-key'))
+    await expect(pauseSession('cosmos', 'space-platform', session.id, 1, 'pause-key'))
       .resolves.toEqual(paused)
-    await expect(resumeSession('relay', 'space-platform', session.id, 2, 'resume-key'))
+    await expect(resumeSession('cosmos', 'space-platform', session.id, 2, 'resume-key'))
       .resolves.toEqual(resumed)
     await expect(cancelSession(
-      'relay', 'space-platform', session.id, 3, 'cancel-key', 'Operator request.',
+      'cosmos', 'space-platform', session.id, 3, 'cancel-key', 'Operator request.',
     )).resolves.toEqual(canceled)
     await expect(retrySessionTurn(
-      'relay', 'space-platform', session.id, turnId, 5, 'retry-key',
+      'cosmos', 'space-platform', session.id, turnId, 5, 'retry-key',
     )).resolves.toEqual(retried)
 
     expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
-      ['/api/v1/organizations/relay/spaces/space-platform/sessions/session-1/pause', 'POST'],
-      ['/api/v1/organizations/relay/spaces/space-platform/sessions/session-1/resume', 'POST'],
-      ['/api/v1/organizations/relay/spaces/space-platform/sessions/session-1/cancel', 'POST'],
-      ['/api/v1/organizations/relay/spaces/space-platform/sessions/session-1/turns/turn-1/retry', 'POST'],
+      ['/api/v1/organizations/cosmos/spaces/space-platform/sessions/session-1/pause', 'POST'],
+      ['/api/v1/organizations/cosmos/spaces/space-platform/sessions/session-1/resume', 'POST'],
+      ['/api/v1/organizations/cosmos/spaces/space-platform/sessions/session-1/cancel', 'POST'],
+      ['/api/v1/organizations/cosmos/spaces/space-platform/sessions/session-1/turns/turn-1/retry', 'POST'],
     ])
     expect(fetchMock.mock.calls[0][1]?.body).toBeUndefined()
     expect(fetchMock.mock.calls[1][1]?.body).toBeUndefined()
@@ -754,11 +754,11 @@ describe('Relay API client', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(startSession(
-      'relay', 'space-platform', session.id, 1, 'start-session-1',
+      'cosmos', 'space-platform', session.id, 1, 'start-session-1',
       { accessToken: 'access-token' },
     )).resolves.toEqual({ session: queuedSession, turn, command })
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/v1/organizations/relay/spaces/space-platform/sessions/session-1/start',
+      '/api/v1/organizations/cosmos/spaces/space-platform/sessions/session-1/start',
       expect.objectContaining({ method: 'POST', headers: expect.any(Headers) }),
     )
     expect(fetchMock.mock.calls[0][1]?.body).toBeUndefined()
@@ -774,7 +774,7 @@ describe('Relay API client', () => {
       command,
     }, 202))
     await expect(startSession(
-      'relay', 'space-platform', session.id, 1, 'start-session-2',
+      'cosmos', 'space-platform', session.id, 1, 'start-session-2',
     )).rejects.toMatchObject({ code: 'INVALID_RESPONSE', status: 202 })
   })
 
@@ -799,11 +799,11 @@ describe('Relay API client', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(sendSessionMessage(
-      'relay', 'space-platform', session.id,
+      'cosmos', 'space-platform', session.id,
       { content: message.content }, 'send-message-2', { accessToken: 'access-token' },
     )).resolves.toEqual(result)
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/v1/organizations/relay/spaces/space-platform/sessions/session-1/messages',
+      '/api/v1/organizations/cosmos/spaces/space-platform/sessions/session-1/messages',
       expect.objectContaining({ method: 'POST', headers: expect.any(Headers) }),
     )
     expect(fetchMock.mock.calls[0][1]?.body).toBe(JSON.stringify({ content: message.content }))
@@ -817,7 +817,7 @@ describe('Relay API client', () => {
       turn: { ...turn, inputMessageId: 'another-message' },
     }, 202))
     await expect(sendSessionMessage(
-      'relay', 'space-platform', session.id,
+      'cosmos', 'space-platform', session.id,
       { content: message.content }, 'send-message-invalid',
     )).rejects.toMatchObject({ code: 'INVALID_RESPONSE', status: 202 })
   })
@@ -843,7 +843,7 @@ describe('Relay API client', () => {
 
   it('loads scoped Session messages and base64url-scoped events with recoverable cursors', async () => {
     const eventCursor = {
-      organizationId: 'relay', spaceId: 'space-platform', sessionId: session.id, sequence: 2,
+      organizationId: 'cosmos', spaceId: 'space-platform', sessionId: session.id, sequence: 2,
     }
     const fetchMock = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(jsonResponse(messagePage))
@@ -852,23 +852,23 @@ describe('Relay API client', () => {
     const controller = new AbortController()
 
     await expect(listSessionMessages(
-      'relay', 'space-platform', session.id, { accessToken: 'access-token' }, controller.signal,
+      'cosmos', 'space-platform', session.id, { accessToken: 'access-token' }, controller.signal,
       { cursor: eventCursor, limit: 100 },
     )).resolves.toEqual(messagePage)
     await expect(listSessionEvents(
-      'relay', 'space-platform', session.id, { accessToken: 'access-token' }, controller.signal,
+      'cosmos', 'space-platform', session.id, { accessToken: 'access-token' }, controller.signal,
       { cursor: eventCursor, limit: 500 },
     )).resolves.toEqual(eventPage)
 
     const messageUrl = new URL(String(fetchMock.mock.calls[0][0]), window.location.origin)
-    expect(messageUrl.pathname).toBe('/api/v1/organizations/relay/spaces/space-platform/sessions/session-1/messages')
+    expect(messageUrl.pathname).toBe('/api/v1/organizations/cosmos/spaces/space-platform/sessions/session-1/messages')
     expect(messageUrl.searchParams.get('limit')).toBe('100')
     const encodedMessageCursor = messageUrl.searchParams.get('cursor')!
     const messageBase64 = encodedMessageCursor.replaceAll('-', '+').replaceAll('_', '/')
     expect(JSON.parse(atob(messageBase64.padEnd(Math.ceil(messageBase64.length / 4) * 4, '='))))
       .toEqual(eventCursor)
     const eventUrl = new URL(String(fetchMock.mock.calls[1][0]), window.location.origin)
-    expect(eventUrl.pathname).toBe('/api/v1/organizations/relay/spaces/space-platform/sessions/session-1/events')
+    expect(eventUrl.pathname).toBe('/api/v1/organizations/cosmos/spaces/space-platform/sessions/session-1/events')
     expect(eventUrl.searchParams.get('limit')).toBe('500')
     const encodedCursor = eventUrl.searchParams.get('cursor')!
     const base64 = encodedCursor.replaceAll('-', '+').replaceAll('_', '/')
@@ -888,10 +888,10 @@ describe('Relay API client', () => {
         code: 'AUTHENTICATION_REQUIRED', message: 'Sign in again.', retryable: false,
       }, 401)))
 
-    await expect(listSessionMessages('relay', 'space-platform', session.id)).rejects.toMatchObject({
+    await expect(listSessionMessages('cosmos', 'space-platform', session.id)).rejects.toMatchObject({
       code: 'INVALID_RESPONSE', status: 200,
     })
-    await expect(listSessionEvents('relay', 'space-platform', session.id, {
+    await expect(listSessionEvents('cosmos', 'space-platform', session.id, {
       accessToken: 'expired-token', onUnauthorized,
     })).rejects.toMatchObject({ status: 401 })
     expect(onUnauthorized).toHaveBeenCalledWith('expired-token')
@@ -902,7 +902,7 @@ describe('Relay API client', () => {
       ...session, organizationId: 'other-organization',
     })))
 
-    await expect(getSession('relay', 'space-platform', 'session-1')).rejects.toMatchObject({
+    await expect(getSession('cosmos', 'space-platform', 'session-1')).rejects.toMatchObject({
       code: 'INVALID_RESPONSE', status: 200,
     })
   })
@@ -914,10 +914,10 @@ describe('Relay API client', () => {
     const fetchMock = vi.fn<typeof fetch>().mockReturnValue(pending)
     vi.stubGlobal('fetch', fetchMock)
 
-    const first = listSessions('relay', 'space-platform', {
+    const first = listSessions('cosmos', 'space-platform', {
       accessToken: 'token-a', requestIdentity: 'credential-7',
     })
-    const second = listSessions('relay', 'space-platform', {
+    const second = listSessions('cosmos', 'space-platform', {
       accessToken: 'token-b', requestIdentity: 'credential-7',
     })
     expect(fetchMock).toHaveBeenCalledTimes(1)
@@ -934,10 +934,10 @@ describe('Relay API client', () => {
       .mockResolvedValueOnce(jsonResponse(response))
     vi.stubGlobal('fetch', fetchMock)
 
-    const first = listSessions('relay', 'space-platform', {
+    const first = listSessions('cosmos', 'space-platform', {
       accessToken: 'token-a', requestIdentity: 'actor-a\u00007',
     })
-    const second = listSessions('relay', 'space-platform', {
+    const second = listSessions('cosmos', 'space-platform', {
       accessToken: 'token-b', requestIdentity: 'actor-b\u00007',
     })
 
@@ -956,7 +956,7 @@ describe('Relay API client', () => {
     const onEvent = vi.fn()
 
     await expect(streamSessionEvents(
-      'relay', 'space-platform', session.id,
+      'cosmos', 'space-platform', session.id,
       { accessToken: 'access-token' },
       new AbortController().signal,
       { lastEventId: 'cursor-41', onEvent },
@@ -976,7 +976,7 @@ describe('Relay API client', () => {
     )))
 
     await expect(streamSessionEvents(
-      'relay', 'space-platform', session.id, {}, new AbortController().signal,
+      'cosmos', 'space-platform', session.id, {}, new AbortController().signal,
       { onEvent: vi.fn() },
     )).rejects.toMatchObject({ code: 'INVALID_RESPONSE', status: 200 })
   })
@@ -997,7 +997,7 @@ describe('Relay API client', () => {
     const onEvent = vi.fn()
 
     await expect(streamSessionEvents(
-      'relay', 'space-platform', session.id, {}, new AbortController().signal, { onEvent },
+      'cosmos', 'space-platform', session.id, {}, new AbortController().signal, { onEvent },
     )).resolves.toEqual({ lastEventId: 'cursor-42', reconnect: true })
     expect(onEvent).toHaveBeenCalledWith(event)
   })
@@ -1012,14 +1012,14 @@ describe('Relay API client', () => {
     const controller = new AbortController()
 
     await expect(listExperts(
-      'relay',
+      'cosmos',
       'space-platform',
       { accessToken: 'access-token' },
       controller.signal,
       { cursor: 'cursor value', limit: 25 },
     )).resolves.toEqual(response)
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/v1/organizations/relay/spaces/space-platform/experts?cursor=cursor+value&limit=25',
+      '/api/v1/organizations/cosmos/spaces/space-platform/experts?cursor=cursor+value&limit=25',
       expect.objectContaining({ method: 'GET', signal: expect.any(AbortSignal) }),
     )
     expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('Authorization')).toBe('Bearer access-token')
@@ -1031,10 +1031,10 @@ describe('Relay API client', () => {
     const controller = new AbortController()
 
     await expect(getExpert(
-      'relay', 'space-platform', expertDetail.id, undefined, controller.signal,
+      'cosmos', 'space-platform', expertDetail.id, undefined, controller.signal,
     )).resolves.toEqual(expertDetail)
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/v1/organizations/relay/spaces/space-platform/experts/expert-pr-author',
+      '/api/v1/organizations/cosmos/spaces/space-platform/experts/expert-pr-author',
       expect.objectContaining({ method: 'GET', signal: expect.any(AbortSignal) }),
     )
 
@@ -1042,12 +1042,12 @@ describe('Relay API client', () => {
       items: [expertSummary, { ...expertSummary, organizationId: 'other-organization' }],
       page: { nextCursor: null, hasMore: false, projectionUpdatedAt: expertSummary.updatedAt },
     }))
-    await expect(listExperts('relay', 'space-platform')).rejects.toMatchObject({
+    await expect(listExperts('cosmos', 'space-platform')).rejects.toMatchObject({
       code: 'INVALID_RESPONSE', status: 200,
     })
 
     fetchMock.mockResolvedValueOnce(jsonResponse({ ...expertDetail, spaceId: 'space-other' }))
-    await expect(getExpert('relay', 'space-platform', expertDetail.id)).rejects.toMatchObject({
+    await expect(getExpert('cosmos', 'space-platform', expertDetail.id)).rejects.toMatchObject({
       code: 'INVALID_RESPONSE', status: 200,
     })
   })
@@ -1062,10 +1062,10 @@ describe('Relay API client', () => {
     const controller = new AbortController()
 
     await expect(listEnvironments(
-      'relay', 'space-platform', { accessToken: 'access-token' }, controller.signal,
+      'cosmos', 'space-platform', { accessToken: 'access-token' }, controller.signal,
     )).resolves.toEqual(response)
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/v1/organizations/relay/spaces/space-platform/environments',
+      '/api/v1/organizations/cosmos/spaces/space-platform/environments',
       expect.objectContaining({ method: 'GET', signal: expect.any(AbortSignal) }),
     )
     expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('Authorization')).toBe('Bearer access-token')
@@ -1077,10 +1077,10 @@ describe('Relay API client', () => {
     const controller = new AbortController()
 
     await expect(getEnvironment(
-      'relay', 'space-platform', environmentDetail.id, undefined, controller.signal,
+      'cosmos', 'space-platform', environmentDetail.id, undefined, controller.signal,
     )).resolves.toEqual(environmentDetail)
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/v1/organizations/relay/spaces/space-platform/environments/environment-platform',
+      '/api/v1/organizations/cosmos/spaces/space-platform/environments/environment-platform',
       expect.objectContaining({ method: 'GET', signal: expect.any(AbortSignal) }),
     )
 
@@ -1088,14 +1088,14 @@ describe('Relay API client', () => {
       items: [environmentSummary, { ...environmentSummary, spaceId: 'space-other' }],
       page: { nextCursor: null, hasMore: false, projectionUpdatedAt: environmentSummary.updatedAt },
     }))
-    await expect(listEnvironments('relay', 'space-platform')).rejects.toMatchObject({
+    await expect(listEnvironments('cosmos', 'space-platform')).rejects.toMatchObject({
       code: 'INVALID_RESPONSE', status: 200,
     })
 
     fetchMock.mockResolvedValueOnce(jsonResponse({
       ...environmentDetail, organizationId: 'other-organization',
     }))
-    await expect(getEnvironment('relay', 'space-platform', environmentDetail.id)).rejects.toMatchObject({
+    await expect(getEnvironment('cosmos', 'space-platform', environmentDetail.id)).rejects.toMatchObject({
       code: 'INVALID_RESPONSE', status: 200,
     })
   })
@@ -1121,17 +1121,17 @@ describe('Relay API client', () => {
       }))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(listApprovals('relay', 'space-platform', {
+    await expect(listApprovals('cosmos', 'space-platform', {
       status: 'pending', assignedToMe: true, sessionId: session.id, limit: 25,
     })).resolves.toMatchObject({ items: [{ id: approval.id }] })
-    await expect(getApproval('relay', 'space-platform', approval.id)).resolves.toEqual(approval)
+    await expect(getApproval('cosmos', 'space-platform', approval.id)).resolves.toEqual(approval)
     await expect(decideApproval(
-      'relay', 'space-platform', approval.id,
+      'cosmos', 'space-platform', approval.id,
       { decision: 'approved', note: 'Reviewed.' }, 1, 'approval-decision-key',
     )).resolves.toMatchObject({ status: 'approved', version: 2 })
 
     expect(fetchMock.mock.calls[0][0]).toBe(
-      `/api/v1/organizations/relay/spaces/space-platform/approvals?limit=25&status=pending&assignedToMe=true&sessionId=${session.id}`,
+      `/api/v1/organizations/cosmos/spaces/space-platform/approvals?limit=25&status=pending&assignedToMe=true&sessionId=${session.id}`,
     )
     const decisionHeaders = new Headers(fetchMock.mock.calls[2][1]?.headers)
     expect(decisionHeaders.get('Idempotency-Key')).toBe('approval-decision-key')
@@ -1170,16 +1170,16 @@ describe('Relay API client', () => {
       .mockResolvedValueOnce(jsonResponse(failed))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(listAdvisorPlans('relay', 'space-platform', session.id)).resolves.toMatchObject({
+    await expect(listAdvisorPlans('cosmos', 'space-platform', session.id)).resolves.toMatchObject({
       items: [{ id: advisorPlan.id }],
     })
-    await expect(getAdvisorPlan('relay', 'space-platform', session.id, advisorPlan.id)).resolves.toEqual(advisorPlan)
+    await expect(getAdvisorPlan('cosmos', 'space-platform', session.id, advisorPlan.id)).resolves.toEqual(advisorPlan)
     await expect(decideAdvisorPlan(
-      'relay', 'space-platform', session.id, advisorPlan.id,
+      'cosmos', 'space-platform', session.id, advisorPlan.id,
       { decision: 'confirmed' }, 1, 'advisor-decision-key',
     )).resolves.toMatchObject({ status: 'executing', version: 2 })
     await expect(retryAdvisorPlan(
-      'relay', 'space-platform', session.id, advisorPlan.id,
+      'cosmos', 'space-platform', session.id, advisorPlan.id,
       3, 'advisor-retry-key',
     )).resolves.toMatchObject({ status: 'failed', version: 3 })
 
@@ -1213,8 +1213,8 @@ describe('Relay API client', () => {
       code: 'IDEMPOTENCY_KEY_REUSED', message: 'The idempotency key was already used.', retryable: false,
       correlationId: 'request-409',
     }, 409)))
-    await expect(createSession('relay', 'space-platform', createInput, 'duplicate-key')).rejects.toMatchObject({
-      name: 'RelayApiError', code: 'IDEMPOTENCY_KEY_REUSED', status: 409, correlationId: 'request-409', retryable: false,
+    await expect(createSession('cosmos', 'space-platform', createInput, 'duplicate-key')).rejects.toMatchObject({
+      name: 'CosmosApiError', code: 'IDEMPOTENCY_KEY_REUSED', status: 409, correlationId: 'request-409', retryable: false,
     })
   })
 
@@ -1225,7 +1225,7 @@ describe('Relay API client', () => {
       correlationId: 'request-401',
     }, 401)))
 
-    await expect(listSessions('relay', 'space-platform', {
+    await expect(listSessions('cosmos', 'space-platform', {
       accessToken: 'expired-token', onUnauthorized,
     })).rejects.toMatchObject({ status: 401 })
     expect(onUnauthorized).toHaveBeenCalledOnce()
@@ -1238,7 +1238,7 @@ describe('Relay API client', () => {
       correlationId: 'request-401-cleanup',
     }, 401)))
 
-    await expect(listSessions('relay', 'space-platform', {
+    await expect(listSessions('cosmos', 'space-platform', {
       accessToken: 'expired-token', onUnauthorized: async () => { throw new Error('storage unavailable') },
     })).rejects.toMatchObject({
       code: 'AUTHENTICATION_REQUIRED', status: 401, correlationId: 'request-401-cleanup',
@@ -1249,15 +1249,15 @@ describe('Relay API client', () => {
     vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(
       { items: 'not-an-array', page: {} }, 200, { 'x-request-id': 'request-invalid' },
     )))
-    await expect(listSessions('relay', 'space-platform')).rejects.toMatchObject({
-      name: 'RelayApiError', code: 'INVALID_RESPONSE', status: 200, correlationId: 'request-invalid',
+    await expect(listSessions('cosmos', 'space-platform')).rejects.toMatchObject({
+      name: 'CosmosApiError', code: 'INVALID_RESPONSE', status: 200, correlationId: 'request-invalid',
     })
   })
 
   it('wraps fetch failures as retryable network errors', async () => {
     vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockRejectedValue(new TypeError('Failed to fetch')))
-    const error = await listSessions('relay', 'space-platform').catch((cause: unknown) => cause)
-    expect(error).toBeInstanceOf(RelayApiError)
+    const error = await listSessions('cosmos', 'space-platform').catch((cause: unknown) => cause)
+    expect(error).toBeInstanceOf(CosmosApiError)
     expect(error).toMatchObject({ code: 'NETWORK_ERROR', status: undefined, correlationId: undefined, retryable: true })
   })
 })

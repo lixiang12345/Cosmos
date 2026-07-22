@@ -8,7 +8,7 @@ import type {
   OrganizationRole,
   SessionDto,
   SpaceRole,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
@@ -18,7 +18,7 @@ import { AuthContext, type AuthContextValue } from './auth/context'
 import { initialRuns } from './data/mockData'
 import { PREFERENCE_STORAGE_KEYS, PreferencesProvider } from './preferences'
 import {
-  RelayApiError,
+  CosmosApiError,
   archiveSession,
   cancelSession,
   createSession,
@@ -40,11 +40,11 @@ import {
   restoreSession,
   retrySessionTurn,
   startSession,
-} from './services/relayApi'
+} from './services/cosmosApi'
 import { WorkspaceContext, type WorkspaceContextValue } from './workspace'
 
-vi.mock('./services/relayApi', async (importOriginal) => ({
-  ...await importOriginal<typeof import('./services/relayApi')>(),
+vi.mock('./services/cosmosApi', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./services/cosmosApi')>(),
   archiveSession: vi.fn(),
   cancelSession: vi.fn(),
   createSession: vi.fn(),
@@ -106,7 +106,7 @@ const productionEnvironmentDetail: EnvironmentDetailDto = {
   activeRevision: {
     ...productionEnvironment.activeRevision!,
     repositoryBindings: [productionDefaultRepository],
-    image: 'ghcr.io/relay/runtime:stable',
+    image: 'ghcr.io/cosmos/runtime:stable',
     variableReferences: [],
     hooks: [],
     networkPolicy: { mode: 'restricted', allowedHosts: [] },
@@ -117,7 +117,7 @@ const productionEnvironmentDetail: EnvironmentDetailDto = {
   latestRevision: {
     id: 'environment-revision-production', environmentId: 'environment-production', revision: 3,
     status: 'ready', repositoryBindings: [productionDefaultRepository],
-    image: 'ghcr.io/relay/runtime:stable', variableReferences: [], hooks: [],
+    image: 'ghcr.io/cosmos/runtime:stable', variableReferences: [], hooks: [],
     networkPolicy: { mode: 'restricted', allowedHosts: [] }, sharing: 'space', daemonPoolId: null,
     checksum: 'a'.repeat(64), createdAt: '2026-07-12T04:00:00.000Z',
   },
@@ -139,7 +139,7 @@ const productionExpert: ExpertSummaryDto = {
     expertId: 'expert-production',
     revision: 5,
     status: 'published',
-    model: 'relay-production',
+    model: 'cosmos-production',
     environmentId: productionEnvironment.id,
     environmentRevisionId: productionEnvironment.activeRevisionId!,
     allowRepositoryOverride: false,
@@ -203,7 +203,7 @@ function renderApp(route = '/runs/run-482') {
   const me: MeResponse = {
     actor: { id: 'user-local-admin', kind: 'user' },
     organizations: [{
-      id: 'relay', name: 'Relay', role: 'organization_owner',
+      id: 'cosmos', name: 'Cosmos', role: 'organization_owner',
       spaces: [
         { id: 'space-commerce', name: 'Commerce Engineering', role: 'space_manager' },
         { id: 'space-platform', name: 'Platform Engineering', role: 'space_manager' },
@@ -316,15 +316,15 @@ async function forkTemplate(user: ReturnType<typeof userEvent.setup>, templateNa
 
 afterEach(() => vi.useRealTimers())
 
-describe('Relay prototype', () => {
+describe('Cosmos prototype', () => {
   beforeEach(() => {
     window.localStorage.setItem(PREFERENCE_STORAGE_KEYS.locale, 'zh')
     window.localStorage.setItem(PREFERENCE_STORAGE_KEYS.theme, 'dark')
-    window.localStorage.setItem('relay.sidebarCollapsed', 'false')
-    window.localStorage.removeItem('relay.sessions')
-    window.localStorage.removeItem('relay.demo.sessions')
-    window.localStorage.removeItem('relay.experts')
-    window.localStorage.removeItem('relay.controlPlane.v1')
+    window.localStorage.setItem('cosmos.sidebarCollapsed', 'false')
+    window.localStorage.removeItem('cosmos.sessions')
+    window.localStorage.removeItem('cosmos.demo.sessions')
+    window.localStorage.removeItem('cosmos.experts')
+    window.localStorage.removeItem('cosmos.controlPlane.v1')
     vi.mocked(archiveSession).mockReset()
     vi.mocked(cancelSession).mockReset()
     vi.mocked(createSession).mockReset()
@@ -469,7 +469,7 @@ describe('Relay prototype', () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: '修复优惠券并发核销' })).toBeInTheDocument()
     expect(createSession).toHaveBeenCalledWith(
-      'relay',
+      'cosmos',
       'space-commerce',
       expect.objectContaining({
         expertId: 'expert-cosmos-advisor',
@@ -483,7 +483,7 @@ describe('Relay prototype', () => {
     expect(screen.getByRole('status')).toHaveTextContent('等待 Worker 接收命令')
     expect(screen.queryByText('正在建立任务上下文')).not.toBeInTheDocument()
     await waitFor(() => {
-      const storedSessions = JSON.parse(window.localStorage.getItem('relay.demo.sessions') ?? '[]') as Array<{
+      const storedSessions = JSON.parse(window.localStorage.getItem('cosmos.demo.sessions') ?? '[]') as Array<{
         id: string
         title: string
         status: string
@@ -510,18 +510,18 @@ describe('Relay prototype', () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: '评估结算链路迁移方案' })).toBeInTheDocument()
     expect(createSession).toHaveBeenCalledWith(
-      'relay',
+      'cosmos',
       'space-commerce',
       expect.objectContaining({ expertId: 'expert-cosmos-advisor', start: true }),
       expect.any(String),
       expect.objectContaining({ accessToken: undefined, onUnauthorized: expect.any(Function) }),
     )
-    const storedSessions = JSON.parse(window.localStorage.getItem('relay.demo.sessions') ?? '[]') as Array<{ title: string; expertId?: string }>
+    const storedSessions = JSON.parse(window.localStorage.getItem('cosmos.demo.sessions') ?? '[]') as Array<{ title: string; expertId?: string }>
     expect(storedSessions.find((session) => session.title === '评估结算链路迁移方案')).toMatchObject({ expertId: 'expert-cosmos-advisor' })
   })
 
   it('hydrates server Sessions for the active Space without duplicating local projections', async () => {
-    const serverSession = makeApiSession('relay', 'space-commerce', {
+    const serverSession = makeApiSession('cosmos', 'space-commerce', {
       title: '服务端持久化会话', expertId: 'expert-pr-author', expertName: 'PR Author',
       repository: 'commerce/checkout', baseBranch: 'main',
       message: { content: '从 PostgreSQL 恢复的会话。' },
@@ -535,12 +535,12 @@ describe('Relay prototype', () => {
 
     expect((await screen.findAllByText('服务端持久化会话')).length).toBeGreaterThan(0)
     expect(listSessions).toHaveBeenCalledWith(
-      'relay', 'space-commerce',
+      'cosmos', 'space-commerce',
       expect.objectContaining({ accessToken: undefined, onUnauthorized: expect.any(Function) }),
       { archived: 'all', limit: 50 },
     )
     await waitFor(() => {
-      const stored = JSON.parse(window.localStorage.getItem('relay.demo.sessions') ?? '[]') as Array<{ id: string }>
+      const stored = JSON.parse(window.localStorage.getItem('cosmos.demo.sessions') ?? '[]') as Array<{ id: string }>
       expect(stored.filter((run) => run.id === 'session-persisted')).toHaveLength(1)
     })
   })
@@ -706,7 +706,7 @@ describe('Relay prototype', () => {
         turnId,
         number: 2,
         status: 'queued' as const,
-        model: 'relay-production',
+        model: 'cosmos-production',
         providerModel: null,
         runtimeId: null,
         failureCode: null,
@@ -923,7 +923,7 @@ describe('Relay prototype', () => {
       expect(listSessionMessages).toHaveBeenCalledOnce()
       expect(listSessionEvents).toHaveBeenCalledOnce()
     })
-    await act(async () => { delayedDetail.reject(new RelayApiError('Session unavailable.', {
+    await act(async () => { delayedDetail.reject(new CosmosApiError('Session unavailable.', {
       code: 'RESOURCE_NOT_FOUND', status: 404,
     })) })
 
@@ -942,7 +942,7 @@ describe('Relay prototype', () => {
     }, { id: 'session-late-detail' })
     const delayedDetail = deferred<SessionDto>()
     vi.mocked(getSession).mockReturnValueOnce(delayedDetail.promise)
-    vi.mocked(listSessionMessages).mockRejectedValueOnce(new RelayApiError('Session unavailable.', {
+    vi.mocked(listSessionMessages).mockRejectedValueOnce(new CosmosApiError('Session unavailable.', {
       code: 'RESOURCE_NOT_FOUND', status: 404,
     }))
     vi.mocked(listSessionEvents).mockImplementationOnce(() => new Promise(() => undefined))
@@ -1003,7 +1003,7 @@ describe('Relay prototype', () => {
   })
 
   it('ignores demo Session storage for an authenticated production identity', async () => {
-    window.localStorage.setItem('relay.demo.sessions', JSON.stringify(initialRuns))
+    window.localStorage.setItem('cosmos.demo.sessions', JSON.stringify(initialRuns))
     vi.mocked(listSessions).mockResolvedValueOnce({
       items: [], page: { nextCursor: null, hasMore: false, projectionUpdatedAt: null },
     })
@@ -1022,7 +1022,7 @@ describe('Relay prototype', () => {
       }),
       { archived: 'all', limit: 50 },
     )
-    expect(JSON.parse(window.localStorage.getItem('relay.demo.sessions') ?? '[]')).toHaveLength(initialRuns.length)
+    expect(JSON.parse(window.localStorage.getItem('cosmos.demo.sessions') ?? '[]')).toHaveLength(initialRuns.length)
     expect(screen.queryByRole('tab', { name: /收藏/ })).not.toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /已归档/ })).toBeInTheDocument()
   })
@@ -1145,13 +1145,13 @@ describe('Relay prototype', () => {
 
   it('does not read or overwrite prototype stores for a production identity', async () => {
     const privateExpert = 'PRIVATE EXPERT FROM ANOTHER USER'
-    window.localStorage.setItem('relay.experts', JSON.stringify({
+    window.localStorage.setItem('cosmos.experts', JSON.stringify({
       schemaVersion: 2,
       experts: [{ id: 'private-expert', spaceId: 'space-production', draftConfig: { name: privateExpert } }],
       versions: [],
     }))
     const controlPlaneValue = JSON.stringify({ private: 'control-plane-state' })
-    window.localStorage.setItem('relay.controlPlane.v1', controlPlaneValue)
+    window.localStorage.setItem('cosmos.controlPlane.v1', controlPlaneValue)
 
     renderAuthenticatedApp('/experts')
 
@@ -1160,8 +1160,8 @@ describe('Relay prototype', () => {
       { archived: 'all', limit: 50 },
     ))
     expect(screen.queryByText(privateExpert)).not.toBeInTheDocument()
-    expect(window.localStorage.getItem('relay.controlPlane.v1')).toBe(controlPlaneValue)
-    expect(window.localStorage.getItem('relay.experts')).toContain(privateExpert)
+    expect(window.localStorage.getItem('cosmos.controlPlane.v1')).toBe(controlPlaneValue)
+    expect(window.localStorage.getItem('cosmos.experts')).toContain(privateExpert)
   })
 
   it('renders production Experts from the tenant-scoped API and opens canonical detail', async () => {
@@ -1431,7 +1431,7 @@ describe('Relay prototype', () => {
         }],
         page: { nextCursor: null, hasMore: false },
       })
-      .mockRejectedValueOnce(new RelayApiError('Session unavailable.', {
+      .mockRejectedValueOnce(new CosmosApiError('Session unavailable.', {
         code: 'RESOURCE_NOT_FOUND', status: 404,
       }))
     vi.mocked(listSessionEvents).mockImplementation(async (organizationId, spaceId, sessionId) => ({
@@ -1536,13 +1536,13 @@ describe('Relay prototype', () => {
     expect(screen.queryByRole('button', { name: '新建会话' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '新建会话' })).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('link', { name: 'Relay' }))
+    await user.click(screen.getByRole('link', { name: 'Cosmos' }))
     expect(await screen.findByRole('heading', { name: '选择 Expert，保存会话草稿' })).toBeInTheDocument()
     expect(screen.queryByRole('textbox', { name: '会话任务' })).not.toBeInTheDocument()
     expect(screen.getByRole('note')).toHaveTextContent('只有查看权限')
 
     await user.keyboard('{Control>}k{/Control}')
-    expect(screen.getByRole('dialog', { name: '搜索 Relay' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: '搜索 Cosmos' })).toBeInTheDocument()
     expect(screen.queryByText('手动创建')).not.toBeInTheDocument()
   })
 
@@ -1704,7 +1704,7 @@ describe('Relay prototype', () => {
     expect(screen.getByRole('status')).toHaveTextContent('专家已发布')
 
     await waitFor(() => {
-      const store = JSON.parse(window.localStorage.getItem('relay.experts') ?? '{}') as {
+      const store = JSON.parse(window.localStorage.getItem('cosmos.experts') ?? '{}') as {
         experts?: Array<{ sourceTemplateId?: string; status: string; latestVersion: number; draftConfig: { name: string } }>
         versions?: Array<{ expertId: string; version: number }>
       }
@@ -1734,7 +1734,7 @@ describe('Relay prototype', () => {
     expect(screen.getByRole('button', { name: `停用: ${expertName}` })).toBeInTheDocument()
 
     await waitFor(() => {
-      const store = JSON.parse(window.localStorage.getItem('relay.experts') ?? '{}') as {
+      const store = JSON.parse(window.localStorage.getItem('cosmos.experts') ?? '{}') as {
         experts?: Array<{ id: string; status: string }>
       }
       expect(store.experts?.find((expert) => expert.id === 'expert-seed-pr-author')).toMatchObject({ status: 'published' })
@@ -1771,7 +1771,7 @@ describe('Relay prototype', () => {
     expect(screen.getByRole('textbox', { name: '显示名称' })).toHaveValue('Figma Expert v1')
 
     await waitFor(() => {
-      const store = JSON.parse(window.localStorage.getItem('relay.experts') ?? '{}') as {
+      const store = JSON.parse(window.localStorage.getItem('cosmos.experts') ?? '{}') as {
         experts?: Array<{ sourceTemplateId?: string; latestVersion: number; draftConfig: { name: string } }>
         versions?: Array<{ version: number; rolledBackFromVersionId?: string }>
       }
@@ -1816,7 +1816,7 @@ describe('Relay prototype', () => {
     await user.click(screen.getByRole('button', { name: '库存并发测试修复 · 会话操作' }))
     await user.click(screen.getByRole('menuitem', { name: '归档' }))
     expect(screen.queryByText('库存并发测试修复')).not.toBeInTheDocument()
-    const storedSessions = JSON.parse(window.localStorage.getItem('relay.demo.sessions') ?? '[]') as Array<{ title: string; archived?: boolean }>
+    const storedSessions = JSON.parse(window.localStorage.getItem('cosmos.demo.sessions') ?? '[]') as Array<{ title: string; archived?: boolean }>
     expect(storedSessions.find((session) => session.title === '库存并发测试修复')).toMatchObject({ archived: true })
     await user.click(screen.getByRole('tab', { name: /已归档/ }))
     expect(screen.getByText('库存并发测试修复')).toBeInTheDocument()
@@ -1825,7 +1825,7 @@ describe('Relay prototype', () => {
   it('prioritizes sessions that need attention', async () => {
     const completedSession = { ...initialRuns.find((run) => run.id === 'run-481')!, archived: false }
     const sessions = [completedSession, ...initialRuns.filter((run) => run.id !== 'run-481')]
-    window.localStorage.setItem('relay.demo.sessions', JSON.stringify(sessions))
+    window.localStorage.setItem('cosmos.demo.sessions', JSON.stringify(sessions))
 
     renderApp('/sessions')
 
@@ -1879,7 +1879,7 @@ describe('Relay prototype', () => {
     expect(screen.getByRole('status')).toHaveTextContent('事件已匹配 Payments alert investigation')
     expect(screen.getByText('@Cosmos investigate payment timeouts')).toBeInTheDocument()
     await waitFor(() => {
-      const storedSessions = JSON.parse(window.localStorage.getItem('relay.demo.sessions') ?? '[]') as Array<{
+      const storedSessions = JSON.parse(window.localStorage.getItem('cosmos.demo.sessions') ?? '[]') as Array<{
         title: string
         source: string
         automationId?: string
@@ -1904,7 +1904,7 @@ describe('Relay prototype', () => {
 
     expect(screen.getByRole('status')).toHaveTextContent('已创建新的 Attempt，重试成功')
     await waitFor(() => {
-      const storedSessions = JSON.parse(window.localStorage.getItem('relay.demo.sessions') ?? '[]') as Array<{
+      const storedSessions = JSON.parse(window.localStorage.getItem('cosmos.demo.sessions') ?? '[]') as Array<{
         id: string
         status: string
         attempts?: Array<{ number: number; status: string }>
@@ -1931,7 +1931,7 @@ describe('Relay prototype', () => {
 
     expect(screen.getByRole('button', { name: /支付回归验证/ })).toBeInTheDocument()
     await waitFor(() => {
-      const state = JSON.parse(window.localStorage.getItem('relay.controlPlane.v1') ?? '{}') as {
+      const state = JSON.parse(window.localStorage.getItem('cosmos.controlPlane.v1') ?? '{}') as {
         environments?: Array<{ name: string; status: string }>
       }
       expect(state.environments).toEqual(expect.arrayContaining([

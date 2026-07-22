@@ -1,6 +1,6 @@
 # PostgreSQL 备份与恢复 Runbook
 
-本文覆盖 Relay PostgreSQL 权威数据的逻辑全量备份与隔离恢复验证。它是发布和季度演练的最低基线，不替代托管数据库的加密连续归档、跨区域副本或 PITR。
+本文覆盖 Cosmos PostgreSQL 权威数据的逻辑全量备份与隔离恢复验证。它是发布和季度演练的最低基线，不替代托管数据库的加密连续归档、跨区域副本或 PITR。
 
 ## 责任与目标
 
@@ -11,7 +11,7 @@
 
 ## 前置条件
 
-1. 使用与服务端相同或更新 major 版本的 `pg_dump`、`pg_restore` 和 `psql`；新集群须先由 IaC 创建 migration、`relay_api_runtime` 与 `relay_worker_runtime` 角色，dump 会保留对象 ACL 但不会创建全局角色。
+1. 使用与服务端相同或更新 major 版本的 `pg_dump`、`pg_restore` 和 `psql`；新集群须先由 IaC 创建 migration、`cosmos_api_runtime` 与 `cosmos_worker_runtime` 角色，dump 会保留对象 ACL 但不会创建全局角色。
 2. 从 Secret Manager 注入连接串，不写入 shell 历史、仓库、日志或 CI artifact。
 3. 为每份备份生成唯一绝对路径；脚本拒绝覆盖已有文件。
 4. 恢复只指向预先创建的隔离数据库。脚本要求连接后的真实数据库名精确匹配 `EXPECTED_DATABASE_NAME`，并要求显式确认值 `restore-approved`。
@@ -22,7 +22,7 @@
 
 ```bash
 export DATABASE_URL='postgresql://...'
-export EXPECTED_DATABASE_NAME='relay_production'
+export EXPECTED_DATABASE_NAME='cosmos_production'
 export PITR_MODE=archive
 export TARGET_RPO_SECONDS=300
 export PITR_TRIGGER_WAL_SWITCH=verify-approved
@@ -37,7 +37,7 @@ pnpm db:pitr-preflight
 
 ```bash
 export DATABASE_URL='postgresql://...'
-export BACKUP_PATH="/secure-staging/relay-$(date -u +%Y%m%dT%H%M%SZ).dump"
+export BACKUP_PATH="/secure-staging/cosmos-$(date -u +%Y%m%dT%H%M%SZ).dump"
 pnpm db:backup
 ```
 
@@ -48,18 +48,18 @@ pnpm db:backup
 由数据库平台先创建空的隔离目标库，禁止使用 `postgres`、`template0` 或 `template1`：
 
 ```bash
-export RESTORE_DATABASE_URL='postgresql://.../relay_restore_2026q3'
-export EXPECTED_DATABASE_NAME='relay_restore_2026q3'
+export RESTORE_DATABASE_URL='postgresql://.../cosmos_restore_2026q3'
+export EXPECTED_DATABASE_NAME='cosmos_restore_2026q3'
 export EXPECTED_MIGRATION_VERSION='073_organization_quotas_and_rate_limits.sql'
 export EXPECTED_MIGRATION_COUNT='75'
-export BACKUP_PATH='/secure-staging/relay-20260713T160000Z.dump'
+export BACKUP_PATH='/secure-staging/cosmos-20260713T160000Z.dump'
 export ALLOW_DESTRUCTIVE_RESTORE='restore-approved'
 pnpm db:restore
 ```
 
 脚本先验证 SHA-256、custom archive 目录和目标库名，再以单事务、`--clean --if-exists` 恢复。失败会回滚恢复事务并返回非零状态。恢复后脚本还会验证 release 对应的精确 migration 数量/版本、六张关键表、五张 tenant 表的 FORCE RLS、API/Worker ACL、每个 Organization 的 quota 和 FileVersion inline/object 存储约束。`EXPECTED_MIGRATION_*` 必须来自待部署 release 清单，不得从未知备份自行推导。完成后还应验证：
 
-1. `relay_schema_migrations` 与源库版本和数量一致，应用 migration readiness 对 pending/unknown 版本均通过，API/Worker runtime 角色 ACL 可用。
+1. `cosmos_schema_migrations` 与源库版本和数量一致，应用 migration readiness 对 pending/unknown 版本均通过，API/Worker runtime 角色 ACL 可用。
 2. Organization、Session、Message、FileVersion、ToolCall、AuditEvent 的计数与抽样 hash 符合演练清单。
 3. API 以恢复库启动后 `/api/ready` 成功，跨租户负向验证仍被 FORCE RLS 拒绝。
 4. Worker 能领取合成命令并写终态，且不会联系真实 provider 或外部集成。
@@ -92,6 +92,6 @@ export OBJECT_STORAGE_GC_MAX_OBJECTS=100000
 pnpm object-storage:gc
 ```
 
-核对 `scannedObjects`、`referencedObjects` 和 `eligibleObjects` 后，经变更审批将 mode 改为 `apply`。命令使用全局 advisory lock 阻止并发运行，只删除超过保护窗且在 `relay_file_versions.object_key` 中不存在的对象；不打印对象 key。每次完成都会向 append-only `relay_object_storage_gc_runs` 写入计数、模式、时间和安全错误码。`partial` 或 `failed` 必须告警并停止后续批次，不能反复盲删。
+核对 `scannedObjects`、`referencedObjects` 和 `eligibleObjects` 后，经变更审批将 mode 改为 `apply`。命令使用全局 advisory lock 阻止并发运行，只删除超过保护窗且在 `cosmos_file_versions.object_key` 中不存在的对象；不打印对象 key。每次完成都会向 append-only `cosmos_object_storage_gc_runs` 写入计数、模式、时间和安全错误码。`partial` 或 `failed` 必须告警并停止后续批次，不能反复盲删。
 
 季度恢复演练还需从隔离恢复库抽样 object-backed FileVersion，验证 metadata 指向的对象可读取、size/SHA-256 一致、无权限 actor 仍被拒绝，并对一次合成 orphan 先 dry-run 再 apply。

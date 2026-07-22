@@ -1,4 +1,4 @@
-import type { AttemptStatus, SessionDto, SessionEventDto, SessionMessageDto } from '@relay/contracts'
+import type { AttemptStatus, SessionDto, SessionEventDto, SessionMessageDto } from '@cosmos/contracts'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -20,7 +20,7 @@ const session: SessionDto = {
   environmentRevisionId: 'environment-revision-7',
   executionSnapshotId: 'execution-snapshot-7',
   repositoryId: 'repository-binding-2',
-  repository: 'relay/checkout',
+  repository: 'cosmos/checkout',
   baseBranch: 'main',
   visibility: 'private',
   status: 'queued',

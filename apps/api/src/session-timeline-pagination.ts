@@ -1,4 +1,4 @@
-import { SessionEventCursorSchema, type SessionEventCursor } from '@relay/contracts'
+import { SessionEventCursorSchema, type SessionEventCursor } from '@cosmos/contracts'
 
 const MAX_CURSOR_LENGTH = 2_048
 

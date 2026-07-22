@@ -1,4 +1,4 @@
-import type { ContextPackResponse } from '@relay/contracts'
+import type { ContextPackResponse } from '@cosmos/contracts'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -7,7 +7,7 @@ import { NewTaskDialog } from './NewTaskDialog'
 
 const contextPack: ContextPackResponse = {
   provider: 'contextengine-plugin',
-  repository: 'relay/platform',
+  repository: 'cosmos/platform',
   task: '定位支付重试策略',
   packedText: 'src/retry/policy.ts:12-38\nexport function retryPayment() {}',
   estimatedTokens: 428,
@@ -54,12 +54,12 @@ describe('NewTaskDialog ContextEngine evidence', () => {
             tools: 'Repository read/write',
             environment: 'Development',
             environmentId: 'env-development',
-            repository: 'relay/platform',
+            repository: 'cosmos/platform',
             approval: 'Required',
             successRate: '98%',
           }]}
-          repositories={[{ id: 'repo-platform', fullName: 'relay/platform', defaultBranch: 'main' }]}
-          environments={[{ id: 'env-development', name: 'Development', image: 'relay/dev:latest', ready: true }]}
+          repositories={[{ id: 'repo-platform', fullName: 'cosmos/platform', defaultBranch: 'main' }]}
+          environments={[{ id: 'env-development', name: 'Development', image: 'cosmos/dev:latest', ready: true }]}
           onClose={vi.fn()}
           onCreate={onCreate}
         />

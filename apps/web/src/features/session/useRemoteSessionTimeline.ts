@@ -2,15 +2,15 @@ import type {
   SessionEventCursor,
   SessionEventDto,
   SessionMessageDto,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 import { useEffect, useState } from 'react'
 import {
-  RelayApiError,
+  CosmosApiError,
   listSessionEvents,
   listSessionMessages,
   streamSessionEvents,
-  type RelayApiAuthContext,
-} from '../../services/relayApi'
+  type CosmosApiAuthContext,
+} from '../../services/cosmosApi'
 
 const SESSION_TIMELINE_POLL_MS = 2_000
 const SESSION_TIMELINE_SSE_RETRY_MS = 500
@@ -30,7 +30,7 @@ type UseRemoteSessionTimelineOptions = {
   spaceId: string
   sessionId?: string
   credentialVersion: number
-  auth: RelayApiAuthContext
+  auth: CosmosApiAuthContext
   enabled: boolean
   transport: 'polling' | 'sse'
   pollMs?: number
@@ -45,7 +45,7 @@ function mergeBySequence<T extends { sequence: number }>(current: T[], incoming:
 }
 
 function isConcealed(cause: unknown) {
-  return cause instanceof RelayApiError
+  return cause instanceof CosmosApiError
     && cause.status !== undefined
     && [401, 403, 404].includes(cause.status)
 }
@@ -175,7 +175,7 @@ export function useRemoteSessionTimeline({
           updateMessages(messages.items)
           if (!messages.page.hasMore) return
         }
-        throw new RelayApiError('Session message pagination exceeded the supported limit.', {
+        throw new CosmosApiError('Session message pagination exceeded the supported limit.', {
           code: 'INVALID_RESPONSE', status: 200,
         })
       }

@@ -1,6 +1,6 @@
 # Load/Soak 与依赖故障演练 Runbook
 
-本文定义 Relay 当前可重复执行的有界 HTTP smoke、Session 生命周期 journey 和本地依赖 readiness 故障演练。它们用于发布回归和建立基线，不等同于生产容量、长时间 soak、多区故障或外部 provider/object-store 灾难恢复证据。
+本文定义 Cosmos 当前可重复执行的有界 HTTP smoke、Session 生命周期 journey 和本地依赖 readiness 故障演练。它们用于发布回归和建立基线，不等同于生产容量、长时间 soak、多区故障或外部 provider/object-store 灾难恢复证据。
 
 ## HTTP 并发 smoke
 

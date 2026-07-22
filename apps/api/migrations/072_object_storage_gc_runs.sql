@@ -1,4 +1,4 @@
-CREATE TABLE relay_object_storage_gc_runs (
+CREATE TABLE cosmos_object_storage_gc_runs (
   id text PRIMARY KEY,
   mode text NOT NULL CHECK (mode IN ('dry_run', 'apply')),
   status text NOT NULL CHECK (status IN ('succeeded', 'partial', 'failed')),
@@ -18,15 +18,15 @@ CREATE TABLE relay_object_storage_gc_runs (
     OR (status = 'failed' AND error_code IS NOT NULL))
 );
 
-CREATE INDEX relay_object_storage_gc_runs_completed_idx
-  ON relay_object_storage_gc_runs (completed_at DESC, id DESC);
+CREATE INDEX cosmos_object_storage_gc_runs_completed_idx
+  ON cosmos_object_storage_gc_runs (completed_at DESC, id DESC);
 
-CREATE TRIGGER relay_object_storage_gc_runs_reject_mutation
-  BEFORE UPDATE OR DELETE ON relay_object_storage_gc_runs
-  FOR EACH STATEMENT EXECUTE FUNCTION relay_reject_ledger_mutation();
+CREATE TRIGGER cosmos_object_storage_gc_runs_reject_mutation
+  BEFORE UPDATE OR DELETE ON cosmos_object_storage_gc_runs
+  FOR EACH STATEMENT EXECUTE FUNCTION cosmos_reject_ledger_mutation();
 
-CREATE TRIGGER relay_object_storage_gc_runs_reject_truncate
-  BEFORE TRUNCATE ON relay_object_storage_gc_runs
-  FOR EACH STATEMENT EXECUTE FUNCTION relay_reject_ledger_mutation();
+CREATE TRIGGER cosmos_object_storage_gc_runs_reject_truncate
+  BEFORE TRUNCATE ON cosmos_object_storage_gc_runs
+  FOR EACH STATEMENT EXECUTE FUNCTION cosmos_reject_ledger_mutation();
 
-REVOKE ALL ON relay_object_storage_gc_runs FROM PUBLIC, relay_api_runtime, relay_worker_runtime;
+REVOKE ALL ON cosmos_object_storage_gc_runs FROM PUBLIC, cosmos_api_runtime, cosmos_worker_runtime;

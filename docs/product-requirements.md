@@ -1,24 +1,24 @@
-# Relay 产品需求规格
+# Cosmos 产品需求规格
 
 > 文档状态：研发基线（Draft for implementation）  
 > 版本：1.3
 > 日期：2026-07-22
 > 事实基线：[cosmos-evidence-matrix.md](./cosmos-evidence-matrix.md)  
-> 适用范围：Relay Cosmos 风格原型及其后续产品化实现
+> 适用范围：Cosmos Cosmos 风格原型及其后续产品化实现
 
 ## 1. 文档目的
 
-本文把官方证据、合理推断和 Relay 自有扩展转成可实施、可验收的产品合同。产品、设计、前端、后端和测试必须使用相同术语、对象关系和优先级；未在本文定义的能力不能仅凭“Cosmos 应该如此”进入开发。
+本文把官方证据、合理推断和 Cosmos 自有扩展转成可实施、可验收的产品合同。产品、设计、前端、后端和测试必须使用相同术语、对象关系和优先级；未在本文定义的能力不能仅凭“Cosmos 应该如此”进入开发。
 
 ### 1.1 证据标记
 
 | 标记 | 含义 | 需求处理规则 |
 | --- | --- | --- |
 | **Official** | Augment 官方文档明确描述 | 作为对标事实实现；若改变，必须记录原因 |
-| **Inferred** | 从官方事实合理推导，但界面或细节未被证实 | 可用于 Relay 设计；上线前保留复核项 |
-| **Relay extension** | Relay 为治理、交付、本地化或团队运营新增 | 使用 Relay 命名、权限和审计，不冒充官方功能 |
+| **Inferred** | 从官方事实合理推导，但界面或细节未被证实 | 可用于 Cosmos 设计；上线前保留复核项 |
+| **Cosmos extension** | Cosmos 为治理、交付、本地化或团队运营新增 | 使用 Cosmos 命名、权限和审计，不冒充官方功能 |
 
-凡未标记的条目默认属于 Relay 的实现约束，而不是 Cosmos 官方事实。
+凡未标记的条目默认属于 Cosmos 的实现约束，而不是 Cosmos 官方事实。
 
 ### 1.2 实现状态标记
 
@@ -35,7 +35,7 @@
 
 ## 2. 产品定义
 
-Relay 是面向研发团队的 Agent 工作系统。用户选择一个可复用 Expert，通过持续 Session 提交目标、补充上下文、观察 Agent 与工具执行、处理必要的人类决策，并追踪文件和交付产物。平台管理员负责 Expert、Environment、Integration、Automation 与 Space 的配置和边界。
+Cosmos 是面向研发团队的 Agent 工作系统。用户选择一个可复用 Expert，通过持续 Session 提交目标、补充上下文、观察 Agent 与工具执行、处理必要的人类决策，并追踪文件和交付产物。平台管理员负责 Expert、Environment、Integration、Automation 与 Space 的配置和边界。
 
 ### 2.1 解决的客户痛点
 
@@ -52,7 +52,7 @@ Relay 是面向研发团队的 Agent 工作系统。用户选择一个可复用 
 - 对话优先，结构化配置用于管理员和高级场景。
 - 人类负责目标、风险和最终判断，不逐步遥控 Agent。
 - 所有模拟结果必须明确标记为 Prototype/Simulation。
-- Official、Inferred 与 Relay extension 在需求、界面和发布说明中保持可追溯。
+- Official、Inferred 与 Cosmos extension 在需求、界面和发布说明中保持可追溯。
 
 ## 3. 目标与非目标
 
@@ -106,7 +106,7 @@ Relay 是面向研发团队的 Agent 工作系统。用户选择一个可复用 
 | Member | 发起/继续 Session、查看获授权资源、管理自己的 Pin | 读取 Space 可见资源；创建 Private/Shared Session |
 | Expert Manager | 创建和维护 Custom Expert，配置团队对 Managed Template 的追加内容 | Member + Expert revision 与发布 |
 | Space Admin | 管理 Space、Environment、Integration、Trigger、Files 策略和成员 | Space 内控制平面读写 |
-| Approver | 处理 Relay 风险决策 | 读取相关证据并批准/退回，不自动获得配置权限 |
+| Approver | 处理 Cosmos 风险决策 | 读取相关证据并批准/退回，不自动获得配置权限 |
 | Organization Admin | 管理 Default Space、跨 Space 迁移、保留策略与组织 Files | 组织范围管理和审计 |
 
 原型可使用固定用户模拟这些角色，但所有受限操作必须展示权限边界；不能因为前端可点击就暗示后端已授权。
@@ -148,7 +148,7 @@ Organization
 | Home | `/home`，`/` 重定向 | **Official** + **Inferred** | Expert 选择、任务 composer、附件、最近 Session；品牌入口可达，不在侧栏新增未经证实的 Home 文本项 | P0 |
 | New Session | 共享 launcher；可演进为 `/sessions/new` | **Official** + **Inferred** | 与 Home 共用 Expert + prompt 交互；标题自动生成 | P0 |
 | Sessions | `/sessions` | **Official** | 当前/归档、可见性、搜索、Pin、继续会话 | P0/P2 |
-| Session detail | `/sessions/:sessionId`；迁移期兼容 `/runs/:id` | **Official** + **Relay extension** | Conversation、composer、Files、Artifacts、Workers；条件式 Changes/Approval/Terminal | P0 |
+| Session detail | `/sessions/:sessionId`；迁移期兼容 `/runs/:id` | **Official** + **Cosmos extension** | Conversation、composer、Files、Artifacts、Workers；条件式 Changes/Approval/Terminal | P0 |
 | Files | `/files/organization`、`/files/user` | **Official** | 只读树、预览、版本、复制、下载；修改必须发起 Session | P0 |
 | Experts | `/experts`、`/experts/:id` | **Official** + **Inferred** | Managed/Custom 分流、launch guidance、Environment ID、Triggers/Workers | P1 |
 | Environments | `/environments`、`/environments/:id` | **Official** + **Inferred** | Cloud/Self-hosted、仓库、变量、Hooks、Terminal、更新历史 | P1 |
@@ -157,8 +157,8 @@ Organization
 | Run History | `/automations/history` | **Official** | 展示 Trigger 创建的 Sessions，不创建第二套运行实体 | P1 |
 | Spaces | `/spaces` | **Official** + **Inferred** | Default、搜索/创建、默认 Expert/Environment、迁移预览 | P1 |
 | Advisor | 通过 Home/Expert picker 启动普通 Session | **Official** | 内置 Expert；计划、确认、工具结果、限制跳转 | P1 |
-| Approvals | `/approvals` 或治理分组 | **Relay extension** | 对有权限用户条件显示，汇总 Session 内风险决策 | P1 |
-| Settings/语言/主题 | `/settings` + 全局控件 | **Relay extension** | 中文/英文、Light/Dark/System、个人偏好 | P0 |
+| Approvals | `/approvals` 或治理分组 | **Cosmos extension** | 对有权限用户条件显示，汇总 Session 内风险决策 | P1 |
+| Settings/语言/主题 | `/settings` + 全局控件 | **Cosmos extension** | 中文/英文、Light/Dark/System、个人偏好 | P0 |
 
 ## 7. 关键用户旅程
 
@@ -172,7 +172,7 @@ Organization
 6. 系统创建 Session，自动推导 Space、Environment 和默认仓库，进入 Session detail。
 7. 若启动前检查失败，保留输入并给出可执行修复入口。
 
-来源：**Official**（Expert + prompt、附件、可见性）、**Inferred**（标题自动生成、launcher 形态）、**Relay extension**（高级验收/分支覆盖）。
+来源：**Official**（Expert + prompt、附件、可见性）、**Inferred**（标题自动生成、launcher 形态）、**Cosmos extension**（高级验收/分支覆盖）。
 
 ### J02：继续、Pin 与归档 Session（P0/P2）
 
@@ -182,7 +182,7 @@ Organization
 4. 用户可 Pin、移动到 Pin 文件夹、归档或恢复。
 5. 普通用户不看到永久删除；管理员按保留策略处理销毁。
 
-来源：**Official**（持续会话、Pinned、Archived、Artifact 搜索）、**Inferred**（Relay 表格和筛选）、**Relay extension**（批量归档）。
+来源：**Official**（持续会话、Pinned、Archived、Artifact 搜索）、**Inferred**（Cosmos 表格和筛选）、**Cosmos extension**（批量归档）。
 
 ### J03：观察 Agent 并在必要时介入（P0）
 
@@ -192,7 +192,7 @@ Organization
 4. Session 展示生成的 Artifact、Worker tree 和 Files 更新。
 5. 只有发生代码变更、风险决策或失败时，显示 Changes、Approval、Retry 等条件式扩展。
 
-来源：**Official**（conversation、queue、attachment、slash、enhance、artifact、worker）、**Relay extension**（审批、Diff、暂停/停止/重试）。
+来源：**Official**（conversation、queue、attachment、slash、enhance、artifact、worker）、**Cosmos extension**（审批、Diff、暂停/停止/重试）。
 
 ### J04：配置并发布 Expert（P1）
 
@@ -202,7 +202,7 @@ Organization
 4. 系统执行校验/试运行并展示问题。
 5. 发布 revision 后，该 Expert 可用于新 Session；旧 revision 仍可追踪。
 
-来源：**Official**（Expert 字段与模板托管语义）、**Inferred**（revision 发布交互）、**Relay extension**（显式审批政策和完成标准）。
+来源：**Official**（Expert 字段与模板托管语义）、**Inferred**（revision 发布交互）、**Cosmos extension**（显式审批政策和完成标准）。
 
 ### J05：建立 Environment（P1）
 
@@ -212,7 +212,7 @@ Organization
 4. 管理员可打开 Web Terminal 调整并 Update Environment；更新形成历史。
 5. Ready Environment 可被 Expert 引用；新 Session 从隔离快照启动。
 
-来源：**Official**；固定 CPU/内存、egress allowlist 等归为 **Relay extension** 高级政策。
+来源：**Official**；固定 CPU/内存、egress allowlist 等归为 **Cosmos extension** 高级政策。
 
 ### J06：由 Event 触发 Automation Session（P1）
 
@@ -222,7 +222,7 @@ Organization
 4. 匹配后创建新 Session，并将原始 payload 作为首条消息。
 5. Automations 与 Run History 从同一 Trigger/Session 数据投影；自动归档按 Trigger 设置执行。
 
-来源：**Official**（数据关系）、**Inferred**（Wizard）、**Relay extension**（模拟注入和幂等测试 UI）。
+来源：**Official**（数据关系）、**Inferred**（Wizard）、**Cosmos extension**（模拟注入和幂等测试 UI）。
 
 ### J07：浏览并请求修改 Files（P0）
 
@@ -231,7 +231,7 @@ Organization
 3. 用户点击“请求修改”，系统以文件路径和版本为上下文打开 Session launcher。
 4. 恢复旧版同样通过 Expert 写回新版本，不在浏览器中直接覆盖。
 
-来源：**Official**；Organization 写入审批和保留策略为 **Relay extension**。
+来源：**Official**；Organization 写入审批和保留策略为 **Cosmos extension**。
 
 ### J08：Advisor 配置控制平面（P1）
 
@@ -241,7 +241,7 @@ Organization
 4. OAuth 和 Secret 操作停在人工步骤，不读取或保存 Secret 明文。
 5. 失败步骤可重试，Session 可恢复并记住已确认的决策。
 
-来源：**Official**；Relay 合规/预算建议使用 `Relay Advisor` 品牌，属于 **Relay extension**。
+来源：**Official**；Cosmos 合规/预算建议使用 `Cosmos Advisor` 品牌，属于 **Cosmos extension**。
 
 ## 8. 功能需求与验收标准
 
@@ -272,7 +272,7 @@ Organization
 | PRD-P1-06 | Event 可追溯 | Event 保存 payload/headers/幂等 ID/匹配解释，并链接唯一 Session；重复 Event 不重复创建 Session |
 | PRD-P1-07 | Space 真实边界 | Picker 来自状态源并持久化；Default 不可删改；删除非 Default 前必须选择迁移目标并预览影响 |
 | PRD-P1-08 | Advisor 受控执行 | 每次控制面变更先呈现 plan/diff 并确认；OAuth/Secret 返回人工步骤；结果进入审计记录 |
-| PRD-P1-09 | Relay Approvals | 只有有权限用户看见治理入口；决策包含风险、影响、证据、到期时间和审计结果 |
+| PRD-P1-09 | Cosmos Approvals | 只有有权限用户看见治理入口；决策包含风险、影响、证据、到期时间和审计结果 |
 
 ### 8.3 P2 管理增强
 
@@ -343,7 +343,7 @@ Organization
 1. P0 每条需求有自动化测试或记录在册的人工视觉用例，且通过。
 2. Home → Session → 消息队列 → Artifact/Files/Worker → 恢复会话的主路径无死路。
 3. Expert → Environment → Session 与 Trigger → Event → Session 两条对象链可在 UI 中追踪。
-4. 所有 Relay extension 在需求和界面命名上可辨识；没有把 Inferred 交互宣称为官方事实。
+4. 所有 Cosmos extension 在需求和界面命名上可辨识；没有把 Inferred 交互宣称为官方事实。
 5. Light/Dark、中文/英文、桌面/小屏均完成截图与交互验收。
 6. `pnpm check` 通过；关键路径无 P0/P1 无障碍、布局或数据一致性缺陷。
 7. 所有后端模拟点有明确标签、确定性结果和未来接口契约，不伪造真实外部成功。
@@ -368,5 +368,5 @@ Organization
 2. New Session 最终采用独立路由还是全局 overlay；当前必须先共享同一 launcher 逻辑。
 3. Session 的自动归档默认值、Pinned 文件夹上限和 Artifact 搜索范围。
 4. Managed Template 的可追加字段和上游更新冲突解决方式。
-5. Relay Approvals、Files 写入治理和高级 Environment Policy 的商业版本边界。
-6. 二级搜索结果曾出现“Open Sessions”描述，但 2026-07-12 直接核验时该页返回 404，且当前官方 `llms.txt`、`sessions-overview.md` 和 `getting-started.md` 均将 Session 定义为与 Expert 的对话。在新的一手证据出现前，Relay 保持 `expertId` 必填，不将 Open Session 宣称为现行 Cosmos 能力。
+5. Cosmos Approvals、Files 写入治理和高级 Environment Policy 的商业版本边界。
+6. 二级搜索结果曾出现“Open Sessions”描述，但 2026-07-12 直接核验时该页返回 404，且当前官方 `llms.txt`、`sessions-overview.md` 和 `getting-started.md` 均将 Session 定义为与 Expert 的对话。在新的一手证据出现前，Cosmos 保持 `expertId` 必填，不将 Open Session 宣称为现行 Cosmos 能力。

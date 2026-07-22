@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cosmos · Augment Code</title>
+  <meta name="description" content="Augment Cosmos — agent orchestration platform prototype" />
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Docs hero showcase (introduction cosmos.png composite) -->
+  <div id="showcase" class="showcase" hidden aria-hidden="true">
+    <div class="pill float pill-collab">COLLABORATE IN REAL TIME</div>
+    <div class="pill float pill-files">STORE FILES ACROSS TEAMS</div>
+    <div class="pill float pill-agents">CUSTOM AGENTS</div>
+    <div class="pill float pill-tools">TOOLS TO GET REAL WORK DONE</div>
+    <aside class="float-card float-session">
+      <div class="fc-head">
+        <span>SESSION</span>
+        <div class="fc-actions">
+          <button type="button" class="text-btn" data-action="copy-session-link">Copy link</button>
+          <button type="button" class="text-btn" data-action="share-session">Share</button>
+        </div>
+      </div>
+      <div class="fc-label">Session name</div>
+      <div class="fc-value" id="float-session-name">Let cosmos Author my PRs</div>
+      <div class="fc-label">Session ID</div>
+      <div class="fc-value mono" id="float-session-id">01KPPH32EJGEKRNC2AT1M4GCCM</div>
+      <div class="fc-label">Last active</div>
+      <div class="fc-value">Just now</div>
+    </aside>
+    <aside class="float-card float-apps" id="float-apps"></aside>
+  </div>
+
+  <div id="app" class="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="sb-header">
+        <button type="button" class="logo" id="btn-space" title="Spaces">
+          <img class="logo-icon" src="assets/cosmos-logo.svg" width="18" height="16" alt="" />
+          <span>Cosmos</span>
+          <svg class="chev" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3.5l3 3 3-3"/></svg>
+        </button>
+        <button type="button" class="icon-btn" id="btn-toggle-sidebar" title="Toggle sidebar (⌘.)" aria-label="Toggle sidebar">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M6.5 2.5v11"/></svg>
+        </button>
+      </div>
+
+      <button type="button" class="sb-new" data-nav="home">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 3.2v9.6M3.2 8h9.6"/></svg>
+        New session
+      </button>
+
+      <nav class="sb-nav" id="sb-nav">
+        <!-- filled by app.js for single source of truth -->
+      </nav>
+
+      <div class="sb-section-label">Favorites</div>
+      <div class="sb-fav-drop" id="favorites-list" title="Pinned sessions appear here">
+        <span class="sb-fav-hint">Drag sessions here to pin</span>
+      </div>
+
+      <div class="sb-section-label row-between">
+        <span>Recent Sessions</span>
+      </div>
+      <div class="sb-recents" id="recent-list"></div>
+
+      <div class="sb-user" id="btn-user-menu" role="button" tabindex="0">
+        <div class="avatar">AV</div>
+        <div class="user-info">
+          <div class="user-name">Alex Vance</div>
+          <div class="user-email">alex.vance@acme.com</div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button type="button" class="icon-btn topbar-open-sb" id="btn-open-sidebar" title="Show sidebar (⌘.)" aria-label="Show sidebar" hidden>
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M6.5 2.5v11"/></svg>
+          </button>
+          <span class="crumb" id="crumb">Home</span>
+        </div>
+        <div class="topbar-right">
+          <button type="button" class="pill-btn" data-nav="philosophy" title="Design philosophy">Philosophy</button>
+          <button type="button" class="pill-btn" id="btn-showcase" title="Docs hero showcase">Showcase</button>
+          <button type="button" class="pill-btn" id="btn-cmd" title="Command palette (⌘K)">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6.5" cy="6.5" r="4.5"/><path d="M11 11l3 3"/></svg>
+            Search <kbd>⌘K</kbd>
+          </button>
+          <button type="button" class="icon-btn" id="btn-theme" title="Theme"></button>
+          <button type="button" class="icon-btn" id="btn-shortcuts" title="Shortcuts (⌘/)"></button>
+        </div>
+      </header>
+      <div class="viewport" id="viewport"></div>
+    </main>
+
+    <aside class="rightbar" id="rightbar" hidden>
+      <div class="rb-header">
+        <span>SESSION</span>
+        <div class="rb-actions">
+          <button type="button" class="text-btn" data-action="copy-session-link">↗ Copy link</button>
+          <button type="button" class="text-btn" data-action="share-session">↑ Share</button>
+        </div>
+      </div>
+      <div class="rb-body" id="rightbar-body"></div>
+    </aside>
+  </div>
+
+  <div id="model-dd" class="popover" hidden></div>
+  <div id="env-dd" class="popover" hidden></div>
+  <div id="space-dd" class="popover" hidden></div>
+  <div id="user-dd" class="popover" hidden></div>
+  <div id="create-env-dd" class="popover" hidden></div>
+
+  <div class="modal-backdrop" id="cmd-backdrop" hidden>
+    <div class="cmd-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+      <div class="cmd-input-wrap">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6.5" cy="6.5" r="4.5"/><path d="M11 11l3 3"/></svg>
+        <input id="cmd-input" placeholder="Search sessions, experts, commands…" autocomplete="off" />
+        <kbd>Esc</kbd>
+      </div>
+      <div class="cmd-results" id="cmd-results"></div>
+      <div class="cmd-footer"><span><kbd>↑↓</kbd> navigate</span><span><kbd>↵</kbd> open</span><span><kbd>⌘↵</kbd> edit</span></div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="shortcuts-backdrop" hidden>
+    <div class="modal sheet">
+      <div class="modal-header"><h2>Keyboard shortcuts</h2><button type="button" class="icon-btn" data-close="shortcuts-backdrop">✕</button></div>
+      <div class="modal-body shortcuts-grid" id="shortcuts-body"></div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="share-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-header"><h2 id="share-title">Share session</h2><button type="button" class="icon-btn" data-close="share-backdrop">✕</button></div>
+      <div class="modal-body" id="share-body"></div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="confirm-backdrop" hidden>
+    <div class="modal sm">
+      <div class="modal-header"><h2 id="confirm-title">Confirm</h2><button type="button" class="icon-btn" data-close="confirm-backdrop">✕</button></div>
+      <div class="modal-body">
+        <p id="confirm-msg" class="muted"></p>
+        <div class="row gap-8 end" style="margin-top:16px">
+          <button type="button" class="btn ghost" data-close="confirm-backdrop">Cancel</button>
+          <button type="button" class="btn primary" id="confirm-ok">Confirm</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Event Log Advanced Filter (docs/manage-automations) -->
+  <div class="modal-backdrop" id="ev-filter-backdrop" hidden>
+    <div class="modal sheet">
+      <div class="modal-header"><h2>Advanced Filter</h2><button type="button" class="icon-btn" data-close="ev-filter-backdrop">✕</button></div>
+      <div class="modal-body" id="ev-filter-body"></div>
+    </div>
+  </div>
+
+  <!-- Create automation right drawer (docs/config-triggers) -->
+  <div class="drawer-backdrop" id="auto-create-backdrop" hidden></div>
+  <aside class="drawer" id="auto-create-drawer" hidden aria-label="Create automation"></aside>
+
+  <!-- Add artifact (docs/artifacts: Pull request | Linear issue | Link) -->
+  <div class="modal-backdrop" id="artifact-backdrop" hidden>
+    <div class="modal sm">
+      <div class="modal-header"><h2>Add artifact</h2><button type="button" class="icon-btn" data-close="artifact-backdrop">✕</button></div>
+      <div class="modal-body" id="artifact-body"></div>
+    </div>
+  </div>
+
+  <!-- Create webhook (docs/config-webhooks) -->
+  <div class="modal-backdrop" id="webhook-create-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-header"><h2>Create webhook</h2><button type="button" class="icon-btn" data-close="webhook-create-backdrop">✕</button></div>
+      <div class="modal-body" id="webhook-create-body"></div>
+    </div>
+  </div>
+
+  <!-- Add MCP server (Settings → Capabilities → MCP Registry) -->
+  <div class="modal-backdrop" id="mcp-add-backdrop" hidden>
+    <div class="modal sheet mcp-add-modal" role="dialog" aria-modal="true" aria-labelledby="mcp-add-title">
+      <div class="modal-header">
+        <div>
+          <h2 id="mcp-add-title">Add MCP server</h2>
+          <p class="mcp-add-sub muted" id="mcp-add-sub">Extend Experts with external tools via Model Context Protocol</p>
+        </div>
+        <button type="button" class="icon-btn" data-close="mcp-add-backdrop">✕</button>
+      </div>
+      <div class="modal-body" id="mcp-add-body"></div>
+    </div>
+  </div>
+
+  <div class="toasts" id="toasts"></div>
+  <script src="app.js"></script>
+</body>
+</html>

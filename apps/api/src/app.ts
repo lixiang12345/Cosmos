@@ -70,7 +70,7 @@ import {
   type ApiError,
   type SessionEventDto,
   type SessionEventPage,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 import Fastify, {
   type FastifyInstance,
   type FastifyReply,
@@ -150,7 +150,7 @@ import {
 } from './file-repository.js'
 import { ObjectStorageError } from './object-storage.js'
 import type { OrganizationQuotaRepository } from './organization-quota-repository.js'
-import { RelayMetrics } from './metrics.js'
+import { CosmosMetrics } from './metrics.js'
 import {
   InvalidFilePaginationError,
   encodeFileCursor,
@@ -351,7 +351,7 @@ export type CreateAppOptions = {
   executionEnabled?: boolean
   executionReadinessCheck?: () => Promise<boolean>
   sessionEventStream?: SessionEventStreamOptions
-  metrics?: RelayMetrics
+  metrics?: CosmosMetrics
   metricsScrapeToken?: string
 }
 
@@ -671,7 +671,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     },
   )
   const sessionRepository = options.sessionRepository ?? new InMemorySessionRepository()
-  const metrics = options.metrics ?? (options.metricsScrapeToken ? new RelayMetrics() : undefined)
+  const metrics = options.metrics ?? (options.metricsScrapeToken ? new CosmosMetrics() : undefined)
   const metricsScrapeToken = options.metricsScrapeToken
   const sessionTimelineRepository = options.sessionTimelineRepository
   const artifactRepository = options.artifactRepository ?? new EmptyArtifactRepository()
@@ -890,7 +890,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     }
 
     if (error instanceof AuthenticationError) {
-      reply.header('WWW-Authenticate', 'Bearer realm="relay-api"')
+      reply.header('WWW-Authenticate', 'Bearer realm="cosmos-api"')
       return sendApiError(reply, 401, request, {
         code: 'AUTHENTICATION_REQUIRED',
         message: error.message,
@@ -1321,7 +1321,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     const expected = Buffer.from(`Bearer ${metricsScrapeToken}`)
     const actual = Buffer.from(typeof authorization === 'string' ? authorization : '')
     if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
-      reply.header('WWW-Authenticate', 'Bearer realm="relay-metrics"')
+      reply.header('WWW-Authenticate', 'Bearer realm="cosmos-metrics"')
       return sendApiError(reply, 401, request, {
         code: 'AUTHENTICATION_REQUIRED',
         message: 'A valid metrics scrape credential is required.',
@@ -1771,7 +1771,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       if (!contextEngineGateway) {
         return sendApiError(reply, 503, request, {
           code: 'DEPENDENCY_UNAVAILABLE',
-          message: 'Context Engine is not configured for this Relay deployment.',
+          message: 'Context Engine is not configured for this Cosmos deployment.',
           retryable: false,
         })
       }
@@ -1809,7 +1809,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       if (!contextEngineGateway) {
         return sendApiError(reply, 503, request, {
           code: 'DEPENDENCY_UNAVAILABLE',
-          message: 'Context Engine is not configured for this Relay deployment.',
+          message: 'Context Engine is not configured for this Cosmos deployment.',
           retryable: false,
         })
       }
@@ -1847,7 +1847,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       if (!contextEngineGateway) {
         return sendApiError(reply, 503, request, {
           code: 'DEPENDENCY_UNAVAILABLE',
-          message: 'Context Engine is not configured for this Relay deployment.',
+          message: 'Context Engine is not configured for this Cosmos deployment.',
           retryable: false,
         })
       }

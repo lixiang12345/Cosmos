@@ -1,6 +1,6 @@
 SET LOCAL lock_timeout = '5s';
 
-CREATE TABLE relay_artifacts (
+CREATE TABLE cosmos_artifacts (
   organization_id text NOT NULL,
   space_id text NOT NULL,
   session_id text NOT NULL,
@@ -25,7 +25,7 @@ CREATE TABLE relay_artifacts (
   version integer NOT NULL DEFAULT 1,
   PRIMARY KEY (organization_id, space_id, session_id, id),
   FOREIGN KEY (organization_id, space_id, session_id)
-    REFERENCES relay_sessions(organization_id, space_id, id) ON DELETE RESTRICT,
+    REFERENCES cosmos_sessions(organization_id, space_id, id) ON DELETE RESTRICT,
   CHECK (btrim(label) <> '' AND char_length(label) <= 240),
   CHECK (char_length(url) <= 2048 AND url ~ '^https://'),
   CHECK (provider IS NULL OR (btrim(provider) <> '' AND char_length(provider) <= 128)),
@@ -39,29 +39,29 @@ CREATE TABLE relay_artifacts (
   CHECK (removed_at IS NULL OR removed_at >= created_at)
 );
 
-ALTER TABLE relay_artifacts
-  ADD CONSTRAINT relay_artifacts_turn_tenant_fk
+ALTER TABLE cosmos_artifacts
+  ADD CONSTRAINT cosmos_artifacts_turn_tenant_fk
   FOREIGN KEY (organization_id, space_id, session_id, turn_id)
-  REFERENCES relay_turns(organization_id, space_id, session_id, id)
+  REFERENCES cosmos_turns(organization_id, space_id, session_id, id)
   ON DELETE RESTRICT NOT VALID;
 
-CREATE UNIQUE INDEX relay_artifacts_external_identity_idx
-  ON relay_artifacts (organization_id, type, provider, external_id)
+CREATE UNIQUE INDEX cosmos_artifacts_external_identity_idx
+  ON cosmos_artifacts (organization_id, type, provider, external_id)
   WHERE provider IS NOT NULL AND external_id IS NOT NULL;
 
-CREATE INDEX relay_artifacts_session_page_idx
-  ON relay_artifacts (
+CREATE INDEX cosmos_artifacts_session_page_idx
+  ON cosmos_artifacts (
     organization_id, space_id, session_id, created_at DESC, id DESC
   )
   WHERE removed_at IS NULL;
 
-CREATE OR REPLACE FUNCTION relay_protect_artifact_history()
+CREATE OR REPLACE FUNCTION cosmos_protect_artifact_history()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
   IF TG_OP = 'DELETE' THEN
-    RAISE EXCEPTION 'Relay Artifact rows cannot be deleted'
+    RAISE EXCEPTION 'Cosmos Artifact rows cannot be deleted'
       USING ERRCODE = '55000';
   END IF;
 
@@ -74,22 +74,22 @@ BEGIN
     OLD.turn_id, OLD.type, OLD.provider, OLD.external_id,
     OLD.created_by_tool_call_id, OLD.created_by, OLD.created_at
   ) THEN
-    RAISE EXCEPTION 'Relay Artifact identity and provenance are immutable'
+    RAISE EXCEPTION 'Cosmos Artifact identity and provenance are immutable'
       USING ERRCODE = '55000';
   END IF;
 
   IF OLD.removed_at IS NOT NULL THEN
-    RAISE EXCEPTION 'Removed Relay Artifact rows are immutable'
+    RAISE EXCEPTION 'Removed Cosmos Artifact rows are immutable'
       USING ERRCODE = '55000';
   END IF;
 
   IF NEW.version <> OLD.version + 1 THEN
-    RAISE EXCEPTION 'Relay Artifact updates must advance version by one'
+    RAISE EXCEPTION 'Cosmos Artifact updates must advance version by one'
       USING ERRCODE = '23514';
   END IF;
 
   IF NEW.updated_at < OLD.updated_at THEN
-    RAISE EXCEPTION 'Relay Artifact updated_at cannot move backwards'
+    RAISE EXCEPTION 'Cosmos Artifact updated_at cannot move backwards'
       USING ERRCODE = '23514';
   END IF;
 
@@ -97,24 +97,24 @@ BEGIN
 END;
 $$;
 
-CREATE TRIGGER relay_artifacts_protect_history
-  BEFORE UPDATE OR DELETE ON relay_artifacts
-  FOR EACH ROW EXECUTE FUNCTION relay_protect_artifact_history();
+CREATE TRIGGER cosmos_artifacts_protect_history
+  BEFORE UPDATE OR DELETE ON cosmos_artifacts
+  FOR EACH ROW EXECUTE FUNCTION cosmos_protect_artifact_history();
 
-CREATE TRIGGER relay_artifacts_reject_truncate
-  BEFORE TRUNCATE ON relay_artifacts
-  FOR EACH STATEMENT EXECUTE FUNCTION relay_reject_ledger_mutation();
+CREATE TRIGGER cosmos_artifacts_reject_truncate
+  BEFORE TRUNCATE ON cosmos_artifacts
+  FOR EACH STATEMENT EXECUTE FUNCTION cosmos_reject_ledger_mutation();
 
-REVOKE DELETE, TRUNCATE ON relay_artifacts FROM PUBLIC;
+REVOKE DELETE, TRUNCATE ON cosmos_artifacts FROM PUBLIC;
 
-ALTER TABLE relay_session_events
+ALTER TABLE cosmos_session_events
   ADD COLUMN artifact_id text,
-  ADD CONSTRAINT relay_session_events_artifact_tenant_fk
+  ADD CONSTRAINT cosmos_session_events_artifact_tenant_fk
   FOREIGN KEY (organization_id, space_id, session_id, artifact_id)
-  REFERENCES relay_artifacts(organization_id, space_id, session_id, id)
+  REFERENCES cosmos_artifacts(organization_id, space_id, session_id, id)
   ON DELETE RESTRICT NOT VALID,
-  DROP CONSTRAINT relay_session_events_runtime_event_type_check,
-  ADD CONSTRAINT relay_session_events_runtime_event_type_check
+  DROP CONSTRAINT cosmos_session_events_runtime_event_type_check,
+  ADD CONSTRAINT cosmos_session_events_runtime_event_type_check
   CHECK (event_type IN (
     'session.created',
     'session.updated',
@@ -128,11 +128,11 @@ ALTER TABLE relay_session_events
     'artifact.updated',
     'artifact.removed'
   )) NOT VALID,
-  DROP CONSTRAINT relay_session_events_runtime_resource_type_check,
-  ADD CONSTRAINT relay_session_events_runtime_resource_type_check
+  DROP CONSTRAINT cosmos_session_events_runtime_resource_type_check,
+  ADD CONSTRAINT cosmos_session_events_runtime_resource_type_check
   CHECK (resource_type IN ('session', 'message', 'turn', 'attempt', 'artifact')) NOT VALID,
-  DROP CONSTRAINT relay_session_events_runtime_typed_resource_check,
-  ADD CONSTRAINT relay_session_events_runtime_typed_resource_check
+  DROP CONSTRAINT cosmos_session_events_runtime_typed_resource_check,
+  ADD CONSTRAINT cosmos_session_events_runtime_typed_resource_check
   CHECK (
     (
       event_type IN (
@@ -167,9 +167,9 @@ ALTER TABLE relay_session_events
     )
   ) NOT VALID;
 
-ALTER TABLE relay_audit_events
-  DROP CONSTRAINT relay_audit_events_action_check,
-  ADD CONSTRAINT relay_audit_events_action_check
+ALTER TABLE cosmos_audit_events
+  DROP CONSTRAINT cosmos_audit_events_action_check,
+  ADD CONSTRAINT cosmos_audit_events_action_check
     CHECK (action IN (
       'session.create', 'session.start', 'session.send',
       'session.rename', 'session.archive', 'session.restore',
@@ -177,8 +177,8 @@ ALTER TABLE relay_audit_events
       'session.share.create', 'session.share.revoke',
       'artifact.create', 'artifact.update', 'artifact.remove'
     )) NOT VALID,
-  DROP CONSTRAINT relay_audit_events_before_state_check,
-  ADD CONSTRAINT relay_audit_events_before_state_check
+  DROP CONSTRAINT cosmos_audit_events_before_state_check,
+  ADD CONSTRAINT cosmos_audit_events_before_state_check
     CHECK (
       (action IN ('session.create', 'session.share.create', 'artifact.create')
         AND before_state IS NULL)
@@ -193,11 +193,11 @@ ALTER TABLE relay_audit_events
         AND jsonb_typeof(before_state) = 'object'
       )
     ) NOT VALID,
-  DROP CONSTRAINT relay_audit_events_target_type_check,
-  ADD CONSTRAINT relay_audit_events_target_type_check
+  DROP CONSTRAINT cosmos_audit_events_target_type_check,
+  ADD CONSTRAINT cosmos_audit_events_target_type_check
     CHECK (target_type IN ('session', 'turn', 'share_grant', 'artifact')) NOT VALID,
-  DROP CONSTRAINT relay_audit_events_target_check,
-  ADD CONSTRAINT relay_audit_events_target_check
+  DROP CONSTRAINT cosmos_audit_events_target_check,
+  ADD CONSTRAINT cosmos_audit_events_target_check
     CHECK (
       (action = 'turn.retry' AND target_type = 'turn')
       OR (
@@ -218,43 +218,43 @@ ALTER TABLE relay_audit_events
       )
     ) NOT VALID;
 
-GRANT SELECT, INSERT, UPDATE ON relay_artifacts TO relay_api_runtime;
+GRANT SELECT, INSERT, UPDATE ON cosmos_artifacts TO cosmos_api_runtime;
 
-ALTER TABLE relay_artifacts ENABLE ROW LEVEL SECURITY;
-ALTER TABLE relay_artifacts FORCE ROW LEVEL SECURITY;
+ALTER TABLE cosmos_artifacts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cosmos_artifacts FORCE ROW LEVEL SECURITY;
 
-CREATE POLICY relay_migration_admin ON relay_artifacts TO CURRENT_USER
+CREATE POLICY cosmos_migration_admin ON cosmos_artifacts TO CURRENT_USER
   USING (true) WITH CHECK (true);
 
-CREATE POLICY relay_api_tenant ON relay_artifacts
-  FOR ALL TO relay_api_runtime
+CREATE POLICY cosmos_api_tenant ON cosmos_artifacts
+  FOR ALL TO cosmos_api_runtime
   USING (
-    organization_id = NULLIF(current_setting('relay.organization_id', true), '')
-    AND space_id = NULLIF(current_setting('relay.space_id', true), '')
+    organization_id = NULLIF(current_setting('cosmos.organization_id', true), '')
+    AND space_id = NULLIF(current_setting('cosmos.space_id', true), '')
     AND EXISTS (
-      SELECT 1 FROM relay_organization_memberships actor_organization
-      WHERE actor_organization.organization_id = relay_artifacts.organization_id
-        AND actor_organization.actor_id = NULLIF(current_setting('relay.actor_id', true), '')
+      SELECT 1 FROM cosmos_organization_memberships actor_organization
+      WHERE actor_organization.organization_id = cosmos_artifacts.organization_id
+        AND actor_organization.actor_id = NULLIF(current_setting('cosmos.actor_id', true), '')
     )
     AND EXISTS (
-      SELECT 1 FROM relay_space_memberships actor_space
-      WHERE actor_space.organization_id = relay_artifacts.organization_id
-        AND actor_space.space_id = relay_artifacts.space_id
-        AND actor_space.actor_id = NULLIF(current_setting('relay.actor_id', true), '')
+      SELECT 1 FROM cosmos_space_memberships actor_space
+      WHERE actor_space.organization_id = cosmos_artifacts.organization_id
+        AND actor_space.space_id = cosmos_artifacts.space_id
+        AND actor_space.actor_id = NULLIF(current_setting('cosmos.actor_id', true), '')
     )
   )
   WITH CHECK (
-    organization_id = NULLIF(current_setting('relay.organization_id', true), '')
-    AND space_id = NULLIF(current_setting('relay.space_id', true), '')
+    organization_id = NULLIF(current_setting('cosmos.organization_id', true), '')
+    AND space_id = NULLIF(current_setting('cosmos.space_id', true), '')
     AND EXISTS (
-      SELECT 1 FROM relay_organization_memberships actor_organization
-      WHERE actor_organization.organization_id = relay_artifacts.organization_id
-        AND actor_organization.actor_id = NULLIF(current_setting('relay.actor_id', true), '')
+      SELECT 1 FROM cosmos_organization_memberships actor_organization
+      WHERE actor_organization.organization_id = cosmos_artifacts.organization_id
+        AND actor_organization.actor_id = NULLIF(current_setting('cosmos.actor_id', true), '')
     )
     AND EXISTS (
-      SELECT 1 FROM relay_space_memberships actor_space
-      WHERE actor_space.organization_id = relay_artifacts.organization_id
-        AND actor_space.space_id = relay_artifacts.space_id
-        AND actor_space.actor_id = NULLIF(current_setting('relay.actor_id', true), '')
+      SELECT 1 FROM cosmos_space_memberships actor_space
+      WHERE actor_space.organization_id = cosmos_artifacts.organization_id
+        AND actor_space.space_id = cosmos_artifacts.space_id
+        AND actor_space.actor_id = NULLIF(current_setting('cosmos.actor_id', true), '')
     )
   );

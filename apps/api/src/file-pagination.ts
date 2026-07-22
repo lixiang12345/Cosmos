@@ -3,7 +3,7 @@ import {
   FilePrefixSchema,
   FileScopeSchema,
   type FileScope,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 import type {
   FileListCursor,
   FileListOptions,

@@ -1,10 +1,10 @@
 SET LOCAL lock_timeout = '5s';
 
-ALTER TABLE relay_sessions DROP CONSTRAINT relay_sessions_source_check;
-ALTER TABLE relay_sessions ADD CONSTRAINT relay_sessions_source_check
+ALTER TABLE cosmos_sessions DROP CONSTRAINT cosmos_sessions_source_check;
+ALTER TABLE cosmos_sessions ADD CONSTRAINT cosmos_sessions_source_check
   CHECK (source IN ('manual', 'automation'));
 
-CREATE TABLE relay_expert_triggers (
+CREATE TABLE cosmos_expert_triggers (
   organization_id text NOT NULL,
   space_id text NOT NULL,
   id text NOT NULL,
@@ -26,23 +26,23 @@ CREATE TABLE relay_expert_triggers (
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (organization_id, space_id, id),
   FOREIGN KEY (organization_id, space_id, expert_id)
-    REFERENCES relay_experts(organization_id, space_id, id) ON DELETE RESTRICT,
+    REFERENCES cosmos_experts(organization_id, space_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (organization_id, space_id, expert_id, expert_revision_id)
-    REFERENCES relay_expert_revisions(organization_id, space_id, expert_id, id) ON DELETE RESTRICT,
+    REFERENCES cosmos_expert_revisions(organization_id, space_id, expert_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (organization_id, service_account_id)
-    REFERENCES relay_service_accounts(organization_id, id) ON DELETE RESTRICT,
+    REFERENCES cosmos_service_accounts(organization_id, id) ON DELETE RESTRICT,
   CHECK (status <> 'active' OR last_tested_at IS NOT NULL)
 );
 
-CREATE INDEX relay_expert_triggers_space_updated_idx
-  ON relay_expert_triggers (organization_id, space_id, updated_at DESC, id DESC);
-CREATE INDEX relay_expert_triggers_match_idx
-  ON relay_expert_triggers (organization_id, space_id, source, event_type, status, created_at, id)
+CREATE INDEX cosmos_expert_triggers_space_updated_idx
+  ON cosmos_expert_triggers (organization_id, space_id, updated_at DESC, id DESC);
+CREATE INDEX cosmos_expert_triggers_match_idx
+  ON cosmos_expert_triggers (organization_id, space_id, source, event_type, status, created_at, id)
   WHERE status = 'active';
-CREATE INDEX relay_expert_triggers_expert_idx
-  ON relay_expert_triggers (organization_id, space_id, expert_id, expert_revision_id);
+CREATE INDEX cosmos_expert_triggers_expert_idx
+  ON cosmos_expert_triggers (organization_id, space_id, expert_id, expert_revision_id);
 
-CREATE TABLE relay_automation_events (
+CREATE TABLE cosmos_automation_events (
   organization_id text NOT NULL,
   space_id text NOT NULL,
   id text NOT NULL,
@@ -66,27 +66,27 @@ CREATE TABLE relay_automation_events (
   PRIMARY KEY (organization_id, space_id, id),
   UNIQUE (organization_id, space_id, source, external_id),
   FOREIGN KEY (organization_id, space_id)
-    REFERENCES relay_spaces(organization_id, id) ON DELETE RESTRICT,
+    REFERENCES cosmos_spaces(organization_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (organization_id, space_id, automation_id)
-    REFERENCES relay_expert_triggers(organization_id, space_id, id) ON DELETE RESTRICT,
+    REFERENCES cosmos_expert_triggers(organization_id, space_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (organization_id, space_id, session_id)
-    REFERENCES relay_sessions(organization_id, space_id, id) ON DELETE RESTRICT,
+    REFERENCES cosmos_sessions(organization_id, space_id, id) ON DELETE RESTRICT,
   CHECK ((error_code IS NULL) = (error_message IS NULL)),
   CHECK (status NOT IN ('matched', 'dispatching', 'dispatched') OR automation_id IS NOT NULL),
   CHECK (status <> 'dispatched' OR session_id IS NOT NULL),
   CHECK (status <> 'failed' OR error_code IS NOT NULL)
 );
 
-CREATE INDEX relay_automation_events_space_received_idx
-  ON relay_automation_events (organization_id, space_id, received_at DESC, id DESC);
-CREATE INDEX relay_automation_events_automation_idx
-  ON relay_automation_events (organization_id, space_id, automation_id, received_at DESC)
+CREATE INDEX cosmos_automation_events_space_received_idx
+  ON cosmos_automation_events (organization_id, space_id, received_at DESC, id DESC);
+CREATE INDEX cosmos_automation_events_automation_idx
+  ON cosmos_automation_events (organization_id, space_id, automation_id, received_at DESC)
   WHERE automation_id IS NOT NULL;
-CREATE INDEX relay_automation_events_session_idx
-  ON relay_automation_events (organization_id, space_id, session_id)
+CREATE INDEX cosmos_automation_events_session_idx
+  ON cosmos_automation_events (organization_id, space_id, session_id)
   WHERE session_id IS NOT NULL;
 
-CREATE TABLE relay_automation_audit_events (
+CREATE TABLE cosmos_automation_audit_events (
   organization_id text NOT NULL,
   space_id text NOT NULL,
   id text NOT NULL,
@@ -101,14 +101,14 @@ CREATE TABLE relay_automation_audit_events (
   occurred_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (organization_id, id),
   FOREIGN KEY (organization_id, space_id)
-    REFERENCES relay_spaces(organization_id, id) ON DELETE RESTRICT,
+    REFERENCES cosmos_spaces(organization_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (organization_id, space_id, automation_id)
-    REFERENCES relay_expert_triggers(organization_id, space_id, id) ON DELETE RESTRICT,
+    REFERENCES cosmos_expert_triggers(organization_id, space_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (organization_id, space_id, event_id)
-    REFERENCES relay_automation_events(organization_id, space_id, id) ON DELETE RESTRICT
+    REFERENCES cosmos_automation_events(organization_id, space_id, id) ON DELETE RESTRICT
 );
 
-CREATE TABLE relay_automation_outbox_events (
+CREATE TABLE cosmos_automation_outbox_events (
   organization_id text NOT NULL,
   space_id text NOT NULL,
   id text NOT NULL,
@@ -120,109 +120,109 @@ CREATE TABLE relay_automation_outbox_events (
   published_at timestamptz,
   PRIMARY KEY (organization_id, id),
   FOREIGN KEY (organization_id, space_id)
-    REFERENCES relay_spaces(organization_id, id) ON DELETE RESTRICT,
+    REFERENCES cosmos_spaces(organization_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (organization_id, space_id, automation_id)
-    REFERENCES relay_expert_triggers(organization_id, space_id, id) ON DELETE RESTRICT,
+    REFERENCES cosmos_expert_triggers(organization_id, space_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (organization_id, space_id, event_id)
-    REFERENCES relay_automation_events(organization_id, space_id, id) ON DELETE RESTRICT
+    REFERENCES cosmos_automation_events(organization_id, space_id, id) ON DELETE RESTRICT
 );
 
-CREATE TRIGGER relay_automation_audit_events_reject_update_delete
-  BEFORE UPDATE OR DELETE ON relay_automation_audit_events
-  FOR EACH STATEMENT EXECUTE FUNCTION relay_reject_ledger_mutation();
-CREATE TRIGGER relay_automation_audit_events_reject_truncate
-  BEFORE TRUNCATE ON relay_automation_audit_events
-  FOR EACH STATEMENT EXECUTE FUNCTION relay_reject_ledger_mutation();
+CREATE TRIGGER cosmos_automation_audit_events_reject_update_delete
+  BEFORE UPDATE OR DELETE ON cosmos_automation_audit_events
+  FOR EACH STATEMENT EXECUTE FUNCTION cosmos_reject_ledger_mutation();
+CREATE TRIGGER cosmos_automation_audit_events_reject_truncate
+  BEFORE TRUNCATE ON cosmos_automation_audit_events
+  FOR EACH STATEMENT EXECUTE FUNCTION cosmos_reject_ledger_mutation();
 
-ALTER TABLE relay_expert_triggers ENABLE ROW LEVEL SECURITY;
-ALTER TABLE relay_expert_triggers FORCE ROW LEVEL SECURITY;
-ALTER TABLE relay_automation_events ENABLE ROW LEVEL SECURITY;
-ALTER TABLE relay_automation_events FORCE ROW LEVEL SECURITY;
-ALTER TABLE relay_automation_audit_events ENABLE ROW LEVEL SECURITY;
-ALTER TABLE relay_automation_audit_events FORCE ROW LEVEL SECURITY;
-ALTER TABLE relay_automation_outbox_events ENABLE ROW LEVEL SECURITY;
-ALTER TABLE relay_automation_outbox_events FORCE ROW LEVEL SECURITY;
+ALTER TABLE cosmos_expert_triggers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cosmos_expert_triggers FORCE ROW LEVEL SECURITY;
+ALTER TABLE cosmos_automation_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cosmos_automation_events FORCE ROW LEVEL SECURITY;
+ALTER TABLE cosmos_automation_audit_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cosmos_automation_audit_events FORCE ROW LEVEL SECURITY;
+ALTER TABLE cosmos_automation_outbox_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cosmos_automation_outbox_events FORCE ROW LEVEL SECURITY;
 
-CREATE POLICY relay_migration_admin ON relay_expert_triggers
+CREATE POLICY cosmos_migration_admin ON cosmos_expert_triggers
   TO CURRENT_USER USING (true) WITH CHECK (true);
-CREATE POLICY relay_migration_admin ON relay_automation_events
+CREATE POLICY cosmos_migration_admin ON cosmos_automation_events
   TO CURRENT_USER USING (true) WITH CHECK (true);
-CREATE POLICY relay_migration_admin ON relay_automation_audit_events
+CREATE POLICY cosmos_migration_admin ON cosmos_automation_audit_events
   TO CURRENT_USER USING (true) WITH CHECK (true);
-CREATE POLICY relay_migration_admin ON relay_automation_outbox_events
+CREATE POLICY cosmos_migration_admin ON cosmos_automation_outbox_events
   TO CURRENT_USER USING (true) WITH CHECK (true);
 
-CREATE POLICY relay_api_trigger_select ON relay_expert_triggers
-  FOR SELECT TO relay_api_runtime
+CREATE POLICY cosmos_api_trigger_select ON cosmos_expert_triggers
+  FOR SELECT TO cosmos_api_runtime
   USING (
-    organization_id = NULLIF(current_setting('relay.organization_id', true), '')
-    AND space_id = NULLIF(current_setting('relay.space_id', true), '')
+    organization_id = NULLIF(current_setting('cosmos.organization_id', true), '')
+    AND space_id = NULLIF(current_setting('cosmos.space_id', true), '')
     AND EXISTS (
-      SELECT 1 FROM relay_organization_memberships membership
-      WHERE membership.organization_id = relay_expert_triggers.organization_id
-        AND membership.actor_id = NULLIF(current_setting('relay.actor_id', true), '')
+      SELECT 1 FROM cosmos_organization_memberships membership
+      WHERE membership.organization_id = cosmos_expert_triggers.organization_id
+        AND membership.actor_id = NULLIF(current_setting('cosmos.actor_id', true), '')
     )
     AND EXISTS (
-      SELECT 1 FROM relay_space_memberships membership
-      WHERE membership.organization_id = relay_expert_triggers.organization_id
-        AND membership.space_id = relay_expert_triggers.space_id
-        AND membership.actor_id = NULLIF(current_setting('relay.actor_id', true), '')
+      SELECT 1 FROM cosmos_space_memberships membership
+      WHERE membership.organization_id = cosmos_expert_triggers.organization_id
+        AND membership.space_id = cosmos_expert_triggers.space_id
+        AND membership.actor_id = NULLIF(current_setting('cosmos.actor_id', true), '')
     )
   );
-CREATE POLICY relay_api_trigger_mutate ON relay_expert_triggers
-  FOR ALL TO relay_api_runtime
+CREATE POLICY cosmos_api_trigger_mutate ON cosmos_expert_triggers
+  FOR ALL TO cosmos_api_runtime
   USING (
-    organization_id = NULLIF(current_setting('relay.organization_id', true), '')
-    AND space_id = NULLIF(current_setting('relay.space_id', true), '')
-    AND relay_actor_can_manage_space(organization_id, space_id)
+    organization_id = NULLIF(current_setting('cosmos.organization_id', true), '')
+    AND space_id = NULLIF(current_setting('cosmos.space_id', true), '')
+    AND cosmos_actor_can_manage_space(organization_id, space_id)
   )
   WITH CHECK (
-    organization_id = NULLIF(current_setting('relay.organization_id', true), '')
-    AND space_id = NULLIF(current_setting('relay.space_id', true), '')
-    AND relay_actor_can_manage_space(organization_id, space_id)
+    organization_id = NULLIF(current_setting('cosmos.organization_id', true), '')
+    AND space_id = NULLIF(current_setting('cosmos.space_id', true), '')
+    AND cosmos_actor_can_manage_space(organization_id, space_id)
   );
 
-CREATE POLICY relay_api_automation_event_access ON relay_automation_events
-  FOR ALL TO relay_api_runtime
+CREATE POLICY cosmos_api_automation_event_access ON cosmos_automation_events
+  FOR ALL TO cosmos_api_runtime
   USING (
-    organization_id = NULLIF(current_setting('relay.organization_id', true), '')
-    AND space_id = NULLIF(current_setting('relay.space_id', true), '')
-    AND relay_actor_can_manage_space(organization_id, space_id)
+    organization_id = NULLIF(current_setting('cosmos.organization_id', true), '')
+    AND space_id = NULLIF(current_setting('cosmos.space_id', true), '')
+    AND cosmos_actor_can_manage_space(organization_id, space_id)
   )
   WITH CHECK (
-    organization_id = NULLIF(current_setting('relay.organization_id', true), '')
-    AND space_id = NULLIF(current_setting('relay.space_id', true), '')
-    AND relay_actor_can_manage_space(organization_id, space_id)
+    organization_id = NULLIF(current_setting('cosmos.organization_id', true), '')
+    AND space_id = NULLIF(current_setting('cosmos.space_id', true), '')
+    AND cosmos_actor_can_manage_space(organization_id, space_id)
   );
-CREATE POLICY relay_api_automation_audit_insert ON relay_automation_audit_events
-  FOR INSERT TO relay_api_runtime
+CREATE POLICY cosmos_api_automation_audit_insert ON cosmos_automation_audit_events
+  FOR INSERT TO cosmos_api_runtime
   WITH CHECK (
-    organization_id = NULLIF(current_setting('relay.organization_id', true), '')
-    AND space_id = NULLIF(current_setting('relay.space_id', true), '')
-    AND relay_actor_can_manage_space(organization_id, space_id)
+    organization_id = NULLIF(current_setting('cosmos.organization_id', true), '')
+    AND space_id = NULLIF(current_setting('cosmos.space_id', true), '')
+    AND cosmos_actor_can_manage_space(organization_id, space_id)
   );
-CREATE POLICY relay_api_automation_outbox_access ON relay_automation_outbox_events
-  FOR ALL TO relay_api_runtime
+CREATE POLICY cosmos_api_automation_outbox_access ON cosmos_automation_outbox_events
+  FOR ALL TO cosmos_api_runtime
   USING (
-    organization_id = NULLIF(current_setting('relay.organization_id', true), '')
-    AND space_id = NULLIF(current_setting('relay.space_id', true), '')
-    AND relay_actor_can_manage_space(organization_id, space_id)
+    organization_id = NULLIF(current_setting('cosmos.organization_id', true), '')
+    AND space_id = NULLIF(current_setting('cosmos.space_id', true), '')
+    AND cosmos_actor_can_manage_space(organization_id, space_id)
   )
   WITH CHECK (
-    organization_id = NULLIF(current_setting('relay.organization_id', true), '')
-    AND space_id = NULLIF(current_setting('relay.space_id', true), '')
-    AND relay_actor_can_manage_space(organization_id, space_id)
+    organization_id = NULLIF(current_setting('cosmos.organization_id', true), '')
+    AND space_id = NULLIF(current_setting('cosmos.space_id', true), '')
+    AND cosmos_actor_can_manage_space(organization_id, space_id)
   );
 
-GRANT SELECT, INSERT ON relay_expert_triggers, relay_automation_events,
-  relay_automation_audit_events, relay_automation_outbox_events TO relay_api_runtime;
+GRANT SELECT, INSERT ON cosmos_expert_triggers, cosmos_automation_events,
+  cosmos_automation_audit_events, cosmos_automation_outbox_events TO cosmos_api_runtime;
 GRANT UPDATE (
   name, event_type, filter, status, auto_archive, service_account_id,
   last_tested_at, last_matched_at, match_count, version, updated_at
-) ON relay_expert_triggers TO relay_api_runtime;
+) ON cosmos_expert_triggers TO cosmos_api_runtime;
 GRANT UPDATE (
   status, automation_id, session_id, match_explanation,
   error_code, error_message, processed_at
-) ON relay_automation_events TO relay_api_runtime;
+) ON cosmos_automation_events TO cosmos_api_runtime;
 
-GRANT EXECUTE ON FUNCTION relay_actor_can_manage_space(text, text) TO relay_api_runtime;
+GRANT EXECUTE ON FUNCTION cosmos_actor_can_manage_space(text, text) TO cosmos_api_runtime;

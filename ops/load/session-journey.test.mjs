@@ -7,7 +7,7 @@ describe('Session journey harness', () => {
     assert.throws(() => loadSessionJourneyConfig({}), /JOURNEY_ALLOW_WRITES/)
     assert.deepEqual(loadSessionJourneyConfig({ JOURNEY_ALLOW_WRITES: 'true' }), {
       baseUrl: 'http://127.0.0.1:8787',
-      organizationId: 'relay',
+      organizationId: 'cosmos',
       spaceId: 'space-platform',
       expertId: 'expert-space-platform',
       authToken: undefined,

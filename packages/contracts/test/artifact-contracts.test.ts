@@ -8,16 +8,16 @@ import {
 } from '../src/index.js'
 
 const artifact = {
-  organizationId: 'organization-relay',
+  organizationId: 'organization-cosmos',
   spaceId: 'space-commerce',
   sessionId: 'session-123',
   id: 'artifact-123',
   turnId: null,
   type: 'pull_request',
   provider: 'github',
-  externalId: 'relay/cosmos#42',
+  externalId: 'cosmos/cosmos#42',
   label: 'Checkout latency fix',
-  url: 'https://github.com/relay/cosmos/pull/42',
+  url: 'https://github.com/cosmos/cosmos/pull/42',
   status: 'open',
   attributes: { draft: false, checks: 7 },
   createdByToolCallId: null,

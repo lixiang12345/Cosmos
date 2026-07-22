@@ -7,7 +7,7 @@ const databaseUrl = process.env.TEST_DATABASE_URL
 const describeWithDatabase = databaseUrl ? describe : describe.skip
 
 describeWithDatabase('development database bootstrap', () => {
-  const schema = `relay_development_bootstrap_${crypto.randomUUID().replaceAll('-', '')}`
+  const schema = `cosmos_development_bootstrap_${crypto.randomUUID().replaceAll('-', '')}`
   const adminPool = new Pool({ connectionString: databaseUrl })
   const pool = new Pool({
     connectionString: databaseUrl,
@@ -39,11 +39,11 @@ describeWithDatabase('development database bootstrap', () => {
         count(space_membership.space_id) FILTER (
           WHERE space_membership.role = 'space_manager'
         )::integer AS managed_spaces
-      FROM relay_organization_memberships organization_membership
-      JOIN relay_space_memberships space_membership
+      FROM cosmos_organization_memberships organization_membership
+      JOIN cosmos_space_memberships space_membership
         ON space_membership.organization_id = organization_membership.organization_id
         AND space_membership.actor_id = organization_membership.actor_id
-      WHERE organization_membership.organization_id = 'relay'
+      WHERE organization_membership.organization_id = 'cosmos'
         AND organization_membership.actor_id = 'user-local-admin'
       GROUP BY organization_membership.role
     `)
@@ -60,14 +60,14 @@ describeWithDatabase('development database bootstrap', () => {
       repositories: number
     }>(`
       SELECT
-        (SELECT count(*)::integer FROM relay_environments
-          WHERE organization_id = 'relay' AND status = 'ready') AS environments,
-        (SELECT count(*)::integer FROM relay_experts
-          WHERE organization_id = 'relay' AND status = 'published') AS experts,
-        (SELECT count(*)::integer FROM relay_experts
-          WHERE organization_id = 'relay' AND status = 'published' AND kind = 'built_in') AS built_in_experts,
-        (SELECT count(*)::integer FROM relay_environment_revision_repositories
-          WHERE organization_id = 'relay' AND is_default) AS repositories
+        (SELECT count(*)::integer FROM cosmos_environments
+          WHERE organization_id = 'cosmos' AND status = 'ready') AS environments,
+        (SELECT count(*)::integer FROM cosmos_experts
+          WHERE organization_id = 'cosmos' AND status = 'published') AS experts,
+        (SELECT count(*)::integer FROM cosmos_experts
+          WHERE organization_id = 'cosmos' AND status = 'published' AND kind = 'built_in') AS built_in_experts,
+        (SELECT count(*)::integer FROM cosmos_environment_revision_repositories
+          WHERE organization_id = 'cosmos' AND is_default) AS repositories
     `)
     expect(catalog.rows).toEqual([{
       environments: 2, experts: 4, built_in_experts: 2, repositories: 2,

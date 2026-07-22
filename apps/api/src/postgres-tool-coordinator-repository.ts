@@ -5,7 +5,7 @@ import {
   ToolCallDtoSchema,
   type ApprovalDto,
   type ToolCallDto,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 import type { Pool, PoolClient } from 'pg'
 import {
   ToolCoordinatorConflictError,
@@ -226,13 +226,13 @@ export class PostgresToolCoordinatorRepository implements ToolCoordinatorReposit
     return transaction(this.pool, async (client) => {
       const parent = await client.query(`
         SELECT 1
-        FROM relay_attempts attempt
-        JOIN relay_turns turn_record
+        FROM cosmos_attempts attempt
+        JOIN cosmos_turns turn_record
           ON turn_record.organization_id = attempt.organization_id
           AND turn_record.space_id = attempt.space_id
           AND turn_record.session_id = attempt.session_id
           AND turn_record.id = attempt.turn_id
-        JOIN relay_sessions session
+        JOIN cosmos_sessions session
           ON session.organization_id = attempt.organization_id
           AND session.space_id = attempt.space_id
           AND session.id = attempt.session_id
@@ -247,7 +247,7 @@ export class PostgresToolCoordinatorRepository implements ToolCoordinatorReposit
       }
       const id = this.createId()
       const inserted = await client.query<ToolCallRow>(`
-        INSERT INTO relay_tool_calls (
+        INSERT INTO cosmos_tool_calls (
           organization_id, space_id, session_id, turn_id, attempt_id, id,
           worker_id, tool_name, operation, risk_level, status, input_summary,
           input_hash, input_ref, created_at, version
@@ -295,7 +295,7 @@ export class PostgresToolCoordinatorRepository implements ToolCoordinatorReposit
     }
     return transaction(this.pool, async (client) => {
       const selected = await client.query<ToolCallRow>(`
-        SELECT ${toolColumns} FROM relay_tool_calls
+        SELECT ${toolColumns} FROM cosmos_tool_calls
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
         FOR UPDATE
       `, [record.organizationId, record.spaceId, record.sessionId, record.toolCallId])
@@ -310,8 +310,8 @@ export class PostgresToolCoordinatorRepository implements ToolCoordinatorReposit
       }
       const eligible = await client.query<{ actor_id: string }>(`
         SELECT organization_membership.actor_id
-        FROM relay_organization_memberships organization_membership
-        JOIN relay_space_memberships space_membership
+        FROM cosmos_organization_memberships organization_membership
+        JOIN cosmos_space_memberships space_membership
           ON space_membership.organization_id = organization_membership.organization_id
           AND space_membership.actor_id = organization_membership.actor_id
           AND space_membership.space_id = $2
@@ -320,7 +320,7 @@ export class PostgresToolCoordinatorRepository implements ToolCoordinatorReposit
           AND organization_membership.role <> 'viewer'
           AND space_membership.role <> 'viewer'
           AND NOT EXISTS (
-            SELECT 1 FROM relay_service_accounts service_account
+            SELECT 1 FROM cosmos_service_accounts service_account
             WHERE service_account.organization_id = organization_membership.organization_id
               AND service_account.id = organization_membership.actor_id
           )
@@ -330,7 +330,7 @@ export class PostgresToolCoordinatorRepository implements ToolCoordinatorReposit
       }
       const approvalId = this.createId()
       await client.query(`
-        INSERT INTO relay_approvals (
+        INSERT INTO cosmos_approvals (
           organization_id, space_id, id, session_id, turn_id, tool_call_id,
           input_hash, action, risk_level, reasons, evidence, status, requested_by,
           required_approvals, approval_count, expires_at, created_at, updated_at, version
@@ -344,7 +344,7 @@ export class PostgresToolCoordinatorRepository implements ToolCoordinatorReposit
       ])
       for (const actorId of assignedTo) {
         await client.query(`
-          INSERT INTO relay_approval_assignments (
+          INSERT INTO cosmos_approval_assignments (
             organization_id, space_id, approval_id, actor_id, assigned_by, assigned_at
           ) VALUES ($1, $2, $3, $4, $5, $6)
         `, [
@@ -353,24 +353,24 @@ export class PostgresToolCoordinatorRepository implements ToolCoordinatorReposit
         ])
       }
       const updated = await client.query<ToolCallRow>(`
-        UPDATE relay_tool_calls
+        UPDATE cosmos_tool_calls
         SET status = 'approval_required', approval_id = $5, version = version + 1
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
         RETURNING ${toolColumns}
       `, [record.organizationId, record.spaceId, record.sessionId, before.id, approvalId])
       const toolCall = mapToolCall(updated.rows[0])
       await client.query(`
-        UPDATE relay_attempts SET status = 'waiting'
+        UPDATE cosmos_attempts SET status = 'waiting'
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
           AND turn_id = $4 AND id = $5 AND status = 'running'
       `, [record.organizationId, record.spaceId, record.sessionId, before.turnId, before.attemptId])
       await client.query(`
-        UPDATE relay_turns SET status = 'waiting_approval', version = version + 1
+        UPDATE cosmos_turns SET status = 'waiting_approval', version = version + 1
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
           AND id = $4 AND status = 'running'
       `, [record.organizationId, record.spaceId, record.sessionId, before.turnId])
       const session = await client.query<{ version: number }>(`
-        UPDATE relay_sessions
+        UPDATE cosmos_sessions
         SET status = 'waiting', updated_at = $4, last_activity_at = $4, version = version + 1
         WHERE organization_id = $1 AND space_id = $2 AND id = $3 AND status = 'active'
         RETURNING version
@@ -378,7 +378,7 @@ export class PostgresToolCoordinatorRepository implements ToolCoordinatorReposit
       if (!session.rows[0]) throw new ToolCoordinatorConflictError('invalid_state', 'The parent Session is no longer active.')
       const approvalResult = await client.query<ApprovalRow>(`
         SELECT approval.*, $4::text[] AS assigned_to
-        FROM relay_approvals approval
+        FROM cosmos_approvals approval
         WHERE organization_id = $1 AND space_id = $2 AND id = $3
       `, [record.organizationId, record.spaceId, approvalId, assignedTo])
       const approval = mapApproval(approvalResult.rows[0])
@@ -407,7 +407,7 @@ export class PostgresToolCoordinatorRepository implements ToolCoordinatorReposit
     const occurredAt = this.now().toISOString()
     return transaction(this.pool, async (client) => {
       const selected = await client.query<ToolCallRow>(`
-        SELECT ${toolColumns} FROM relay_tool_calls
+        SELECT ${toolColumns} FROM cosmos_tool_calls
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
         FOR UPDATE
       `, [record.organizationId, record.spaceId, record.sessionId, record.toolCallId])
@@ -422,7 +422,7 @@ export class PostgresToolCoordinatorRepository implements ToolCoordinatorReposit
       }
       if (before.approvalId) {
         const approval = await client.query<{ status: string; input_hash: string }>(`
-          SELECT status, input_hash FROM relay_approvals
+          SELECT status, input_hash FROM cosmos_approvals
           WHERE organization_id = $1 AND space_id = $2 AND id = $3
         `, [record.organizationId, record.spaceId, before.approvalId])
         if (approval.rows[0]?.status !== 'approved') {
@@ -433,7 +433,7 @@ export class PostgresToolCoordinatorRepository implements ToolCoordinatorReposit
         }
       }
       const updated = await client.query<ToolCallRow>(`
-        UPDATE relay_tool_calls
+        UPDATE cosmos_tool_calls
         SET status = 'running', worker_id = $5, started_at = $6,
           provider_idempotency_key_hash = $7, version = version + 1
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
@@ -459,7 +459,7 @@ export class PostgresToolCoordinatorRepository implements ToolCoordinatorReposit
     }
     return transaction(this.pool, async (client) => {
       const selected = await client.query<ToolCallRow>(`
-        SELECT ${toolColumns} FROM relay_tool_calls
+        SELECT ${toolColumns} FROM cosmos_tool_calls
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
         FOR UPDATE
       `, [record.organizationId, record.spaceId, record.sessionId, record.toolCallId])
@@ -473,7 +473,7 @@ export class PostgresToolCoordinatorRepository implements ToolCoordinatorReposit
         throw new ToolCoordinatorConflictError('invalid_state', 'Only the owning Worker can finish a running ToolCall.')
       }
       const unresolved = await client.query(`
-        SELECT 1 FROM relay_tool_side_effects
+        SELECT 1 FROM cosmos_tool_side_effects
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
           AND tool_call_id = $4 AND status IN ('prepared', 'unknown')
         LIMIT 1
@@ -482,7 +482,7 @@ export class PostgresToolCoordinatorRepository implements ToolCoordinatorReposit
         throw new ToolCoordinatorConflictError('side_effect_unresolved', 'A Tool side effect is unresolved and must be queried before completion.')
       }
       const updated = await client.query<ToolCallRow>(`
-        UPDATE relay_tool_calls
+        UPDATE cosmos_tool_calls
         SET status = $5, output_summary = $6, output_hash = $7,
           output_ref = $8, completed_at = $9, version = version + 1
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
@@ -519,7 +519,7 @@ export class PostgresToolCoordinatorRepository implements ToolCoordinatorReposit
     const occurredAt = this.now().toISOString()
     return transaction(this.pool, async (client) => {
       const tool = await client.query<ToolCallRow>(`
-        SELECT ${toolColumns} FROM relay_tool_calls
+        SELECT ${toolColumns} FROM cosmos_tool_calls
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
         FOR UPDATE
       `, [record.organizationId, record.spaceId, record.sessionId, record.toolCallId])
@@ -527,7 +527,7 @@ export class PostgresToolCoordinatorRepository implements ToolCoordinatorReposit
         throw new ToolCoordinatorConflictError('invalid_state', 'Side effects require a running ToolCall.')
       }
       const existing = await client.query<SideEffectRow>(`
-        SELECT ${sideEffectColumns} FROM relay_tool_side_effects
+        SELECT ${sideEffectColumns} FROM cosmos_tool_side_effects
         WHERE organization_id = $1 AND provider = $2 AND idempotency_key_hash = $3
       `, [record.organizationId, provider, keyHash])
       if (existing.rows[0]) {
@@ -539,7 +539,7 @@ export class PostgresToolCoordinatorRepository implements ToolCoordinatorReposit
         return mapSideEffect(existing.rows[0])
       }
       const inserted = await client.query<SideEffectRow>(`
-        INSERT INTO relay_tool_side_effects (
+        INSERT INTO cosmos_tool_side_effects (
           organization_id, space_id, session_id, tool_call_id, id, provider,
           operation, idempotency_key_hash, request_hash, status, created_at, updated_at, version
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'prepared', $10, $10, 1)
@@ -568,7 +568,7 @@ export class PostgresToolCoordinatorRepository implements ToolCoordinatorReposit
       : bounded(record.resultSummary, 'resultSummary', 4_000)
     return transaction(this.pool, async (client) => {
       const selected = await client.query<SideEffectRow>(`
-        SELECT ${sideEffectColumns} FROM relay_tool_side_effects
+        SELECT ${sideEffectColumns} FROM cosmos_tool_side_effects
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
           AND tool_call_id = $4 AND id = $5
         FOR UPDATE
@@ -582,7 +582,7 @@ export class PostgresToolCoordinatorRepository implements ToolCoordinatorReposit
         throw new ToolCoordinatorConflictError('version_conflict', 'The Tool side-effect version changed.')
       }
       const updated = await client.query<SideEffectRow>(`
-        UPDATE relay_tool_side_effects
+        UPDATE cosmos_tool_side_effects
         SET status = $6, provider_operation_id = $7, result_hash = $8,
           result_summary = $9, updated_at = $10, version = version + 1
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
@@ -610,7 +610,7 @@ export class PostgresToolCoordinatorRepository implements ToolCoordinatorReposit
   ) {
     const sequence = await this.reserveEvents(client, toolCall, 1)
     await client.query(`
-      INSERT INTO relay_session_events (
+      INSERT INTO cosmos_session_events (
         organization_id, space_id, session_id, event_id, sequence, event_type,
         resource_type, resource_id, payload, actor_id, actor_kind, turn_id,
         attempt_id, tool_call_id, approval_id, request_id, occurred_at
@@ -641,7 +641,7 @@ export class PostgresToolCoordinatorRepository implements ToolCoordinatorReposit
     const lastSequence = await this.reserveEvents(client, toolCall, 3)
     const firstSequence = lastSequence - 2
     await client.query(`
-      INSERT INTO relay_session_events (
+      INSERT INTO cosmos_session_events (
         organization_id, space_id, session_id, event_id, sequence, event_type,
         resource_type, resource_id, payload, actor_id, actor_kind, turn_id,
         attempt_id, tool_call_id, approval_id, request_id, occurred_at
@@ -658,7 +658,7 @@ export class PostgresToolCoordinatorRepository implements ToolCoordinatorReposit
       approval.id, requestId, occurredAt,
     ])
     await client.query(`
-      INSERT INTO relay_session_events (
+      INSERT INTO cosmos_session_events (
         organization_id, space_id, session_id, event_id, sequence, event_type,
         resource_type, resource_id, payload, actor_id, actor_kind, turn_id,
         tool_call_id, approval_id, request_id, occurred_at
@@ -674,7 +674,7 @@ export class PostgresToolCoordinatorRepository implements ToolCoordinatorReposit
       }), actorId, actorKind, approval.turnId, approval.toolCallId, requestId, occurredAt,
     ])
     await client.query(`
-      INSERT INTO relay_session_events (
+      INSERT INTO cosmos_session_events (
         organization_id, space_id, session_id, event_id, sequence, event_type,
         resource_type, resource_id, payload, actor_id, actor_kind, request_id, occurred_at
       ) VALUES ($1, $2, $3, $4, $5, 'session.updated', 'session', $3,
@@ -688,7 +688,7 @@ export class PostgresToolCoordinatorRepository implements ToolCoordinatorReposit
 
   private async reserveEvents(client: PoolClient, toolCall: ToolCallDto, count: number) {
     const result = await client.query<{ sequence: string }>(`
-      UPDATE relay_sessions SET last_event_sequence = last_event_sequence + $4
+      UPDATE cosmos_sessions SET last_event_sequence = last_event_sequence + $4
       WHERE organization_id = $1 AND space_id = $2 AND id = $3
       RETURNING last_event_sequence AS sequence
     `, [toolCall.organizationId, toolCall.spaceId, toolCall.sessionId, count])
@@ -710,7 +710,7 @@ export class PostgresToolCoordinatorRepository implements ToolCoordinatorReposit
     occurredAt: string
   }) {
     await client.query(`
-      INSERT INTO relay_audit_events (
+      INSERT INTO cosmos_audit_events (
         organization_id, audit_event_id, space_id, session_id, actor_id,
         actor_kind, delegation_chain, action, target_type, target_id, result,
         request_id, idempotency_key_hash, policy_decision, policy_reason,
@@ -733,7 +733,7 @@ export class PostgresToolCoordinatorRepository implements ToolCoordinatorReposit
     occurredAt: string,
   ) {
     await client.query(`
-      INSERT INTO relay_audit_events (
+      INSERT INTO cosmos_audit_events (
         organization_id, audit_event_id, space_id, session_id, actor_id,
         actor_kind, delegation_chain, action, target_type, target_id, result,
         request_id, idempotency_key_hash, policy_decision, policy_reason,

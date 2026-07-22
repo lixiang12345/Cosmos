@@ -3,7 +3,7 @@ import type {
   SpaceDto,
   SpaceMigrationPreview,
   UpdateSpaceRequest,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 
 export type SpaceScope = {
   organizationId: string

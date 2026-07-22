@@ -30,7 +30,7 @@ export function loadSessionJourneyConfig(env) {
   }
   const config = {
     baseUrl: baseUrl.toString().replace(/\/$/, ''),
-    organizationId: env.JOURNEY_ORGANIZATION_ID?.trim() || (loopback ? 'relay' : ''),
+    organizationId: env.JOURNEY_ORGANIZATION_ID?.trim() || (loopback ? 'cosmos' : ''),
     spaceId: env.JOURNEY_SPACE_ID?.trim() || (loopback ? 'space-platform' : ''),
     expertId: env.JOURNEY_EXPERT_ID?.trim() || (loopback ? 'expert-space-platform' : ''),
     authToken: env.JOURNEY_AUTH_TOKEN?.trim() || undefined,

@@ -13,57 +13,57 @@ describeWithDatabase('PostgresConfigurationCatalogRepository integration', () =>
   beforeAll(async () => {
     await runMigrations(pool)
     await pool.query(`
-      ALTER TABLE relay_session_events DISABLE TRIGGER relay_session_events_reject_truncate;
-      ALTER TABLE relay_audit_events DISABLE TRIGGER relay_audit_events_reject_truncate;
-      ALTER TABLE relay_attempts DISABLE TRIGGER relay_attempts_reject_truncate;
-      ALTER TABLE relay_artifacts DISABLE TRIGGER relay_artifacts_reject_truncate;
-      ALTER TABLE relay_files DISABLE TRIGGER relay_files_reject_truncate;
-      ALTER TABLE relay_file_versions DISABLE TRIGGER relay_file_versions_reject_truncate;
-      ALTER TABLE relay_tool_calls DISABLE TRIGGER relay_tool_calls_reject_truncate;
-      ALTER TABLE relay_approvals DISABLE TRIGGER relay_approvals_reject_truncate;
-      ALTER TABLE relay_tool_side_effects DISABLE TRIGGER relay_tool_side_effects_reject_truncate;
-      ALTER TABLE relay_approval_assignments DISABLE TRIGGER relay_approval_assignments_reject_truncate;
-      ALTER TABLE relay_approval_decisions DISABLE TRIGGER relay_approval_decisions_reject_truncate;
-      ALTER TABLE relay_session_workers DISABLE TRIGGER relay_session_workers_reject_truncate;
-      ALTER TABLE relay_automation_audit_events DISABLE TRIGGER relay_automation_audit_events_reject_truncate;
-      ALTER TABLE relay_space_audit_events DISABLE TRIGGER relay_space_audit_events_reject_truncate;
+      ALTER TABLE cosmos_session_events DISABLE TRIGGER cosmos_session_events_reject_truncate;
+      ALTER TABLE cosmos_audit_events DISABLE TRIGGER cosmos_audit_events_reject_truncate;
+      ALTER TABLE cosmos_attempts DISABLE TRIGGER cosmos_attempts_reject_truncate;
+      ALTER TABLE cosmos_artifacts DISABLE TRIGGER cosmos_artifacts_reject_truncate;
+      ALTER TABLE cosmos_files DISABLE TRIGGER cosmos_files_reject_truncate;
+      ALTER TABLE cosmos_file_versions DISABLE TRIGGER cosmos_file_versions_reject_truncate;
+      ALTER TABLE cosmos_tool_calls DISABLE TRIGGER cosmos_tool_calls_reject_truncate;
+      ALTER TABLE cosmos_approvals DISABLE TRIGGER cosmos_approvals_reject_truncate;
+      ALTER TABLE cosmos_tool_side_effects DISABLE TRIGGER cosmos_tool_side_effects_reject_truncate;
+      ALTER TABLE cosmos_approval_assignments DISABLE TRIGGER cosmos_approval_assignments_reject_truncate;
+      ALTER TABLE cosmos_approval_decisions DISABLE TRIGGER cosmos_approval_decisions_reject_truncate;
+      ALTER TABLE cosmos_session_workers DISABLE TRIGGER cosmos_session_workers_reject_truncate;
+      ALTER TABLE cosmos_automation_audit_events DISABLE TRIGGER cosmos_automation_audit_events_reject_truncate;
+      ALTER TABLE cosmos_space_audit_events DISABLE TRIGGER cosmos_space_audit_events_reject_truncate;
     `)
     try {
-      await pool.query('TRUNCATE relay_organizations CASCADE')
+      await pool.query('TRUNCATE cosmos_organizations CASCADE')
     } finally {
       await pool.query(`
-        ALTER TABLE relay_session_events ENABLE TRIGGER relay_session_events_reject_truncate;
-        ALTER TABLE relay_audit_events ENABLE TRIGGER relay_audit_events_reject_truncate;
-        ALTER TABLE relay_attempts ENABLE TRIGGER relay_attempts_reject_truncate;
-        ALTER TABLE relay_artifacts ENABLE TRIGGER relay_artifacts_reject_truncate;
-        ALTER TABLE relay_files ENABLE TRIGGER relay_files_reject_truncate;
-        ALTER TABLE relay_file_versions ENABLE TRIGGER relay_file_versions_reject_truncate;
-        ALTER TABLE relay_tool_calls ENABLE TRIGGER relay_tool_calls_reject_truncate;
-        ALTER TABLE relay_approvals ENABLE TRIGGER relay_approvals_reject_truncate;
-        ALTER TABLE relay_tool_side_effects ENABLE TRIGGER relay_tool_side_effects_reject_truncate;
-        ALTER TABLE relay_approval_assignments ENABLE TRIGGER relay_approval_assignments_reject_truncate;
-        ALTER TABLE relay_approval_decisions ENABLE TRIGGER relay_approval_decisions_reject_truncate;
-        ALTER TABLE relay_session_workers ENABLE TRIGGER relay_session_workers_reject_truncate;
-        ALTER TABLE relay_automation_audit_events ENABLE TRIGGER relay_automation_audit_events_reject_truncate;
-        ALTER TABLE relay_space_audit_events ENABLE TRIGGER relay_space_audit_events_reject_truncate;
+        ALTER TABLE cosmos_session_events ENABLE TRIGGER cosmos_session_events_reject_truncate;
+        ALTER TABLE cosmos_audit_events ENABLE TRIGGER cosmos_audit_events_reject_truncate;
+        ALTER TABLE cosmos_attempts ENABLE TRIGGER cosmos_attempts_reject_truncate;
+        ALTER TABLE cosmos_artifacts ENABLE TRIGGER cosmos_artifacts_reject_truncate;
+        ALTER TABLE cosmos_files ENABLE TRIGGER cosmos_files_reject_truncate;
+        ALTER TABLE cosmos_file_versions ENABLE TRIGGER cosmos_file_versions_reject_truncate;
+        ALTER TABLE cosmos_tool_calls ENABLE TRIGGER cosmos_tool_calls_reject_truncate;
+        ALTER TABLE cosmos_approvals ENABLE TRIGGER cosmos_approvals_reject_truncate;
+        ALTER TABLE cosmos_tool_side_effects ENABLE TRIGGER cosmos_tool_side_effects_reject_truncate;
+        ALTER TABLE cosmos_approval_assignments ENABLE TRIGGER cosmos_approval_assignments_reject_truncate;
+        ALTER TABLE cosmos_approval_decisions ENABLE TRIGGER cosmos_approval_decisions_reject_truncate;
+        ALTER TABLE cosmos_session_workers ENABLE TRIGGER cosmos_session_workers_reject_truncate;
+        ALTER TABLE cosmos_automation_audit_events ENABLE TRIGGER cosmos_automation_audit_events_reject_truncate;
+        ALTER TABLE cosmos_space_audit_events ENABLE TRIGGER cosmos_space_audit_events_reject_truncate;
       `)
     }
     await pool.query(`
-      INSERT INTO relay_organizations (id, name) VALUES
+      INSERT INTO cosmos_organizations (id, name) VALUES
         ('catalog-org-a', 'Catalog Organization A'),
         ('catalog-org-b', 'Catalog Organization B');
-      INSERT INTO relay_spaces (organization_id, id, name) VALUES
+      INSERT INTO cosmos_spaces (organization_id, id, name) VALUES
         ('catalog-org-a', 'catalog-space', 'Catalog Space'),
         ('catalog-org-a', 'catalog-empty', 'Empty Catalog'),
         ('catalog-org-a', 'catalog-precision', 'Cursor Precision Catalog'),
         ('catalog-org-b', 'catalog-space', 'Other Catalog Space');
-      INSERT INTO relay_organization_memberships (organization_id, actor_id, role) VALUES
+      INSERT INTO cosmos_organization_memberships (organization_id, actor_id, role) VALUES
         ('catalog-org-a', 'catalog-owner', 'organization_owner'),
         ('catalog-org-a', 'catalog-peer', 'member'),
         ('catalog-org-a', 'catalog-viewer', 'viewer'),
         ('catalog-org-a', 'catalog-space-viewer', 'member'),
         ('catalog-org-b', 'catalog-b-owner', 'organization_owner');
-      INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role) VALUES
+      INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role) VALUES
         ('catalog-org-a', 'catalog-space', 'catalog-owner', 'space_manager'),
         ('catalog-org-a', 'catalog-empty', 'catalog-owner', 'space_manager'),
         ('catalog-org-a', 'catalog-precision', 'catalog-owner', 'space_manager'),
@@ -72,7 +72,7 @@ describeWithDatabase('PostgresConfigurationCatalogRepository integration', () =>
         ('catalog-org-a', 'catalog-space', 'catalog-space-viewer', 'viewer'),
         ('catalog-org-b', 'catalog-space', 'catalog-b-owner', 'space_manager');
 
-      INSERT INTO relay_environments (
+      INSERT INTO cosmos_environments (
         organization_id, space_id, id, name, description, status, created_by, created_at, updated_at
       ) VALUES
         ('catalog-org-a', 'catalog-space', 'environment-ready', 'Ready Environment', 'Ready for execution.',
@@ -81,30 +81,30 @@ describeWithDatabase('PostgresConfigurationCatalogRepository integration', () =>
           'draft', 'catalog-owner', '2026-07-12T07:00:00Z', '2026-07-12T07:00:00Z'),
         ('catalog-org-b', 'catalog-space', 'environment-ready', 'Other Tenant Environment', 'Tenant B only.',
           'draft', 'catalog-b-owner', '2026-07-12T08:00:00Z', '2026-07-12T08:00:00Z');
-      INSERT INTO relay_environment_revisions (
+      INSERT INTO cosmos_environment_revisions (
         organization_id, space_id, environment_id, id, revision, status, configuration, created_by, created_at
       ) VALUES
         ('catalog-org-a', 'catalog-space', 'environment-ready', 'environment-revision-ready', 1, 'draft',
           '{"secretValue":"catalog-environment-secret"}', 'catalog-owner', '2026-07-12T08:10:00Z'),
         ('catalog-org-b', 'catalog-space', 'environment-ready', 'environment-revision-ready', 1, 'draft',
           '{}', 'catalog-b-owner', '2026-07-12T08:10:00Z');
-      INSERT INTO relay_environment_revision_repositories (
+      INSERT INTO cosmos_environment_revision_repositories (
         organization_id, space_id, environment_id, environment_revision_id,
         repository_id, repository, base_branch, is_default
       ) VALUES
         ('catalog-org-a', 'catalog-space', 'environment-ready', 'environment-revision-ready',
-          'repository-default', 'relay/platform', 'main', true),
+          'repository-default', 'cosmos/platform', 'main', true),
         ('catalog-org-a', 'catalog-space', 'environment-ready', 'environment-revision-ready',
-          'repository-secondary', 'relay/docs', 'main', false),
+          'repository-secondary', 'cosmos/docs', 'main', false),
         ('catalog-org-b', 'catalog-space', 'environment-ready', 'environment-revision-ready',
           'repository-default', 'other/platform', 'main', true);
-      UPDATE relay_environment_revisions SET status = 'ready'
+      UPDATE cosmos_environment_revisions SET status = 'ready'
       WHERE environment_id = 'environment-ready';
-      UPDATE relay_environments
+      UPDATE cosmos_environments
       SET status = 'ready', active_revision_id = 'environment-revision-ready'
       WHERE id = 'environment-ready';
 
-      INSERT INTO relay_experts (
+      INSERT INTO cosmos_experts (
         organization_id, space_id, id, name, description, visibility, status, created_by, created_at, updated_at
       ) VALUES
         ('catalog-org-a', 'catalog-space', 'expert-published', 'Published Expert', 'Visible published Expert.',
@@ -117,7 +117,7 @@ describeWithDatabase('PostgresConfigurationCatalogRepository integration', () =>
           'space', 'draft', 'catalog-owner', '2026-07-12T08:30:00Z', '2026-07-12T08:30:00Z'),
         ('catalog-org-b', 'catalog-space', 'expert-published', 'Other Tenant Expert', 'Tenant B only.',
           'space', 'draft', 'catalog-b-owner', '2026-07-12T09:00:00Z', '2026-07-12T09:00:00Z');
-      INSERT INTO relay_expert_revisions (
+      INSERT INTO cosmos_expert_revisions (
         organization_id, space_id, expert_id, id, revision, status, environment_id,
         environment_revision_id, allow_repository_override, allow_base_branch_override,
         instructions, model, configuration, created_by, created_at
@@ -135,18 +135,18 @@ describeWithDatabase('PostgresConfigurationCatalogRepository integration', () =>
         ('catalog-org-b', 'catalog-space', 'expert-published', 'expert-revision-published', 1, 'draft',
           'environment-ready', 'environment-revision-ready', true, true,
           'Other tenant instructions.', 'default', '{}', 'catalog-b-owner', '2026-07-12T09:10:00Z');
-      UPDATE relay_expert_revisions SET status = 'published';
-      UPDATE relay_experts
+      UPDATE cosmos_expert_revisions SET status = 'published';
+      UPDATE cosmos_experts
       SET status = 'published', published_revision_id = CASE id
         WHEN 'expert-private' THEN 'expert-revision-private'
         WHEN 'expert-disabled' THEN 'expert-revision-disabled'
         ELSE 'expert-revision-published'
       END
       WHERE id <> 'expert-draft';
-      UPDATE relay_experts SET status = 'disabled'
+      UPDATE cosmos_experts SET status = 'disabled'
       WHERE organization_id = 'catalog-org-a' AND id = 'expert-disabled';
 
-      INSERT INTO relay_experts (
+      INSERT INTO cosmos_experts (
         organization_id, space_id, id, name, visibility, status, created_by, created_at, updated_at
       ) VALUES
         ('catalog-org-a', 'catalog-precision', 'expert-micro-900', 'Microsecond 900',
@@ -171,14 +171,14 @@ describeWithDatabase('PostgresConfigurationCatalogRepository integration', () =>
     )).resolves.toBeNull()
 
     await pool.query(`
-      DELETE FROM relay_space_memberships
+      DELETE FROM cosmos_space_memberships
       WHERE organization_id = 'catalog-org-a' AND space_id = 'catalog-space' AND actor_id = 'catalog-peer'
     `)
     await expect(repository.listEnvironments(
       'catalog-org-a', 'catalog-space', 'catalog-peer',
     )).resolves.toBeNull()
     await pool.query(`
-      INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
+      INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role)
       VALUES ('catalog-org-a', 'catalog-space', 'catalog-peer', 'member')
     `)
   })
@@ -270,8 +270,8 @@ describeWithDatabase('PostgresConfigurationCatalogRepository integration', () =>
       'catalog-org-a', 'catalog-space', 'environment-ready', 'catalog-owner',
     )
     expect(environment?.activeRevision?.repositoryBindings).toEqual([
-      { repositoryId: 'repository-default', repository: 'relay/platform', baseBranch: 'main', isDefault: true },
-      { repositoryId: 'repository-secondary', repository: 'relay/docs', baseBranch: 'main', isDefault: false },
+      { repositoryId: 'repository-default', repository: 'cosmos/platform', baseBranch: 'main', isDefault: true },
+      { repositoryId: 'repository-secondary', repository: 'cosmos/docs', baseBranch: 'main', isDefault: false },
     ])
     expect(JSON.stringify(environment)).not.toContain('catalog-environment-secret')
     expect(environment?.activeRevision).not.toHaveProperty('configuration')

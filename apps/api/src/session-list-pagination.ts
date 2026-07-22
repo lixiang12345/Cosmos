@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { SessionStatus } from '@relay/contracts'
+import type { SessionStatus } from '@cosmos/contracts'
 import type { SessionListCursor, SessionListOptions } from './session-repository.js'
 
 export type SessionListQuery = {

@@ -1,8 +1,8 @@
 SET LOCAL lock_timeout = '5s';
 
-ALTER TABLE relay_session_events
-  DROP CONSTRAINT relay_session_events_runtime_event_type_check,
-  ADD CONSTRAINT relay_session_events_runtime_event_type_check
+ALTER TABLE cosmos_session_events
+  DROP CONSTRAINT cosmos_session_events_runtime_event_type_check,
+  ADD CONSTRAINT cosmos_session_events_runtime_event_type_check
   CHECK (event_type IN (
     'session.created',
     'session.updated',
@@ -10,8 +10,8 @@ ALTER TABLE relay_session_events
     'turn.queued',
     'attempt.updated'
   )) NOT VALID,
-  DROP CONSTRAINT relay_session_events_runtime_typed_resource_check,
-  ADD CONSTRAINT relay_session_events_runtime_typed_resource_check
+  DROP CONSTRAINT cosmos_session_events_runtime_typed_resource_check,
+  ADD CONSTRAINT cosmos_session_events_runtime_typed_resource_check
   CHECK (
     (
       event_type IN ('session.created', 'session.updated') AND resource_type = 'session'

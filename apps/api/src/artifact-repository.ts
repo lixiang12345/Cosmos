@@ -3,7 +3,7 @@ import type {
   ArtifactType,
   CreateArtifactRequest,
   UpdateArtifactRequest,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 
 export type ArtifactListCursor = {
   createdAt: string

@@ -1,4 +1,4 @@
-import type { CreateEnvironmentRequest } from '@relay/contracts'
+import type { CreateEnvironmentRequest } from '@cosmos/contracts'
 import { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { EnvironmentIdempotencyConflictError } from './configuration-catalog-repository.js'
@@ -17,10 +17,10 @@ const createRequest: CreateEnvironmentRequest = {
   name: 'Release runtime',
   description: 'Isolated release engineering runtime.',
   visibility: 'space',
-  image: 'ghcr.io/relay/release-runtime:2026.07',
+  image: 'ghcr.io/cosmos/release-runtime:2026.07',
   repositoryBindings: [{
     repositoryId: 'repository-release',
-    repository: 'relay/release',
+    repository: 'cosmos/release',
     baseBranch: 'main',
     isDefault: true,
   }],
@@ -32,18 +32,18 @@ const createRequest: CreateEnvironmentRequest = {
 }
 
 describeWithDatabase('Environment lifecycle under restricted runtime roles', () => {
-  const schema = `relay_environment_lifecycle_${crypto.randomUUID().replaceAll('-', '')}`
+  const schema = `cosmos_environment_lifecycle_${crypto.randomUUID().replaceAll('-', '')}`
   const adminPool = new Pool({ connectionString: databaseUrl })
   const migrationPool = new Pool({ connectionString: databaseUrl, options: `-c search_path=${schema}` })
   const apiPool = new Pool({
     connectionString: databaseUrl,
     max: 1,
-    options: `-c role=relay_api_runtime -c search_path=${schema}`,
+    options: `-c role=cosmos_api_runtime -c search_path=${schema}`,
   })
   const workerPool = new Pool({
     connectionString: databaseUrl,
     max: 1,
-    options: `-c role=relay_worker_runtime -c search_path=${schema}`,
+    options: `-c role=cosmos_worker_runtime -c search_path=${schema}`,
   })
   const repository = new PostgresConfigurationCatalogRepository(apiPool)
   const provisioningRepository = new PostgresEnvironmentProvisioningRepository(workerPool)
@@ -54,17 +54,17 @@ describeWithDatabase('Environment lifecycle under restricted runtime roles', () 
     await adminPool.query(`CREATE SCHEMA ${schema}`)
     await runMigrations(migrationPool)
     await migrationPool.query(`
-      INSERT INTO relay_organizations (id, name) VALUES
+      INSERT INTO cosmos_organizations (id, name) VALUES
         ('environment-org-a', 'Environment Organization A'),
         ('environment-org-b', 'Environment Organization B');
-      INSERT INTO relay_spaces (organization_id, id, name) VALUES
+      INSERT INTO cosmos_spaces (organization_id, id, name) VALUES
         ('environment-org-a', 'environment-space', 'Environment Space'),
         ('environment-org-b', 'environment-space', 'Other Environment Space');
-      INSERT INTO relay_organization_memberships (organization_id, actor_id, role) VALUES
+      INSERT INTO cosmos_organization_memberships (organization_id, actor_id, role) VALUES
         ('environment-org-a', 'environment-owner', 'organization_owner'),
         ('environment-org-a', 'environment-member', 'member'),
         ('environment-org-b', 'environment-b-owner', 'organization_owner');
-      INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role) VALUES
+      INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role) VALUES
         ('environment-org-a', 'environment-space', 'environment-owner', 'space_manager'),
         ('environment-org-a', 'environment-space', 'environment-member', 'member'),
         ('environment-org-b', 'environment-space', 'environment-b-owner', 'space_manager');
@@ -128,7 +128,7 @@ describeWithDatabase('Environment lifecycle under restricted runtime roles', () 
       apiPool,
       { organizationId: 'environment-org-a', spaceId: 'environment-space', actorId: 'environment-member' },
       (client) => client.query(`
-        INSERT INTO relay_environment_revisions (
+        INSERT INTO cosmos_environment_revisions (
           organization_id, space_id, environment_id, id, revision, status,
           configuration, checksum, created_by
         ) VALUES (
@@ -204,7 +204,7 @@ describeWithDatabase('Environment lifecycle under restricted runtime roles', () 
       actorId: 'environment-owner',
       expectedVersion: version,
       idempotencyKey: 'update-release-runtime',
-      request: { image: 'ghcr.io/relay/release-runtime:2026.08' },
+      request: { image: 'ghcr.io/cosmos/release-runtime:2026.08' },
     })
     expect(updated).toMatchObject({
       environment: {
@@ -229,7 +229,7 @@ describeWithDatabase('Environment lifecycle under restricted runtime roles', () 
     )
     expect(ready).toMatchObject({
       status: 'ready',
-      activeRevision: { revision: 2, image: 'ghcr.io/relay/release-runtime:2026.08' },
+      activeRevision: { revision: 2, image: 'ghcr.io/cosmos/release-runtime:2026.08' },
     })
 
     const revisions = await repository.listEnvironmentRevisions(
@@ -242,7 +242,7 @@ describeWithDatabase('Environment lifecycle under restricted runtime roles', () 
       apiPool,
       { organizationId: 'environment-org-a', spaceId: 'environment-space', actorId: 'environment-owner' },
       (client) => client.query(`
-        UPDATE relay_environment_revisions SET status = 'failed'
+        UPDATE cosmos_environment_revisions SET status = 'failed'
         WHERE environment_id = $1 AND revision = 1
       `, [environmentId]),
     )).rejects.toMatchObject({ code: '55000' })
@@ -252,9 +252,9 @@ describeWithDatabase('Environment lifecycle under restricted runtime roles', () 
 
     const evidence = await migrationPool.query<{ audits: number; jobs: number; plaintext_secrets: number }>(`
       SELECT
-        (SELECT count(*)::integer FROM relay_environment_audit_events WHERE environment_id = $1) AS audits,
-        (SELECT count(*)::integer FROM relay_environment_provisioning_jobs WHERE environment_id = $1) AS jobs,
-        (SELECT count(*)::integer FROM relay_environment_revisions
+        (SELECT count(*)::integer FROM cosmos_environment_audit_events WHERE environment_id = $1) AS audits,
+        (SELECT count(*)::integer FROM cosmos_environment_provisioning_jobs WHERE environment_id = $1) AS jobs,
+        (SELECT count(*)::integer FROM cosmos_environment_revisions
           WHERE environment_id = $1 AND configuration::text LIKE '%plaintext%') AS plaintext_secrets
     `, [environmentId])
     expect(evidence.rows[0]).toMatchObject({ audits: 6, jobs: 3, plaintext_secrets: 0 })

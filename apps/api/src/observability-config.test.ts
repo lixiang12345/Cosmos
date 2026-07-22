@@ -6,7 +6,7 @@ import { parse } from 'yaml'
 
 const rulesPath = resolve(
   dirname(fileURLToPath(import.meta.url)),
-  '../../../ops/observability/relay-alerts.yaml',
+  '../../../ops/observability/cosmos-alerts.yaml',
 )
 
 describe('observability deployment assets', () => {
@@ -19,14 +19,14 @@ describe('observability deployment assets', () => {
     const alertNames = rules.flatMap((rule) => typeof rule.alert === 'string' ? [rule.alert] : [])
 
     expect(alertNames).toEqual(expect.arrayContaining([
-      'RelayApiTargetDown',
-      'RelayApiAvailabilityFastBurn',
-      'RelayApiLatencyP95High',
-      'RelaySseConnectionCapacityHigh',
-      'RelayWorkerExecutionUnavailable',
-      'RelayCommandQueueAgeHigh',
-      'RelayOutboxLagHigh',
-      'RelayObserverWorkerHeartbeatStale',
+      'CosmosApiTargetDown',
+      'CosmosApiAvailabilityFastBurn',
+      'CosmosApiLatencyP95High',
+      'CosmosSseConnectionCapacityHigh',
+      'CosmosWorkerExecutionUnavailable',
+      'CosmosCommandQueueAgeHigh',
+      'CosmosOutboxLagHigh',
+      'CosmosObserverWorkerHeartbeatStale',
     ]))
     expect(rules.filter((rule) => rule.alert).every((rule) => (
       typeof rule.for === 'string'

@@ -15,17 +15,17 @@ const databaseUrl = process.env.TEST_DATABASE_URL
 const describeWithDatabase = databaseUrl ? describe : describe.skip
 
 describeWithDatabase('Postgres ToolCall and Approval governance', () => {
-  const schema = `relay_tools_${crypto.randomUUID().replaceAll('-', '')}`
+  const schema = `cosmos_tools_${crypto.randomUUID().replaceAll('-', '')}`
   const adminPool = new Pool({ connectionString: databaseUrl })
   const migrationPool = new Pool({ connectionString: databaseUrl, options: `-c search_path=${schema}` })
   const apiPool = new Pool({
     connectionString: databaseUrl,
     max: 12,
-    options: `-c role=relay_api_runtime -c search_path=${schema}`,
+    options: `-c role=cosmos_api_runtime -c search_path=${schema}`,
   })
   const workerPool = new Pool({
     connectionString: databaseUrl,
-    options: `-c role=relay_worker_runtime -c search_path=${schema}`,
+    options: `-c role=cosmos_worker_runtime -c search_path=${schema}`,
   })
   let sequence = 0
   let now = new Date('2026-07-13T03:00:00.000Z')
@@ -46,16 +46,16 @@ describeWithDatabase('Postgres ToolCall and Approval governance', () => {
     await adminPool.query(`CREATE SCHEMA ${schema}`)
     await runMigrations(migrationPool)
     await migrationPool.query(`
-      INSERT INTO relay_organizations (id, name) VALUES ('tool-org', 'Tool Organization');
-      INSERT INTO relay_spaces (organization_id, id, name)
+      INSERT INTO cosmos_organizations (id, name) VALUES ('tool-org', 'Tool Organization');
+      INSERT INTO cosmos_spaces (organization_id, id, name)
       VALUES ('tool-org', 'tool-space', 'Tool Space');
-      INSERT INTO relay_organization_memberships (organization_id, actor_id, role)
+      INSERT INTO cosmos_organization_memberships (organization_id, actor_id, role)
       VALUES
         ('tool-org', 'tool-requester', 'member'),
         ('tool-org', 'tool-reviewer-1', 'member'),
         ('tool-org', 'tool-reviewer-2', 'member'),
         ('tool-org', 'tool-admin', 'organization_admin');
-      INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
+      INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role)
       VALUES
         ('tool-org', 'tool-space', 'tool-requester', 'member'),
         ('tool-org', 'tool-space', 'tool-reviewer-1', 'member'),
@@ -115,8 +115,8 @@ describeWithDatabase('Postgres ToolCall and Approval governance', () => {
       toolName: 'github',
       operation,
       riskLevel: 'high' as const,
-      input: { repository: 'relay/cosmos', pullRequest: 42, token: '[secret-reference]' },
-      inputSummary: `Perform ${operation} for relay/cosmos#42.`,
+      input: { repository: 'cosmos/cosmos', pullRequest: 42, token: '[secret-reference]' },
+      inputSummary: `Perform ${operation} for cosmos/cosmos#42.`,
     }
   }
 
@@ -140,7 +140,7 @@ describeWithDatabase('Postgres ToolCall and Approval governance', () => {
       provider: 'github',
       operation: 'create_check_run',
       idempotencyKey: 'github-check-run-42',
-      request: { repository: 'relay/cosmos', headSha: 'abc123' },
+      request: { repository: 'cosmos/cosmos', headSha: 'abc123' },
       requestId: 'side-effect-prepare',
     })
     await expect(coordinator.prepareSideEffect({
@@ -204,12 +204,12 @@ describeWithDatabase('Postgres ToolCall and Approval governance', () => {
     expect(completed).toMatchObject({ status: 'succeeded', outputSummary: 'Created check run 9001.' })
 
     const ledger = await migrationPool.query<{ request_hash: string; result_hash: string }>(`
-      SELECT request_hash, result_hash FROM relay_tool_side_effects WHERE id = $1
+      SELECT request_hash, result_hash FROM cosmos_tool_side_effects WHERE id = $1
     `, [prepared.id])
     expect(ledger.rows[0].request_hash).toMatch(/^[a-f0-9]{64}$/)
     expect(ledger.rows[0].result_hash).toMatch(/^[a-f0-9]{64}$/)
     const serializedEvents = await migrationPool.query<{ payload: string }>(`
-      SELECT jsonb_agg(payload)::text AS payload FROM relay_session_events
+      SELECT jsonb_agg(payload)::text AS payload FROM cosmos_session_events
       WHERE session_id = $1 AND event_type = 'tool_call.updated'
     `, [sessionId])
     expect(serializedEvents.rows[0].payload).not.toContain('abc123')
@@ -308,10 +308,10 @@ describeWithDatabase('Postgres ToolCall and Approval governance', () => {
     const parent = await migrationPool.query<{ session_status: string; turn_status: string; attempt_status: string }>(`
       SELECT session.status AS session_status, turn_record.status AS turn_status,
         attempt.status AS attempt_status
-      FROM relay_sessions session
-      JOIN relay_turns turn_record ON turn_record.organization_id = session.organization_id
+      FROM cosmos_sessions session
+      JOIN cosmos_turns turn_record ON turn_record.organization_id = session.organization_id
         AND turn_record.space_id = session.space_id AND turn_record.session_id = session.id
-      JOIN relay_attempts attempt ON attempt.organization_id = turn_record.organization_id
+      JOIN cosmos_attempts attempt ON attempt.organization_id = turn_record.organization_id
         AND attempt.space_id = turn_record.space_id AND attempt.session_id = turn_record.session_id
         AND attempt.turn_id = turn_record.id
       WHERE session.id = $1 AND turn_record.id = $2 AND attempt.id = $3
@@ -353,13 +353,13 @@ describeWithDatabase('Postgres ToolCall and Approval governance', () => {
     expect((decisions.find(({ status }) => status === 'rejected') as PromiseRejectedResult).reason)
       .toBeInstanceOf(ApprovalAlreadyDecidedError)
     const history = await migrationPool.query<{ decisions: string; status: string }>(`
-      SELECT (SELECT count(*)::text FROM relay_approval_decisions WHERE approval_id = $1) AS decisions,
-        status FROM relay_approvals WHERE id = $1
+      SELECT (SELECT count(*)::text FROM cosmos_approval_decisions WHERE approval_id = $1) AS decisions,
+        status FROM cosmos_approvals WHERE id = $1
     `, [requested.approval.id])
     expect(history.rows[0].decisions).toBe('1')
     expect(['approved', 'rejected']).toContain(history.rows[0].status)
     await expect(migrationPool.query(`
-      UPDATE relay_approval_decisions SET note = 'tampered' WHERE approval_id = $1
+      UPDATE cosmos_approval_decisions SET note = 'tampered' WHERE approval_id = $1
     `, [requested.approval.id])).rejects.toBeDefined()
   })
 
@@ -379,16 +379,16 @@ describeWithDatabase('Postgres ToolCall and Approval governance', () => {
 
   it('keeps terminal ToolCalls and ledger rows immutable at the database boundary', async () => {
     const succeeded = await migrationPool.query<{ id: string }>(`
-      SELECT id FROM relay_tool_calls WHERE status = 'succeeded' LIMIT 1
+      SELECT id FROM cosmos_tool_calls WHERE status = 'succeeded' LIMIT 1
     `)
     await expect(migrationPool.query(`
-      UPDATE relay_tool_calls SET output_summary = 'tampered', version = version + 1 WHERE id = $1
+      UPDATE cosmos_tool_calls SET output_summary = 'tampered', version = version + 1 WHERE id = $1
     `, [succeeded.rows[0].id])).rejects.toBeDefined()
-    await expect(migrationPool.query('TRUNCATE relay_tool_side_effects')).rejects.toBeDefined()
+    await expect(migrationPool.query('TRUNCATE cosmos_tool_side_effects')).rejects.toBeDefined()
     const protectedTables = await migrationPool.query<{ count: string }>(`
       SELECT count(*)::text AS count FROM pg_class
-      WHERE relnamespace = current_schema()::regnamespace AND relname LIKE 'relay_%'
-        AND relkind = 'r' AND relname NOT IN ('relay_schema_migrations', 'relay_worker_heartbeats')
+      WHERE relnamespace = current_schema()::regnamespace AND relname LIKE 'cosmos_%'
+        AND relkind = 'r' AND relname NOT IN ('cosmos_schema_migrations', 'cosmos_worker_heartbeats')
         AND relrowsecurity AND relforcerowsecurity
     `)
     expect(protectedTables.rows[0].count).toBe('50')

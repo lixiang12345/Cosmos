@@ -166,7 +166,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   )
 }
 
-const environmentImages = ['relay-ubuntu-22.04', 'node-22-browser', 'go-1.24-services', 'read-only-analysis']
+const environmentImages = ['cosmos-ubuntu-22.04', 'node-22-browser', 'go-1.24-services', 'read-only-analysis']
 
 type EnvironmentDraft = {
   name: string
@@ -219,7 +219,7 @@ function defaultEnvironmentConfig(environment: Environment, repositoryIds: strin
     variables: [{ id: 'variable-1', key: 'CI', value: 'true', secret: false }],
     hooks: [{ id: 'hook-1', name: 'Install dependencies', phase: 'setup', command: packageCommand, enabled: true }],
     terminalLines: [
-      'Relay Cloud Environment Terminal (prototype)',
+      'Cosmos Cloud Environment Terminal (prototype)',
       `Image: ${environment.image}`,
       'No command is sent to a real VM.',
     ],
@@ -475,7 +475,7 @@ export function EnvironmentsPage({ onOpenNavigation }: CosmosConfigurationPagePr
                     <div><span>{copy(locale, '允许主机', 'Allowed hosts')}</span><strong>{selected.allowedHosts.length ? selected.allowedHosts.join(', ') : copy(locale, '无外部访问', 'No external access')}</strong></div>
                   </section>
                   <details className="environment-advanced-policy">
-                    <summary><Settings2 aria-hidden="true" /><span><strong>{copy(locale, 'Relay 高级运行策略', 'Relay advanced runtime policy')}</strong><small>{copy(locale, 'Cloud 资源按工作负载扩展；以下固定值仅为 Relay 原型策略。', 'Cloud resources scale with workload; fixed values below are Relay prototype policy.')}</small></span><ChevronRight aria-hidden="true" /></summary>
+                    <summary><Settings2 aria-hidden="true" /><span><strong>{copy(locale, 'Cosmos 高级运行策略', 'Cosmos advanced runtime policy')}</strong><small>{copy(locale, 'Cloud 资源按工作负载扩展；以下固定值仅为 Cosmos 原型策略。', 'Cloud resources scale with workload; fixed values below are Cosmos prototype policy.')}</small></span><ChevronRight aria-hidden="true" /></summary>
                     <dl><div><dt>vCPU</dt><dd>{selected.cpu}</dd></div><div><dt>{copy(locale, '内存', 'Memory')}</dt><dd>{selected.memoryGb} GB</dd></div><div><dt>{copy(locale, '会话超时', 'Session timeout')}</dt><dd>{selected.timeoutMinutes} min</dd></div></dl>
                   </details>
                   <footer className="environment-section-actions">

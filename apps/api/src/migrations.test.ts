@@ -114,7 +114,7 @@ describe('migration readiness', () => {
 
   it('rejects a database without migration metadata', async () => {
     const pool = {
-      query: vi.fn().mockRejectedValue(new Error('relay_schema_migrations does not exist')),
+      query: vi.fn().mockRejectedValue(new Error('cosmos_schema_migrations does not exist')),
     } as unknown as Pool
     await expect(assertMigrationsCurrent(pool)).rejects.toThrow('does not exist')
   })
@@ -124,7 +124,7 @@ describe('migration readiness', () => {
     applied.delete('017_attempt_tenant_identity.sql')
     const client = {
       query: vi.fn(async (sql: string, parameters?: unknown[]) => {
-        if (sql === 'SELECT version FROM relay_schema_migrations WHERE version = $1') {
+        if (sql === 'SELECT version FROM cosmos_schema_migrations WHERE version = $1') {
           return { rowCount: applied.has(String(parameters?.[0])) ? 1 : 0, rows: [] }
         }
         return { rowCount: 1, rows: [] }
@@ -141,10 +141,10 @@ describe('migration readiness', () => {
     const statements = client.query.mock.calls.map(([sql]) => sql)
     const lockIndex = statements.indexOf("SET lock_timeout = '5s'")
     const dropIndex = statements.indexOf(
-      'DROP INDEX CONCURRENTLY IF EXISTS "relay_attempts_tenant_identity_unique"',
+      'DROP INDEX CONCURRENTLY IF EXISTS "cosmos_attempts_tenant_identity_unique"',
     )
     const createIndex = statements.findIndex((sql) => (
-      typeof sql === 'string' && sql.includes('CREATE UNIQUE INDEX CONCURRENTLY relay_attempts_tenant_identity_unique')
+      typeof sql === 'string' && sql.includes('CREATE UNIQUE INDEX CONCURRENTLY cosmos_attempts_tenant_identity_unique')
     ))
     const resetIndex = statements.indexOf('RESET lock_timeout')
     expect(lockIndex).toBeGreaterThan(-1)

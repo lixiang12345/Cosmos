@@ -1,7 +1,7 @@
-import type { SessionEventPage, SessionMessagePage } from '@relay/contracts'
+import type { SessionEventPage, SessionMessagePage } from '@cosmos/contracts'
 import { act, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { RELAY_API_TIMEOUT_MS } from '../../services/relayApi'
+import { COSMOS_API_TIMEOUT_MS } from '../../services/cosmosApi'
 import { useRemoteSessionTimeline } from './useRemoteSessionTimeline'
 
 const scope = {
@@ -190,7 +190,7 @@ describe('useRemoteSessionTimeline', () => {
     await flushRequests()
     const retryDelays = [500, 1_000, 2_000, 4_000, 8_000]
     for (let attempt = 0; attempt < 6; attempt += 1) {
-      await act(async () => { await vi.advanceTimersByTimeAsync(RELAY_API_TIMEOUT_MS) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(COSMOS_API_TIMEOUT_MS) })
       if (attempt < retryDelays.length) {
         await act(async () => { await vi.advanceTimersByTimeAsync(retryDelays[attempt]) })
       }

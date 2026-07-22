@@ -1,10 +1,10 @@
-# Relay 后端需求与领域模型
+# Cosmos 后端需求与领域模型
 
 > 状态：MVP 实施基线  
 > 版本：1.3（2026-07-22）
 > 依据：`docs/cosmos-evidence-matrix.md`（2026-07-12）  
 > API 契约：`docs/api-contract.yaml`  
-> 目标：为 Relay 的 Home、Sessions、Experts、Environments、Files、Artifacts、Workers 与 Automations 提供可演进、可审计的多租户后端边界。
+> 目标：为 Cosmos 的 Home、Sessions、Experts、Environments、Files、Artifacts、Workers 与 Automations 提供可演进、可审计的多租户后端边界。
 
 ## 1. 设计原则
 
@@ -156,7 +156,7 @@ EnvironmentRevision 核心字段：`image`、`repositoryBindings`、`variableRef
 
 - 环境变量只保存 Secret reference；API 永不返回明文。
 - 每个 Cloud Session 从固定 Environment Revision 创建新隔离 Snapshot。
-- 默认按工作负载自动分配计算资源；CPU/Memory 上限属于 Relay Enterprise Policy，不是 Expert 的业务字段。
+- 默认按工作负载自动分配计算资源；CPU/Memory 上限属于 Cosmos Enterprise Policy，不是 Expert 的业务字段。
 - Update/Refresh 创建新 Revision；运行中的 Snapshot 不原地变更。
 - Environment disable 不影响已启动 Snapshot，但禁止新 Session 使用。
 
@@ -259,7 +259,7 @@ Session 的可发现交付物或外部引用。
 - `(organization_id, provider, external_id, type)` 在非空 external ID 时唯一。
 - URL 必须经过协议和 host policy 校验；前端不得渲染未经转义的 provider 内容。
 - Artifact label、external ID、branch、PR、issue 和自定义链接进入 Session 搜索索引。
-- 手工新增/编辑只改变 Relay 引用，不修改外部系统对象；删除为解除关联并保留审计。
+- 手工新增/编辑只改变 Cosmos 引用，不修改外部系统对象；删除为解除关联并保留审计。
 
 ### 4.12 Automation
 
@@ -269,7 +269,7 @@ Expert Trigger 的只读聚合身份和可管理投影。
 
 约束：
 
-- `Automation.id` 稳定映射到一个 Expert Trigger；当前实现以 `relay_expert_triggers` 为 CAS versioned 权威资源，PATCH 后回到 paused。随 Expert Draft Revision 发布切换是目标能力，尚未实现。
+- `Automation.id` 稳定映射到一个 Expert Trigger；当前实现以 `cosmos_expert_triggers` 为 CAS versioned 权威资源，PATCH 后回到 paused。随 Expert Draft Revision 发布切换是目标能力，尚未实现。
 - 新 Trigger 默认 paused；测试事件成功后显式启用。
 - Filter 使用受限 JSONLogic 方言，限制深度、操作符和执行时间，不允许任意代码。
 - 自动化创建 Session 时使用固定 ServiceAccount，权限不得高于 Expert 和 Space policy。
@@ -302,7 +302,7 @@ Agent 在运行时创建的临时事件监听，将后续 Event 投递到已有 
 
 ### 4.15 Approval
 
-高风险 ToolCall 或 Relay 治理动作所需的人类决策。
+高风险 ToolCall 或 Cosmos 治理动作所需的人类决策。
 
 核心字段：`id`、`organizationId`、`spaceId`、`sessionId`、`turnId`、`toolCallId`、`action`、`riskLevel(low|medium|high|critical)`、`reasons`、`evidenceRefs`、`status(pending|approved|changes_requested|rejected|expired|canceled)`、`requestedBy`、`assignedTo`、`expiresAt`、`decidedBy`、`decisionNote`、`decidedAt`。
 
@@ -421,7 +421,7 @@ Approval: pending -> approved|changes_requested|rejected|expired|canceled
 
 ```json
 {
-  "type": "https://relay.example/problems/invalid-state-transition",
+  "type": "https://cosmos.example/problems/invalid-state-transition",
   "title": "Invalid state transition",
   "status": 409,
   "code": "INVALID_STATE_TRANSITION",
@@ -433,7 +433,7 @@ Approval: pending -> approved|changes_requested|rejected|expired|canceled
 
 核心错误码：`VALIDATION_FAILED`、`AUTHENTICATION_REQUIRED`、`PERMISSION_DENIED`、`RESOURCE_NOT_FOUND`、`RESOURCE_CONFLICT`、`PRECONDITION_REQUIRED`、`VERSION_MISMATCH`、`INVALID_STATE_TRANSITION`、`IDEMPOTENCY_KEY_REUSED`、`RATE_LIMITED`、`QUOTA_EXCEEDED`、`APPROVAL_REQUIRED`、`APPROVAL_ALREADY_DECIDED`、`ENVIRONMENT_NOT_READY`、`EXPERT_NOT_PUBLISHED`、`EVENT_SIGNATURE_INVALID`、`EVENT_DUPLICATE`、`PAYLOAD_TOO_LARGE`、`INTERNAL_ERROR`、`DEPENDENCY_UNAVAILABLE`。
 
-当前 `@relay/contracts` 的 `ApiError` 仍为迁移格式。在统一前，API 必须始终返回已声明的一种格式，Web 只在单一 adapter 中兼容，并为两种响应写契约测试；禁止 endpoint 自定义错误 JSON。
+当前 `@cosmos/contracts` 的 `ApiError` 仍为迁移格式。在统一前，API 必须始终返回已声明的一种格式，Web 只在单一 adapter 中兼容，并为两种响应写契约测试；禁止 endpoint 自定义错误 JSON。
 
 ## 8. 队列、调度和恢复
 

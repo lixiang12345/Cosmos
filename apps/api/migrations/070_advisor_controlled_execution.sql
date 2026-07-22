@@ -1,29 +1,29 @@
 SET LOCAL lock_timeout = '5s';
 
-ALTER TABLE relay_experts
+ALTER TABLE cosmos_experts
   ADD COLUMN kind text NOT NULL DEFAULT 'custom'
     CHECK (kind IN ('managed_template', 'custom', 'built_in'));
 
-CREATE OR REPLACE FUNCTION relay_guard_expert_runtime_update() RETURNS trigger
+CREATE OR REPLACE FUNCTION cosmos_guard_expert_runtime_update() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
-  IF TG_TABLE_NAME = 'relay_experts'
-    AND current_user = 'relay_api_runtime'
+  IF TG_TABLE_NAME = 'cosmos_experts'
+    AND current_user = 'cosmos_api_runtime'
     AND to_jsonb(OLD) ->> 'kind' = 'built_in' THEN
     RAISE EXCEPTION 'Built-in Experts are immutable' USING ERRCODE = '42501';
   END IF;
-  IF current_user = 'relay_api_runtime' AND NOT (
+  IF current_user = 'cosmos_api_runtime' AND NOT (
     EXISTS (
-      SELECT 1 FROM relay_organization_memberships membership
+      SELECT 1 FROM cosmos_organization_memberships membership
       WHERE membership.organization_id = NEW.organization_id
-        AND membership.actor_id = NULLIF(current_setting('relay.actor_id', true), '')
+        AND membership.actor_id = NULLIF(current_setting('cosmos.actor_id', true), '')
         AND membership.role IN ('organization_owner', 'organization_admin')
     )
     OR EXISTS (
-      SELECT 1 FROM relay_space_memberships membership
+      SELECT 1 FROM cosmos_space_memberships membership
       WHERE membership.organization_id = NEW.organization_id
         AND membership.space_id = NEW.space_id
-        AND membership.actor_id = NULLIF(current_setting('relay.actor_id', true), '')
+        AND membership.actor_id = NULLIF(current_setting('cosmos.actor_id', true), '')
         AND membership.role = 'space_manager'
     )
   ) THEN
@@ -34,7 +34,7 @@ BEGIN
 END;
 $$;
 
-CREATE TABLE relay_advisor_plans (
+CREATE TABLE cosmos_advisor_plans (
   organization_id text NOT NULL,
   space_id text NOT NULL,
   session_id text NOT NULL,
@@ -56,11 +56,11 @@ CREATE TABLE relay_advisor_plans (
   PRIMARY KEY (organization_id, space_id, session_id, id),
   UNIQUE (organization_id, space_id, session_id, provider_tool_call_hash),
   FOREIGN KEY (organization_id, space_id, session_id)
-    REFERENCES relay_sessions(organization_id, space_id, id) ON DELETE RESTRICT,
+    REFERENCES cosmos_sessions(organization_id, space_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (organization_id, requested_by)
-    REFERENCES relay_organization_memberships(organization_id, actor_id) ON DELETE RESTRICT,
+    REFERENCES cosmos_organization_memberships(organization_id, actor_id) ON DELETE RESTRICT,
   FOREIGN KEY (organization_id, confirmed_by)
-    REFERENCES relay_organization_memberships(organization_id, actor_id) ON DELETE RESTRICT,
+    REFERENCES cosmos_organization_memberships(organization_id, actor_id) ON DELETE RESTRICT,
   CHECK (provider_tool_call_hash ~ '^[a-f0-9]{64}$'),
   CHECK (btrim(summary) <> '' AND char_length(summary) <= 2000),
   CHECK (jsonb_typeof(dependencies) = 'array' AND jsonb_array_length(dependencies) <= 10),
@@ -70,7 +70,7 @@ CREATE TABLE relay_advisor_plans (
   CHECK (updated_at >= created_at AND version > 0)
 );
 
-CREATE TABLE relay_advisor_plan_steps (
+CREATE TABLE cosmos_advisor_plan_steps (
   organization_id text NOT NULL,
   space_id text NOT NULL,
   session_id text NOT NULL,
@@ -97,7 +97,7 @@ CREATE TABLE relay_advisor_plan_steps (
   PRIMARY KEY (organization_id, space_id, session_id, plan_id, id),
   UNIQUE (organization_id, space_id, session_id, plan_id, ordinal),
   FOREIGN KEY (organization_id, space_id, session_id, plan_id)
-    REFERENCES relay_advisor_plans(organization_id, space_id, session_id, id) ON DELETE RESTRICT,
+    REFERENCES cosmos_advisor_plans(organization_id, space_id, session_id, id) ON DELETE RESTRICT,
   CHECK (ordinal BETWEEN 1 AND 10),
   CHECK (rationale IS NULL OR (btrim(rationale) <> '' AND char_length(rationale) <= 1000)),
   CHECK (failure_code IS NULL OR (btrim(failure_code) <> '' AND char_length(failure_code) <= 128)),
@@ -121,12 +121,12 @@ CREATE TABLE relay_advisor_plan_steps (
   )
 );
 
-CREATE INDEX relay_advisor_plans_session_idx
-  ON relay_advisor_plans (organization_id, space_id, session_id, created_at, id);
-CREATE INDEX relay_advisor_plans_recovery_idx
-  ON relay_advisor_plans (updated_at, id) WHERE status IN ('executing', 'failed');
+CREATE INDEX cosmos_advisor_plans_session_idx
+  ON cosmos_advisor_plans (organization_id, space_id, session_id, created_at, id);
+CREATE INDEX cosmos_advisor_plans_recovery_idx
+  ON cosmos_advisor_plans (updated_at, id) WHERE status IN ('executing', 'failed');
 
-CREATE OR REPLACE FUNCTION relay_protect_advisor_plan() RETURNS trigger
+CREATE OR REPLACE FUNCTION cosmos_protect_advisor_plan() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
   IF TG_OP = 'DELETE' THEN
@@ -155,7 +155,7 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION relay_protect_advisor_plan_step() RETURNS trigger
+CREATE OR REPLACE FUNCTION cosmos_protect_advisor_plan_step() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
   IF TG_OP = 'DELETE' THEN
@@ -181,103 +181,103 @@ BEGIN
 END;
 $$;
 
-CREATE TRIGGER relay_advisor_plans_protect
-  BEFORE UPDATE OR DELETE ON relay_advisor_plans
-  FOR EACH ROW EXECUTE FUNCTION relay_protect_advisor_plan();
-CREATE TRIGGER relay_advisor_plan_steps_protect
-  BEFORE UPDATE OR DELETE ON relay_advisor_plan_steps
-  FOR EACH ROW EXECUTE FUNCTION relay_protect_advisor_plan_step();
-REVOKE DELETE, TRUNCATE ON relay_advisor_plans, relay_advisor_plan_steps FROM PUBLIC;
+CREATE TRIGGER cosmos_advisor_plans_protect
+  BEFORE UPDATE OR DELETE ON cosmos_advisor_plans
+  FOR EACH ROW EXECUTE FUNCTION cosmos_protect_advisor_plan();
+CREATE TRIGGER cosmos_advisor_plan_steps_protect
+  BEFORE UPDATE OR DELETE ON cosmos_advisor_plan_steps
+  FOR EACH ROW EXECUTE FUNCTION cosmos_protect_advisor_plan_step();
+REVOKE DELETE, TRUNCATE ON cosmos_advisor_plans, cosmos_advisor_plan_steps FROM PUBLIC;
 
-GRANT SELECT, INSERT, UPDATE ON relay_advisor_plans, relay_advisor_plan_steps
-  TO relay_api_runtime;
-GRANT SELECT, INSERT ON relay_advisor_plans, relay_advisor_plan_steps
-  TO relay_worker_runtime;
-GRANT SELECT ON relay_experts, relay_spaces, relay_organizations, relay_environments
-  TO relay_worker_runtime;
+GRANT SELECT, INSERT, UPDATE ON cosmos_advisor_plans, cosmos_advisor_plan_steps
+  TO cosmos_api_runtime;
+GRANT SELECT, INSERT ON cosmos_advisor_plans, cosmos_advisor_plan_steps
+  TO cosmos_worker_runtime;
+GRANT SELECT ON cosmos_experts, cosmos_spaces, cosmos_organizations, cosmos_environments
+  TO cosmos_worker_runtime;
 
-CREATE POLICY relay_worker_advisor_select ON relay_experts
-  FOR SELECT TO relay_worker_runtime USING (true);
-CREATE POLICY relay_worker_advisor_select ON relay_spaces
-  FOR SELECT TO relay_worker_runtime USING (true);
-CREATE POLICY relay_worker_advisor_select ON relay_organizations
-  FOR SELECT TO relay_worker_runtime USING (true);
+CREATE POLICY cosmos_worker_advisor_select ON cosmos_experts
+  FOR SELECT TO cosmos_worker_runtime USING (true);
+CREATE POLICY cosmos_worker_advisor_select ON cosmos_spaces
+  FOR SELECT TO cosmos_worker_runtime USING (true);
+CREATE POLICY cosmos_worker_advisor_select ON cosmos_organizations
+  FOR SELECT TO cosmos_worker_runtime USING (true);
 
-ALTER TABLE relay_advisor_plans ENABLE ROW LEVEL SECURITY;
-ALTER TABLE relay_advisor_plans FORCE ROW LEVEL SECURITY;
-ALTER TABLE relay_advisor_plan_steps ENABLE ROW LEVEL SECURITY;
-ALTER TABLE relay_advisor_plan_steps FORCE ROW LEVEL SECURITY;
-CREATE POLICY relay_migration_admin ON relay_advisor_plans
+ALTER TABLE cosmos_advisor_plans ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cosmos_advisor_plans FORCE ROW LEVEL SECURITY;
+ALTER TABLE cosmos_advisor_plan_steps ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cosmos_advisor_plan_steps FORCE ROW LEVEL SECURITY;
+CREATE POLICY cosmos_migration_admin ON cosmos_advisor_plans
   TO CURRENT_USER USING (true) WITH CHECK (true);
-CREATE POLICY relay_migration_admin ON relay_advisor_plan_steps
+CREATE POLICY cosmos_migration_admin ON cosmos_advisor_plan_steps
   TO CURRENT_USER USING (true) WITH CHECK (true);
 
-CREATE POLICY relay_api_advisor_plan_select ON relay_advisor_plans
-  FOR SELECT TO relay_api_runtime
+CREATE POLICY cosmos_api_advisor_plan_select ON cosmos_advisor_plans
+  FOR SELECT TO cosmos_api_runtime
   USING (
-    organization_id = NULLIF(current_setting('relay.organization_id', true), '')
-    AND space_id = NULLIF(current_setting('relay.space_id', true), '')
+    organization_id = NULLIF(current_setting('cosmos.organization_id', true), '')
+    AND space_id = NULLIF(current_setting('cosmos.space_id', true), '')
     AND EXISTS (
-      SELECT 1 FROM relay_sessions visible_session
-      WHERE visible_session.organization_id = relay_advisor_plans.organization_id
-        AND visible_session.space_id = relay_advisor_plans.space_id
-        AND visible_session.id = relay_advisor_plans.session_id
+      SELECT 1 FROM cosmos_sessions visible_session
+      WHERE visible_session.organization_id = cosmos_advisor_plans.organization_id
+        AND visible_session.space_id = cosmos_advisor_plans.space_id
+        AND visible_session.id = cosmos_advisor_plans.session_id
     )
   );
-CREATE POLICY relay_api_advisor_plan_update ON relay_advisor_plans
-  FOR UPDATE TO relay_api_runtime
+CREATE POLICY cosmos_api_advisor_plan_update ON cosmos_advisor_plans
+  FOR UPDATE TO cosmos_api_runtime
   USING (
-    organization_id = NULLIF(current_setting('relay.organization_id', true), '')
-    AND space_id = NULLIF(current_setting('relay.space_id', true), '')
+    organization_id = NULLIF(current_setting('cosmos.organization_id', true), '')
+    AND space_id = NULLIF(current_setting('cosmos.space_id', true), '')
     AND (
-      EXISTS (SELECT 1 FROM relay_organization_memberships membership
-        WHERE membership.organization_id = relay_advisor_plans.organization_id
-          AND membership.actor_id = NULLIF(current_setting('relay.actor_id', true), '')
+      EXISTS (SELECT 1 FROM cosmos_organization_memberships membership
+        WHERE membership.organization_id = cosmos_advisor_plans.organization_id
+          AND membership.actor_id = NULLIF(current_setting('cosmos.actor_id', true), '')
           AND membership.role IN ('organization_owner', 'organization_admin'))
-      OR EXISTS (SELECT 1 FROM relay_space_memberships membership
-        WHERE membership.organization_id = relay_advisor_plans.organization_id
-          AND membership.space_id = relay_advisor_plans.space_id
-          AND membership.actor_id = NULLIF(current_setting('relay.actor_id', true), '')
+      OR EXISTS (SELECT 1 FROM cosmos_space_memberships membership
+        WHERE membership.organization_id = cosmos_advisor_plans.organization_id
+          AND membership.space_id = cosmos_advisor_plans.space_id
+          AND membership.actor_id = NULLIF(current_setting('cosmos.actor_id', true), '')
           AND membership.role = 'space_manager')
     )
   ) WITH CHECK (
-    organization_id = NULLIF(current_setting('relay.organization_id', true), '')
-    AND space_id = NULLIF(current_setting('relay.space_id', true), '')
+    organization_id = NULLIF(current_setting('cosmos.organization_id', true), '')
+    AND space_id = NULLIF(current_setting('cosmos.space_id', true), '')
   );
-CREATE POLICY relay_api_advisor_step_select ON relay_advisor_plan_steps
-  FOR SELECT TO relay_api_runtime
+CREATE POLICY cosmos_api_advisor_step_select ON cosmos_advisor_plan_steps
+  FOR SELECT TO cosmos_api_runtime
   USING (
-    organization_id = NULLIF(current_setting('relay.organization_id', true), '')
-    AND space_id = NULLIF(current_setting('relay.space_id', true), '')
-    AND EXISTS (SELECT 1 FROM relay_advisor_plans plan
-      WHERE plan.organization_id = relay_advisor_plan_steps.organization_id
-        AND plan.space_id = relay_advisor_plan_steps.space_id
-        AND plan.session_id = relay_advisor_plan_steps.session_id
-        AND plan.id = relay_advisor_plan_steps.plan_id)
+    organization_id = NULLIF(current_setting('cosmos.organization_id', true), '')
+    AND space_id = NULLIF(current_setting('cosmos.space_id', true), '')
+    AND EXISTS (SELECT 1 FROM cosmos_advisor_plans plan
+      WHERE plan.organization_id = cosmos_advisor_plan_steps.organization_id
+        AND plan.space_id = cosmos_advisor_plan_steps.space_id
+        AND plan.session_id = cosmos_advisor_plan_steps.session_id
+        AND plan.id = cosmos_advisor_plan_steps.plan_id)
   );
-CREATE POLICY relay_api_advisor_step_update ON relay_advisor_plan_steps
-  FOR UPDATE TO relay_api_runtime
+CREATE POLICY cosmos_api_advisor_step_update ON cosmos_advisor_plan_steps
+  FOR UPDATE TO cosmos_api_runtime
   USING (
-    organization_id = NULLIF(current_setting('relay.organization_id', true), '')
-    AND space_id = NULLIF(current_setting('relay.space_id', true), '')
-    AND EXISTS (SELECT 1 FROM relay_advisor_plans plan
-      WHERE plan.organization_id = relay_advisor_plan_steps.organization_id
-        AND plan.space_id = relay_advisor_plan_steps.space_id
-        AND plan.session_id = relay_advisor_plan_steps.session_id
-        AND plan.id = relay_advisor_plan_steps.plan_id)
+    organization_id = NULLIF(current_setting('cosmos.organization_id', true), '')
+    AND space_id = NULLIF(current_setting('cosmos.space_id', true), '')
+    AND EXISTS (SELECT 1 FROM cosmos_advisor_plans plan
+      WHERE plan.organization_id = cosmos_advisor_plan_steps.organization_id
+        AND plan.space_id = cosmos_advisor_plan_steps.space_id
+        AND plan.session_id = cosmos_advisor_plan_steps.session_id
+        AND plan.id = cosmos_advisor_plan_steps.plan_id)
   ) WITH CHECK (
-    organization_id = NULLIF(current_setting('relay.organization_id', true), '')
-    AND space_id = NULLIF(current_setting('relay.space_id', true), '')
+    organization_id = NULLIF(current_setting('cosmos.organization_id', true), '')
+    AND space_id = NULLIF(current_setting('cosmos.space_id', true), '')
   );
 
-CREATE POLICY relay_worker_advisor_plan_all ON relay_advisor_plans
-  FOR ALL TO relay_worker_runtime USING (true) WITH CHECK (true);
-CREATE POLICY relay_worker_advisor_step_all ON relay_advisor_plan_steps
-  FOR ALL TO relay_worker_runtime USING (true) WITH CHECK (true);
+CREATE POLICY cosmos_worker_advisor_plan_all ON cosmos_advisor_plans
+  FOR ALL TO cosmos_worker_runtime USING (true) WITH CHECK (true);
+CREATE POLICY cosmos_worker_advisor_step_all ON cosmos_advisor_plan_steps
+  FOR ALL TO cosmos_worker_runtime USING (true) WITH CHECK (true);
 
-ALTER TABLE relay_audit_events
-  DROP CONSTRAINT relay_audit_events_action_check,
-  ADD CONSTRAINT relay_audit_events_action_check CHECK (action IN (
+ALTER TABLE cosmos_audit_events
+  DROP CONSTRAINT cosmos_audit_events_action_check,
+  ADD CONSTRAINT cosmos_audit_events_action_check CHECK (action IN (
     'session.create', 'session.start', 'session.send', 'session.rename', 'session.archive',
     'session.restore', 'session.pause', 'session.resume', 'session.cancel', 'turn.retry',
     'session.share.create', 'session.share.revoke', 'artifact.create', 'artifact.update',
@@ -285,8 +285,8 @@ ALTER TABLE relay_audit_events
     'tool_side_effect.record', 'approval.request', 'approval.decision',
     'advisor.plan.propose', 'advisor.plan.decision', 'advisor.plan.execute', 'advisor.plan.retry'
   )),
-  DROP CONSTRAINT relay_audit_events_before_state_check,
-  ADD CONSTRAINT relay_audit_events_before_state_check CHECK (
+  DROP CONSTRAINT cosmos_audit_events_before_state_check,
+  ADD CONSTRAINT cosmos_audit_events_before_state_check CHECK (
     (action IN ('session.create', 'session.share.create', 'artifact.create',
       'tool_call.create', 'tool_side_effect.record', 'approval.request', 'advisor.plan.propose')
       AND before_state IS NULL)
@@ -297,13 +297,13 @@ ALTER TABLE relay_audit_events
       'approval.decision', 'advisor.plan.decision', 'advisor.plan.execute', 'advisor.plan.retry')
       AND before_state IS NOT NULL AND jsonb_typeof(before_state) = 'object')
   ),
-  DROP CONSTRAINT relay_audit_events_target_type_check,
-  ADD CONSTRAINT relay_audit_events_target_type_check CHECK (target_type IN (
+  DROP CONSTRAINT cosmos_audit_events_target_type_check,
+  ADD CONSTRAINT cosmos_audit_events_target_type_check CHECK (target_type IN (
     'session', 'turn', 'share_grant', 'artifact', 'file', 'tool_call', 'tool_side_effect',
     'approval', 'advisor_plan'
   )),
-  DROP CONSTRAINT relay_audit_events_target_check,
-  ADD CONSTRAINT relay_audit_events_target_check CHECK (
+  DROP CONSTRAINT cosmos_audit_events_target_check,
+  ADD CONSTRAINT cosmos_audit_events_target_check CHECK (
     (action = 'turn.retry' AND target_type = 'turn')
     OR (action IN ('session.share.create', 'session.share.revoke') AND target_type = 'share_grant')
     OR (action IN ('artifact.create', 'artifact.update', 'artifact.remove') AND target_type = 'artifact')
@@ -318,7 +318,7 @@ ALTER TABLE relay_audit_events
       AND target_type = 'session' AND target_id = session_id)
   );
 
-ALTER TABLE relay_audit_events VALIDATE CONSTRAINT relay_audit_events_action_check;
-ALTER TABLE relay_audit_events VALIDATE CONSTRAINT relay_audit_events_before_state_check;
-ALTER TABLE relay_audit_events VALIDATE CONSTRAINT relay_audit_events_target_type_check;
-ALTER TABLE relay_audit_events VALIDATE CONSTRAINT relay_audit_events_target_check;
+ALTER TABLE cosmos_audit_events VALIDATE CONSTRAINT cosmos_audit_events_action_check;
+ALTER TABLE cosmos_audit_events VALIDATE CONSTRAINT cosmos_audit_events_before_state_check;
+ALTER TABLE cosmos_audit_events VALIDATE CONSTRAINT cosmos_audit_events_target_type_check;
+ALTER TABLE cosmos_audit_events VALIDATE CONSTRAINT cosmos_audit_events_target_check;

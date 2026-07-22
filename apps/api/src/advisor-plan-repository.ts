@@ -4,7 +4,7 @@ import type {
   AdvisorPlanProposal,
   AdvisorPlanStepDto,
   AdvisorPlanStatus,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 
 export type AdvisorPlanScope = {
   organizationId: string

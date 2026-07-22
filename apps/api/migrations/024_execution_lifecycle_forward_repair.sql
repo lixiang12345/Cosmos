@@ -1,8 +1,8 @@
 SET LOCAL lock_timeout = '5s';
 
-ALTER TABLE relay_commands
-  DROP CONSTRAINT relay_commands_protocol1_tuple_check,
-  ADD CONSTRAINT relay_commands_protocol1_tuple_check
+ALTER TABLE cosmos_commands
+  DROP CONSTRAINT cosmos_commands_protocol1_tuple_check,
+  ADD CONSTRAINT cosmos_commands_protocol1_tuple_check
   CHECK (
     protocol_version = 0
     OR (
@@ -87,7 +87,7 @@ ALTER TABLE relay_commands
     )
   ) NOT VALID;
 
-CREATE FUNCTION relay_protect_turn_history()
+CREATE FUNCTION cosmos_protect_turn_history()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
@@ -99,12 +99,12 @@ BEGIN
     OLD.organization_id, OLD.space_id, OLD.session_id, OLD.id, OLD.ordinal,
     OLD.initiator_type, OLD.initiator_id, OLD.input_message_id, OLD.queued_at
   ) THEN
-    RAISE EXCEPTION 'Relay Turn identity is immutable'
+    RAISE EXCEPTION 'Cosmos Turn identity is immutable'
       USING ERRCODE = '55000';
   END IF;
 
   IF OLD.status IN ('completed', 'canceled') THEN
-    RAISE EXCEPTION 'Terminal Relay Turn rows are immutable'
+    RAISE EXCEPTION 'Terminal Cosmos Turn rows are immutable'
       USING ERRCODE = '55000';
   END IF;
 
@@ -117,23 +117,23 @@ BEGIN
       AND NEW.status IN ('running', 'completed', 'failed', 'canceled'))
     OR (OLD.status = 'failed' AND NEW.status = 'queued')
   ) THEN
-    RAISE EXCEPTION 'Invalid Relay Turn transition from % to %', OLD.status, NEW.status
+    RAISE EXCEPTION 'Invalid Cosmos Turn transition from % to %', OLD.status, NEW.status
       USING ERRCODE = '23514';
   END IF;
 
   IF NEW.status <> OLD.status AND NEW.version <> OLD.version + 1 THEN
-    RAISE EXCEPTION 'Relay Turn status transitions must advance version by one'
+    RAISE EXCEPTION 'Cosmos Turn status transitions must advance version by one'
       USING ERRCODE = '23514';
   END IF;
 
   IF NEW.status = OLD.status AND NEW.version <> OLD.version THEN
-    RAISE EXCEPTION 'Relay Turn version may change only with status'
+    RAISE EXCEPTION 'Cosmos Turn version may change only with status'
       USING ERRCODE = '23514';
   END IF;
 
   IF OLD.heartbeat_at IS NOT NULL AND NEW.status <> 'queued'
      AND (NEW.heartbeat_at IS NULL OR NEW.heartbeat_at < OLD.heartbeat_at) THEN
-    RAISE EXCEPTION 'Relay Turn heartbeat_at cannot move backwards'
+    RAISE EXCEPTION 'Cosmos Turn heartbeat_at cannot move backwards'
       USING ERRCODE = '23514';
   END IF;
 
@@ -141,6 +141,6 @@ BEGIN
 END;
 $$;
 
-CREATE TRIGGER relay_turns_protect_history
-  BEFORE UPDATE ON relay_turns
-  FOR EACH ROW EXECUTE FUNCTION relay_protect_turn_history();
+CREATE TRIGGER cosmos_turns_protect_history
+  BEFORE UPDATE ON cosmos_turns
+  FOR EACH ROW EXECUTE FUNCTION cosmos_protect_turn_history();

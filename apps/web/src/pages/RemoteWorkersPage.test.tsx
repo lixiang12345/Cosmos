@@ -1,13 +1,13 @@
-import type { SessionWorkerDto } from '@relay/contracts'
+import type { SessionWorkerDto } from '@cosmos/contracts'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PREFERENCE_STORAGE_KEYS, PreferencesProvider } from '../preferences'
-import { listSessionWorkers } from '../services/relayApi'
+import { listSessionWorkers } from '../services/cosmosApi'
 import { RemoteWorkersPage, type RemoteWorkersPageProps } from './RemoteWorkersPage'
 
-vi.mock('../services/relayApi', async (importOriginal) => ({
-  ...await importOriginal<typeof import('../services/relayApi')>(),
+vi.mock('../services/cosmosApi', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../services/cosmosApi')>(),
   listSessionWorkers: vi.fn(),
 }))
 

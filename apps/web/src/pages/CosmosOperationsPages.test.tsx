@@ -17,7 +17,7 @@ const expert = {
   environment: 'Production',
   approval: 'Required',
   successRate: '98%',
-  repository: 'relay/platform',
+  repository: 'cosmos/platform',
 }
 
 function SpaContextProbe() {
@@ -65,7 +65,7 @@ describe('Cosmos home navigation', () => {
     const user = userEvent.setup()
     const contextPack = {
       provider: 'contextengine-plugin' as const,
-      repository: 'relay/platform',
+      repository: 'cosmos/platform',
       task: '检查鉴权边界',
       packedText: 'src/auth.ts evidence',
       estimatedTokens: 832,

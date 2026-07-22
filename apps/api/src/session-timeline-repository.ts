@@ -1,4 +1,4 @@
-import type { SessionEventPage, SessionMessagePage } from '@relay/contracts'
+import type { SessionEventPage, SessionMessagePage } from '@cosmos/contracts'
 
 export type SessionTimelineListOptions = Readonly<{
   afterSequence?: number

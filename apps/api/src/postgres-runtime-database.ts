@@ -2,9 +2,9 @@ import type { Pool, PoolClient, PoolConfig, QueryResult, QueryResultRow } from '
 import { Pool as PostgresPool } from 'pg'
 
 export type RuntimeDatabaseRole =
-  | 'relay_api_runtime'
-  | 'relay_worker_runtime'
-  | 'relay_observer_runtime'
+  | 'cosmos_api_runtime'
+  | 'cosmos_worker_runtime'
+  | 'cosmos_observer_runtime'
 
 export type ApiDatabaseContext = {
   actorId: string
@@ -26,9 +26,9 @@ export async function setLocalApiDatabaseContext(
   if (!actorId) throw new Error('Database actor id is required.')
   await client.query(`
     SELECT
-      set_config('relay.actor_id', $1, true),
-      set_config('relay.organization_id', $2, true),
-      set_config('relay.space_id', $3, true)
+      set_config('cosmos.actor_id', $1, true),
+      set_config('cosmos.organization_id', $2, true),
+      set_config('cosmos.space_id', $3, true)
   `, [
     actorId,
     contextValue(context.organizationId, 'Database organization id'),

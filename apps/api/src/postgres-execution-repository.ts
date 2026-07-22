@@ -159,7 +159,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
           command_record.request_id,
           command_record.requested_by,
           CASE WHEN EXISTS (
-            SELECT 1 FROM relay_service_accounts service_account
+            SELECT 1 FROM cosmos_service_accounts service_account
             WHERE service_account.organization_id = command_record.organization_id
               AND service_account.id = command_record.requested_by
           ) THEN 'service_account' ELSE 'user' END AS requested_by_kind,
@@ -169,36 +169,36 @@ export class PostgresExecutionRepository implements ExecutionRepository {
           expert_revision.model,
           expert_revision.instructions,
           input_message.content AS input_content
-        FROM relay_commands command_record
-        JOIN relay_sessions session_record
+        FROM cosmos_commands command_record
+        JOIN cosmos_sessions session_record
           ON session_record.organization_id = command_record.organization_id
           AND session_record.space_id = command_record.space_id
           AND session_record.id = command_record.session_id
-        JOIN relay_turns turn_record
+        JOIN cosmos_turns turn_record
           ON turn_record.organization_id = command_record.organization_id
           AND turn_record.space_id = command_record.space_id
           AND turn_record.session_id = command_record.session_id
           AND turn_record.id = command_record.resource_id
-        JOIN relay_messages input_message
+        JOIN cosmos_messages input_message
           ON input_message.organization_id = turn_record.organization_id
           AND input_message.space_id = turn_record.space_id
           AND input_message.session_id = turn_record.session_id
           AND input_message.id = turn_record.input_message_id
-        LEFT JOIN relay_attempts queued_attempt
+        LEFT JOIN cosmos_attempts queued_attempt
           ON queued_attempt.organization_id = turn_record.organization_id
           AND queued_attempt.space_id = turn_record.space_id
           AND queued_attempt.session_id = turn_record.session_id
           AND queued_attempt.turn_id = turn_record.id
           AND queued_attempt.status = 'queued'
-        JOIN relay_expert_revisions expert_revision
+        JOIN cosmos_expert_revisions expert_revision
           ON expert_revision.organization_id = session_record.organization_id
           AND expert_revision.space_id = session_record.space_id
           AND expert_revision.expert_id = session_record.expert_id
           AND expert_revision.id = session_record.expert_revision_id
-        JOIN relay_organization_memberships organization_membership
+        JOIN cosmos_organization_memberships organization_membership
           ON organization_membership.organization_id = command_record.organization_id
           AND organization_membership.actor_id = command_record.requested_by
-        JOIN relay_space_memberships space_membership
+        JOIN cosmos_space_memberships space_membership
           ON space_membership.organization_id = command_record.organization_id
           AND space_membership.space_id = command_record.space_id
           AND space_membership.actor_id = command_record.requested_by
@@ -215,7 +215,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
           AND input_message.role = 'user'
           AND NOT EXISTS (
             SELECT 1
-            FROM relay_turns earlier_turn
+            FROM cosmos_turns earlier_turn
             WHERE earlier_turn.organization_id = turn_record.organization_id
               AND earlier_turn.space_id = turn_record.space_id
               AND earlier_turn.session_id = turn_record.session_id
@@ -240,7 +240,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
         WITH execution_time AS (
           SELECT COALESCE($6::timestamptz, clock_timestamp()) AS claimed_at
         )
-        UPDATE relay_commands
+        UPDATE cosmos_commands
         SET status = 'running',
             queued_at = COALESCE(queued_at, execution_time.claimed_at),
             started_at = execution_time.claimed_at,
@@ -275,7 +275,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
           throw new Error('The queued retry Attempt does not match the Command fence.')
         }
         const startingAttempt = await client.query(`
-          UPDATE relay_attempts
+          UPDATE cosmos_attempts
           SET status = 'starting', runtime_id = $7, started_at = $8
           WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
             AND turn_id = $4 AND id = $5 AND number = $6 AND status = 'queued'
@@ -291,7 +291,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
         ])
         if (startingAttempt.rowCount !== 1) throw new Error('Queued retry Attempt could not be started.')
         const runningAttempt = await client.query(`
-          UPDATE relay_attempts
+          UPDATE cosmos_attempts
           SET status = 'running', heartbeat_at = $7
           WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
             AND turn_id = $4 AND id = $5 AND number = $6 AND status = 'starting'
@@ -307,7 +307,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
         if (runningAttempt.rowCount !== 1) throw new Error('Queued retry Attempt could not begin running.')
       } else {
         const attempt = await client.query(`
-          INSERT INTO relay_attempts (
+          INSERT INTO cosmos_attempts (
             organization_id, space_id, session_id, turn_id, id, number, status,
             model, runtime_id, created_at, started_at, heartbeat_at
           ) VALUES ($1, $2, $3, $4, $5, $6, 'running', $7, $8, $9, $9, $9)
@@ -325,7 +325,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
         if (attempt.rowCount !== 1) throw new Error('Execution Attempt could not be created.')
       }
       const turn = await client.query(`
-        UPDATE relay_turns
+        UPDATE cosmos_turns
         SET status = 'running',
             started_at = COALESCE(started_at, $5),
             heartbeat_at = $5,
@@ -339,7 +339,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
       if (turn.rowCount !== 1) throw new Error('Locked execution Turn could not be activated.')
 
       const session = await client.query<{ first_sequence: string; version: number }>(`
-        UPDATE relay_sessions
+        UPDATE cosmos_sessions
         SET status = 'active',
             updated_at = $4,
             last_activity_at = $4,
@@ -423,17 +423,17 @@ export class PostgresExecutionRepository implements ExecutionRepository {
           command_record.lease_owner,
           command_record.request_id,
           command_record.max_attempts
-        FROM relay_commands command_record
-        JOIN relay_sessions session_record
+        FROM cosmos_commands command_record
+        JOIN cosmos_sessions session_record
           ON session_record.organization_id = command_record.organization_id
           AND session_record.space_id = command_record.space_id
           AND session_record.id = command_record.session_id
-        JOIN relay_turns turn_record
+        JOIN cosmos_turns turn_record
           ON turn_record.organization_id = command_record.organization_id
           AND turn_record.space_id = command_record.space_id
           AND turn_record.session_id = command_record.session_id
           AND turn_record.id = command_record.resource_id
-        JOIN relay_attempts attempt
+        JOIN cosmos_attempts attempt
           ON attempt.organization_id = turn_record.organization_id
           AND attempt.space_id = turn_record.space_id
           AND attempt.session_id = turn_record.session_id
@@ -481,9 +481,9 @@ export class PostgresExecutionRepository implements ExecutionRepository {
         WITH execution_time AS (
           SELECT COALESCE($8::timestamptz, clock_timestamp()) AS heartbeat_at
         )
-        UPDATE relay_commands
-        SET heartbeat_at = GREATEST(relay_commands.heartbeat_at, execution_time.heartbeat_at),
-            lease_expires_at = GREATEST(relay_commands.heartbeat_at, execution_time.heartbeat_at)
+        UPDATE cosmos_commands
+        SET heartbeat_at = GREATEST(cosmos_commands.heartbeat_at, execution_time.heartbeat_at),
+            lease_expires_at = GREATEST(cosmos_commands.heartbeat_at, execution_time.heartbeat_at)
               + ($9::double precision * interval '1 millisecond')
         FROM execution_time
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
@@ -493,7 +493,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
           AND attempts = $6
           AND lease_owner = $7
           AND lease_expires_at > execution_time.heartbeat_at
-        RETURNING relay_commands.heartbeat_at
+        RETURNING cosmos_commands.heartbeat_at
       `, [
         input.claim.organizationId,
         input.claim.spaceId,
@@ -510,7 +510,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
       const heartbeatTimestamp = timestamp(heartbeatAt)
 
       const attempt = await client.query(`
-        UPDATE relay_attempts
+        UPDATE cosmos_attempts
         SET heartbeat_at = GREATEST(heartbeat_at, $8::timestamptz)
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
           AND turn_id = $4 AND id = $5 AND number = $6
@@ -528,7 +528,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
       if (attempt.rowCount !== 1) throw new Error('Claimed execution Attempt is missing or no longer running.')
 
       const turn = await client.query(`
-        UPDATE relay_turns
+        UPDATE cosmos_turns
         SET heartbeat_at = GREATEST(heartbeat_at, $5::timestamptz)
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
           AND status = 'running'
@@ -569,17 +569,17 @@ export class PostgresExecutionRepository implements ExecutionRepository {
           command_record.lease_owner,
           command_record.request_id,
           command_record.max_attempts
-        FROM relay_commands command_record
-        JOIN relay_sessions session_record
+        FROM cosmos_commands command_record
+        JOIN cosmos_sessions session_record
           ON session_record.organization_id = command_record.organization_id
           AND session_record.space_id = command_record.space_id
           AND session_record.id = command_record.session_id
-        JOIN relay_turns turn_record
+        JOIN cosmos_turns turn_record
           ON turn_record.organization_id = command_record.organization_id
           AND turn_record.space_id = command_record.space_id
           AND turn_record.session_id = command_record.session_id
           AND turn_record.id = command_record.resource_id
-        JOIN relay_attempts attempt
+        JOIN cosmos_attempts attempt
           ON attempt.organization_id = turn_record.organization_id
           AND attempt.space_id = turn_record.space_id
           AND attempt.session_id = turn_record.session_id
@@ -630,10 +630,10 @@ export class PostgresExecutionRepository implements ExecutionRepository {
         WITH execution_time AS (
           SELECT COALESCE($7::timestamptz, clock_timestamp()) AS transitioned_at
         )
-        UPDATE relay_commands
+        UPDATE cosmos_commands
         SET status = 'succeeded',
-            heartbeat_at = GREATEST(relay_commands.heartbeat_at, execution_time.transitioned_at),
-            completed_at = GREATEST(relay_commands.heartbeat_at, execution_time.transitioned_at),
+            heartbeat_at = GREATEST(cosmos_commands.heartbeat_at, execution_time.transitioned_at),
+            completed_at = GREATEST(cosmos_commands.heartbeat_at, execution_time.transitioned_at),
             lease_owner = NULL,
             lease_expires_at = NULL
         FROM execution_time
@@ -658,7 +658,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
       const messageId = this.createId()
       requireIdentifier(messageId, 'Generated Message id')
       const attempt = await client.query(`
-        UPDATE relay_attempts
+        UPDATE cosmos_attempts
         SET status = 'succeeded',
             heartbeat_at = GREATEST(heartbeat_at, $8::timestamptz),
             completed_at = GREATEST(heartbeat_at, $8::timestamptz),
@@ -679,13 +679,13 @@ export class PostgresExecutionRepository implements ExecutionRepository {
       ])
       if (attempt.rowCount !== 1) throw new Error('Locked execution Attempt could not be completed.')
       const message = await client.query(`
-        INSERT INTO relay_messages (
+        INSERT INTO cosmos_messages (
           id, organization_id, space_id, session_id, sequence, role, actor_id,
           content, attachments, created_at, turn_id, attempt_id
         ) SELECT
           $5, $1, $2, $3, COALESCE(MAX(sequence), 0) + 1, 'agent', NULL,
           $6, '[]'::jsonb, $7, $4, $8
-        FROM relay_messages
+        FROM cosmos_messages
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
       `, [
         execution.organization_id,
@@ -699,7 +699,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
       ])
       if (message.rowCount !== 1) throw new Error('Execution output Message could not be inserted.')
       const turn = await client.query(`
-        UPDATE relay_turns
+        UPDATE cosmos_turns
         SET status = 'completed',
             heartbeat_at = GREATEST(heartbeat_at, $5::timestamptz),
             completed_at = GREATEST(heartbeat_at, $5::timestamptz),
@@ -719,25 +719,25 @@ export class PostgresExecutionRepository implements ExecutionRepository {
         WITH completion_state AS (
           SELECT
             EXISTS (
-              SELECT 1 FROM relay_turns queued_turn
+              SELECT 1 FROM cosmos_turns queued_turn
               WHERE queued_turn.organization_id = $1
                 AND queued_turn.space_id = $2
                 AND queued_turn.session_id = $3
                 AND queued_turn.status = 'queued'
             ) AS has_queued_turn,
             COALESCE(automation_auto_archive, false) AND archived_at IS NULL AS should_auto_archive
-          FROM relay_sessions
+          FROM cosmos_sessions
           WHERE organization_id = $1 AND space_id = $2 AND id = $3
         )
-        UPDATE relay_sessions
+        UPDATE cosmos_sessions
         SET status = CASE WHEN completion_state.has_queued_turn THEN 'queued' ELSE 'completed' END,
             archived_at = CASE
               WHEN NOT completion_state.has_queued_turn AND completion_state.should_auto_archive THEN $4
-              ELSE relay_sessions.archived_at
+              ELSE cosmos_sessions.archived_at
             END,
             automation_auto_archived_at = CASE
               WHEN NOT completion_state.has_queued_turn AND completion_state.should_auto_archive THEN $4
-              ELSE relay_sessions.automation_auto_archived_at
+              ELSE cosmos_sessions.automation_auto_archived_at
             END,
             updated_at = $4,
             last_activity_at = $4,
@@ -845,17 +845,17 @@ export class PostgresExecutionRepository implements ExecutionRepository {
           command_record.lease_owner,
           command_record.request_id,
           command_record.max_attempts
-        FROM relay_commands command_record
-        JOIN relay_turns turn_record
+        FROM cosmos_commands command_record
+        JOIN cosmos_turns turn_record
           ON turn_record.organization_id = command_record.organization_id
           AND turn_record.space_id = command_record.space_id
           AND turn_record.session_id = command_record.session_id
           AND turn_record.id = command_record.resource_id
-        JOIN relay_sessions session_record
+        JOIN cosmos_sessions session_record
           ON session_record.organization_id = command_record.organization_id
           AND session_record.space_id = command_record.space_id
           AND session_record.id = command_record.session_id
-        JOIN relay_attempts attempt
+        JOIN cosmos_attempts attempt
           ON attempt.organization_id = turn_record.organization_id
           AND attempt.space_id = turn_record.space_id
           AND attempt.session_id = turn_record.session_id
@@ -940,17 +940,17 @@ export class PostgresExecutionRepository implements ExecutionRepository {
           command_record.lease_owner,
           command_record.request_id,
           command_record.max_attempts
-        FROM relay_commands command_record
-        JOIN relay_turns turn_record
+        FROM cosmos_commands command_record
+        JOIN cosmos_turns turn_record
           ON turn_record.organization_id = command_record.organization_id
           AND turn_record.space_id = command_record.space_id
           AND turn_record.session_id = command_record.session_id
           AND turn_record.id = command_record.resource_id
-        JOIN relay_sessions session_record
+        JOIN cosmos_sessions session_record
           ON session_record.organization_id = command_record.organization_id
           AND session_record.space_id = command_record.space_id
           AND session_record.id = command_record.session_id
-        JOIN relay_attempts attempt
+        JOIN cosmos_attempts attempt
           ON attempt.organization_id = turn_record.organization_id
           AND attempt.space_id = turn_record.space_id
           AND attempt.session_id = turn_record.session_id
@@ -1008,12 +1008,12 @@ export class PostgresExecutionRepository implements ExecutionRepository {
         command_record.id AS command_id,
         command_record.request_id,
         command_record.attempts
-      FROM relay_commands command_record
-      JOIN relay_sessions session_record
+      FROM cosmos_commands command_record
+      JOIN cosmos_sessions session_record
         ON session_record.organization_id = command_record.organization_id
         AND session_record.space_id = command_record.space_id
         AND session_record.id = command_record.session_id
-      JOIN relay_turns turn_record
+      JOIN cosmos_turns turn_record
         ON turn_record.organization_id = command_record.organization_id
         AND turn_record.space_id = command_record.space_id
         AND turn_record.session_id = command_record.session_id
@@ -1026,8 +1026,8 @@ export class PostgresExecutionRepository implements ExecutionRepository {
         AND turn_record.status = 'queued'
         AND NOT EXISTS (
           SELECT 1
-          FROM relay_organization_memberships organization_membership
-          JOIN relay_space_memberships space_membership
+          FROM cosmos_organization_memberships organization_membership
+          JOIN cosmos_space_memberships space_membership
             ON space_membership.organization_id = organization_membership.organization_id
             AND space_membership.actor_id = organization_membership.actor_id
           WHERE organization_membership.organization_id = command_record.organization_id
@@ -1046,7 +1046,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
         WITH execution_time AS (
           SELECT COALESCE($6::timestamptz, clock_timestamp()) AS transitioned_at
         )
-        UPDATE relay_commands
+        UPDATE cosmos_commands
         SET status = 'canceled',
             completed_at = GREATEST(
               COALESCE(heartbeat_at, started_at, queued_at, accepted_at),
@@ -1072,7 +1072,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
       if (!transitionedAt) throw new Error('Unauthorized execution Command could not be canceled.')
       const canceledAt = timestamp(transitionedAt)
       const turn = await client.query(`
-        UPDATE relay_turns
+        UPDATE cosmos_turns
         SET status = 'canceled',
             completed_at = GREATEST(
               COALESCE(heartbeat_at, started_at, queued_at),
@@ -1092,7 +1092,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
       ])
       if (turn.rowCount !== 1) throw new Error('Unauthorized execution Turn could not be canceled.')
       const session = await client.query<{ event_sequence: string; version: number }>(`
-        UPDATE relay_sessions
+        UPDATE cosmos_sessions
         SET status = 'canceled', updated_at = $4, last_activity_at = $4,
             version = version + 1,
             last_event_sequence = last_event_sequence + 1
@@ -1124,11 +1124,11 @@ export class PostgresExecutionRepository implements ExecutionRepository {
   private async hasWritePermission(client: PoolClient, execution: LockedExecutionRow) {
     const authorization = await client.query(`
       SELECT 1
-      FROM relay_commands command_record
-      JOIN relay_organization_memberships organization_membership
+      FROM cosmos_commands command_record
+      JOIN cosmos_organization_memberships organization_membership
         ON organization_membership.organization_id = command_record.organization_id
         AND organization_membership.actor_id = command_record.requested_by
-      JOIN relay_space_memberships space_membership
+      JOIN cosmos_space_memberships space_membership
         ON space_membership.organization_id = command_record.organization_id
         AND space_membership.space_id = command_record.space_id
         AND space_membership.actor_id = command_record.requested_by
@@ -1164,10 +1164,10 @@ export class PostgresExecutionRepository implements ExecutionRepository {
       WITH execution_time AS (
         SELECT COALESCE($7::timestamptz, clock_timestamp()) AS transitioned_at
       )
-      UPDATE relay_commands
+      UPDATE cosmos_commands
       SET status = 'canceled',
-          heartbeat_at = GREATEST(relay_commands.heartbeat_at, execution_time.transitioned_at),
-          completed_at = GREATEST(relay_commands.heartbeat_at, execution_time.transitioned_at),
+          heartbeat_at = GREATEST(cosmos_commands.heartbeat_at, execution_time.transitioned_at),
+          completed_at = GREATEST(cosmos_commands.heartbeat_at, execution_time.transitioned_at),
           lease_owner = NULL,
           lease_expires_at = NULL,
           failure_code = NULL,
@@ -1190,7 +1190,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
     if (!transitionedAt) return false
     const canceledAt = timestamp(transitionedAt)
     const attempt = await client.query(`
-      UPDATE relay_attempts
+      UPDATE cosmos_attempts
       SET status = 'canceled',
           heartbeat_at = GREATEST(heartbeat_at, $7::timestamptz),
           completed_at = GREATEST(heartbeat_at, $7::timestamptz),
@@ -1211,7 +1211,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
     ])
     if (attempt.rowCount !== 1) throw new Error('Revoked execution Attempt could not be canceled.')
     const turn = await client.query(`
-      UPDATE relay_turns
+      UPDATE cosmos_turns
       SET status = 'canceled',
           heartbeat_at = GREATEST(heartbeat_at, $5::timestamptz),
           completed_at = GREATEST(heartbeat_at, $5::timestamptz),
@@ -1229,7 +1229,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
     ])
     if (turn.rowCount !== 1) throw new Error('Revoked execution Turn could not be canceled.')
     const session = await client.query<{ first_sequence: string; version: number }>(`
-      UPDATE relay_sessions
+      UPDATE cosmos_sessions
       SET status = 'canceled', updated_at = $4, last_activity_at = $4,
           version = version + 1, last_event_sequence = last_event_sequence + 2
       WHERE organization_id = $1 AND space_id = $2 AND id = $3
@@ -1308,7 +1308,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
         WITH execution_time AS (
           SELECT COALESCE($7::timestamptz, clock_timestamp()) AS transitioned_at
         )
-        UPDATE relay_commands
+        UPDATE cosmos_commands
         SET status = 'queued',
             available_at = execution_time.transitioned_at
               + ($8::double precision * interval '1 millisecond'),
@@ -1339,10 +1339,10 @@ export class PostgresExecutionRepository implements ExecutionRepository {
         WITH execution_time AS (
           SELECT COALESCE($9::timestamptz, clock_timestamp()) AS transitioned_at
         )
-        UPDATE relay_commands
+        UPDATE cosmos_commands
         SET status = 'failed',
-            heartbeat_at = GREATEST(relay_commands.heartbeat_at, execution_time.transitioned_at),
-            completed_at = GREATEST(relay_commands.heartbeat_at, execution_time.transitioned_at),
+            heartbeat_at = GREATEST(cosmos_commands.heartbeat_at, execution_time.transitioned_at),
+            completed_at = GREATEST(cosmos_commands.heartbeat_at, execution_time.transitioned_at),
             lease_owner = NULL,
             lease_expires_at = NULL,
             failure_code = $7,
@@ -1369,7 +1369,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
     const failedAt = timestamp(transitionedAt)
 
     const attempt = await client.query(`
-      UPDATE relay_attempts
+      UPDATE cosmos_attempts
       SET status = 'failed',
           heartbeat_at = GREATEST(heartbeat_at, $9::timestamptz),
           completed_at = GREATEST(heartbeat_at, $9::timestamptz),
@@ -1394,7 +1394,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
 
     if (failure.retry) {
       const turn = await client.query(`
-        UPDATE relay_turns
+        UPDATE cosmos_turns
         SET status = 'queued',
             completed_at = NULL,
             failure_code = NULL,
@@ -1406,7 +1406,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
       if (turn.rowCount !== 1) throw new Error('Locked execution Turn could not be requeued.')
     } else {
       const turn = await client.query(`
-        UPDATE relay_turns
+        UPDATE cosmos_turns
         SET status = 'failed',
             heartbeat_at = GREATEST(heartbeat_at, $7::timestamptz),
             completed_at = GREATEST(heartbeat_at, $7::timestamptz),
@@ -1432,14 +1432,14 @@ export class PostgresExecutionRepository implements ExecutionRepository {
       status: 'queued' | 'failed'
       version: number
     }>(`
-      UPDATE relay_sessions
+      UPDATE cosmos_sessions
       SET status = CASE
             WHEN $4::boolean THEN 'queued'
             WHEN EXISTS (
-              SELECT 1 FROM relay_turns queued_turn
-              WHERE queued_turn.organization_id = relay_sessions.organization_id
-                AND queued_turn.space_id = relay_sessions.space_id
-                AND queued_turn.session_id = relay_sessions.id
+              SELECT 1 FROM cosmos_turns queued_turn
+              WHERE queued_turn.organization_id = cosmos_sessions.organization_id
+                AND queued_turn.space_id = cosmos_sessions.space_id
+                AND queued_turn.session_id = cosmos_sessions.id
                 AND queued_turn.status = 'queued'
             ) THEN 'queued'
             ELSE 'failed'
@@ -1510,7 +1510,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
     },
   ) {
     const inserted = await client.query(`
-      INSERT INTO relay_session_events (
+      INSERT INTO cosmos_session_events (
         organization_id, space_id, session_id, event_id, sequence,
         event_type, resource_type, resource_id, payload, actor_id, actor_kind,
         message_id, turn_id, attempt_id, command_id, request_id, occurred_at
@@ -1551,7 +1551,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
     },
   ) {
     const inserted = await client.query(`
-      INSERT INTO relay_session_events (
+      INSERT INTO cosmos_session_events (
         organization_id, space_id, session_id, event_id, sequence,
         event_type, resource_type, resource_id, payload, actor_id, actor_kind,
         message_id, turn_id, attempt_id, command_id, request_id, occurred_at
@@ -1592,7 +1592,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
     },
   ) {
     await client.query(`
-      INSERT INTO relay_session_events (
+      INSERT INTO cosmos_session_events (
         organization_id, space_id, session_id, event_id, sequence,
         event_type, resource_type, resource_id, payload, actor_id, actor_kind,
         message_id, turn_id, attempt_id, command_id, request_id, occurred_at
@@ -1606,7 +1606,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
       event.actorId, event.commandId, event.requestId, event.occurredAt,
     ])
     await client.query(`
-      INSERT INTO relay_audit_events (
+      INSERT INTO cosmos_audit_events (
         organization_id, audit_event_id, space_id, session_id, actor_id,
         actor_kind, action, target_type, target_id, result, request_id,
         idempotency_key_hash, policy_decision, policy_reason, before_state,
@@ -1644,7 +1644,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
     },
   ) {
     const inserted = await client.query(`
-      INSERT INTO relay_session_events (
+      INSERT INTO cosmos_session_events (
         organization_id, space_id, session_id, event_id, sequence,
         event_type, resource_type, resource_id, payload, actor_id, actor_kind,
         message_id, turn_id, attempt_id, command_id, request_id, occurred_at

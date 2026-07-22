@@ -1,6 +1,6 @@
 SET LOCAL lock_timeout = '5s';
 
-CREATE TABLE relay_tool_calls (
+CREATE TABLE cosmos_tool_calls (
   organization_id text NOT NULL,
   space_id text NOT NULL,
   session_id text NOT NULL,
@@ -30,7 +30,7 @@ CREATE TABLE relay_tool_calls (
   UNIQUE (organization_id, space_id, session_id, turn_id, id),
   UNIQUE (organization_id, space_id, session_id, turn_id, attempt_id, id),
   FOREIGN KEY (organization_id, space_id, session_id, turn_id, attempt_id)
-    REFERENCES relay_attempts(organization_id, space_id, session_id, turn_id, id)
+    REFERENCES cosmos_attempts(organization_id, space_id, session_id, turn_id, id)
     ON DELETE RESTRICT,
   CHECK (btrim(tool_name) <> '' AND char_length(tool_name) <= 160),
   CHECK (btrim(operation) <> '' AND char_length(operation) <= 160),
@@ -53,13 +53,13 @@ CREATE TABLE relay_tool_calls (
   CHECK (status <> 'approval_required' OR approval_id IS NOT NULL)
 );
 
-CREATE INDEX relay_tool_calls_session_page_idx
-  ON relay_tool_calls (organization_id, space_id, session_id, created_at DESC, id DESC);
-CREATE INDEX relay_tool_calls_ready_idx
-  ON relay_tool_calls (created_at, id)
+CREATE INDEX cosmos_tool_calls_session_page_idx
+  ON cosmos_tool_calls (organization_id, space_id, session_id, created_at DESC, id DESC);
+CREATE INDEX cosmos_tool_calls_ready_idx
+  ON cosmos_tool_calls (created_at, id)
   WHERE status = 'queued';
 
-CREATE TABLE relay_approvals (
+CREATE TABLE cosmos_approvals (
   organization_id text NOT NULL,
   space_id text NOT NULL,
   id text NOT NULL,
@@ -87,12 +87,12 @@ CREATE TABLE relay_approvals (
   PRIMARY KEY (organization_id, space_id, id),
   UNIQUE (organization_id, space_id, session_id, tool_call_id),
   FOREIGN KEY (organization_id, space_id, session_id, turn_id, tool_call_id)
-    REFERENCES relay_tool_calls(organization_id, space_id, session_id, turn_id, id)
+    REFERENCES cosmos_tool_calls(organization_id, space_id, session_id, turn_id, id)
     ON DELETE RESTRICT,
   FOREIGN KEY (organization_id, requested_by)
-    REFERENCES relay_organization_memberships(organization_id, actor_id) ON DELETE RESTRICT,
+    REFERENCES cosmos_organization_memberships(organization_id, actor_id) ON DELETE RESTRICT,
   FOREIGN KEY (organization_id, decided_by)
-    REFERENCES relay_organization_memberships(organization_id, actor_id) ON DELETE RESTRICT,
+    REFERENCES cosmos_organization_memberships(organization_id, actor_id) ON DELETE RESTRICT,
   CHECK (input_hash ~ '^[a-f0-9]{64}$'),
   CHECK (btrim(action) <> '' AND char_length(action) <= 240),
   CHECK (jsonb_typeof(reasons) = 'array' AND jsonb_array_length(reasons) BETWEEN 1 AND 20),
@@ -109,18 +109,18 @@ CREATE TABLE relay_approvals (
   CHECK (status <> 'approved' OR approval_count = required_approvals)
 );
 
-ALTER TABLE relay_tool_calls
-  ADD CONSTRAINT relay_tool_calls_approval_fk
+ALTER TABLE cosmos_tool_calls
+  ADD CONSTRAINT cosmos_tool_calls_approval_fk
   FOREIGN KEY (organization_id, space_id, approval_id)
-  REFERENCES relay_approvals(organization_id, space_id, id)
+  REFERENCES cosmos_approvals(organization_id, space_id, id)
   ON DELETE RESTRICT NOT VALID;
 
-CREATE INDEX relay_approvals_space_page_idx
-  ON relay_approvals (organization_id, space_id, created_at DESC, id DESC);
-CREATE INDEX relay_approvals_pending_expiry_idx
-  ON relay_approvals (expires_at, id) WHERE status = 'pending';
+CREATE INDEX cosmos_approvals_space_page_idx
+  ON cosmos_approvals (organization_id, space_id, created_at DESC, id DESC);
+CREATE INDEX cosmos_approvals_pending_expiry_idx
+  ON cosmos_approvals (expires_at, id) WHERE status = 'pending';
 
-CREATE TABLE relay_approval_assignments (
+CREATE TABLE cosmos_approval_assignments (
   organization_id text NOT NULL,
   space_id text NOT NULL,
   approval_id text NOT NULL,
@@ -129,17 +129,17 @@ CREATE TABLE relay_approval_assignments (
   assigned_at timestamptz NOT NULL,
   PRIMARY KEY (organization_id, space_id, approval_id, actor_id),
   FOREIGN KEY (organization_id, space_id, approval_id)
-    REFERENCES relay_approvals(organization_id, space_id, id) ON DELETE RESTRICT,
+    REFERENCES cosmos_approvals(organization_id, space_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (organization_id, actor_id)
-    REFERENCES relay_organization_memberships(organization_id, actor_id) ON DELETE RESTRICT,
+    REFERENCES cosmos_organization_memberships(organization_id, actor_id) ON DELETE RESTRICT,
   FOREIGN KEY (organization_id, assigned_by)
-    REFERENCES relay_organization_memberships(organization_id, actor_id) ON DELETE RESTRICT
+    REFERENCES cosmos_organization_memberships(organization_id, actor_id) ON DELETE RESTRICT
 );
 
-CREATE INDEX relay_approval_assignments_actor_idx
-  ON relay_approval_assignments (organization_id, space_id, actor_id, approval_id);
+CREATE INDEX cosmos_approval_assignments_actor_idx
+  ON cosmos_approval_assignments (organization_id, space_id, actor_id, approval_id);
 
-CREATE TABLE relay_approval_decisions (
+CREATE TABLE cosmos_approval_decisions (
   organization_id text NOT NULL,
   space_id text NOT NULL,
   approval_id text NOT NULL,
@@ -153,15 +153,15 @@ CREATE TABLE relay_approval_decisions (
   PRIMARY KEY (organization_id, space_id, approval_id, id),
   UNIQUE (organization_id, space_id, approval_id, actor_id),
   FOREIGN KEY (organization_id, space_id, approval_id)
-    REFERENCES relay_approvals(organization_id, space_id, id) ON DELETE RESTRICT,
+    REFERENCES cosmos_approvals(organization_id, space_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (organization_id, actor_id)
-    REFERENCES relay_organization_memberships(organization_id, actor_id) ON DELETE RESTRICT,
+    REFERENCES cosmos_organization_memberships(organization_id, actor_id) ON DELETE RESTRICT,
   CHECK (char_length(note) <= 5000),
   CHECK (input_hash ~ '^[a-f0-9]{64}$'),
   CHECK (idempotency_key_hash ~ '^[a-f0-9]{64}$')
 );
 
-CREATE TABLE relay_tool_side_effects (
+CREATE TABLE cosmos_tool_side_effects (
   organization_id text NOT NULL,
   space_id text NOT NULL,
   session_id text NOT NULL,
@@ -181,7 +181,7 @@ CREATE TABLE relay_tool_side_effects (
   PRIMARY KEY (organization_id, space_id, session_id, tool_call_id, id),
   UNIQUE (organization_id, provider, idempotency_key_hash),
   FOREIGN KEY (organization_id, space_id, session_id, tool_call_id)
-    REFERENCES relay_tool_calls(organization_id, space_id, session_id, id) ON DELETE RESTRICT,
+    REFERENCES cosmos_tool_calls(organization_id, space_id, session_id, id) ON DELETE RESTRICT,
   CHECK (btrim(provider) <> '' AND char_length(provider) <= 160),
   CHECK (btrim(operation) <> '' AND char_length(operation) <= 160),
   CHECK (idempotency_key_hash ~ '^[a-f0-9]{64}$'),
@@ -192,11 +192,11 @@ CREATE TABLE relay_tool_side_effects (
   CHECK ((status IN ('succeeded', 'failed')) = (result_hash IS NOT NULL))
 );
 
-CREATE OR REPLACE FUNCTION relay_protect_tool_call_history()
+CREATE OR REPLACE FUNCTION cosmos_protect_tool_call_history()
 RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF TG_OP = 'DELETE' THEN
-    RAISE EXCEPTION 'Relay ToolCall rows cannot be deleted' USING ERRCODE = '55000';
+    RAISE EXCEPTION 'Cosmos ToolCall rows cannot be deleted' USING ERRCODE = '55000';
   END IF;
   IF ROW(NEW.organization_id, NEW.space_id, NEW.session_id, NEW.turn_id,
     NEW.attempt_id, NEW.id, NEW.tool_name, NEW.operation, NEW.risk_level,
@@ -205,37 +205,37 @@ BEGIN
     ROW(OLD.organization_id, OLD.space_id, OLD.session_id, OLD.turn_id,
     OLD.attempt_id, OLD.id, OLD.tool_name, OLD.operation, OLD.risk_level,
     OLD.input_summary, OLD.input_hash, OLD.input_ref, OLD.created_at) THEN
-    RAISE EXCEPTION 'Relay ToolCall identity and input are immutable' USING ERRCODE = '55000';
+    RAISE EXCEPTION 'Cosmos ToolCall identity and input are immutable' USING ERRCODE = '55000';
   END IF;
   IF OLD.status IN ('succeeded', 'failed', 'canceled') THEN
-    RAISE EXCEPTION 'Terminal Relay ToolCall rows are immutable' USING ERRCODE = '55000';
+    RAISE EXCEPTION 'Terminal Cosmos ToolCall rows are immutable' USING ERRCODE = '55000';
   END IF;
   IF NOT (
     (OLD.status = 'queued' AND NEW.status IN ('approval_required', 'running', 'canceled'))
     OR (OLD.status = 'approval_required' AND NEW.status IN ('queued', 'canceled'))
     OR (OLD.status = 'running' AND NEW.status IN ('succeeded', 'failed', 'canceled'))
   ) THEN
-    RAISE EXCEPTION 'Invalid Relay ToolCall state transition' USING ERRCODE = '23514';
+    RAISE EXCEPTION 'Invalid Cosmos ToolCall state transition' USING ERRCODE = '23514';
   END IF;
   IF NEW.version <> OLD.version + 1 THEN
-    RAISE EXCEPTION 'Relay ToolCall updates must advance version by one' USING ERRCODE = '23514';
+    RAISE EXCEPTION 'Cosmos ToolCall updates must advance version by one' USING ERRCODE = '23514';
   END IF;
   RETURN NEW;
 END;
 $$;
 
-CREATE TRIGGER relay_tool_calls_protect_history
-  BEFORE UPDATE OR DELETE ON relay_tool_calls
-  FOR EACH ROW EXECUTE FUNCTION relay_protect_tool_call_history();
-CREATE TRIGGER relay_tool_calls_reject_truncate
-  BEFORE TRUNCATE ON relay_tool_calls
-  FOR EACH STATEMENT EXECUTE FUNCTION relay_reject_ledger_mutation();
+CREATE TRIGGER cosmos_tool_calls_protect_history
+  BEFORE UPDATE OR DELETE ON cosmos_tool_calls
+  FOR EACH ROW EXECUTE FUNCTION cosmos_protect_tool_call_history();
+CREATE TRIGGER cosmos_tool_calls_reject_truncate
+  BEFORE TRUNCATE ON cosmos_tool_calls
+  FOR EACH STATEMENT EXECUTE FUNCTION cosmos_reject_ledger_mutation();
 
-CREATE OR REPLACE FUNCTION relay_protect_approval_history()
+CREATE OR REPLACE FUNCTION cosmos_protect_approval_history()
 RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF TG_OP = 'DELETE' THEN
-    RAISE EXCEPTION 'Relay Approval rows cannot be deleted' USING ERRCODE = '55000';
+    RAISE EXCEPTION 'Cosmos Approval rows cannot be deleted' USING ERRCODE = '55000';
   END IF;
   IF ROW(NEW.organization_id, NEW.space_id, NEW.id, NEW.session_id, NEW.turn_id,
     NEW.tool_call_id, NEW.input_hash, NEW.action, NEW.risk_level, NEW.reasons,
@@ -244,33 +244,33 @@ BEGIN
     ROW(OLD.organization_id, OLD.space_id, OLD.id, OLD.session_id, OLD.turn_id,
     OLD.tool_call_id, OLD.input_hash, OLD.action, OLD.risk_level, OLD.reasons,
     OLD.evidence, OLD.requested_by, OLD.required_approvals, OLD.expires_at, OLD.created_at) THEN
-    RAISE EXCEPTION 'Relay Approval request fields are immutable' USING ERRCODE = '55000';
+    RAISE EXCEPTION 'Cosmos Approval request fields are immutable' USING ERRCODE = '55000';
   END IF;
   IF OLD.status <> 'pending' THEN
-    RAISE EXCEPTION 'Terminal Relay Approval rows are immutable' USING ERRCODE = '55000';
+    RAISE EXCEPTION 'Terminal Cosmos Approval rows are immutable' USING ERRCODE = '55000';
   END IF;
   IF NEW.status NOT IN ('pending', 'approved', 'changes_requested', 'rejected', 'expired', 'canceled') THEN
-    RAISE EXCEPTION 'Invalid Relay Approval state transition' USING ERRCODE = '23514';
+    RAISE EXCEPTION 'Invalid Cosmos Approval state transition' USING ERRCODE = '23514';
   END IF;
   IF NEW.version <> OLD.version + 1 OR NEW.updated_at < OLD.updated_at THEN
-    RAISE EXCEPTION 'Relay Approval updates must advance version and time' USING ERRCODE = '23514';
+    RAISE EXCEPTION 'Cosmos Approval updates must advance version and time' USING ERRCODE = '23514';
   END IF;
   RETURN NEW;
 END;
 $$;
 
-CREATE TRIGGER relay_approvals_protect_history
-  BEFORE UPDATE OR DELETE ON relay_approvals
-  FOR EACH ROW EXECUTE FUNCTION relay_protect_approval_history();
-CREATE TRIGGER relay_approvals_reject_truncate
-  BEFORE TRUNCATE ON relay_approvals
-  FOR EACH STATEMENT EXECUTE FUNCTION relay_reject_ledger_mutation();
+CREATE TRIGGER cosmos_approvals_protect_history
+  BEFORE UPDATE OR DELETE ON cosmos_approvals
+  FOR EACH ROW EXECUTE FUNCTION cosmos_protect_approval_history();
+CREATE TRIGGER cosmos_approvals_reject_truncate
+  BEFORE TRUNCATE ON cosmos_approvals
+  FOR EACH STATEMENT EXECUTE FUNCTION cosmos_reject_ledger_mutation();
 
-CREATE OR REPLACE FUNCTION relay_protect_tool_side_effect_history()
+CREATE OR REPLACE FUNCTION cosmos_protect_tool_side_effect_history()
 RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF TG_OP = 'DELETE' THEN
-    RAISE EXCEPTION 'Relay Tool side-effect rows cannot be deleted' USING ERRCODE = '55000';
+    RAISE EXCEPTION 'Cosmos Tool side-effect rows cannot be deleted' USING ERRCODE = '55000';
   END IF;
   IF ROW(NEW.organization_id, NEW.space_id, NEW.session_id, NEW.tool_call_id,
     NEW.id, NEW.provider, NEW.operation, NEW.idempotency_key_hash,
@@ -279,69 +279,69 @@ BEGIN
     ROW(OLD.organization_id, OLD.space_id, OLD.session_id, OLD.tool_call_id,
     OLD.id, OLD.provider, OLD.operation, OLD.idempotency_key_hash,
     OLD.request_hash, OLD.created_at) THEN
-    RAISE EXCEPTION 'Relay Tool side-effect identity is immutable' USING ERRCODE = '55000';
+    RAISE EXCEPTION 'Cosmos Tool side-effect identity is immutable' USING ERRCODE = '55000';
   END IF;
   IF OLD.status IN ('succeeded', 'failed')
     OR NOT (
       (OLD.status = 'prepared' AND NEW.status IN ('unknown', 'succeeded', 'failed'))
       OR (OLD.status = 'unknown' AND NEW.status IN ('succeeded', 'failed'))
     ) THEN
-    RAISE EXCEPTION 'Invalid Relay Tool side-effect state transition' USING ERRCODE = '23514';
+    RAISE EXCEPTION 'Invalid Cosmos Tool side-effect state transition' USING ERRCODE = '23514';
   END IF;
   IF NEW.version <> OLD.version + 1 OR NEW.updated_at < OLD.updated_at THEN
-    RAISE EXCEPTION 'Relay Tool side-effect updates must advance version and time' USING ERRCODE = '23514';
+    RAISE EXCEPTION 'Cosmos Tool side-effect updates must advance version and time' USING ERRCODE = '23514';
   END IF;
   RETURN NEW;
 END;
 $$;
 
-CREATE TRIGGER relay_tool_side_effects_protect_history
-  BEFORE UPDATE OR DELETE ON relay_tool_side_effects
-  FOR EACH ROW EXECUTE FUNCTION relay_protect_tool_side_effect_history();
-CREATE TRIGGER relay_tool_side_effects_reject_truncate
-  BEFORE TRUNCATE ON relay_tool_side_effects
-  FOR EACH STATEMENT EXECUTE FUNCTION relay_reject_ledger_mutation();
+CREATE TRIGGER cosmos_tool_side_effects_protect_history
+  BEFORE UPDATE OR DELETE ON cosmos_tool_side_effects
+  FOR EACH ROW EXECUTE FUNCTION cosmos_protect_tool_side_effect_history();
+CREATE TRIGGER cosmos_tool_side_effects_reject_truncate
+  BEFORE TRUNCATE ON cosmos_tool_side_effects
+  FOR EACH STATEMENT EXECUTE FUNCTION cosmos_reject_ledger_mutation();
 
-CREATE TRIGGER relay_approval_assignments_reject_update_delete
-  BEFORE UPDATE OR DELETE ON relay_approval_assignments
-  FOR EACH STATEMENT EXECUTE FUNCTION relay_reject_ledger_mutation();
-CREATE TRIGGER relay_approval_assignments_reject_truncate
-  BEFORE TRUNCATE ON relay_approval_assignments
-  FOR EACH STATEMENT EXECUTE FUNCTION relay_reject_ledger_mutation();
-CREATE TRIGGER relay_approval_decisions_reject_update_delete
-  BEFORE UPDATE OR DELETE ON relay_approval_decisions
-  FOR EACH STATEMENT EXECUTE FUNCTION relay_reject_ledger_mutation();
-CREATE TRIGGER relay_approval_decisions_reject_truncate
-  BEFORE TRUNCATE ON relay_approval_decisions
-  FOR EACH STATEMENT EXECUTE FUNCTION relay_reject_ledger_mutation();
+CREATE TRIGGER cosmos_approval_assignments_reject_update_delete
+  BEFORE UPDATE OR DELETE ON cosmos_approval_assignments
+  FOR EACH STATEMENT EXECUTE FUNCTION cosmos_reject_ledger_mutation();
+CREATE TRIGGER cosmos_approval_assignments_reject_truncate
+  BEFORE TRUNCATE ON cosmos_approval_assignments
+  FOR EACH STATEMENT EXECUTE FUNCTION cosmos_reject_ledger_mutation();
+CREATE TRIGGER cosmos_approval_decisions_reject_update_delete
+  BEFORE UPDATE OR DELETE ON cosmos_approval_decisions
+  FOR EACH STATEMENT EXECUTE FUNCTION cosmos_reject_ledger_mutation();
+CREATE TRIGGER cosmos_approval_decisions_reject_truncate
+  BEFORE TRUNCATE ON cosmos_approval_decisions
+  FOR EACH STATEMENT EXECUTE FUNCTION cosmos_reject_ledger_mutation();
 
-REVOKE DELETE, TRUNCATE ON relay_tool_calls, relay_approvals, relay_tool_side_effects FROM PUBLIC;
-REVOKE UPDATE, DELETE, TRUNCATE ON relay_approval_assignments, relay_approval_decisions FROM PUBLIC;
+REVOKE DELETE, TRUNCATE ON cosmos_tool_calls, cosmos_approvals, cosmos_tool_side_effects FROM PUBLIC;
+REVOKE UPDATE, DELETE, TRUNCATE ON cosmos_approval_assignments, cosmos_approval_decisions FROM PUBLIC;
 
-ALTER TABLE relay_session_events
+ALTER TABLE cosmos_session_events
   ADD COLUMN tool_call_id text,
   ADD COLUMN approval_id text,
-  ADD CONSTRAINT relay_session_events_tool_call_tenant_fk
+  ADD CONSTRAINT cosmos_session_events_tool_call_tenant_fk
     FOREIGN KEY (organization_id, space_id, session_id, tool_call_id)
-    REFERENCES relay_tool_calls(organization_id, space_id, session_id, id)
+    REFERENCES cosmos_tool_calls(organization_id, space_id, session_id, id)
     ON DELETE RESTRICT NOT VALID,
-  ADD CONSTRAINT relay_session_events_approval_tenant_fk
+  ADD CONSTRAINT cosmos_session_events_approval_tenant_fk
     FOREIGN KEY (organization_id, space_id, approval_id)
-    REFERENCES relay_approvals(organization_id, space_id, id)
+    REFERENCES cosmos_approvals(organization_id, space_id, id)
     ON DELETE RESTRICT NOT VALID,
-  DROP CONSTRAINT relay_session_events_runtime_event_type_check,
-  ADD CONSTRAINT relay_session_events_runtime_event_type_check CHECK (event_type IN (
+  DROP CONSTRAINT cosmos_session_events_runtime_event_type_check,
+  ADD CONSTRAINT cosmos_session_events_runtime_event_type_check CHECK (event_type IN (
     'session.created', 'session.updated', 'session.renamed', 'session.archived',
     'session.restored', 'message.created', 'turn.queued', 'attempt.updated',
     'artifact.created', 'artifact.updated', 'artifact.removed', 'file.version.created',
     'tool_call.updated', 'approval.requested', 'approval.decided'
   )) NOT VALID,
-  DROP CONSTRAINT relay_session_events_runtime_resource_type_check,
-  ADD CONSTRAINT relay_session_events_runtime_resource_type_check CHECK (resource_type IN (
+  DROP CONSTRAINT cosmos_session_events_runtime_resource_type_check,
+  ADD CONSTRAINT cosmos_session_events_runtime_resource_type_check CHECK (resource_type IN (
     'session', 'message', 'turn', 'attempt', 'artifact', 'file', 'tool_call', 'approval'
   )) NOT VALID,
-  DROP CONSTRAINT relay_session_events_runtime_typed_resource_check,
-  ADD CONSTRAINT relay_session_events_runtime_typed_resource_check CHECK (
+  DROP CONSTRAINT cosmos_session_events_runtime_typed_resource_check,
+  ADD CONSTRAINT cosmos_session_events_runtime_typed_resource_check CHECK (
     (event_type IN ('session.created', 'session.updated', 'session.renamed', 'session.archived', 'session.restored')
       AND resource_type = 'session' AND resource_id = session_id
       AND message_id IS NULL AND turn_id IS NULL AND attempt_id IS NULL AND artifact_id IS NULL
@@ -374,17 +374,17 @@ ALTER TABLE relay_session_events
       AND file_id IS NULL AND file_version_id IS NULL)
   ) NOT VALID;
 
-ALTER TABLE relay_audit_events
-  DROP CONSTRAINT relay_audit_events_action_check,
-  ADD CONSTRAINT relay_audit_events_action_check CHECK (action IN (
+ALTER TABLE cosmos_audit_events
+  DROP CONSTRAINT cosmos_audit_events_action_check,
+  ADD CONSTRAINT cosmos_audit_events_action_check CHECK (action IN (
     'session.create', 'session.start', 'session.send', 'session.rename', 'session.archive',
     'session.restore', 'session.pause', 'session.resume', 'session.cancel', 'turn.retry',
     'session.share.create', 'session.share.revoke', 'artifact.create', 'artifact.update',
     'artifact.remove', 'file.version.create', 'tool_call.create', 'tool_call.update',
     'tool_side_effect.record', 'approval.request', 'approval.decision'
   )) NOT VALID,
-  DROP CONSTRAINT relay_audit_events_before_state_check,
-  ADD CONSTRAINT relay_audit_events_before_state_check CHECK (
+  DROP CONSTRAINT cosmos_audit_events_before_state_check,
+  ADD CONSTRAINT cosmos_audit_events_before_state_check CHECK (
     (action IN ('session.create', 'session.share.create', 'artifact.create',
       'tool_call.create', 'tool_side_effect.record', 'approval.request') AND before_state IS NULL)
     OR (action = 'file.version.create' AND (before_state IS NULL OR jsonb_typeof(before_state) = 'object'))
@@ -393,12 +393,12 @@ ALTER TABLE relay_audit_events
       'session.share.revoke', 'artifact.update', 'artifact.remove', 'tool_call.update',
       'approval.decision') AND before_state IS NOT NULL AND jsonb_typeof(before_state) = 'object')
   ) NOT VALID,
-  DROP CONSTRAINT relay_audit_events_target_type_check,
-  ADD CONSTRAINT relay_audit_events_target_type_check CHECK (target_type IN (
+  DROP CONSTRAINT cosmos_audit_events_target_type_check,
+  ADD CONSTRAINT cosmos_audit_events_target_type_check CHECK (target_type IN (
     'session', 'turn', 'share_grant', 'artifact', 'file', 'tool_call', 'tool_side_effect', 'approval'
   )) NOT VALID,
-  DROP CONSTRAINT relay_audit_events_target_check,
-  ADD CONSTRAINT relay_audit_events_target_check CHECK (
+  DROP CONSTRAINT cosmos_audit_events_target_check,
+  ADD CONSTRAINT cosmos_audit_events_target_check CHECK (
     (action = 'turn.retry' AND target_type = 'turn')
     OR (action IN ('session.share.create', 'session.share.revoke') AND target_type = 'share_grant')
     OR (action IN ('artifact.create', 'artifact.update', 'artifact.remove') AND target_type = 'artifact')
@@ -411,99 +411,99 @@ ALTER TABLE relay_audit_events
       AND target_type = 'session' AND target_id = session_id)
   ) NOT VALID;
 
-GRANT SELECT ON relay_tool_calls, relay_approvals, relay_approval_assignments, relay_approval_decisions
-  TO relay_api_runtime;
-GRANT UPDATE ON relay_approvals, relay_tool_calls TO relay_api_runtime;
-GRANT INSERT ON relay_approval_decisions TO relay_api_runtime;
-GRANT SELECT, INSERT, UPDATE ON relay_tool_calls, relay_approvals, relay_tool_side_effects
-  TO relay_worker_runtime;
-GRANT SELECT, INSERT ON relay_approval_assignments TO relay_worker_runtime;
-GRANT SELECT ON relay_approval_decisions TO relay_worker_runtime;
-GRANT SELECT ON relay_service_accounts TO relay_worker_runtime;
-GRANT INSERT ON relay_audit_events, relay_outbox_events TO relay_worker_runtime;
+GRANT SELECT ON cosmos_tool_calls, cosmos_approvals, cosmos_approval_assignments, cosmos_approval_decisions
+  TO cosmos_api_runtime;
+GRANT UPDATE ON cosmos_approvals, cosmos_tool_calls TO cosmos_api_runtime;
+GRANT INSERT ON cosmos_approval_decisions TO cosmos_api_runtime;
+GRANT SELECT, INSERT, UPDATE ON cosmos_tool_calls, cosmos_approvals, cosmos_tool_side_effects
+  TO cosmos_worker_runtime;
+GRANT SELECT, INSERT ON cosmos_approval_assignments TO cosmos_worker_runtime;
+GRANT SELECT ON cosmos_approval_decisions TO cosmos_worker_runtime;
+GRANT SELECT ON cosmos_service_accounts TO cosmos_worker_runtime;
+GRANT INSERT ON cosmos_audit_events, cosmos_outbox_events TO cosmos_worker_runtime;
 
 DO $$
 DECLARE table_name text;
 BEGIN
   FOREACH table_name IN ARRAY ARRAY[
-    'relay_tool_calls', 'relay_approvals', 'relay_approval_assignments',
-    'relay_approval_decisions', 'relay_tool_side_effects'
+    'cosmos_tool_calls', 'cosmos_approvals', 'cosmos_approval_assignments',
+    'cosmos_approval_decisions', 'cosmos_tool_side_effects'
   ] LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', table_name);
     EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', table_name);
-    EXECUTE format('CREATE POLICY relay_migration_admin ON %I TO %I USING (true) WITH CHECK (true)', table_name, current_user);
+    EXECUTE format('CREATE POLICY cosmos_migration_admin ON %I TO %I USING (true) WITH CHECK (true)', table_name, current_user);
   END LOOP;
 END;
 $$;
 
-CREATE POLICY relay_api_tenant_select ON relay_tool_calls FOR SELECT TO relay_api_runtime
-  USING (organization_id = NULLIF(current_setting('relay.organization_id', true), '')
-    AND space_id = NULLIF(current_setting('relay.space_id', true), '')
-    AND EXISTS (SELECT 1 FROM relay_sessions visible_session
-      WHERE visible_session.organization_id = relay_tool_calls.organization_id
-        AND visible_session.space_id = relay_tool_calls.space_id
-        AND visible_session.id = relay_tool_calls.session_id));
+CREATE POLICY cosmos_api_tenant_select ON cosmos_tool_calls FOR SELECT TO cosmos_api_runtime
+  USING (organization_id = NULLIF(current_setting('cosmos.organization_id', true), '')
+    AND space_id = NULLIF(current_setting('cosmos.space_id', true), '')
+    AND EXISTS (SELECT 1 FROM cosmos_sessions visible_session
+      WHERE visible_session.organization_id = cosmos_tool_calls.organization_id
+        AND visible_session.space_id = cosmos_tool_calls.space_id
+        AND visible_session.id = cosmos_tool_calls.session_id));
 
-CREATE POLICY relay_api_tenant_select ON relay_approvals FOR SELECT TO relay_api_runtime
-  USING (organization_id = NULLIF(current_setting('relay.organization_id', true), '')
-    AND space_id = NULLIF(current_setting('relay.space_id', true), '')
+CREATE POLICY cosmos_api_tenant_select ON cosmos_approvals FOR SELECT TO cosmos_api_runtime
+  USING (organization_id = NULLIF(current_setting('cosmos.organization_id', true), '')
+    AND space_id = NULLIF(current_setting('cosmos.space_id', true), '')
     AND (
-      EXISTS (SELECT 1 FROM relay_approval_assignments assignment
-        WHERE assignment.organization_id = relay_approvals.organization_id
-          AND assignment.space_id = relay_approvals.space_id
-          AND assignment.approval_id = relay_approvals.id
-          AND assignment.actor_id = NULLIF(current_setting('relay.actor_id', true), ''))
-      OR EXISTS (SELECT 1 FROM relay_organization_memberships membership
-        WHERE membership.organization_id = relay_approvals.organization_id
-          AND membership.actor_id = NULLIF(current_setting('relay.actor_id', true), '')
+      EXISTS (SELECT 1 FROM cosmos_approval_assignments assignment
+        WHERE assignment.organization_id = cosmos_approvals.organization_id
+          AND assignment.space_id = cosmos_approvals.space_id
+          AND assignment.approval_id = cosmos_approvals.id
+          AND assignment.actor_id = NULLIF(current_setting('cosmos.actor_id', true), ''))
+      OR EXISTS (SELECT 1 FROM cosmos_organization_memberships membership
+        WHERE membership.organization_id = cosmos_approvals.organization_id
+          AND membership.actor_id = NULLIF(current_setting('cosmos.actor_id', true), '')
           AND membership.role IN ('organization_owner', 'organization_admin'))
-      OR EXISTS (SELECT 1 FROM relay_space_memberships membership
-        WHERE membership.organization_id = relay_approvals.organization_id
-          AND membership.space_id = relay_approvals.space_id
-          AND membership.actor_id = NULLIF(current_setting('relay.actor_id', true), '')
+      OR EXISTS (SELECT 1 FROM cosmos_space_memberships membership
+        WHERE membership.organization_id = cosmos_approvals.organization_id
+          AND membership.space_id = cosmos_approvals.space_id
+          AND membership.actor_id = NULLIF(current_setting('cosmos.actor_id', true), '')
           AND membership.role = 'space_manager')
     ));
 
-CREATE POLICY relay_api_tenant_update ON relay_approvals FOR UPDATE TO relay_api_runtime
-  USING (organization_id = NULLIF(current_setting('relay.organization_id', true), '')
-    AND space_id = NULLIF(current_setting('relay.space_id', true), ''))
-  WITH CHECK (organization_id = NULLIF(current_setting('relay.organization_id', true), '')
-    AND space_id = NULLIF(current_setting('relay.space_id', true), ''));
+CREATE POLICY cosmos_api_tenant_update ON cosmos_approvals FOR UPDATE TO cosmos_api_runtime
+  USING (organization_id = NULLIF(current_setting('cosmos.organization_id', true), '')
+    AND space_id = NULLIF(current_setting('cosmos.space_id', true), ''))
+  WITH CHECK (organization_id = NULLIF(current_setting('cosmos.organization_id', true), '')
+    AND space_id = NULLIF(current_setting('cosmos.space_id', true), ''));
 
-CREATE POLICY relay_api_tenant_update ON relay_tool_calls FOR UPDATE TO relay_api_runtime
-  USING (organization_id = NULLIF(current_setting('relay.organization_id', true), '')
-    AND space_id = NULLIF(current_setting('relay.space_id', true), ''))
-  WITH CHECK (organization_id = NULLIF(current_setting('relay.organization_id', true), '')
-    AND space_id = NULLIF(current_setting('relay.space_id', true), ''));
+CREATE POLICY cosmos_api_tenant_update ON cosmos_tool_calls FOR UPDATE TO cosmos_api_runtime
+  USING (organization_id = NULLIF(current_setting('cosmos.organization_id', true), '')
+    AND space_id = NULLIF(current_setting('cosmos.space_id', true), ''))
+  WITH CHECK (organization_id = NULLIF(current_setting('cosmos.organization_id', true), '')
+    AND space_id = NULLIF(current_setting('cosmos.space_id', true), ''));
 
-CREATE POLICY relay_api_tenant_select ON relay_approval_assignments FOR SELECT TO relay_api_runtime
-  USING (organization_id = NULLIF(current_setting('relay.organization_id', true), '')
-    AND space_id = NULLIF(current_setting('relay.space_id', true), ''));
-CREATE POLICY relay_api_tenant_select ON relay_approval_decisions FOR SELECT TO relay_api_runtime
-  USING (organization_id = NULLIF(current_setting('relay.organization_id', true), '')
-    AND space_id = NULLIF(current_setting('relay.space_id', true), ''));
-CREATE POLICY relay_api_tenant_insert ON relay_approval_decisions FOR INSERT TO relay_api_runtime
-  WITH CHECK (organization_id = NULLIF(current_setting('relay.organization_id', true), '')
-    AND space_id = NULLIF(current_setting('relay.space_id', true), '')
-    AND actor_id = NULLIF(current_setting('relay.actor_id', true), ''));
+CREATE POLICY cosmos_api_tenant_select ON cosmos_approval_assignments FOR SELECT TO cosmos_api_runtime
+  USING (organization_id = NULLIF(current_setting('cosmos.organization_id', true), '')
+    AND space_id = NULLIF(current_setting('cosmos.space_id', true), ''));
+CREATE POLICY cosmos_api_tenant_select ON cosmos_approval_decisions FOR SELECT TO cosmos_api_runtime
+  USING (organization_id = NULLIF(current_setting('cosmos.organization_id', true), '')
+    AND space_id = NULLIF(current_setting('cosmos.space_id', true), ''));
+CREATE POLICY cosmos_api_tenant_insert ON cosmos_approval_decisions FOR INSERT TO cosmos_api_runtime
+  WITH CHECK (organization_id = NULLIF(current_setting('cosmos.organization_id', true), '')
+    AND space_id = NULLIF(current_setting('cosmos.space_id', true), '')
+    AND actor_id = NULLIF(current_setting('cosmos.actor_id', true), ''));
 
 DO $$
 DECLARE table_name text;
 BEGIN
   FOREACH table_name IN ARRAY ARRAY[
-    'relay_tool_calls', 'relay_approvals', 'relay_approval_assignments',
-    'relay_approval_decisions', 'relay_tool_side_effects'
+    'cosmos_tool_calls', 'cosmos_approvals', 'cosmos_approval_assignments',
+    'cosmos_approval_decisions', 'cosmos_tool_side_effects'
   ] LOOP
-    EXECUTE format('CREATE POLICY relay_worker_select ON %I FOR SELECT TO relay_worker_runtime USING (true)', table_name);
+    EXECUTE format('CREATE POLICY cosmos_worker_select ON %I FOR SELECT TO cosmos_worker_runtime USING (true)', table_name);
   END LOOP;
 END;
 $$;
-CREATE POLICY relay_worker_insert ON relay_tool_calls FOR INSERT TO relay_worker_runtime WITH CHECK (true);
-CREATE POLICY relay_worker_update ON relay_tool_calls FOR UPDATE TO relay_worker_runtime USING (true) WITH CHECK (true);
-CREATE POLICY relay_worker_insert ON relay_approvals FOR INSERT TO relay_worker_runtime WITH CHECK (true);
-CREATE POLICY relay_worker_update ON relay_approvals FOR UPDATE TO relay_worker_runtime USING (true) WITH CHECK (true);
-CREATE POLICY relay_worker_insert ON relay_approval_assignments FOR INSERT TO relay_worker_runtime WITH CHECK (true);
-CREATE POLICY relay_worker_insert ON relay_tool_side_effects FOR INSERT TO relay_worker_runtime WITH CHECK (true);
-CREATE POLICY relay_worker_update ON relay_tool_side_effects FOR UPDATE TO relay_worker_runtime USING (true) WITH CHECK (true);
-CREATE POLICY relay_worker_select ON relay_service_accounts
-  FOR SELECT TO relay_worker_runtime USING (true);
+CREATE POLICY cosmos_worker_insert ON cosmos_tool_calls FOR INSERT TO cosmos_worker_runtime WITH CHECK (true);
+CREATE POLICY cosmos_worker_update ON cosmos_tool_calls FOR UPDATE TO cosmos_worker_runtime USING (true) WITH CHECK (true);
+CREATE POLICY cosmos_worker_insert ON cosmos_approvals FOR INSERT TO cosmos_worker_runtime WITH CHECK (true);
+CREATE POLICY cosmos_worker_update ON cosmos_approvals FOR UPDATE TO cosmos_worker_runtime USING (true) WITH CHECK (true);
+CREATE POLICY cosmos_worker_insert ON cosmos_approval_assignments FOR INSERT TO cosmos_worker_runtime WITH CHECK (true);
+CREATE POLICY cosmos_worker_insert ON cosmos_tool_side_effects FOR INSERT TO cosmos_worker_runtime WITH CHECK (true);
+CREATE POLICY cosmos_worker_update ON cosmos_tool_side_effects FOR UPDATE TO cosmos_worker_runtime USING (true) WITH CHECK (true);
+CREATE POLICY cosmos_worker_select ON cosmos_service_accounts
+  FOR SELECT TO cosmos_worker_runtime USING (true);

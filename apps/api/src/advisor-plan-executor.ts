@@ -1,4 +1,4 @@
-import type { AdvisorPlanDto, AdvisorPlanStepDto, UpdateSpaceRequest } from '@relay/contracts'
+import type { AdvisorPlanDto, AdvisorPlanStepDto, UpdateSpaceRequest } from '@cosmos/contracts'
 import type { AdvisorPlanRepository, AdvisorPlanScope } from './advisor-plan-repository.js'
 import {
   SpacePermissionError,

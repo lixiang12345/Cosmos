@@ -98,50 +98,50 @@ import {
   type TestAutomationRequest,
   type UpdateAutomationRequestInput,
   type UpdateEnvironmentRequestInput,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 
-const DEFAULT_RELAY_API_BASE_URL = '/api'
-export const RELAY_API_TIMEOUT_MS = 20_000
+const DEFAULT_COSMOS_API_BASE_URL = '/api'
+export const COSMOS_API_TIMEOUT_MS = 20_000
 
-export type RelayApiAuthContext = {
+export type CosmosApiAuthContext = {
   accessToken?: string
   requestIdentity?: string
   onUnauthorized?: (failedAccessToken: string | undefined) => void | Promise<void>
 }
 
-export type RelayCatalogListOptions = {
+export type CosmosCatalogListOptions = {
   cursor?: string
   limit?: number
 }
 
-export type RelaySessionListOptions = RelayCatalogListOptions & {
+export type CosmosSessionListOptions = CosmosCatalogListOptions & {
   status?: SessionDto['status']
   archived?: boolean | 'all'
   search?: string
 }
 
-export type RelaySessionMessageListOptions = {
+export type CosmosSessionMessageListOptions = {
   cursor?: string | SessionEventCursor
   limit?: number
 }
 
-export type RelaySessionEventListOptions = {
+export type CosmosSessionEventListOptions = {
   cursor?: SessionEventCursor
   limit?: number
 }
 
-export type RelaySessionEventStreamOptions = {
+export type CosmosSessionEventStreamOptions = {
   cursor?: SessionEventCursor
   lastEventId?: string
   onEvent: (event: SessionEventDto) => void | Promise<void>
 }
 
-export type RelaySessionEventStreamResult = {
+export type CosmosSessionEventStreamResult = {
   lastEventId?: string
   reconnect: boolean
 }
 
-export type RelayFileListOptions = RelayCatalogListOptions & {
+export type CosmosFileListOptions = CosmosCatalogListOptions & {
   scope: FileScope
   ownerUserId?: string
   sessionId?: string
@@ -149,14 +149,14 @@ export type RelayFileListOptions = RelayCatalogListOptions & {
   search?: string
 }
 
-export type RelayFileContent = {
+export type CosmosFileContent = {
   blob: Blob
   contentType: string
   fileName?: string
   etag?: string
 }
 
-export type RelayApprovalListOptions = RelayCatalogListOptions & {
+export type CosmosApprovalListOptions = CosmosCatalogListOptions & {
   status?: ApprovalStatus
   assignedToMe?: boolean
   sessionId?: string
@@ -164,13 +164,13 @@ export type RelayApprovalListOptions = RelayCatalogListOptions & {
 
 const sessionListRequests = new Map<string, Promise<SessionListResponse>>()
 
-type RelayApiLocation = {
+type CosmosApiLocation = {
   applicationOrigin: string
   configuredBaseUrl?: string
   allowedOrigins?: string
 }
 
-type RelayApiErrorInit = {
+type CosmosApiErrorInit = {
   code: string
   status?: number
   correlationId?: string
@@ -184,7 +184,7 @@ type ResponseSchema<T> = {
   safeParse(value: unknown): { success: true; data: T } | { success: false }
 }
 
-export class RelayApiError extends Error {
+export class CosmosApiError extends Error {
   readonly code: string
   readonly status?: number
   readonly correlationId?: string
@@ -192,9 +192,9 @@ export class RelayApiError extends Error {
   readonly fieldErrors?: ApiError['fieldErrors']
   readonly details?: ApiError['details']
 
-  constructor(message: string, init: RelayApiErrorInit) {
+  constructor(message: string, init: CosmosApiErrorInit) {
     super(message, { cause: init.cause })
-    this.name = 'RelayApiError'
+    this.name = 'CosmosApiError'
     this.code = init.code
     this.status = init.status
     this.correlationId = init.correlationId
@@ -212,7 +212,7 @@ function configuredOrigins(value: string | undefined) {
     .map((item) => {
       const url = new URL(item)
       if (url.href !== `${url.origin}/`) {
-        throw new RelayApiError('VITE_API_ALLOWED_ORIGINS entries must be origins without paths.', {
+        throw new CosmosApiError('VITE_API_ALLOWED_ORIGINS entries must be origins without paths.', {
           code: 'API_CONFIGURATION_ERROR',
         })
       }
@@ -220,21 +220,21 @@ function configuredOrigins(value: string | undefined) {
     }))
 }
 
-export function resolveRelayApiBaseUrl(
+export function resolveCosmosApiBaseUrl(
   configured: string | undefined,
   applicationOrigin: string,
   allowedOrigins: string | undefined,
 ) {
   const value = configured?.trim()
-  if (!value) return DEFAULT_RELAY_API_BASE_URL
+  if (!value) return DEFAULT_COSMOS_API_BASE_URL
   if (value.includes('\\') || value.startsWith('//')) {
-    throw new RelayApiError('VITE_API_BASE_URL must be an absolute URL or a root-relative path.', {
+    throw new CosmosApiError('VITE_API_BASE_URL must be an absolute URL or a root-relative path.', {
       code: 'API_CONFIGURATION_ERROR',
     })
   }
   const rootRelative = value.startsWith('/')
   if (!rootRelative && !URL.canParse(value)) {
-    throw new RelayApiError('VITE_API_BASE_URL must be an absolute URL or a root-relative path.', {
+    throw new CosmosApiError('VITE_API_BASE_URL must be an absolute URL or a root-relative path.', {
       code: 'API_CONFIGURATION_ERROR',
     })
   }
@@ -243,33 +243,33 @@ export function resolveRelayApiBaseUrl(
   try {
     apiUrl = new URL(value, `${new URL(applicationOrigin).origin}/`)
   } catch (cause) {
-    throw new RelayApiError('VITE_API_BASE_URL must be an absolute URL or a root-relative path.', {
+    throw new CosmosApiError('VITE_API_BASE_URL must be an absolute URL or a root-relative path.', {
       code: 'API_CONFIGURATION_ERROR', cause,
     })
   }
   const appOrigin = new URL(applicationOrigin).origin
   if (apiUrl.username || apiUrl.password || apiUrl.search || apiUrl.hash) {
-    throw new RelayApiError('VITE_API_BASE_URL cannot contain credentials, a query, or a fragment.', {
+    throw new CosmosApiError('VITE_API_BASE_URL cannot contain credentials, a query, or a fragment.', {
       code: 'API_CONFIGURATION_ERROR',
     })
   }
   if (apiUrl.origin !== appOrigin) {
     if (apiUrl.protocol !== 'https:' || !configuredOrigins(allowedOrigins).has(apiUrl.origin)) {
-      throw new RelayApiError('The configured API origin is not allowed to receive access tokens.', {
+      throw new CosmosApiError('The configured API origin is not allowed to receive access tokens.', {
         code: 'API_ORIGIN_NOT_ALLOWED',
       })
     }
   }
   const path = apiUrl.pathname.replace(/\/+$/, '')
   if (path.startsWith('//')) {
-    throw new RelayApiError('VITE_API_BASE_URL resolves to an ambiguous network path.', {
+    throw new CosmosApiError('VITE_API_BASE_URL resolves to an ambiguous network path.', {
       code: 'API_CONFIGURATION_ERROR',
     })
   }
   return rootRelative ? (path || '/') : `${apiUrl.origin}${path}`
 }
 
-function apiLocation(): RelayApiLocation {
+function apiLocation(): CosmosApiLocation {
   return {
     applicationOrigin: window.location.origin,
     configuredBaseUrl: import.meta.env.VITE_API_BASE_URL,
@@ -277,21 +277,21 @@ function apiLocation(): RelayApiLocation {
   }
 }
 
-export function getRelayApiBaseUrl(location: RelayApiLocation = apiLocation()) {
-  return resolveRelayApiBaseUrl(
+export function getCosmosApiBaseUrl(location: CosmosApiLocation = apiLocation()) {
+  return resolveCosmosApiBaseUrl(
     location.configuredBaseUrl,
     location.applicationOrigin,
     location.allowedOrigins,
   )
 }
 
-export function resolveRelayApiRequestUrl(path: string, location: RelayApiLocation = apiLocation()) {
-  const baseUrl = getRelayApiBaseUrl(location)
+export function resolveCosmosApiRequestUrl(path: string, location: CosmosApiLocation = apiLocation()) {
+  const baseUrl = getCosmosApiBaseUrl(location)
   const target = new URL(`${baseUrl === '/' ? '' : baseUrl}${path}`, `${location.applicationOrigin}/`)
   const allowed = configuredOrigins(location.allowedOrigins)
   if (target.origin !== new URL(location.applicationOrigin).origin
     && (target.protocol !== 'https:' || !allowed.has(target.origin))) {
-    throw new RelayApiError('The final API request origin is not allowed to receive access tokens.', {
+    throw new CosmosApiError('The final API request origin is not allowed to receive access tokens.', {
       code: 'API_ORIGIN_NOT_ALLOWED',
     })
   }
@@ -320,12 +320,12 @@ async function request<T>(
   path: string,
   init: RequestInit,
   schema: ResponseSchema<T>,
-  auth: RelayApiAuthContext = {},
+  auth: CosmosApiAuthContext = {},
 ): Promise<T> {
   const headers = new Headers(init.headers)
   if (auth.accessToken) headers.set('Authorization', `Bearer ${auth.accessToken}`)
-  const requestUrl = resolveRelayApiRequestUrl(path)
-  const timeoutSignal = AbortSignal.timeout(RELAY_API_TIMEOUT_MS)
+  const requestUrl = resolveCosmosApiRequestUrl(path)
+  const timeoutSignal = AbortSignal.timeout(COSMOS_API_TIMEOUT_MS)
   const signal = init.signal
     ? AbortSignal.any([init.signal, timeoutSignal])
     : timeoutSignal
@@ -336,16 +336,16 @@ async function request<T>(
     body = await readJson(response, signal)
   } catch (cause) {
     if (timeoutSignal.aborted && !init.signal?.aborted) {
-      throw new RelayApiError('The Relay API request timed out.', {
+      throw new CosmosApiError('The Cosmos API request timed out.', {
         code: 'REQUEST_TIMEOUT', retryable: true, cause,
       })
     }
     if (init.signal?.aborted) {
-      throw new RelayApiError('The Relay API request was canceled.', {
+      throw new CosmosApiError('The Cosmos API request was canceled.', {
         code: 'REQUEST_CANCELED', retryable: true, cause,
       })
     }
-    throw new RelayApiError('Unable to reach the Relay API.', { code: 'NETWORK_ERROR', retryable: true, cause })
+    throw new CosmosApiError('Unable to reach the Cosmos API.', { code: 'NETWORK_ERROR', retryable: true, cause })
   }
 
   const correlationId = getCorrelationId(response, body)
@@ -355,7 +355,7 @@ async function request<T>(
     }
     const parsedError = ApiErrorSchema.safeParse(body)
     if (parsedError.success) {
-      throw new RelayApiError(parsedError.data.message, {
+      throw new CosmosApiError(parsedError.data.message, {
         code: parsedError.data.code,
         status: response.status,
         correlationId: parsedError.data.correlationId ?? correlationId,
@@ -364,14 +364,14 @@ async function request<T>(
         details: parsedError.data.details,
       })
     }
-    throw new RelayApiError(`Relay API request failed with status ${response.status}.`, {
+    throw new CosmosApiError(`Cosmos API request failed with status ${response.status}.`, {
       code: 'HTTP_ERROR', status: response.status, correlationId, retryable: response.status >= 500,
     })
   }
 
   const parsed = schema.safeParse(body)
   if (!parsed.success) {
-    throw new RelayApiError('Relay API returned an invalid response.', {
+    throw new CosmosApiError('Cosmos API returned an invalid response.', {
       code: 'INVALID_RESPONSE', status: response.status, correlationId,
     })
   }
@@ -381,27 +381,27 @@ async function request<T>(
 async function requestBlob(
   path: string,
   init: RequestInit,
-  auth: RelayApiAuthContext = {},
-): Promise<RelayFileContent> {
+  auth: CosmosApiAuthContext = {},
+): Promise<CosmosFileContent> {
   const headers = new Headers(init.headers)
   if (auth.accessToken) headers.set('Authorization', `Bearer ${auth.accessToken}`)
-  const timeoutSignal = AbortSignal.timeout(RELAY_API_TIMEOUT_MS)
+  const timeoutSignal = AbortSignal.timeout(COSMOS_API_TIMEOUT_MS)
   const signal = init.signal ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal
   let response: Response
   try {
-    response = await fetch(resolveRelayApiRequestUrl(path), { ...init, headers, signal })
+    response = await fetch(resolveCosmosApiRequestUrl(path), { ...init, headers, signal })
   } catch (cause) {
     if (timeoutSignal.aborted && !init.signal?.aborted) {
-      throw new RelayApiError('The Relay API request timed out.', {
+      throw new CosmosApiError('The Cosmos API request timed out.', {
         code: 'REQUEST_TIMEOUT', retryable: true, cause,
       })
     }
     if (init.signal?.aborted) {
-      throw new RelayApiError('The Relay API request was canceled.', {
+      throw new CosmosApiError('The Cosmos API request was canceled.', {
         code: 'REQUEST_CANCELED', retryable: true, cause,
       })
     }
-    throw new RelayApiError('Unable to reach the Relay API.', {
+    throw new CosmosApiError('Unable to reach the Cosmos API.', {
       code: 'NETWORK_ERROR', retryable: true, cause,
     })
   }
@@ -413,7 +413,7 @@ async function requestBlob(
     }
     const parsedError = ApiErrorSchema.safeParse(body)
     if (parsedError.success) {
-      throw new RelayApiError(parsedError.data.message, {
+      throw new CosmosApiError(parsedError.data.message, {
         code: parsedError.data.code,
         status: response.status,
         correlationId: parsedError.data.correlationId ?? correlationId,
@@ -422,7 +422,7 @@ async function requestBlob(
         details: parsedError.data.details,
       })
     }
-    throw new RelayApiError(`Relay API request failed with status ${response.status}.`, {
+    throw new CosmosApiError(`Cosmos API request failed with status ${response.status}.`, {
       code: 'HTTP_ERROR', status: response.status, correlationId, retryable: response.status >= 500,
     })
   }
@@ -509,7 +509,7 @@ function filePath(organizationId: string, spaceId: string, fileId: string) {
   return `${filesPath(organizationId, spaceId)}/${encodeURIComponent(fileId)}`
 }
 
-function fileListPath(path: string, options: RelayFileListOptions) {
+function fileListPath(path: string, options: CosmosFileListOptions) {
   const query = new URLSearchParams({ scope: options.scope })
   if (options.cursor) query.set('cursor', options.cursor)
   if (options.limit !== undefined) query.set('limit', String(options.limit))
@@ -520,7 +520,7 @@ function fileListPath(path: string, options: RelayFileListOptions) {
   return `${path}?${query.toString()}`
 }
 
-function catalogListPath(path: string, options: RelayCatalogListOptions | undefined) {
+function catalogListPath(path: string, options: CosmosCatalogListOptions | undefined) {
   const query = new URLSearchParams()
   if (options?.cursor) query.set('cursor', options.cursor)
   if (options?.limit !== undefined) query.set('limit', String(options.limit))
@@ -528,7 +528,7 @@ function catalogListPath(path: string, options: RelayCatalogListOptions | undefi
   return value ? `${path}?${value}` : path
 }
 
-function approvalListPath(path: string, options: RelayApprovalListOptions | undefined) {
+function approvalListPath(path: string, options: CosmosApprovalListOptions | undefined) {
   const query = new URLSearchParams()
   if (options?.cursor) query.set('cursor', options.cursor)
   if (options?.limit !== undefined) query.set('limit', String(options.limit))
@@ -539,7 +539,7 @@ function approvalListPath(path: string, options: RelayApprovalListOptions | unde
   return value ? `${path}?${value}` : path
 }
 
-function sessionListPath(path: string, options: RelaySessionListOptions | undefined) {
+function sessionListPath(path: string, options: CosmosSessionListOptions | undefined) {
   const query = new URLSearchParams()
   if (options?.cursor) query.set('cursor', options.cursor)
   if (options?.limit !== undefined) query.set('limit', String(options.limit))
@@ -557,7 +557,7 @@ function encodeBase64UrlJson(value: unknown) {
   return window.btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '')
 }
 
-function eventListPath(path: string, options: RelaySessionEventListOptions | undefined) {
+function eventListPath(path: string, options: CosmosSessionEventListOptions | undefined) {
   const query = new URLSearchParams()
   if (options?.cursor) query.set('cursor', encodeBase64UrlJson(options.cursor))
   if (options?.limit !== undefined) query.set('limit', String(options.limit))
@@ -571,7 +571,7 @@ function eventStreamPath(path: string, cursor: SessionEventCursor | undefined) {
   return `${path}?${query.toString()}`
 }
 
-function messageListPath(path: string, options: RelaySessionMessageListOptions | undefined) {
+function messageListPath(path: string, options: CosmosSessionMessageListOptions | undefined) {
   const query = new URLSearchParams()
   if (options?.cursor) {
     query.set('cursor', typeof options.cursor === 'string'
@@ -601,7 +601,7 @@ function assertControlPlaneScope(
     || resource.spaceId !== spaceId
     || (resourceId !== undefined && resource.id !== resourceId)
   ) {
-    throw new RelayApiError(`Relay API returned an ${resourceType} outside the requested scope.`, {
+    throw new CosmosApiError(`Cosmos API returned an ${resourceType} outside the requested scope.`, {
       code: 'INVALID_RESPONSE', status: 200,
     })
   }
@@ -618,7 +618,7 @@ function assertSessionScope(
     || session.spaceId !== spaceId
     || (sessionId !== undefined && session.id !== sessionId)
   ) {
-    throw new RelayApiError('Relay API returned a Session outside the requested scope.', {
+    throw new CosmosApiError('Cosmos API returned a Session outside the requested scope.', {
       code: 'INVALID_RESPONSE', status: 200,
     })
   }
@@ -635,7 +635,7 @@ function assertSessionTimelineScope(
     || page.spaceId !== spaceId
     || page.sessionId !== sessionId
   ) {
-    throw new RelayApiError('Relay API returned a Session timeline outside the requested scope.', {
+    throw new CosmosApiError('Cosmos API returned a Session timeline outside the requested scope.', {
       code: 'INVALID_RESPONSE', status: 200,
     })
   }
@@ -646,7 +646,7 @@ export function createSession(
   spaceId: string,
   input: CreateSessionRequestInput,
   idempotencyKey: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ): Promise<CreateSessionResponse> {
   return request(sessionsPath(organizationId, spaceId), {
     method: 'POST',
@@ -658,8 +658,8 @@ export function createSession(
 export function listSessions(
   organizationId: string,
   spaceId: string,
-  auth?: RelayApiAuthContext,
-  options?: RelaySessionListOptions,
+  auth?: CosmosApiAuthContext,
+  options?: CosmosSessionListOptions,
 ): Promise<SessionListResponse> {
   const path = sessionListPath(sessionsPath(organizationId, spaceId), options)
   if (!auth?.requestIdentity) return loadSessions(path, organizationId, spaceId, auth)
@@ -678,7 +678,7 @@ function loadSessions(
   path: string,
   organizationId: string,
   spaceId: string,
-  auth: RelayApiAuthContext | undefined,
+  auth: CosmosApiAuthContext | undefined,
 ) {
   return request(path, {
     method: 'GET',
@@ -693,7 +693,7 @@ export function getSession(
   organizationId: string,
   spaceId: string,
   sessionId: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
   signal?: AbortSignal,
 ): Promise<SessionDto> {
   return request(sessionPath(organizationId, spaceId, sessionId), {
@@ -719,7 +719,7 @@ function assertAdvisorPlanScope(
     || plan.sessionId !== sessionId
     || (planId !== undefined && plan.id !== planId)
   ) {
-    throw new RelayApiError('Relay API returned an Advisor plan outside the requested scope.', {
+    throw new CosmosApiError('Cosmos API returned an Advisor plan outside the requested scope.', {
       code: 'INVALID_RESPONSE', status: 200,
     })
   }
@@ -729,7 +729,7 @@ export function listAdvisorPlans(
   organizationId: string,
   spaceId: string,
   sessionId: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
   signal?: AbortSignal,
 ): Promise<AdvisorPlanListResponse> {
   return request(advisorPlansPath(organizationId, spaceId, sessionId), {
@@ -740,7 +740,7 @@ export function listAdvisorPlans(
       || response.spaceId !== spaceId
       || response.sessionId !== sessionId
     ) {
-      throw new RelayApiError('Relay API returned Advisor plans outside the requested scope.', {
+      throw new CosmosApiError('Cosmos API returned Advisor plans outside the requested scope.', {
         code: 'INVALID_RESPONSE', status: 200,
       })
     }
@@ -754,7 +754,7 @@ export function getAdvisorPlan(
   spaceId: string,
   sessionId: string,
   planId: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
   signal?: AbortSignal,
 ): Promise<AdvisorPlanDto> {
   return request(advisorPlanPath(organizationId, spaceId, sessionId, planId), {
@@ -773,7 +773,7 @@ export function decideAdvisorPlan(
   decision: AdvisorPlanDecisionRequestInput,
   version: number,
   idempotencyKey: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ): Promise<AdvisorPlanDto> {
   return request(`${advisorPlanPath(organizationId, spaceId, sessionId, planId)}/decision`, {
     method: 'POST',
@@ -795,7 +795,7 @@ export function retryAdvisorPlan(
   planId: string,
   version: number,
   idempotencyKey: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ): Promise<AdvisorPlanDto> {
   return request(`${advisorPlanPath(organizationId, spaceId, sessionId, planId)}/retry`, {
     method: 'POST',
@@ -814,9 +814,9 @@ export function listSessionWorkers(
   organizationId: string,
   spaceId: string,
   sessionId: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
   signal?: AbortSignal,
-  options?: RelayCatalogListOptions,
+  options?: CosmosCatalogListOptions,
 ): Promise<SessionWorkerListResponse> {
   return request(catalogListPath(`${sessionPath(organizationId, spaceId, sessionId)}/workers`, options), {
     method: 'GET',
@@ -828,7 +828,7 @@ export function listSessionWorkers(
       || response.spaceId !== spaceId
       || response.sessionId !== sessionId
     ) {
-      throw new RelayApiError('Relay API returned Session Workers outside the requested scope.', {
+      throw new CosmosApiError('Cosmos API returned Session Workers outside the requested scope.', {
         code: 'INVALID_RESPONSE', status: 200,
       })
     }
@@ -847,7 +847,7 @@ function assertFileScope(
     || (file.scope === 'workspace' && file.spaceId !== requestedSpaceId)
     || (fileId !== undefined && file.id !== fileId)
   ) {
-    throw new RelayApiError('Relay API returned a File outside the requested scope.', {
+    throw new CosmosApiError('Cosmos API returned a File outside the requested scope.', {
       code: 'INVALID_RESPONSE', status: 200,
     })
   }
@@ -856,8 +856,8 @@ function assertFileScope(
 export function listFiles(
   organizationId: string,
   spaceId: string,
-  options: RelayFileListOptions,
-  auth?: RelayApiAuthContext,
+  options: CosmosFileListOptions,
+  auth?: CosmosApiAuthContext,
   signal?: AbortSignal,
 ): Promise<FileListResponse> {
   return request(fileListPath(filesPath(organizationId, spaceId), options), {
@@ -871,7 +871,7 @@ export function listFiles(
       || (options.scope !== 'user' && response.ownerUserId !== null)
       || (options.ownerUserId !== undefined && response.ownerUserId !== options.ownerUserId)
     ) {
-      throw new RelayApiError('Relay API returned a File page outside the requested scope.', {
+      throw new CosmosApiError('Cosmos API returned a File page outside the requested scope.', {
         code: 'INVALID_RESPONSE', status: 200,
       })
     }
@@ -884,7 +884,7 @@ export function getFile(
   organizationId: string,
   spaceId: string,
   fileId: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
   signal?: AbortSignal,
 ): Promise<FileDto> {
   return request(filePath(organizationId, spaceId, fileId), {
@@ -899,9 +899,9 @@ export function listFileVersions(
   organizationId: string,
   spaceId: string,
   fileId: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
   signal?: AbortSignal,
-  options?: RelayCatalogListOptions,
+  options?: CosmosCatalogListOptions,
 ): Promise<FileVersionListResponse> {
   return request(catalogListPath(`${filePath(organizationId, spaceId, fileId)}/versions`, options), {
     method: 'GET', headers: { Accept: 'application/json' }, signal,
@@ -911,7 +911,7 @@ export function listFileVersions(
       || response.requestedSpaceId !== spaceId
       || response.fileId !== fileId
     ) {
-      throw new RelayApiError('Relay API returned File versions outside the requested scope.', {
+      throw new CosmosApiError('Cosmos API returned File versions outside the requested scope.', {
         code: 'INVALID_RESPONSE', status: 200,
       })
     }
@@ -923,7 +923,7 @@ export function getFileContent(
   organizationId: string,
   spaceId: string,
   fileId: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
   signal?: AbortSignal,
   options?: { version?: number; disposition?: 'inline' | 'attachment' },
 ) {
@@ -947,7 +947,7 @@ function assertApprovalScope(
     || approval.spaceId !== spaceId
     || (approvalId !== undefined && approval.id !== approvalId)
   ) {
-    throw new RelayApiError('Relay API returned an Approval outside the requested scope.', {
+    throw new CosmosApiError('Cosmos API returned an Approval outside the requested scope.', {
       code: 'INVALID_RESPONSE', status: 200,
     })
   }
@@ -956,15 +956,15 @@ function assertApprovalScope(
 export function listApprovals(
   organizationId: string,
   spaceId: string,
-  options?: RelayApprovalListOptions,
-  auth?: RelayApiAuthContext,
+  options?: CosmosApprovalListOptions,
+  auth?: CosmosApiAuthContext,
   signal?: AbortSignal,
 ): Promise<ApprovalListResponse> {
   return request(approvalListPath(approvalsPath(organizationId, spaceId), options), {
     method: 'GET', headers: { Accept: 'application/json' }, signal,
   }, ApprovalListResponseSchema, auth).then((response) => {
     if (response.organizationId !== organizationId || response.spaceId !== spaceId) {
-      throw new RelayApiError('Relay API returned an Approval page outside the requested scope.', {
+      throw new CosmosApiError('Cosmos API returned an Approval page outside the requested scope.', {
         code: 'INVALID_RESPONSE', status: 200,
       })
     }
@@ -977,7 +977,7 @@ export function getApproval(
   organizationId: string,
   spaceId: string,
   approvalId: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
   signal?: AbortSignal,
 ): Promise<ApprovalDto> {
   return request(approvalPath(organizationId, spaceId, approvalId), {
@@ -995,7 +995,7 @@ export function decideApproval(
   decision: ApprovalDecisionRequestInput,
   version: number,
   idempotencyKey: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ): Promise<ApprovalDto> {
   return request(`${approvalPath(organizationId, spaceId, approvalId)}/decision`, {
     method: 'POST',
@@ -1018,7 +1018,7 @@ export function renameSession(
   sessionId: string,
   title: string,
   version: number,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ): Promise<SessionDto> {
   return request(sessionPath(organizationId, spaceId, sessionId), {
     method: 'PATCH',
@@ -1041,7 +1041,7 @@ function setSessionArchived(
   action: 'archive' | 'restore',
   version: number,
   idempotencyKey: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ): Promise<SessionDto> {
   return request(`${sessionPath(organizationId, spaceId, sessionId)}/${action}`, {
     method: 'POST',
@@ -1062,7 +1062,7 @@ export function archiveSession(
   sessionId: string,
   version: number,
   idempotencyKey: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ) {
   return setSessionArchived(
     organizationId, spaceId, sessionId, 'archive', version, idempotencyKey, auth,
@@ -1075,7 +1075,7 @@ export function restoreSession(
   sessionId: string,
   version: number,
   idempotencyKey: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ) {
   return setSessionArchived(
     organizationId, spaceId, sessionId, 'restore', version, idempotencyKey, auth,
@@ -1090,7 +1090,7 @@ function controlSession(
   version: number,
   idempotencyKey: string,
   reason: string | undefined,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ): Promise<SessionControlResponse> {
   const hasBody = action === 'cancel' && reason !== undefined
   return request(`${sessionPath(organizationId, spaceId, sessionId)}/${action}`, {
@@ -1114,7 +1114,7 @@ export function pauseSession(
   sessionId: string,
   version: number,
   idempotencyKey: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ) {
   return controlSession(
     organizationId, spaceId, sessionId, 'pause', version, idempotencyKey, undefined, auth,
@@ -1127,7 +1127,7 @@ export function resumeSession(
   sessionId: string,
   version: number,
   idempotencyKey: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ) {
   return controlSession(
     organizationId, spaceId, sessionId, 'resume', version, idempotencyKey, undefined, auth,
@@ -1141,7 +1141,7 @@ export function cancelSession(
   version: number,
   idempotencyKey: string,
   reason: string | undefined,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ) {
   return controlSession(
     organizationId, spaceId, sessionId, 'cancel', version, idempotencyKey, reason, auth,
@@ -1155,7 +1155,7 @@ export function retrySessionTurn(
   turnId: string,
   version: number,
   idempotencyKey: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ): Promise<RetryTurnResponse> {
   return request(`${sessionPath(organizationId, spaceId, sessionId)}/turns/${encodeURIComponent(turnId)}/retry`, {
     method: 'POST',
@@ -1167,7 +1167,7 @@ export function retrySessionTurn(
   }, RetryTurnResponseSchema, auth).then((response) => {
     assertSessionScope(response.session, organizationId, spaceId, sessionId)
     if (response.attempt.sessionId !== sessionId || response.attempt.turnId !== turnId) {
-      throw new RelayApiError('The retry response scope does not match the requested Turn.', {
+      throw new CosmosApiError('The retry response scope does not match the requested Turn.', {
         code: 'INVALID_RESPONSE',
       })
     }
@@ -1181,7 +1181,7 @@ export function startSession(
   sessionId: string,
   version: number,
   idempotencyKey: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ): Promise<StartSessionResponse> {
   return request(`${sessionPath(organizationId, spaceId, sessionId)}/start`, {
     method: 'POST',
@@ -1196,7 +1196,7 @@ export function startSession(
       response.turn.sessionId !== sessionId
       || response.command.resourceId !== response.turn.id
     ) {
-      throw new RelayApiError('Relay API returned a start result outside the requested Session.', {
+      throw new CosmosApiError('Cosmos API returned a start result outside the requested Session.', {
         code: 'INVALID_RESPONSE', status: 202,
       })
     }
@@ -1210,7 +1210,7 @@ export function sendSessionMessage(
   sessionId: string,
   input: MessageCreateInput,
   idempotencyKey: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ): Promise<SendSessionMessageResponse> {
   return request(`${sessionPath(organizationId, spaceId, sessionId)}/messages`, {
     method: 'POST',
@@ -1229,7 +1229,7 @@ export function sendSessionMessage(
       || response.command.type !== 'session.send'
       || response.command.resourceId !== response.turn.id
     ) {
-      throw new RelayApiError('Relay API returned a send result outside the requested Session.', {
+      throw new CosmosApiError('Cosmos API returned a send result outside the requested Session.', {
         code: 'INVALID_RESPONSE', status: 202,
       })
     }
@@ -1241,9 +1241,9 @@ export function listSessionMessages(
   organizationId: string,
   spaceId: string,
   sessionId: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
   signal?: AbortSignal,
-  options?: RelaySessionMessageListOptions,
+  options?: CosmosSessionMessageListOptions,
 ): Promise<SessionMessagePage> {
   return request(messageListPath(`${sessionPath(organizationId, spaceId, sessionId)}/messages`, options), {
     method: 'GET',
@@ -1259,9 +1259,9 @@ export function listSessionEvents(
   organizationId: string,
   spaceId: string,
   sessionId: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
   signal?: AbortSignal,
-  options?: RelaySessionEventListOptions,
+  options?: CosmosSessionEventListOptions,
 ): Promise<SessionEventPage> {
   return request(eventListPath(`${sessionPath(organizationId, spaceId, sessionId)}/events`, options), {
     method: 'GET',
@@ -1277,7 +1277,7 @@ function streamHttpError(response: Response, body: unknown) {
   const correlationId = getCorrelationId(response, body)
   const parsedError = ApiErrorSchema.safeParse(body)
   if (parsedError.success) {
-    return new RelayApiError(parsedError.data.message, {
+    return new CosmosApiError(parsedError.data.message, {
       code: parsedError.data.code,
       status: response.status,
       correlationId: parsedError.data.correlationId ?? correlationId,
@@ -1286,7 +1286,7 @@ function streamHttpError(response: Response, body: unknown) {
       details: parsedError.data.details,
     })
   }
-  return new RelayApiError(`Relay API request failed with status ${response.status}.`, {
+  return new CosmosApiError(`Cosmos API request failed with status ${response.status}.`, {
     code: 'HTTP_ERROR', status: response.status, correlationId, retryable: response.status >= 500,
   })
 }
@@ -1321,10 +1321,10 @@ export async function streamSessionEvents(
   organizationId: string,
   spaceId: string,
   sessionId: string,
-  auth: RelayApiAuthContext,
+  auth: CosmosApiAuthContext,
   signal: AbortSignal,
-  options: RelaySessionEventStreamOptions,
-): Promise<RelaySessionEventStreamResult> {
+  options: CosmosSessionEventStreamOptions,
+): Promise<CosmosSessionEventStreamResult> {
   const path = eventStreamPath(
     `${sessionPath(organizationId, spaceId, sessionId)}/events/stream`,
     options.lastEventId ? undefined : options.cursor,
@@ -1335,26 +1335,26 @@ export async function streamSessionEvents(
   const connectionTimeout = new AbortController()
   const connectionTimer = window.setTimeout(
     () => connectionTimeout.abort(),
-    RELAY_API_TIMEOUT_MS,
+    COSMOS_API_TIMEOUT_MS,
   )
   const connectionSignal = AbortSignal.any([signal, connectionTimeout.signal])
   let response: Response
   try {
-    response = await fetch(resolveRelayApiRequestUrl(path), {
+    response = await fetch(resolveCosmosApiRequestUrl(path), {
       method: 'GET', headers, signal: connectionSignal,
     })
   } catch (cause) {
     if (connectionTimeout.signal.aborted && !signal.aborted) {
-      throw new RelayApiError('The Relay API event stream connection timed out.', {
+      throw new CosmosApiError('The Cosmos API event stream connection timed out.', {
         code: 'REQUEST_TIMEOUT', retryable: true, cause,
       })
     }
     if (signal.aborted) {
-      throw new RelayApiError('The Relay API request was canceled.', {
+      throw new CosmosApiError('The Cosmos API request was canceled.', {
         code: 'REQUEST_CANCELED', retryable: true, cause,
       })
     }
-    throw new RelayApiError('Unable to reach the Relay API.', {
+    throw new CosmosApiError('Unable to reach the Cosmos API.', {
       code: 'NETWORK_ERROR', retryable: true, cause,
     })
   } finally {
@@ -1369,12 +1369,12 @@ export async function streamSessionEvents(
   }
   if (!response.headers.get('content-type')?.toLowerCase().includes('text/event-stream')) {
     await response.body?.cancel().catch(() => undefined)
-    throw new RelayApiError('Relay API returned an invalid event stream.', {
+    throw new CosmosApiError('Cosmos API returned an invalid event stream.', {
       code: 'INVALID_RESPONSE', status: response.status,
     })
   }
   if (!response.body) {
-    throw new RelayApiError('Relay API returned an empty event stream.', {
+    throw new CosmosApiError('Cosmos API returned an empty event stream.', {
       code: 'INVALID_RESPONSE', status: response.status,
     })
   }
@@ -1397,13 +1397,13 @@ export async function streamSessionEvents(
     try {
       value = JSON.parse(frame.data)
     } catch (cause) {
-      throw new RelayApiError('Relay API returned invalid event stream JSON.', {
+      throw new CosmosApiError('Cosmos API returned invalid event stream JSON.', {
         code: 'INVALID_RESPONSE', status: response.status, cause,
       })
     }
     const parsed = SessionEventDtoSchema.safeParse(value)
     if (!parsed.success || (frame.event !== undefined && frame.event !== parsed.data.type)) {
-      throw new RelayApiError('Relay API returned an invalid Session event.', {
+      throw new CosmosApiError('Cosmos API returned an invalid Session event.', {
         code: 'INVALID_RESPONSE', status: response.status,
       })
     }
@@ -1417,7 +1417,7 @@ export async function streamSessionEvents(
       if (chunk.done) break
       buffer = `${buffer}${decoder.decode(chunk.value, { stream: true })}`.replaceAll('\r\n', '\n')
       if (buffer.length > MAX_SSE_BUFFER_CHARACTERS) {
-        throw new RelayApiError('Relay API event stream exceeded the buffer limit.', {
+        throw new CosmosApiError('Cosmos API event stream exceeded the buffer limit.', {
           code: 'INVALID_RESPONSE', status: response.status,
         })
       }
@@ -1444,9 +1444,9 @@ export async function streamSessionEvents(
 export function listExperts(
   organizationId: string,
   spaceId: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
   signal?: AbortSignal,
-  options?: RelayCatalogListOptions,
+  options?: CosmosCatalogListOptions,
 ): Promise<ExpertListResponse> {
   return request(catalogListPath(expertsPath(organizationId, spaceId), options), {
     method: 'GET',
@@ -1462,14 +1462,14 @@ export function listExperts(
 
 export function listSpaces(
   organizationId: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
   signal?: AbortSignal,
 ): Promise<SpaceListResponse> {
   return request(spacesPath(organizationId), {
     method: 'GET', headers: { Accept: 'application/json' }, signal,
   }, SpaceListResponseSchema, auth).then((response) => {
     if (response.items.some((space) => space.organizationId !== organizationId)) {
-      throw new RelayApiError('Relay API returned a Space outside the requested Organization.', {
+      throw new CosmosApiError('Cosmos API returned a Space outside the requested Organization.', {
         code: 'INVALID_RESPONSE', status: 200,
       })
     }
@@ -1480,14 +1480,14 @@ export function listSpaces(
 export function getSpace(
   organizationId: string,
   spaceId: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
   signal?: AbortSignal,
 ): Promise<SpaceDto> {
   return request(spacePath(organizationId, spaceId), {
     method: 'GET', headers: { Accept: 'application/json' }, signal,
   }, SpaceDtoSchema, auth).then((space) => {
     if (space.organizationId !== organizationId || space.id !== spaceId) {
-      throw new RelayApiError('Relay API returned a Space outside the requested scope.', {
+      throw new CosmosApiError('Cosmos API returned a Space outside the requested scope.', {
         code: 'INVALID_RESPONSE', status: 200,
       })
     }
@@ -1499,7 +1499,7 @@ export function createSpace(
   organizationId: string,
   input: CreateSpaceRequestInput,
   idempotencyKey: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ): Promise<SpaceDto> {
   return request(spacesPath(organizationId), {
     method: 'POST',
@@ -1514,7 +1514,7 @@ export function updateSpace(
   input: UpdateSpaceRequestInput,
   version: number,
   idempotencyKey: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ): Promise<SpaceDto> {
   return request(spacePath(organizationId, spaceId), {
     method: 'PATCH',
@@ -1531,7 +1531,7 @@ export function setDefaultSpace(
   spaceId: string,
   version: number,
   idempotencyKey: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ): Promise<SpaceDto> {
   return request(`${spacePath(organizationId, spaceId)}/default`, {
     method: 'POST', headers: {
@@ -1544,7 +1544,7 @@ export function previewSpaceMigration(
   organizationId: string,
   spaceId: string,
   targetSpaceId: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
   signal?: AbortSignal,
 ): Promise<SpaceMigrationPreview> {
   const query = new URLSearchParams({ targetSpaceId }).toString()
@@ -1557,7 +1557,7 @@ export function getExpert(
   organizationId: string,
   spaceId: string,
   expertId: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
   signal?: AbortSignal,
 ): Promise<ExpertDetailDto> {
   return request(`${expertsPath(organizationId, spaceId)}/${encodeURIComponent(expertId)}`, {
@@ -1575,7 +1575,7 @@ export function createExpert(
   spaceId: string,
   input: CreateExpertRequestInput,
   idempotencyKey: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ): Promise<ExpertDetailDto> {
   return request(expertsPath(organizationId, spaceId), {
     method: 'POST',
@@ -1597,7 +1597,7 @@ export function updateExpert(
   expertId: string,
   input: UpdateExpertRequestInput,
   version: number,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ): Promise<ExpertDetailDto> {
   return request(`${expertsPath(organizationId, spaceId)}/${encodeURIComponent(expertId)}`, {
     method: 'PATCH',
@@ -1619,7 +1619,7 @@ export function publishExpert(
   expertId: string,
   version: number,
   idempotencyKey: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ): Promise<ExpertDetailDto> {
   return request(`${expertsPath(organizationId, spaceId)}/${encodeURIComponent(expertId)}/publish`, {
     method: 'POST',
@@ -1639,7 +1639,7 @@ export function disableExpert(
   spaceId: string,
   expertId: string,
   version: number,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ): Promise<ExpertDetailDto> {
   return request(`${expertsPath(organizationId, spaceId)}/${encodeURIComponent(expertId)}/disable`, {
     method: 'POST',
@@ -1661,7 +1661,7 @@ export function archiveExpert(
   spaceId: string,
   expertId: string,
   version: number,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ): Promise<void> {
   return request(`${expertsPath(organizationId, spaceId)}/${encodeURIComponent(expertId)}`, {
     method: 'DELETE',
@@ -1673,7 +1673,7 @@ export function listExpertRevisions(
   organizationId: string,
   spaceId: string,
   expertId: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
   signal?: AbortSignal,
 ): Promise<ExpertRevisionListResponse> {
   return request(`${expertsPath(organizationId, spaceId)}/${encodeURIComponent(expertId)}/revisions`, {
@@ -1682,7 +1682,7 @@ export function listExpertRevisions(
     signal,
   }, ExpertRevisionListResponseSchema, auth).then((response) => {
     if (response.items.some((revision) => revision.expertId !== expertId)) {
-      throw new RelayApiError('Relay API returned an Expert revision outside the requested scope.', {
+      throw new CosmosApiError('Cosmos API returned an Expert revision outside the requested scope.', {
         code: 'INVALID_RESPONSE', status: 200,
       })
     }
@@ -1693,9 +1693,9 @@ export function listExpertRevisions(
 export function listEnvironments(
   organizationId: string,
   spaceId: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
   signal?: AbortSignal,
-  options?: RelayCatalogListOptions,
+  options?: CosmosCatalogListOptions,
 ): Promise<EnvironmentListResponse> {
   return request(catalogListPath(environmentsPath(organizationId, spaceId), options), {
     method: 'GET',
@@ -1713,7 +1713,7 @@ export function getEnvironment(
   organizationId: string,
   spaceId: string,
   environmentId: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
   signal?: AbortSignal,
 ): Promise<EnvironmentDetailDto> {
   return request(`${environmentsPath(organizationId, spaceId)}/${encodeURIComponent(environmentId)}`, {
@@ -1731,7 +1731,7 @@ export function createEnvironment(
   spaceId: string,
   input: CreateEnvironmentRequestInput,
   idempotencyKey: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ): Promise<EnvironmentDetailDto> {
   return request(environmentsPath(organizationId, spaceId), {
     method: 'POST',
@@ -1754,7 +1754,7 @@ export function updateEnvironment(
   input: UpdateEnvironmentRequestInput,
   version: number,
   idempotencyKey: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ): Promise<EnvironmentDetailDto> {
   return request(`${environmentsPath(organizationId, spaceId)}/${encodeURIComponent(environmentId)}`, {
     method: 'PATCH',
@@ -1778,7 +1778,7 @@ function mutateEnvironmentStatus(
   environmentId: string,
   version: number,
   idempotencyKey: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ) {
   return request(`${environmentsPath(organizationId, spaceId)}/${encodeURIComponent(environmentId)}/${action}`, {
     method: 'POST',
@@ -1802,7 +1802,7 @@ export function archiveEnvironment(
   environmentId: string,
   version: number,
   idempotencyKey: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ): Promise<EnvironmentDetailDto> {
   return request(`${environmentsPath(organizationId, spaceId)}/${encodeURIComponent(environmentId)}`, {
     method: 'DELETE',
@@ -1821,7 +1821,7 @@ export function listEnvironmentRevisions(
   organizationId: string,
   spaceId: string,
   environmentId: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
   signal?: AbortSignal,
 ): Promise<EnvironmentRevisionListResponse> {
   return request(`${environmentsPath(organizationId, spaceId)}/${encodeURIComponent(environmentId)}/revisions`, {
@@ -1830,7 +1830,7 @@ export function listEnvironmentRevisions(
     signal,
   }, EnvironmentRevisionListResponseSchema, auth).then((response) => {
     if (response.items.some((revision) => revision.environmentId !== environmentId)) {
-      throw new RelayApiError('Relay API returned an Environment revision outside the requested scope.', {
+      throw new CosmosApiError('Cosmos API returned an Environment revision outside the requested scope.', {
         code: 'INVALID_RESPONSE', status: 200,
       })
     }
@@ -1841,7 +1841,7 @@ export function listEnvironmentRevisions(
 export function listAutomations(
   organizationId: string,
   spaceId: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
   signal?: AbortSignal,
 ): Promise<AutomationListResponse> {
   return request(automationsPath(organizationId, spaceId), {
@@ -1859,7 +1859,7 @@ export function createAutomation(
   spaceId: string,
   input: CreateAutomationRequestInput,
   idempotencyKey: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ): Promise<AutomationDto> {
   return request(automationsPath(organizationId, spaceId), {
     method: 'POST',
@@ -1881,7 +1881,7 @@ export function updateAutomation(
   input: UpdateAutomationRequestInput,
   version: number,
   idempotencyKey: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ): Promise<AutomationDto> {
   return request(`${automationsPath(organizationId, spaceId)}/${encodeURIComponent(automationId)}`, {
     method: 'PATCH',
@@ -1902,7 +1902,7 @@ export function archiveAutomation(
   automationId: string,
   version: number,
   idempotencyKey: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ): Promise<AutomationDto> {
   return request(`${automationsPath(organizationId, spaceId)}/${encodeURIComponent(automationId)}`, {
     method: 'DELETE',
@@ -1924,7 +1924,7 @@ export function testAutomation(
   input: TestAutomationRequest,
   version: number,
   idempotencyKey: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ): Promise<AutomationTestResult> {
   return request(`${automationsPath(organizationId, spaceId)}/${encodeURIComponent(automationId)}/test`, {
     method: 'POST',
@@ -1946,7 +1946,7 @@ function mutateAutomationStatus(
   automationId: string,
   version: number,
   idempotencyKey: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ): Promise<AutomationDto> {
   return request(`${automationsPath(organizationId, spaceId)}/${encodeURIComponent(automationId)}/${action}`, {
     method: 'POST',
@@ -1966,7 +1966,7 @@ export const pauseAutomation = mutateAutomationStatus.bind(undefined, 'pause')
 export function listAutomationEvents(
   organizationId: string,
   spaceId: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
   signal?: AbortSignal,
 ): Promise<AutomationEventListResponse> {
   return request(automationEventsPath(organizationId, spaceId), {
@@ -1978,7 +1978,7 @@ export function receiveAutomationEvent(
   organizationId: string,
   spaceId: string,
   input: ReceiveAutomationEventRequestInput,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
 ): Promise<AutomationEventReceipt> {
   return request(automationEventsPath(organizationId, spaceId), {
     method: 'POST',
@@ -1990,7 +1990,7 @@ export function receiveAutomationEvent(
 export function listAutomationRuns(
   organizationId: string,
   spaceId: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
   signal?: AbortSignal,
 ): Promise<AutomationRunListResponse> {
   return request(automationRunsPath(organizationId, spaceId), {
@@ -1998,7 +1998,7 @@ export function listAutomationRuns(
   }, AutomationRunListResponseSchema, auth)
 }
 
-export function getMe(auth?: RelayApiAuthContext): Promise<MeResponse> {
+export function getMe(auth?: CosmosApiAuthContext): Promise<MeResponse> {
   return request('/v1/me', {
     method: 'GET',
     headers: { Accept: 'application/json' },
@@ -2006,7 +2006,7 @@ export function getMe(auth?: RelayApiAuthContext): Promise<MeResponse> {
 }
 
 export function getRuntimeCapabilities(
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
   signal?: AbortSignal,
 ): Promise<RuntimeCapabilities> {
   return request('/v1/capabilities', {
@@ -2020,7 +2020,7 @@ export function getContextEngineStatus(
   organizationId: string,
   spaceId: string,
   repository: string,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
   signal?: AbortSignal,
 ): Promise<ContextEngineStatus> {
   const query = new URLSearchParams({ repository })
@@ -2035,7 +2035,7 @@ export function searchContextEngine(
   organizationId: string,
   spaceId: string,
   input: ContextSearchRequestInput,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
   signal?: AbortSignal,
 ): Promise<ContextSearchResponse> {
   return request(`${contextEnginePath(organizationId, spaceId)}/search`, {
@@ -2050,7 +2050,7 @@ export function packContextEngine(
   organizationId: string,
   spaceId: string,
   input: ContextPackRequestInput,
-  auth?: RelayApiAuthContext,
+  auth?: CosmosApiAuthContext,
   signal?: AbortSignal,
 ): Promise<ContextPackResponse> {
   return request(`${contextEnginePath(organizationId, spaceId)}/context`, {

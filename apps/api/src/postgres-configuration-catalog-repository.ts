@@ -18,7 +18,7 @@ import {
   type ExpertSummaryDto,
   type ExpertDraftRevisionDto,
   type ExpertPublishedRevisionDto,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 import type { Pool, PoolClient } from 'pg'
 import { queryWithApiDatabaseContext, withApiDatabaseContext } from './postgres-runtime-database.js'
 import type {
@@ -54,25 +54,25 @@ const accessCte = `
     SELECT
       (
         SELECT organization_membership.role
-        FROM relay_organization_memberships organization_membership
+        FROM cosmos_organization_memberships organization_membership
         WHERE organization_membership.organization_id = $1
           AND organization_membership.actor_id = $3
       ) AS organization_role,
       (
         SELECT space_membership.role
-        FROM relay_space_memberships space_membership
+        FROM cosmos_space_memberships space_membership
         WHERE space_membership.organization_id = $1
           AND space_membership.space_id = $2
           AND space_membership.actor_id = $3
       ) AS space_role
     WHERE EXISTS (
       SELECT 1
-      FROM relay_organization_memberships organization_membership
+      FROM cosmos_organization_memberships organization_membership
       WHERE organization_membership.organization_id = $1
         AND organization_membership.actor_id = $3
     ) AND EXISTS (
       SELECT 1
-      FROM relay_space_memberships space_membership
+      FROM cosmos_space_memberships space_membership
       WHERE space_membership.organization_id = $1
         AND space_membership.space_id = $2
         AND space_membership.actor_id = $3
@@ -333,7 +333,7 @@ async function selectEnvironmentDetail(
   }>(`
     SELECT id, organization_id, space_id, type, name, description, visibility,
       status, active_revision_id, latest_revision_id, version, created_at, updated_at
-    FROM relay_environments
+    FROM cosmos_environments
     WHERE organization_id = $1 AND space_id = $2 AND id = $3
   `, [organizationId, spaceId, environmentId])
   const environment = environmentResult.rows[0]
@@ -348,7 +348,7 @@ async function selectEnvironmentDetail(
     created_at: TimestampValue
   }>(`
     SELECT id, environment_id, revision, status, configuration, checksum, created_at
-    FROM relay_environment_revisions
+    FROM cosmos_environment_revisions
     WHERE organization_id = $1 AND space_id = $2 AND environment_id = $3
       AND id = ANY($4::text[])
   `, [
@@ -363,7 +363,7 @@ async function selectEnvironmentDetail(
     is_default: boolean
   }>(`
     SELECT environment_revision_id, repository_id, repository, base_branch, is_default
-    FROM relay_environment_revision_repositories
+    FROM cosmos_environment_revision_repositories
     WHERE organization_id = $1 AND space_id = $2 AND environment_id = $3
       AND environment_revision_id = ANY($4::text[])
     ORDER BY is_default DESC, repository_id
@@ -386,7 +386,7 @@ async function selectEnvironmentDetail(
   }>(`
     SELECT id, environment_revision_id, phase, progress, attempt, max_attempts,
       error_code, error_message, error_retryable, created_at, updated_at
-    FROM relay_environment_provisioning_jobs
+    FROM cosmos_environment_provisioning_jobs
     WHERE organization_id = $1 AND space_id = $2 AND environment_id = $3
     ORDER BY created_at DESC, id DESC LIMIT 100
   `, [organizationId, spaceId, environmentId])
@@ -470,8 +470,8 @@ async function selectExpertDetail(
 ) {
   const result = await client.query<ExpertRow>(`
     SELECT ${expertSummaryColumns}, ${expertDetailDraftColumns}
-    FROM relay_experts expert
-    LEFT JOIN relay_expert_revisions published_revision
+    FROM cosmos_experts expert
+    LEFT JOIN cosmos_expert_revisions published_revision
       ON published_revision.organization_id = expert.organization_id
       AND published_revision.space_id = expert.space_id
       AND published_revision.expert_id = expert.id
@@ -479,7 +479,7 @@ async function selectExpertDetail(
       AND published_revision.status = 'published'
     LEFT JOIN LATERAL (
       SELECT candidate.*
-      FROM relay_expert_revisions candidate
+      FROM cosmos_expert_revisions candidate
       WHERE candidate.organization_id = expert.organization_id
         AND candidate.space_id = expert.space_id
         AND candidate.expert_id = expert.id
@@ -633,7 +633,7 @@ function environmentConfiguration(value: unknown, fallbackSharing: 'private' | '
     ...configuration,
     image: typeof configuration.image === 'string'
       ? configuration.image
-      : 'ghcr.io/relay/runtime:stable',
+      : 'ghcr.io/cosmos/runtime:stable',
     variableReferences: Array.isArray(configuration.variableReferences)
       ? configuration.variableReferences
       : [],
@@ -770,8 +770,8 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
   ) {
     const result = await client.query(`
       SELECT 1
-      FROM relay_environments environment
-      JOIN relay_environment_revisions revision
+      FROM cosmos_environments environment
+      JOIN cosmos_environment_revisions revision
         ON revision.organization_id = environment.organization_id
         AND revision.space_id = environment.space_id
         AND revision.environment_id = environment.id
@@ -811,7 +811,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
     ])])
     const now = this.now()
     await client.query(`
-      DELETE FROM relay_control_plane_idempotency
+      DELETE FROM cosmos_control_plane_idempotency
       WHERE organization_id = $1 AND actor_id = $2 AND method = $3
         AND canonical_path = $4 AND idempotency_key_hash = $5 AND expires_at <= $6
     `, [
@@ -820,7 +820,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
     ])
     const existing = await client.query<{ request_hash: string; response_body: unknown }>(`
       SELECT request_hash, response_body
-      FROM relay_control_plane_idempotency
+      FROM cosmos_control_plane_idempotency
       WHERE organization_id = $1 AND actor_id = $2 AND method = $3
         AND canonical_path = $4 AND idempotency_key_hash = $5 AND expires_at > $6
     `, [
@@ -860,7 +860,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
     },
   ) {
     await client.query(`
-      INSERT INTO relay_control_plane_idempotency (
+      INSERT INTO cosmos_control_plane_idempotency (
         organization_id, space_id, actor_id, method, canonical_path,
         idempotency_key_hash, request_hash, status_code, response_body,
         response_headers, expires_at
@@ -892,7 +892,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
     ])])
     const now = this.now()
     await client.query(`
-      DELETE FROM relay_control_plane_idempotency
+      DELETE FROM cosmos_control_plane_idempotency
       WHERE organization_id = $1 AND actor_id = $2 AND method = $3
         AND canonical_path = $4 AND idempotency_key_hash = $5 AND expires_at <= $6
     `, [
@@ -901,7 +901,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
     ])
     const existing = await client.query<{ request_hash: string; response_body: unknown }>(`
       SELECT request_hash, response_body
-      FROM relay_control_plane_idempotency
+      FROM cosmos_control_plane_idempotency
       WHERE organization_id = $1 AND actor_id = $2 AND method = $3
         AND canonical_path = $4 AND idempotency_key_hash = $5 AND expires_at > $6
     `, [
@@ -941,7 +941,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
     },
   ) {
     await client.query(`
-      INSERT INTO relay_control_plane_idempotency (
+      INSERT INTO cosmos_control_plane_idempotency (
         organization_id, space_id, actor_id, method, canonical_path,
         idempotency_key_hash, request_hash, status_code, response_body,
         response_headers, expires_at
@@ -968,7 +968,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
     },
   ) {
     await client.query(`
-      INSERT INTO relay_environment_audit_events (
+      INSERT INTO cosmos_environment_audit_events (
         organization_id, space_id, id, environment_id, environment_revision_id,
         actor_id, action, result, resource_version, metadata, occurred_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'accepted', $8, $9::jsonb, $10)
@@ -992,7 +992,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
     const jobId = this.createId()
     const now = this.now().toISOString()
     await client.query(`
-      INSERT INTO relay_environment_provisioning_jobs (
+      INSERT INTO cosmos_environment_provisioning_jobs (
         organization_id, space_id, id, environment_id, environment_revision_id,
         status, phase, progress, available_at, created_at, updated_at, created_by
       ) VALUES ($1, $2, $3, $4, $5, 'queued', 'queued', 0, $6, $6, $6, $7)
@@ -1001,7 +1001,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
       input.environmentRevisionId, now, input.actorId,
     ])
     await client.query(`
-      INSERT INTO relay_environment_outbox_events (
+      INSERT INTO cosmos_environment_outbox_events (
         organization_id, space_id, id, environment_id, environment_revision_id,
         event_type, payload, occurred_at
       ) VALUES ($1, $2, $3, $4, $5, 'environment.provisioning.requested', $6::jsonb, $7)
@@ -1026,18 +1026,18 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
       SELECT EXISTS (
         SELECT 1
         FROM access
-        JOIN relay_environments environment
+        JOIN cosmos_environments environment
           ON environment.organization_id = $1
           AND environment.space_id = $2
           AND environment.status = 'ready'
           AND environment.active_revision_id IS NOT NULL
-        JOIN relay_environment_revisions active_revision
+        JOIN cosmos_environment_revisions active_revision
           ON active_revision.organization_id = environment.organization_id
           AND active_revision.space_id = environment.space_id
           AND active_revision.environment_id = environment.id
           AND active_revision.id = environment.active_revision_id
           AND active_revision.status = 'ready'
-        JOIN relay_environment_revision_repositories repository_binding
+        JOIN cosmos_environment_revision_repositories repository_binding
           ON repository_binding.organization_id = active_revision.organization_id
           AND repository_binding.space_id = active_revision.space_id
           AND repository_binding.environment_id = active_revision.environment_id
@@ -1067,8 +1067,8 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
       FROM access
       LEFT JOIN LATERAL (
         SELECT ${expertSummaryColumns}
-        FROM relay_experts expert
-        LEFT JOIN relay_expert_revisions published_revision
+        FROM cosmos_experts expert
+        LEFT JOIN cosmos_expert_revisions published_revision
           ON published_revision.organization_id = expert.organization_id
           AND published_revision.space_id = expert.space_id
           AND published_revision.expert_id = expert.id
@@ -1107,8 +1107,8 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
       FROM access
       LEFT JOIN LATERAL (
         SELECT ${expertSummaryColumns}, ${expertDetailDraftColumns}
-        FROM relay_experts expert
-        LEFT JOIN relay_expert_revisions published_revision
+        FROM cosmos_experts expert
+        LEFT JOIN cosmos_expert_revisions published_revision
           ON published_revision.organization_id = expert.organization_id
           AND published_revision.space_id = expert.space_id
           AND published_revision.expert_id = expert.id
@@ -1116,7 +1116,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
           AND published_revision.status = 'published'
         LEFT JOIN LATERAL (
           SELECT candidate.*
-          FROM relay_expert_revisions candidate
+          FROM cosmos_expert_revisions candidate
           WHERE candidate.organization_id = expert.organization_id
             AND candidate.space_id = expert.space_id
             AND candidate.expert_id = expert.id
@@ -1160,7 +1160,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
       const expertId = this.createId()
       const revisionId = this.createId()
       await client.query(`
-        INSERT INTO relay_experts (
+        INSERT INTO cosmos_experts (
           organization_id, space_id, id, name, description, visibility,
           status, created_by
         ) VALUES ($1, $2, $3, $4, $5, $6, 'draft', $7)
@@ -1169,7 +1169,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
         record.request.description, record.request.visibility, record.actorId,
       ])
       await client.query(`
-        INSERT INTO relay_expert_revisions (
+        INSERT INTO cosmos_expert_revisions (
           organization_id, space_id, expert_id, id, revision, status,
           environment_id, environment_revision_id, allow_repository_override,
           allow_base_branch_override, instructions, model, configuration, created_by
@@ -1207,7 +1207,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
         published_revision_id: string | null
       }>(`
         SELECT version, status, published_revision_id
-        FROM relay_experts
+        FROM cosmos_experts
         WHERE organization_id = $1 AND space_id = $2 AND id = $3
         FOR UPDATE
       `, [record.organizationId, record.spaceId, record.expertId])
@@ -1226,7 +1226,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
         environment_revision_id: string
       }>(`
         SELECT id, environment_id, environment_revision_id
-        FROM relay_expert_revisions
+        FROM cosmos_expert_revisions
         WHERE organization_id = $1 AND space_id = $2 AND expert_id = $3 AND status = 'draft'
         ORDER BY revision DESC LIMIT 1
       `, [record.organizationId, record.spaceId, record.expertId])
@@ -1236,19 +1236,19 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
         }
         const revisionId = this.createId()
         await client.query(`
-          INSERT INTO relay_expert_revisions (
+          INSERT INTO cosmos_expert_revisions (
             organization_id, space_id, expert_id, id, revision, status,
             environment_id, environment_revision_id, allow_repository_override,
             allow_base_branch_override, instructions, model, configuration, created_by
           )
           SELECT organization_id, space_id, expert_id, $4,
-            (SELECT max(revision) + 1 FROM relay_expert_revisions revisions
+            (SELECT max(revision) + 1 FROM cosmos_expert_revisions revisions
               WHERE revisions.organization_id = published.organization_id
                 AND revisions.space_id = published.space_id
                 AND revisions.expert_id = published.expert_id),
             'draft', environment_id, environment_revision_id, allow_repository_override,
             allow_base_branch_override, instructions, model, configuration, $5
-          FROM relay_expert_revisions published
+          FROM cosmos_expert_revisions published
           WHERE organization_id = $1 AND space_id = $2 AND expert_id = $3 AND id = $6
         `, [
           record.organizationId, record.spaceId, record.expertId, revisionId,
@@ -1260,7 +1260,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
           environment_revision_id: string
         }>(`
           SELECT id, environment_id, environment_revision_id
-          FROM relay_expert_revisions
+          FROM cosmos_expert_revisions
           WHERE organization_id = $1 AND space_id = $2 AND expert_id = $3 AND id = $4
         `, [record.organizationId, record.spaceId, record.expertId, revisionId])
       }
@@ -1280,7 +1280,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
         configurationPatch.launchGuidance = record.request.launchGuidance
       }
       await client.query(`
-        UPDATE relay_expert_revisions
+        UPDATE cosmos_expert_revisions
         SET environment_id = COALESCE($5, environment_id),
           environment_revision_id = COALESCE($6, environment_revision_id),
           allow_repository_override = COALESCE($7, allow_repository_override),
@@ -1300,7 +1300,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
         JSON.stringify(configurationPatch),
       ])
       await client.query(`
-        UPDATE relay_experts
+        UPDATE cosmos_experts
         SET name = COALESCE($4, name), description = COALESCE($5, description),
           visibility = COALESCE($6, visibility)
         WHERE organization_id = $1 AND space_id = $2 AND id = $3
@@ -1326,7 +1326,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
       })
       if (idempotency.replay) return { expert: idempotency.replay, replayed: true }
       const selected = await client.query<{ version: number; status: string }>(`
-        SELECT version, status FROM relay_experts
+        SELECT version, status FROM cosmos_experts
         WHERE organization_id = $1 AND space_id = $2 AND id = $3 FOR UPDATE
       `, [record.organizationId, record.spaceId, record.expertId])
       const target = selected.rows[0]
@@ -1343,7 +1343,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
         environment_revision_id: string
       }>(`
         SELECT id, environment_id, environment_revision_id
-        FROM relay_expert_revisions
+        FROM cosmos_expert_revisions
         WHERE organization_id = $1 AND space_id = $2 AND expert_id = $3 AND status = 'draft'
         ORDER BY revision DESC LIMIT 1
       `, [record.organizationId, record.spaceId, record.expertId])
@@ -1354,11 +1354,11 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
         revision.environment_id, revision.environment_revision_id,
       )
       await client.query(`
-        UPDATE relay_expert_revisions SET status = 'published'
+        UPDATE cosmos_expert_revisions SET status = 'published'
         WHERE organization_id = $1 AND space_id = $2 AND expert_id = $3 AND id = $4
       `, [record.organizationId, record.spaceId, record.expertId, revision.id])
       await client.query(`
-        UPDATE relay_experts SET status = 'published', published_revision_id = $4
+        UPDATE cosmos_experts SET status = 'published', published_revision_id = $4
         WHERE organization_id = $1 AND space_id = $2 AND id = $3
       `, [record.organizationId, record.spaceId, record.expertId, revision.id])
       const expert = await selectExpertDetail(
@@ -1389,7 +1389,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
         status: 'draft' | 'published' | 'disabled' | 'archived'
         published_revision_id: string | null
       }>(`
-        SELECT version, status, published_revision_id FROM relay_experts
+        SELECT version, status, published_revision_id FROM cosmos_experts
         WHERE organization_id = $1 AND space_id = $2 AND id = $3 FOR UPDATE
       `, [record.organizationId, record.spaceId, record.expertId])
       const target = selected.rows[0]
@@ -1407,7 +1407,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
         throw new ExpertStateConflictError('Only an Expert with a published revision can be disabled.')
       }
       await client.query(`
-        UPDATE relay_experts SET status = $4
+        UPDATE cosmos_experts SET status = $4
         WHERE organization_id = $1 AND space_id = $2 AND id = $3
       `, [record.organizationId, record.spaceId, record.expertId, nextStatus])
       return selectExpertDetail(client, record.organizationId, record.spaceId, record.expertId)
@@ -1436,7 +1436,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
           ${accessCte}
           SELECT expert.id
           FROM access
-          JOIN relay_experts expert ON expert.organization_id = $1 AND expert.space_id = $2
+          JOIN cosmos_experts expert ON expert.organization_id = $1 AND expert.space_id = $2
             AND expert.id = $4
             AND (expert.visibility = 'space' OR expert.created_by = $3)
             AND (expert.status = 'published'
@@ -1461,7 +1461,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
             allow_repository_override, allow_base_branch_override, instructions,
             configuration -> 'capabilities' AS capabilities,
             configuration ->> 'launchGuidance' AS launch_guidance, created_at
-          FROM relay_expert_revisions
+          FROM cosmos_expert_revisions
           WHERE organization_id = $1 AND space_id = $2 AND expert_id = $3
           ORDER BY revision DESC LIMIT 100
         `, [organizationId, spaceId, expertId])
@@ -1509,7 +1509,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
       })
       const checksum = environmentRevisionChecksum(configuration, record.request.repositoryBindings)
       await client.query(`
-        INSERT INTO relay_environments (
+        INSERT INTO cosmos_environments (
           organization_id, space_id, id, type, name, description, visibility,
           status, active_revision_id, latest_revision_id, created_by
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'provisioning', NULL, $8, $9)
@@ -1518,7 +1518,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
         record.request.name, record.request.description, visibility, revisionId, record.actorId,
       ])
       await client.query(`
-        INSERT INTO relay_environment_revisions (
+        INSERT INTO cosmos_environment_revisions (
           organization_id, space_id, environment_id, id, revision, status,
           configuration, checksum, created_by
         ) VALUES ($1, $2, $3, $4, 1, 'provisioning', $5::jsonb, $6, $7)
@@ -1528,7 +1528,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
       ])
       for (const binding of record.request.repositoryBindings) {
         await client.query(`
-          INSERT INTO relay_environment_revision_repositories (
+          INSERT INTO cosmos_environment_revision_repositories (
             organization_id, space_id, environment_id, environment_revision_id,
             repository_id, repository, base_branch, is_default
           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -1585,7 +1585,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
         visibility: 'private' | 'space'
       }>(`
         SELECT version, type, status, active_revision_id, latest_revision_id, visibility
-        FROM relay_environments
+        FROM cosmos_environments
         WHERE organization_id = $1 AND space_id = $2 AND id = $3 FOR UPDATE
       `, [record.organizationId, record.spaceId, record.environmentId])
       const target = selected.rows[0]
@@ -1595,7 +1595,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
       }
       if (target.status === 'archived') throw new EnvironmentStateConflictError('Archived Environments cannot be updated.')
       const activeJob = await client.query(`
-        SELECT 1 FROM relay_environment_provisioning_jobs
+        SELECT 1 FROM cosmos_environment_provisioning_jobs
         WHERE organization_id = $1 AND space_id = $2 AND environment_id = $3
           AND status IN ('queued', 'running')
       `, [record.organizationId, record.spaceId, record.environmentId])
@@ -1606,7 +1606,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
         revision: number
         configuration: unknown
       }>(`
-        SELECT revision, configuration FROM relay_environment_revisions
+        SELECT revision, configuration FROM cosmos_environment_revisions
         WHERE organization_id = $1 AND space_id = $2 AND environment_id = $3 AND id = $4
       `, [record.organizationId, record.spaceId, record.environmentId, target.latest_revision_id])
       const previous = previousRevision.rows[0]
@@ -1619,7 +1619,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
         is_default: boolean
       }>(`
         SELECT repository_id, repository, base_branch, is_default
-        FROM relay_environment_revision_repositories
+        FROM cosmos_environment_revision_repositories
         WHERE organization_id = $1 AND space_id = $2 AND environment_id = $3
           AND environment_revision_id = $4
         ORDER BY is_default DESC, repository_id
@@ -1653,7 +1653,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
       const revisionId = this.createId()
       const checksum = environmentRevisionChecksum(configuration, repositoryBindings)
       await client.query(`
-        INSERT INTO relay_environment_revisions (
+        INSERT INTO cosmos_environment_revisions (
           organization_id, space_id, environment_id, id, revision, status,
           configuration, checksum, created_by
         ) VALUES ($1, $2, $3, $4, $5, 'provisioning', $6::jsonb, $7, $8)
@@ -1663,7 +1663,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
       ])
       for (const binding of repositoryBindings) {
         await client.query(`
-          INSERT INTO relay_environment_revision_repositories (
+          INSERT INTO cosmos_environment_revision_repositories (
             organization_id, space_id, environment_id, environment_revision_id,
             repository_id, repository, base_branch, is_default
           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -1673,7 +1673,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
         ])
       }
       await client.query(`
-        UPDATE relay_environments SET
+        UPDATE cosmos_environments SET
           name = COALESCE($4, name), description = COALESCE($5, description),
           visibility = $6, status = CASE WHEN active_revision_id IS NULL THEN 'provisioning' ELSE 'updating' END,
           latest_revision_id = $7
@@ -1718,7 +1718,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
         active_revision_id: string | null
         latest_revision_id: string
       }>(`
-        SELECT version, status, active_revision_id, latest_revision_id FROM relay_environments
+        SELECT version, status, active_revision_id, latest_revision_id FROM cosmos_environments
         WHERE organization_id = $1 AND space_id = $2 AND id = $3 FOR UPDATE
       `, [record.organizationId, record.spaceId, record.environmentId])
       const target = selected.rows[0]
@@ -1730,12 +1730,12 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
         throw new EnvironmentStateConflictError('Only a failed Environment can be retried.')
       }
       await client.query(`
-        UPDATE relay_environment_revisions SET status = 'provisioning'
+        UPDATE cosmos_environment_revisions SET status = 'provisioning'
         WHERE organization_id = $1 AND space_id = $2 AND environment_id = $3 AND id = $4
           AND status = 'failed'
       `, [record.organizationId, record.spaceId, record.environmentId, target.latest_revision_id])
       await client.query(`
-        UPDATE relay_environments SET status = CASE WHEN active_revision_id IS NULL THEN 'provisioning' ELSE 'updating' END
+        UPDATE cosmos_environments SET status = CASE WHEN active_revision_id IS NULL THEN 'provisioning' ELSE 'updating' END
         WHERE organization_id = $1 AND space_id = $2 AND id = $3
       `, [record.organizationId, record.spaceId, record.environmentId])
       await this.enqueueEnvironmentProvisioning(client, {
@@ -1773,7 +1773,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
         status: string
         latest_revision_id: string
       }>(`
-        SELECT version, status, latest_revision_id FROM relay_environments
+        SELECT version, status, latest_revision_id FROM cosmos_environments
         WHERE organization_id = $1 AND space_id = $2 AND id = $3 FOR UPDATE
       `, [record.organizationId, record.spaceId, record.environmentId])
       const target = selected.rows[0]
@@ -1787,9 +1787,9 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
       if (nextStatus === 'archived') {
         const references = await client.query<{ expert_count: number; session_count: number }>(`
           SELECT
-            (SELECT count(*)::integer FROM relay_expert_revisions
+            (SELECT count(*)::integer FROM cosmos_expert_revisions
               WHERE organization_id = $1 AND space_id = $2 AND environment_id = $3) AS expert_count,
-            (SELECT count(*)::integer FROM relay_sessions
+            (SELECT count(*)::integer FROM cosmos_sessions
               WHERE organization_id = $1 AND space_id = $2 AND environment_id = $3) AS session_count
         `, [record.organizationId, record.spaceId, record.environmentId])
         const counts = references.rows[0]
@@ -1801,7 +1801,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
       }
       const now = this.now().toISOString()
       await client.query(`
-        UPDATE relay_environment_provisioning_jobs SET status = 'canceled', phase = 'failed',
+        UPDATE cosmos_environment_provisioning_jobs SET status = 'canceled', phase = 'failed',
           progress = 100, error_code = 'environment_${operation}d',
           error_message = 'Provisioning was canceled because the Environment was ${operation}d.',
           error_retryable = false, completed_at = $4, updated_at = $4,
@@ -1810,11 +1810,11 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
           AND status IN ('queued', 'running')
       `, [record.organizationId, record.spaceId, record.environmentId, now])
       await client.query(`
-        UPDATE relay_environments SET status = $4
+        UPDATE cosmos_environments SET status = $4
         WHERE organization_id = $1 AND space_id = $2 AND id = $3
       `, [record.organizationId, record.spaceId, record.environmentId, nextStatus])
       await client.query(`
-        INSERT INTO relay_environment_outbox_events (
+        INSERT INTO cosmos_environment_outbox_events (
           organization_id, space_id, id, environment_id, environment_revision_id,
           event_type, payload, occurred_at
         ) VALUES ($1, $2, $3, $4, $5, $6, '{}'::jsonb, $7)
@@ -1855,7 +1855,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
   ): Promise<EnvironmentRevisionDto[] | null> {
     return withApiDatabaseContext(this.pool, { organizationId, spaceId, actorId }, async (client) => {
       const environment = await client.query(`
-        SELECT id FROM relay_environments
+        SELECT id FROM cosmos_environments
         WHERE organization_id = $1 AND space_id = $2 AND id = $3
       `, [organizationId, spaceId, environmentId])
       if (!environment.rows[0]) return null
@@ -1875,8 +1875,8 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
             'repositoryId', binding.repository_id, 'repository', binding.repository,
             'baseBranch', binding.base_branch, 'isDefault', binding.is_default
           ) ORDER BY binding.is_default DESC, binding.repository_id), '[]'::jsonb) AS repository_bindings
-        FROM relay_environment_revisions revision
-        LEFT JOIN relay_environment_revision_repositories binding
+        FROM cosmos_environment_revisions revision
+        LEFT JOIN cosmos_environment_revision_repositories binding
           ON binding.organization_id = revision.organization_id
           AND binding.space_id = revision.space_id
           AND binding.environment_id = revision.environment_id
@@ -1923,21 +1923,21 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
       FROM access
       LEFT JOIN LATERAL (
         SELECT ${environmentSummaryColumns}
-        FROM relay_environments environment
-        LEFT JOIN relay_environment_revisions active_revision
+        FROM cosmos_environments environment
+        LEFT JOIN cosmos_environment_revisions active_revision
           ON active_revision.organization_id = environment.organization_id
           AND active_revision.space_id = environment.space_id
           AND active_revision.environment_id = environment.id
           AND active_revision.id = environment.active_revision_id
           AND active_revision.status = 'ready'
-        LEFT JOIN relay_environment_revision_repositories default_repository
+        LEFT JOIN cosmos_environment_revision_repositories default_repository
           ON default_repository.organization_id = active_revision.organization_id
           AND default_repository.space_id = active_revision.space_id
           AND default_repository.environment_id = active_revision.environment_id
           AND default_repository.environment_revision_id = active_revision.id
           AND default_repository.is_default
         LEFT JOIN LATERAL (
-          SELECT job.* FROM relay_environment_provisioning_jobs job
+          SELECT job.* FROM cosmos_environment_provisioning_jobs job
           WHERE job.organization_id = environment.organization_id
             AND job.space_id = environment.space_id
             AND job.environment_id = environment.id
@@ -1987,21 +1987,21 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
       FROM access
       LEFT JOIN LATERAL (
         SELECT ${environmentSummaryColumns}
-        FROM relay_environments environment
-        LEFT JOIN relay_environment_revisions active_revision
+        FROM cosmos_environments environment
+        LEFT JOIN cosmos_environment_revisions active_revision
           ON active_revision.organization_id = environment.organization_id
           AND active_revision.space_id = environment.space_id
           AND active_revision.environment_id = environment.id
           AND active_revision.id = environment.active_revision_id
           AND active_revision.status = 'ready'
-        LEFT JOIN relay_environment_revision_repositories default_repository
+        LEFT JOIN cosmos_environment_revision_repositories default_repository
           ON default_repository.organization_id = active_revision.organization_id
           AND default_repository.space_id = active_revision.space_id
           AND default_repository.environment_id = active_revision.environment_id
           AND default_repository.environment_revision_id = active_revision.id
           AND default_repository.is_default
         LEFT JOIN LATERAL (
-          SELECT job.* FROM relay_environment_provisioning_jobs job
+          SELECT job.* FROM cosmos_environment_provisioning_jobs job
           WHERE job.organization_id = environment.organization_id
             AND job.space_id = environment.space_id
             AND job.environment_id = environment.id
@@ -2015,12 +2015,12 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
             OR (access.organization_role <> 'viewer' AND access.space_role <> 'viewer')
           )
       ) item ON true
-      LEFT JOIN relay_environment_revisions latest_revision
+      LEFT JOIN cosmos_environment_revisions latest_revision
         ON latest_revision.organization_id = item.organization_id
         AND latest_revision.space_id = item.space_id
         AND latest_revision.environment_id = item.id
         AND latest_revision.id = item.latest_revision_id
-      LEFT JOIN relay_environment_revision_repositories latest_binding
+      LEFT JOIN cosmos_environment_revision_repositories latest_binding
         ON latest_binding.organization_id = latest_revision.organization_id
         AND latest_binding.space_id = latest_revision.space_id
         AND latest_binding.environment_id = latest_revision.environment_id
@@ -2032,7 +2032,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
           'baseBranch', binding.base_branch,
           'isDefault', binding.is_default
         ) ORDER BY binding.is_default DESC, binding.repository_id), '[]'::jsonb) AS bindings
-        FROM relay_environment_revision_repositories binding
+        FROM cosmos_environment_revision_repositories binding
         WHERE binding.organization_id = item.organization_id
           AND binding.space_id = item.space_id
           AND binding.environment_id = item.id
@@ -2053,7 +2053,7 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
           'updatedAt', job.updated_at
         ) ORDER BY job.created_at DESC, job.id DESC), '[]'::jsonb) AS items
         FROM (
-          SELECT * FROM relay_environment_provisioning_jobs candidate
+          SELECT * FROM cosmos_environment_provisioning_jobs candidate
           WHERE candidate.organization_id = item.organization_id
             AND candidate.space_id = item.space_id
             AND candidate.environment_id = item.id

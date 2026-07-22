@@ -1,4 +1,4 @@
-import type { SessionWorkerDto, SessionWorkerStatus } from '@relay/contracts'
+import type { SessionWorkerDto, SessionWorkerStatus } from '@cosmos/contracts'
 
 export type SessionWorkerListCursor = {
   createdAt: string

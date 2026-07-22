@@ -5,7 +5,7 @@ import type {
   ContextPackResponse,
   ContextSearchRequestInput,
   ContextSearchResponse,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 
 const demoHits: ContextEngineHit[] = [
   {

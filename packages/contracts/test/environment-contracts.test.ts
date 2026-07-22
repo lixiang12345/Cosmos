@@ -20,7 +20,7 @@ const activeRevision = {
   environmentId: 'environment-commerce',
   revision: 3,
   status: 'ready',
-  image: 'ghcr.io/relay/runtime:stable',
+  image: 'ghcr.io/cosmos/runtime:stable',
   repositoryBindings: [defaultRepository],
   variableReferences: [],
   hooks: [],
@@ -59,7 +59,7 @@ const activeRevisionSummary = {
 
 const environmentSummary = {
   id: 'environment-commerce',
-  organizationId: 'organization-relay',
+  organizationId: 'organization-cosmos',
   spaceId: 'space-commerce',
   type: 'cloud',
   name: 'Commerce runtime',

@@ -1,4 +1,4 @@
-import { ArtifactTypeSchema, type ArtifactType } from '@relay/contracts'
+import { ArtifactTypeSchema, type ArtifactType } from '@cosmos/contracts'
 import type { ArtifactListCursor, ArtifactListOptions } from './artifact-repository.js'
 
 export type ArtifactListQuery = {

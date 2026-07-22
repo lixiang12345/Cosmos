@@ -23,9 +23,9 @@ import {
   type RetryTurnResponse,
   type SessionTurn,
   type SpaceRole,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 
-export type { OrganizationRole, SpaceRole } from '@relay/contracts'
+export type { OrganizationRole, SpaceRole } from '@cosmos/contracts'
 
 export type CreateSessionRecord = {
   organizationId: string

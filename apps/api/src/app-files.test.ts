@@ -1,4 +1,4 @@
-import type { FileDto, FileVersionDto, MeOrganization } from '@relay/contracts'
+import type { FileDto, FileVersionDto, MeOrganization } from '@cosmos/contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.js'
 import { createDevelopmentAuthenticator } from './auth.js'
@@ -6,7 +6,7 @@ import type { FileRepository } from './file-repository.js'
 import { ObjectStorageError } from './object-storage.js'
 import { InMemorySessionRepository } from './session-repository.js'
 
-const organizationId = 'relay'
+const organizationId = 'cosmos'
 const spaceId = 'platform'
 const actorId = 'user-1'
 const fileId = 'file-1'
@@ -47,7 +47,7 @@ const version: FileVersionDto = {
 
 const organizations: MeOrganization[] = [{
   id: organizationId,
-  name: 'Relay',
+  name: 'Cosmos',
   role: 'member',
   spaces: [{ id: spaceId, name: 'Platform', role: 'member' }],
 }]
@@ -197,7 +197,7 @@ describe('File API', () => {
   it('fails closed for Service Accounts before File repository access', async () => {
     const list = vi.fn<FileRepository['list']>()
     const app = createApp({
-      authenticate: async () => ({ id: actorId, kind: 'service_account', audience: 'relay-api' }),
+      authenticate: async () => ({ id: actorId, kind: 'service_account', audience: 'cosmos-api' }),
       fileRepository: repository({ list }),
       sessionRepository: new InMemorySessionRepository({
         actorOrganizations: { [actorId]: organizations },

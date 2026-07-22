@@ -7,7 +7,7 @@ import {
   type SessionEventPage,
   type SessionMessageDto,
   type SessionMessagePage,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 import type { Pool } from 'pg'
 import { queryWithApiDatabaseContext } from './postgres-runtime-database.js'
 import {
@@ -293,11 +293,11 @@ export class PostgresSessionTimelineRepository implements SessionTimelineReposit
       `
       WITH access AS (
         SELECT session.id AS session_id
-        FROM relay_sessions session
-        JOIN relay_organization_memberships organization_membership
+        FROM cosmos_sessions session
+        JOIN cosmos_organization_memberships organization_membership
           ON organization_membership.organization_id = session.organization_id
           AND organization_membership.actor_id = $4
-        JOIN relay_space_memberships space_membership
+        JOIN cosmos_space_memberships space_membership
           ON space_membership.organization_id = session.organization_id
           AND space_membership.space_id = session.space_id
           AND space_membership.actor_id = $4
@@ -309,7 +309,7 @@ export class PostgresSessionTimelineRepository implements SessionTimelineReposit
             OR session.created_by = $4
             OR EXISTS (
               SELECT 1
-              FROM relay_session_share_grants share_grant
+              FROM cosmos_session_share_grants share_grant
               WHERE share_grant.organization_id = session.organization_id
                 AND share_grant.space_id = session.space_id
                 AND share_grant.session_id = session.id
@@ -320,7 +320,7 @@ export class PostgresSessionTimelineRepository implements SessionTimelineReposit
                   OR (
                     share_grant.principal_type = 'group'
                     AND EXISTS (
-                      SELECT 1 FROM relay_group_memberships group_membership
+                      SELECT 1 FROM cosmos_group_memberships group_membership
                       WHERE group_membership.organization_id = share_grant.organization_id
                         AND group_membership.group_id = share_grant.principal_id
                         AND group_membership.actor_id = $4
@@ -336,7 +336,7 @@ export class PostgresSessionTimelineRepository implements SessionTimelineReposit
         SELECT message.id, message.organization_id, message.space_id,
           message.session_id, message.sequence, message.role, message.actor_id,
           message.content, message.attachments, message.created_at
-        FROM relay_messages message
+        FROM cosmos_messages message
         WHERE message.organization_id = $1
           AND message.space_id = $2
           AND message.session_id = access.session_id
@@ -383,11 +383,11 @@ export class PostgresSessionTimelineRepository implements SessionTimelineReposit
       `
       WITH access AS (
         SELECT session.id AS session_id, session.last_event_sequence AS current_sequence
-        FROM relay_sessions session
-        JOIN relay_organization_memberships organization_membership
+        FROM cosmos_sessions session
+        JOIN cosmos_organization_memberships organization_membership
           ON organization_membership.organization_id = session.organization_id
           AND organization_membership.actor_id = $4
-        JOIN relay_space_memberships space_membership
+        JOIN cosmos_space_memberships space_membership
           ON space_membership.organization_id = session.organization_id
           AND space_membership.space_id = session.space_id
           AND space_membership.actor_id = $4
@@ -399,7 +399,7 @@ export class PostgresSessionTimelineRepository implements SessionTimelineReposit
             OR session.created_by = $4
             OR EXISTS (
               SELECT 1
-              FROM relay_session_share_grants share_grant
+              FROM cosmos_session_share_grants share_grant
               WHERE share_grant.organization_id = session.organization_id
                 AND share_grant.space_id = session.space_id
                 AND share_grant.session_id = session.id
@@ -410,7 +410,7 @@ export class PostgresSessionTimelineRepository implements SessionTimelineReposit
                   OR (
                     share_grant.principal_type = 'group'
                     AND EXISTS (
-                      SELECT 1 FROM relay_group_memberships group_membership
+                      SELECT 1 FROM cosmos_group_memberships group_membership
                       WHERE group_membership.organization_id = share_grant.organization_id
                         AND group_membership.group_id = share_grant.principal_id
                         AND group_membership.actor_id = $4
@@ -468,7 +468,7 @@ export class PostgresSessionTimelineRepository implements SessionTimelineReposit
             THEN event.payload->>'version' END AS file_version,
           CASE WHEN event.event_type = 'file.version.created'
             THEN event.payload->>'size' END AS file_size
-        FROM relay_session_events event
+        FROM cosmos_session_events event
         WHERE event.organization_id = $1
           AND event.space_id = $2
           AND event.session_id = access.session_id

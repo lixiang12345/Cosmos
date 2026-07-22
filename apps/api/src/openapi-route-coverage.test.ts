@@ -23,7 +23,7 @@ type Operation = {
   operationId?: string
   requestBody?: { content?: Record<string, MediaType> }
   responses?: Record<string, Response>
-  'x-relay-implementation-status'?: 'implemented' | 'partial'
+  'x-cosmos-implementation-status'?: 'implemented' | 'partial'
 }
 type PathItem = Partial<Record<HttpMethod, Operation>> & {
   parameters?: Reference[]
@@ -40,8 +40,8 @@ type OpenApiDocument = {
 function implementedOperations(document: OpenApiDocument) {
   return Object.entries(document.paths).flatMap(([path, pathItem]) => HTTP_METHODS.flatMap((method) => {
     const operation = pathItem[method]
-    return operation?.['x-relay-implementation-status'] === 'implemented'
-      || operation?.['x-relay-implementation-status'] === 'partial'
+    return operation?.['x-cosmos-implementation-status'] === 'implemented'
+      || operation?.['x-cosmos-implementation-status'] === 'partial'
       ? [{ method, operation, path, pathItem }]
       : []
   }))

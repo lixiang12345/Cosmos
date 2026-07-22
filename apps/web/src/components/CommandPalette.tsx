@@ -57,8 +57,8 @@ export function CommandPalette({
   const [activeIndex, setActiveIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const copy = locale === 'zh'
-    ? { title: '搜索 Relay', placeholder: '查找页面、会话或运行命令…', navigation: '导航与命令', sessions: '会话', empty: '没有匹配结果', newSession: '新建会话', manual: '手动创建', open: '打开' }
-    : { title: 'Search Relay', placeholder: 'Find a page, session, or command…', navigation: 'Navigation and commands', sessions: 'Sessions', empty: 'No matching results', newSession: 'New session', manual: 'Create manually', open: 'Open' }
+    ? { title: '搜索 Cosmos', placeholder: '查找页面、会话或运行命令…', navigation: '导航与命令', sessions: '会话', empty: '没有匹配结果', newSession: '新建会话', manual: '手动创建', open: '打开' }
+    : { title: 'Search Cosmos', placeholder: 'Find a page, session, or command…', navigation: 'Navigation and commands', sessions: 'Sessions', empty: 'No matching results', newSession: 'New session', manual: 'Create manually', open: 'Open' }
 
   const closePalette = useCallback(() => {
     setQuery('')

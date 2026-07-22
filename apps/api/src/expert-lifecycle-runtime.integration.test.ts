@@ -1,4 +1,4 @@
-import type { CreateExpertRequest } from '@relay/contracts'
+import type { CreateExpertRequest } from '@cosmos/contracts'
 import { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
@@ -26,7 +26,7 @@ const createRequest: CreateExpertRequest = {
 }
 
 describeWithDatabase('Expert lifecycle under the restricted API runtime role', () => {
-  const schema = `relay_expert_lifecycle_${crypto.randomUUID().replaceAll('-', '')}`
+  const schema = `cosmos_expert_lifecycle_${crypto.randomUUID().replaceAll('-', '')}`
   const adminPool = new Pool({ connectionString: databaseUrl })
   const migrationPool = new Pool({
     connectionString: databaseUrl,
@@ -35,7 +35,7 @@ describeWithDatabase('Expert lifecycle under the restricted API runtime role', (
   const apiPool = new Pool({
     connectionString: databaseUrl,
     max: 1,
-    options: `-c role=relay_api_runtime -c search_path=${schema}`,
+    options: `-c role=cosmos_api_runtime -c search_path=${schema}`,
   })
   const ids = ['expert-created', 'expert-revision-1', 'expert-revision-2']
   const repository = new PostgresConfigurationCatalogRepository(apiPool, {
@@ -47,41 +47,41 @@ describeWithDatabase('Expert lifecycle under the restricted API runtime role', (
     await adminPool.query(`CREATE SCHEMA ${schema}`)
     await runMigrations(migrationPool)
     await migrationPool.query(`
-      INSERT INTO relay_organizations (id, name) VALUES
+      INSERT INTO cosmos_organizations (id, name) VALUES
         ('expert-org-a', 'Expert Organization A'),
         ('expert-org-b', 'Expert Organization B');
-      INSERT INTO relay_spaces (organization_id, id, name) VALUES
+      INSERT INTO cosmos_spaces (organization_id, id, name) VALUES
         ('expert-org-a', 'expert-space', 'Expert Space'),
         ('expert-org-b', 'expert-space', 'Other Expert Space');
-      INSERT INTO relay_organization_memberships (organization_id, actor_id, role) VALUES
+      INSERT INTO cosmos_organization_memberships (organization_id, actor_id, role) VALUES
         ('expert-org-a', 'expert-owner', 'organization_owner'),
         ('expert-org-a', 'expert-member', 'member'),
         ('expert-org-b', 'expert-b-owner', 'organization_owner');
-      INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role) VALUES
+      INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role) VALUES
         ('expert-org-a', 'expert-space', 'expert-owner', 'space_manager'),
         ('expert-org-a', 'expert-space', 'expert-member', 'member'),
         ('expert-org-b', 'expert-space', 'expert-b-owner', 'space_manager');
-      INSERT INTO relay_environments (
+      INSERT INTO cosmos_environments (
         organization_id, space_id, id, name, status, created_by
       ) VALUES
         ('expert-org-a', 'expert-space', 'environment-ready', 'Ready Environment', 'draft', 'expert-owner'),
         ('expert-org-b', 'expert-space', 'environment-ready', 'Other Environment', 'draft', 'expert-b-owner');
-      INSERT INTO relay_environment_revisions (
+      INSERT INTO cosmos_environment_revisions (
         organization_id, space_id, environment_id, id, revision, status, created_by
       ) VALUES
         ('expert-org-a', 'expert-space', 'environment-ready', 'environment-revision-ready', 1, 'draft', 'expert-owner'),
         ('expert-org-b', 'expert-space', 'environment-ready', 'environment-revision-ready', 1, 'draft', 'expert-b-owner');
-      INSERT INTO relay_environment_revision_repositories (
+      INSERT INTO cosmos_environment_revision_repositories (
         organization_id, space_id, environment_id, environment_revision_id,
         repository_id, repository, base_branch, is_default
       ) VALUES
         ('expert-org-a', 'expert-space', 'environment-ready', 'environment-revision-ready',
-          'repository-default', 'relay/platform', 'main', true),
+          'repository-default', 'cosmos/platform', 'main', true),
         ('expert-org-b', 'expert-space', 'environment-ready', 'environment-revision-ready',
           'repository-default', 'other/platform', 'main', true);
-      UPDATE relay_environment_revisions SET status = 'ready'
+      UPDATE cosmos_environment_revisions SET status = 'ready'
       WHERE id = 'environment-revision-ready';
-      UPDATE relay_environments SET status = 'ready', active_revision_id = 'environment-revision-ready'
+      UPDATE cosmos_environments SET status = 'ready', active_revision_id = 'environment-revision-ready'
       WHERE id = 'environment-ready';
     `)
   })
@@ -184,7 +184,7 @@ describeWithDatabase('Expert lifecycle under the restricted API runtime role', (
       apiPool,
       { organizationId: 'expert-org-a', spaceId: 'expert-space', actorId: 'expert-owner' },
       (client) => client.query(`
-        UPDATE relay_expert_revisions SET instructions = 'mutated'
+        UPDATE cosmos_expert_revisions SET instructions = 'mutated'
         WHERE id = 'expert-revision-1'
       `),
     )).rejects.toMatchObject({ code: '55000' })

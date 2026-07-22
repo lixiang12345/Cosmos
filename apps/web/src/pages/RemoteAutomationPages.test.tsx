@@ -4,7 +4,7 @@ import type {
   AutomationRunDto,
   ExpertSummaryDto,
   SessionDto,
-} from '@relay/contracts'
+} from '@cosmos/contracts'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -21,16 +21,16 @@ import {
   receiveAutomationEvent,
   testAutomation,
   updateAutomation,
-  type RelayApiAuthContext,
-} from '../services/relayApi'
+  type CosmosApiAuthContext,
+} from '../services/cosmosApi'
 import {
   RemoteAutomationEventLogPage,
   RemoteAutomationRunHistoryPage,
   RemoteAutomationsPage,
 } from './RemoteAutomationPages'
 
-vi.mock('../services/relayApi', async (importOriginal) => ({
-  ...await importOriginal<typeof import('../services/relayApi')>(),
+vi.mock('../services/cosmosApi', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../services/cosmosApi')>(),
   createAutomation: vi.fn(),
   archiveAutomation: vi.fn(),
   enableAutomation: vi.fn(),
@@ -46,7 +46,7 @@ vi.mock('../services/relayApi', async (importOriginal) => ({
 
 const organizationId = 'organization-a'
 const spaceId = 'space-a'
-const auth: RelayApiAuthContext = { accessToken: 'test-access-token' }
+const auth: CosmosApiAuthContext = { accessToken: 'test-access-token' }
 const now = '2026-07-22T08:00:00.000Z'
 
 const expert: ExpertSummaryDto = {
@@ -63,7 +63,7 @@ const expert: ExpertSummaryDto = {
     id: 'expert-revision-a',
     expertId: 'expert-a',
     revision: 1,
-    model: 'relay-default',
+    model: 'cosmos-default',
     environmentId: 'environment-a',
     environmentRevisionId: 'environment-revision-a',
     allowRepositoryOverride: false,
@@ -129,7 +129,7 @@ const session: SessionDto = {
   expertName: expert.name,
   expertVersion: 1,
   environmentId: 'environment-a',
-  repository: 'relay/platform',
+  repository: 'cosmos/platform',
   baseBranch: 'main',
   visibility: 'private',
   status: 'active',

@@ -35,7 +35,7 @@ const createSessionInput = {
 
 const sessionInput = {
   id: 'session-123',
-  organizationId: 'organization-relay',
+  organizationId: 'organization-cosmos',
   spaceId: 'space-commerce',
   title: createSessionInput.title,
   summary: createSessionInput.message.content,
@@ -175,7 +175,7 @@ describe('session contracts', () => {
       turnId: 'turn-1',
       number: 2,
       status: 'queued' as const,
-      model: 'relay-default',
+      model: 'cosmos-default',
       providerModel: null,
       runtimeId: null,
       failureCode: null,
@@ -233,7 +233,7 @@ describe('session contracts', () => {
       principalType: 'user', principalId: ' user-collaborator ', role: 'viewer',
     })).toEqual({ principalType: 'user', principalId: 'user-collaborator', role: 'viewer' })
     expect(CreateShareGrantRequestSchema.safeParse({
-      principalType: 'organization', principalId: 'relay', role: 'owner',
+      principalType: 'organization', principalId: 'cosmos', role: 'owner',
     }).success).toBe(false)
     expect(ShareGrantDtoSchema.parse(grant)).toEqual(grant)
     expect(ShareGrantDtoSchema.safeParse({
@@ -305,8 +305,8 @@ describe('identity discovery contract', () => {
   const response = {
     actor: { id: 'user-123', kind: 'user' },
     organizations: [{
-      id: 'organization-relay',
-      name: 'Relay Engineering',
+      id: 'organization-cosmos',
+      name: 'Cosmos Engineering',
       role: 'organization_admin',
       spaces: [{ id: 'space-platform', name: 'Platform', role: 'space_manager' }],
     }],

@@ -9,7 +9,7 @@ import {
 } from '../src/index.js'
 
 const file = {
-  organizationId: 'relay',
+  organizationId: 'cosmos',
   spaceId: null,
   id: 'file-1',
   scope: 'user',

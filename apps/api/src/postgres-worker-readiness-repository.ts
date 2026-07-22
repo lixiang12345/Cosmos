@@ -30,11 +30,11 @@ export class PostgresWorkerReadinessRepository implements WorkerReadinessReposit
   async recordHeartbeat(workerId: string, now?: Date): Promise<void> {
     requireWorkerId(workerId)
     const result = await this.pool.query(`
-      INSERT INTO relay_worker_heartbeats (worker_id, last_seen_at)
+      INSERT INTO cosmos_worker_heartbeats (worker_id, last_seen_at)
       VALUES ($1, COALESCE($2::timestamptz, clock_timestamp()))
       ON CONFLICT (worker_id) DO UPDATE
       SET last_seen_at = GREATEST(
-        relay_worker_heartbeats.last_seen_at,
+        cosmos_worker_heartbeats.last_seen_at,
         EXCLUDED.last_seen_at
       )
     `, [workerId, optionalTimestamp(now)])
@@ -43,7 +43,7 @@ export class PostgresWorkerReadinessRepository implements WorkerReadinessReposit
 
   async removeHeartbeat(workerId: string): Promise<void> {
     requireWorkerId(workerId)
-    await this.pool.query('DELETE FROM relay_worker_heartbeats WHERE worker_id = $1', [workerId])
+    await this.pool.query('DELETE FROM cosmos_worker_heartbeats WHERE worker_id = $1', [workerId])
   }
 
   async hasRecentHeartbeat(query: WorkerReadinessQuery): Promise<boolean> {
@@ -52,7 +52,7 @@ export class PostgresWorkerReadinessRepository implements WorkerReadinessReposit
     const result = await this.pool.query<{ ready: boolean }>(`
       SELECT EXISTS (
         SELECT 1
-        FROM relay_worker_heartbeats
+        FROM cosmos_worker_heartbeats
         WHERE ($1::text IS NULL OR worker_id = $1)
           AND last_seen_at >= COALESCE($2::timestamptz, clock_timestamp())
             - ($3::double precision * interval '1 millisecond')

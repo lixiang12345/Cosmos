@@ -1,6 +1,6 @@
 SET LOCAL lock_timeout = '5s';
 
-CREATE TABLE relay_security_audit_events (
+CREATE TABLE cosmos_security_audit_events (
   audit_event_id text PRIMARY KEY,
   request_id text NOT NULL UNIQUE
     CHECK (length(request_id) BETWEEN 1 AND 256),
@@ -37,38 +37,38 @@ CREATE TABLE relay_security_audit_events (
   )
 );
 
-CREATE INDEX relay_security_audit_events_occurred_idx
-  ON relay_security_audit_events (occurred_at DESC, audit_event_id DESC);
-CREATE INDEX relay_security_audit_events_actor_idx
-  ON relay_security_audit_events (actor_fingerprint, occurred_at DESC)
+CREATE INDEX cosmos_security_audit_events_occurred_idx
+  ON cosmos_security_audit_events (occurred_at DESC, audit_event_id DESC);
+CREATE INDEX cosmos_security_audit_events_actor_idx
+  ON cosmos_security_audit_events (actor_fingerprint, occurred_at DESC)
   WHERE actor_fingerprint IS NOT NULL;
 
-DROP TRIGGER IF EXISTS relay_security_audit_events_reject_update_delete
-  ON relay_security_audit_events;
-CREATE TRIGGER relay_security_audit_events_reject_update_delete
-  BEFORE UPDATE OR DELETE ON relay_security_audit_events
-  FOR EACH STATEMENT EXECUTE FUNCTION relay_reject_ledger_mutation();
+DROP TRIGGER IF EXISTS cosmos_security_audit_events_reject_update_delete
+  ON cosmos_security_audit_events;
+CREATE TRIGGER cosmos_security_audit_events_reject_update_delete
+  BEFORE UPDATE OR DELETE ON cosmos_security_audit_events
+  FOR EACH STATEMENT EXECUTE FUNCTION cosmos_reject_ledger_mutation();
 
-DROP TRIGGER IF EXISTS relay_security_audit_events_reject_truncate
-  ON relay_security_audit_events;
-CREATE TRIGGER relay_security_audit_events_reject_truncate
-  BEFORE TRUNCATE ON relay_security_audit_events
-  FOR EACH STATEMENT EXECUTE FUNCTION relay_reject_ledger_mutation();
+DROP TRIGGER IF EXISTS cosmos_security_audit_events_reject_truncate
+  ON cosmos_security_audit_events;
+CREATE TRIGGER cosmos_security_audit_events_reject_truncate
+  BEFORE TRUNCATE ON cosmos_security_audit_events
+  FOR EACH STATEMENT EXECUTE FUNCTION cosmos_reject_ledger_mutation();
 
-REVOKE ALL ON relay_security_audit_events FROM PUBLIC;
-GRANT INSERT ON relay_security_audit_events TO relay_api_runtime;
+REVOKE ALL ON cosmos_security_audit_events FROM PUBLIC;
+GRANT INSERT ON cosmos_security_audit_events TO cosmos_api_runtime;
 
-ALTER TABLE relay_security_audit_events ENABLE ROW LEVEL SECURITY;
-ALTER TABLE relay_security_audit_events FORCE ROW LEVEL SECURITY;
+ALTER TABLE cosmos_security_audit_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cosmos_security_audit_events FORCE ROW LEVEL SECURITY;
 
 DO $$
 BEGIN
   EXECUTE format(
-    'CREATE POLICY relay_migration_admin ON relay_security_audit_events TO %I USING (true) WITH CHECK (true)',
+    'CREATE POLICY cosmos_migration_admin ON cosmos_security_audit_events TO %I USING (true) WITH CHECK (true)',
     current_user
   );
 END;
 $$;
 
-CREATE POLICY relay_api_insert ON relay_security_audit_events
-  FOR INSERT TO relay_api_runtime WITH CHECK (true);
+CREATE POLICY cosmos_api_insert ON cosmos_security_audit_events
+  FOR INSERT TO cosmos_api_runtime WITH CHECK (true);

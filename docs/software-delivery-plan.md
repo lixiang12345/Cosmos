@@ -1,4 +1,4 @@
-# Relay 软件交付计划
+# Cosmos 软件交付计划
 
 > 文档状态：执行基线（Draft for implementation）  
 > 版本：1.0  
@@ -7,7 +7,7 @@
 
 ## 1. 交付目标
 
-用可回滚、可验证的增量，把现有本地 React 原型演进为领域关系正确、交互完整、可接真实后端的 Relay 产品原型。交付优先修正主流程和对象语义，不以页面数量或视觉相似度代替完成度。
+用可回滚、可验证的增量，把现有本地 React 原型演进为领域关系正确、交互完整、可接真实后端的 Cosmos 产品原型。交付优先修正主流程和对象语义，不以页面数量或视觉相似度代替完成度。
 
 ### 1.1 成功指标
 
@@ -23,7 +23,7 @@
 
 ## 2. 交付原则
 
-1. 证据先行：每项对标能力引用 `Official`、`Inferred` 或 `Relay extension`。
+1. 证据先行：每项对标能力引用 `Official`、`Inferred` 或 `Cosmos extension`。
 2. 垂直切片：每个里程碑包含 UI、状态、错误、权限、测试和文档，不交付孤立静态页面。
 3. 兼容迁移：旧 route/localStorage 通过适配层迁移，不在页面里双写两套模型。
 4. 小 PR：每个 PR 对应一个可验证目标，避免视觉、领域模型和大规模格式化混在一起。
@@ -135,7 +135,7 @@
 - Test event、Event Log payload/headers、幂等、匹配解释、Run History。
 - Space picker 真实状态、Default、默认 Expert/Environment、迁移预览。
 - Advisor 内置 Expert、普通 Session、plan/diff/confirm 与受控工具模拟。
-- Relay Approvals 按权限条件显示并写审计。
+- Cosmos Approvals 按权限条件显示并写审计。
 
 **退出条件**
 
@@ -194,7 +194,7 @@ Evidence/PRD
 ### 7.2 PR 模板最小内容
 
 - 变更目标和非目标。
-- 关联 `PRD-*` / `FE-*` ID 及 `Official/Inferred/Relay extension`。
+- 关联 `PRD-*` / `FE-*` ID 及 `Official/Inferred/Cosmos extension`。
 - UI 前后截图/视频（涉及视觉时）。
 - 测试命令和结果。
 - 数据/API/schema 兼容性。
@@ -268,7 +268,7 @@ Evidence/PRD
 
 ### 11.1 当前本地数据
 
-现有 `relay.sessions`、`relay.experts`、`relay.controlPlane.v1` 和 preference keys 只作为原型数据。迁移步骤：
+现有 `cosmos.sessions`、`cosmos.experts`、`cosmos.controlPlane.v1` 和 preference keys 只作为原型数据。迁移步骤：
 
 1. 读取旧 schema 并复制到内存，解析失败不覆盖原值。
 2. 将 `favorite` 映射为账户级 `pinned`；`archived` 保持独立属性。
@@ -305,7 +305,7 @@ Evidence/PRD
 - `trigger_projection_v2`
 - `space_migration`
 - `advisor_control_tools`
-- `relay_approvals`
+- `cosmos_approvals`
 
 Flag 必须有 owner、默认值、目标移除日期和组合测试；安全控制不能仅依赖前端 flag。
 

@@ -124,7 +124,7 @@ export function Sidebar({
   const copy = locale === 'zh'
     ? { files: '文件', automations: '自动化', configuration: '配置', pinned: '置顶', recent: '最近会话', expand: '展开导航', collapse: '收起导航', role: '已认证组织成员', signOut: '退出登录' }
     : { files: 'Files', automations: 'Automations', configuration: 'Configuration', pinned: 'Pinned', recent: 'Recent Sessions', expand: 'Expand navigation', collapse: 'Collapse navigation', role: 'Authenticated organization member', signOut: 'Sign out' }
-  const displayName = auth.displayName ?? auth.actorId ?? 'Relay user'
+  const displayName = auth.displayName ?? auth.actorId ?? 'Cosmos user'
   const avatar = Array.from(displayName.trim())[0]?.toLocaleUpperCase() ?? 'R'
   const toggleNavigationGroup = (setOpen: (update: (value: boolean) => boolean) => void) => {
     const compactDesktopRail = collapsed
@@ -143,9 +143,9 @@ export function Sidebar({
       <button type="button" className={`sidebar-scrim${open ? ' sidebar-scrim--visible' : ''}`} aria-label={t('common.close')} onClick={onClose} />
       <aside className={`sidebar sidebar--cosmos${open ? ' sidebar--open' : ''}${collapsed ? ' sidebar--collapsed' : ''}`}>
         <div className="sidebar__brand">
-          <NavLink to="/home" className="brand" onClick={onClose} aria-label="Relay">
+          <NavLink to="/home" className="brand" onClick={onClose} aria-label="Cosmos">
             <span className="brand__mark"><Orbit aria-hidden="true" /></span>
-            <span className="brand__copy"><strong>Relay</strong><small>Agent OS</small></span>
+            <span className="brand__copy"><strong>Cosmos</strong><small>Agent OS</small></span>
           </NavLink>
           <IconButton icon={X} label={t('common.close')} className="sidebar__mobile-close" onClick={onClose} />
         </div>

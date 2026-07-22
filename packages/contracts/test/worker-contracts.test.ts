@@ -6,7 +6,7 @@ import {
 import { describe, expect, it } from 'vitest'
 
 const worker: SessionWorkerDto = {
-  organizationId: 'relay',
+  organizationId: 'cosmos',
   spaceId: 'platform',
   sessionId: 'session-1',
   id: 'worker-1',

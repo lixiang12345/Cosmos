@@ -1,15 +1,15 @@
-import type { MeResponse } from '@relay/contracts'
+import type { MeResponse } from '@cosmos/contracts'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { StrictMode, useState } from 'react'
 import { AuthContext, type AuthContextValue } from '../auth/context'
 import { PreferencesProvider } from '../preferences'
-import { getMe } from '../services/relayApi'
+import { getMe } from '../services/cosmosApi'
 import { useWorkspace } from './context'
 import { WorkspaceGate } from './WorkspaceGate'
 import { WorkspaceProvider } from './WorkspaceProvider'
 
-vi.mock('../services/relayApi', () => ({ getMe: vi.fn() }))
+vi.mock('../services/cosmosApi', () => ({ getMe: vi.fn() }))
 
 const me: MeResponse = {
   actor: { id: 'user-a', kind: 'user' },
@@ -134,7 +134,7 @@ describe('WorkspaceProvider', () => {
   })
 
   it('honors only a persisted selection that still exists in the actor memberships', async () => {
-    window.localStorage.setItem('relay.workspace.selection.v1', JSON.stringify({
+    window.localStorage.setItem('cosmos.workspace.selection.v1', JSON.stringify({
       actorId: 'user-a', organizationId: 'organization-beta', spaceId: 'space-shared',
     }))
     vi.mocked(getMe).mockResolvedValue(me)
@@ -144,7 +144,7 @@ describe('WorkspaceProvider', () => {
   })
 
   it('rejects stale, cross-actor, and unauthorized persisted selections', async () => {
-    window.localStorage.setItem('relay.workspace.selection.v1', JSON.stringify({
+    window.localStorage.setItem('cosmos.workspace.selection.v1', JSON.stringify({
       actorId: 'user-b', organizationId: 'organization-hidden', spaceId: 'space-hidden',
     }))
     vi.mocked(getMe).mockResolvedValue(me)
@@ -193,7 +193,7 @@ describe('WorkspaceProvider', () => {
 
     await user.click(screen.getByRole('button', { name: 'Select Beta' }))
     expect(screen.getByTestId('selection')).toHaveTextContent('organization-beta:space-shared')
-    expect(JSON.parse(window.localStorage.getItem('relay.workspace.selection.v1') ?? '{}')).toEqual({
+    expect(JSON.parse(window.localStorage.getItem('cosmos.workspace.selection.v1') ?? '{}')).toEqual({
       actorId: 'user-a', organizationId: 'organization-beta', spaceId: 'space-shared',
     })
   })

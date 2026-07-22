@@ -98,12 +98,12 @@ verification=$(psql \
   --command="
     WITH required_tables(name, force_rls) AS (
       VALUES
-        ('relay_organizations', true),
-        ('relay_sessions', true),
-        ('relay_file_versions', true),
-        ('relay_organization_quotas', true),
-        ('relay_organization_rate_limit_windows', true),
-        ('relay_object_storage_gc_runs', false)
+        ('cosmos_organizations', true),
+        ('cosmos_sessions', true),
+        ('cosmos_file_versions', true),
+        ('cosmos_organization_quotas', true),
+        ('cosmos_organization_rate_limit_windows', true),
+        ('cosmos_object_storage_gc_runs', false)
     ), table_state AS (
       SELECT
         count(c.oid) FILTER (WHERE n.nspname = 'public') AS present_count,
@@ -120,18 +120,18 @@ verification=$(psql \
         ON n.oid = c.relnamespace
     )
     SELECT
-      (SELECT count(*) FROM relay_schema_migrations),
-      (SELECT max(version) FROM relay_schema_migrations),
+      (SELECT count(*) FROM cosmos_schema_migrations),
+      (SELECT max(version) FROM cosmos_schema_migrations),
       table_state.present_count,
       table_state.forced_rls_count,
-      has_table_privilege('relay_api_runtime', 'relay_sessions', 'SELECT')
-        AND has_table_privilege('relay_api_runtime', 'relay_file_versions', 'SELECT')
-        AND has_table_privilege('relay_api_runtime', 'relay_organization_quotas', 'SELECT'),
-      has_table_privilege('relay_worker_runtime', 'relay_organization_quotas', 'SELECT'),
-      (SELECT count(*) FROM relay_organizations organization
-        LEFT JOIN relay_organization_quotas quota ON quota.organization_id = organization.id
+      has_table_privilege('cosmos_api_runtime', 'cosmos_sessions', 'SELECT')
+        AND has_table_privilege('cosmos_api_runtime', 'cosmos_file_versions', 'SELECT')
+        AND has_table_privilege('cosmos_api_runtime', 'cosmos_organization_quotas', 'SELECT'),
+      has_table_privilege('cosmos_worker_runtime', 'cosmos_organization_quotas', 'SELECT'),
+      (SELECT count(*) FROM cosmos_organizations organization
+        LEFT JOIN cosmos_organization_quotas quota ON quota.organization_id = organization.id
         WHERE quota.organization_id IS NULL),
-      (SELECT count(*) FROM relay_file_versions
+      (SELECT count(*) FROM cosmos_file_versions
         WHERE (storage_backend = 'inline' AND (content IS NULL OR object_key IS NOT NULL))
           OR (storage_backend = 'object' AND (content IS NOT NULL OR object_key IS NULL)))
     FROM table_state

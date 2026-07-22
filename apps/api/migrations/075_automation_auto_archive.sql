@@ -1,18 +1,18 @@
 SET LOCAL lock_timeout = '5s';
 
-ALTER TABLE relay_sessions
+ALTER TABLE cosmos_sessions
   ADD COLUMN automation_auto_archive boolean,
   ADD COLUMN automation_auto_archived_at timestamptz;
 
-UPDATE relay_sessions
+UPDATE cosmos_sessions
 SET automation_auto_archive = false
 WHERE source = 'automation';
 
-ALTER TABLE relay_sessions
-  ADD CONSTRAINT relay_sessions_automation_snapshot_check CHECK (
+ALTER TABLE cosmos_sessions
+  ADD CONSTRAINT cosmos_sessions_automation_snapshot_check CHECK (
     (source = 'automation') = (automation_auto_archive IS NOT NULL)
   ),
-  ADD CONSTRAINT relay_sessions_automation_auto_archived_check CHECK (
+  ADD CONSTRAINT cosmos_sessions_automation_auto_archived_check CHECK (
     automation_auto_archived_at IS NULL
     OR (
       source = 'automation'
@@ -22,7 +22,7 @@ ALTER TABLE relay_sessions
     )
   );
 
-CREATE FUNCTION relay_protect_session_automation_snapshot() RETURNS trigger
+CREATE FUNCTION cosmos_protect_session_automation_snapshot() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
   IF TG_OP = 'UPDATE' AND NEW.automation_auto_archive IS DISTINCT FROM OLD.automation_auto_archive THEN
@@ -30,7 +30,7 @@ BEGIN
   END IF;
   IF TG_OP = 'UPDATE' AND NEW.automation_auto_archived_at IS DISTINCT FROM OLD.automation_auto_archived_at
     AND NOT (
-      current_user = 'relay_worker_runtime'
+      current_user = 'cosmos_worker_runtime'
       AND OLD.automation_auto_archived_at IS NULL
       AND OLD.archived_at IS NULL
       AND NEW.automation_auto_archived_at IS NOT NULL
@@ -46,6 +46,6 @@ BEGIN
 END;
 $$;
 
-CREATE TRIGGER relay_sessions_protect_automation_snapshot
-  BEFORE INSERT OR UPDATE ON relay_sessions
-  FOR EACH ROW EXECUTE FUNCTION relay_protect_session_automation_snapshot();
+CREATE TRIGGER cosmos_sessions_protect_automation_snapshot
+  BEFORE INSERT OR UPDATE ON cosmos_sessions
+  FOR EACH ROW EXECUTE FUNCTION cosmos_protect_session_automation_snapshot();

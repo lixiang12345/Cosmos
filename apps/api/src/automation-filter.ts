@@ -1,4 +1,4 @@
-import type { AutomationFilter } from '@relay/contracts'
+import type { AutomationFilter } from '@cosmos/contracts'
 
 const sensitiveKey = /authorization|cookie|token|secret|password|signature|api[-_]?key/i
 

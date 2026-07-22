@@ -4,7 +4,7 @@ import {
   type ControlPlaneState,
 } from './types'
 
-export const CONTROL_PLANE_STORAGE_KEY = 'relay.controlPlane.v1'
+export const CONTROL_PLANE_STORAGE_KEY = 'cosmos.controlPlane.v1'
 
 export type ControlPlaneStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 

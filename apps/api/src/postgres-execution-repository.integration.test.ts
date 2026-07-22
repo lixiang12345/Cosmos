@@ -1,4 +1,4 @@
-import type { CreateSessionRequest } from '@relay/contracts'
+import type { CreateSessionRequest } from '@cosmos/contracts'
 import { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { runMigrations } from './migrations.js'
@@ -27,7 +27,7 @@ function delay(durationMs: number) {
 }
 
 describeWithDatabase('PostgresExecutionRepository', () => {
-  const schema = `relay_execution_repository_${crypto.randomUUID().replaceAll('-', '')}`
+  const schema = `cosmos_execution_repository_${crypto.randomUUID().replaceAll('-', '')}`
   const adminPool = new Pool({ connectionString: databaseUrl })
   const pool = new Pool({
     connectionString: databaseUrl,
@@ -37,7 +37,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
   const workerPool = new Pool({
     connectionString: databaseUrl,
     max: 4,
-    options: `-c role=relay_worker_runtime -c search_path=${schema}`,
+    options: `-c role=cosmos_worker_runtime -c search_path=${schema}`,
   })
   let sequence = 0
 
@@ -45,13 +45,13 @@ describeWithDatabase('PostgresExecutionRepository', () => {
     await adminPool.query(`CREATE SCHEMA ${schema}`)
     await runMigrations(pool)
     await pool.query(`
-      INSERT INTO relay_organizations (id, name)
+      INSERT INTO cosmos_organizations (id, name)
       VALUES ('execution-organization', 'Execution Organization');
-      INSERT INTO relay_spaces (organization_id, id, name)
+      INSERT INTO cosmos_spaces (organization_id, id, name)
       VALUES ('execution-organization', 'execution-space', 'Execution Space');
-      INSERT INTO relay_organization_memberships (organization_id, actor_id, role)
+      INSERT INTO cosmos_organization_memberships (organization_id, actor_id, role)
       VALUES ('execution-organization', 'execution-user', 'member');
-      INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
+      INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role)
       VALUES ('execution-organization', 'execution-space', 'execution-user', 'member');
     `)
     const configuration = await seedSessionConfiguration(
@@ -60,7 +60,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       'execution-space',
     )
     await pool.query(`
-      INSERT INTO relay_experts (
+      INSERT INTO cosmos_experts (
         organization_id, space_id, id, name, status, visibility, created_by
       ) VALUES (
         'execution-organization', 'execution-space', 'execution-expert',
@@ -68,7 +68,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       )
     `)
     await pool.query(`
-      INSERT INTO relay_expert_revisions (
+      INSERT INTO cosmos_expert_revisions (
         organization_id, space_id, expert_id, id, revision, status,
         environment_id, environment_revision_id, instructions, model, created_by
       ) VALUES (
@@ -78,14 +78,14 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       )
     `, [configuration.environmentId, configuration.environmentRevisionId])
     await pool.query(`
-      UPDATE relay_expert_revisions SET status = 'published'
+      UPDATE cosmos_expert_revisions SET status = 'published'
       WHERE organization_id = 'execution-organization'
         AND space_id = 'execution-space'
         AND expert_id = 'execution-expert'
         AND id = 'execution-expert-revision'
     `)
     await pool.query(`
-      UPDATE relay_experts
+      UPDATE cosmos_experts
       SET status = 'published', published_revision_id = 'execution-expert-revision'
       WHERE organization_id = 'execution-organization'
         AND space_id = 'execution-space'
@@ -260,7 +260,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
     })).resolves.toBe(true)
 
     const attempts = await pool.query<{ number: number; status: string }>(`
-      SELECT number, status FROM relay_attempts
+      SELECT number, status FROM cosmos_attempts
       WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND turn_id = $4
       ORDER BY number
     `, [firstClaim.organizationId, firstClaim.spaceId, firstClaim.sessionId, firstClaim.turnId])
@@ -328,11 +328,11 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       outputs: string
     }>(`
       SELECT
-        (SELECT status FROM relay_commands WHERE id = $4) AS command_status,
-        (SELECT status FROM relay_attempts WHERE id = $5) AS attempt_status,
-        (SELECT status FROM relay_turns WHERE id = $6) AS turn_status,
-        (SELECT status FROM relay_sessions WHERE id = $3) AS session_status,
-        (SELECT count(*) FROM relay_messages
+        (SELECT status FROM cosmos_commands WHERE id = $4) AS command_status,
+        (SELECT status FROM cosmos_attempts WHERE id = $5) AS attempt_status,
+        (SELECT status FROM cosmos_turns WHERE id = $6) AS turn_status,
+        (SELECT status FROM cosmos_sessions WHERE id = $3) AS session_status,
+        (SELECT count(*) FROM cosmos_messages
           WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND role = 'agent') AS outputs
     `, [claim.organizationId, claim.spaceId, claim.sessionId, claim.commandId, claim.attemptId, claim.turnId])
     expect(state.rows[0]).toEqual({
@@ -343,7 +343,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       outputs: '0',
     })
     const outbox = await pool.query<{ event_type: string }>(`
-      SELECT event_type FROM relay_outbox_events
+      SELECT event_type FROM cosmos_outbox_events
       WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
         AND event_type = 'session.canceled'
     `, [claim.organizationId, claim.spaceId, claim.sessionId])
@@ -411,7 +411,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       turnId: firstClaim.turnId,
     })
     const attemptCount = await pool.query<{ count: string }>(`
-      SELECT count(*) FROM relay_attempts
+      SELECT count(*) FROM cosmos_attempts
       WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND turn_id = $4
     `, [secondClaim.organizationId, secondClaim.spaceId, secondClaim.sessionId, secondClaim.turnId])
     expect(attemptCount.rows[0].count).toBe('2')
@@ -423,7 +423,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
     })).resolves.toBe(true)
 
     const audit = await pool.query<{ action: string; target_type: string; target_id: string }>(`
-      SELECT action, target_type, target_id FROM relay_audit_events
+      SELECT action, target_type, target_id FROM cosmos_audit_events
       WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
         AND action = 'turn.retry'
     `, [secondClaim.organizationId, secondClaim.spaceId, secondClaim.sessionId])
@@ -529,7 +529,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
 
   it('starts the claim lease from database time after a membership lock wait', async () => {
     await createSession({ maxAttempts: 1 })
-    const applicationName = `relay_claim_clock_${crypto.randomUUID()}`
+    const applicationName = `cosmos_claim_clock_${crypto.randomUUID()}`
     const claimPool = new Pool({
       connectionString: databaseUrl,
       application_name: applicationName,
@@ -541,7 +541,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       await blocker.query('BEGIN')
       transaction = true
       await blocker.query(`
-        UPDATE relay_space_memberships SET role = role
+        UPDATE cosmos_space_memberships SET role = role
         WHERE organization_id = 'execution-organization'
           AND space_id = 'execution-space' AND actor_id = 'execution-user'
       `)
@@ -559,7 +559,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       const lease = await pool.query<{ has_remaining_lease: boolean }>(`
         SELECT lease_expires_at > clock_timestamp() + interval '1 second'
           AS has_remaining_lease
-        FROM relay_commands
+        FROM cosmos_commands
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
       `, [claim.organizationId, claim.spaceId, claim.sessionId, claim.commandId])
       expect(lease.rows[0].has_remaining_lease).toBe(true)
@@ -582,7 +582,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       leaseOwner: 'delayed-heartbeat-worker', leaseDurationMs: 1_000,
     })
     if (!claim) throw new Error('Expected delayed heartbeat claim.')
-    const applicationName = `relay_heartbeat_clock_${crypto.randomUUID()}`
+    const applicationName = `cosmos_heartbeat_clock_${crypto.randomUUID()}`
     const heartbeatPool = new Pool({
       connectionString: databaseUrl,
       application_name: applicationName,
@@ -594,7 +594,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       await blocker.query('BEGIN')
       transaction = true
       await blocker.query(`
-        SELECT 1 FROM relay_commands
+        SELECT 1 FROM cosmos_commands
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
         FOR UPDATE
       `, [claim.organizationId, claim.spaceId, claim.sessionId, claim.commandId])
@@ -624,7 +624,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       leaseOwner: 'delayed-complete-worker', leaseDurationMs: 1_000,
     })
     if (!claim) throw new Error('Expected delayed completion claim.')
-    const applicationName = `relay_complete_clock_${crypto.randomUUID()}`
+    const applicationName = `cosmos_complete_clock_${crypto.randomUUID()}`
     const completePool = new Pool({
       connectionString: databaseUrl,
       application_name: applicationName,
@@ -636,7 +636,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       await blocker.query('BEGIN')
       transaction = true
       await blocker.query(`
-        UPDATE relay_space_memberships SET role = role
+        UPDATE cosmos_space_memberships SET role = role
         WHERE organization_id = $1 AND space_id = $2 AND actor_id = $3
       `, [claim.organizationId, claim.spaceId, claim.requestedBy])
       const completion = new PostgresExecutionRepository(completePool).complete({
@@ -651,7 +651,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
 
       await expect(completion).resolves.toBe(false)
       const messages = await pool.query<{ count: string }>(`
-        SELECT count(*) FROM relay_messages
+        SELECT count(*) FROM cosmos_messages
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND role = 'agent'
       `, [claim.organizationId, claim.spaceId, claim.sessionId])
       expect(messages.rows[0].count).toBe('0')
@@ -672,7 +672,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       leaseOwner: 'delayed-fail-worker', leaseDurationMs: 1_000,
     })
     if (!claim) throw new Error('Expected delayed failure claim.')
-    const applicationName = `relay_fail_clock_${crypto.randomUUID()}`
+    const applicationName = `cosmos_fail_clock_${crypto.randomUUID()}`
     const failPool = new Pool({
       connectionString: databaseUrl,
       application_name: applicationName,
@@ -684,7 +684,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       await blocker.query('BEGIN')
       transaction = true
       await blocker.query(`
-        UPDATE relay_space_memberships SET role = role
+        UPDATE cosmos_space_memberships SET role = role
         WHERE organization_id = $1 AND space_id = $2 AND actor_id = $3
       `, [claim.organizationId, claim.spaceId, claim.requestedBy])
       const failure = new PostgresExecutionRepository(failPool).fail({
@@ -700,7 +700,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
 
       await expect(failure).resolves.toBe('stale')
       const attempt = await pool.query<{ status: string }>(`
-        SELECT status FROM relay_attempts
+        SELECT status FROM cosmos_attempts
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
       `, [claim.organizationId, claim.spaceId, claim.sessionId, claim.attemptId])
       expect(attempt.rows[0].status).toBe('running')
@@ -721,7 +721,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       leaseOwner: 'completion-downgrade-worker', leaseDurationMs: 5_000,
     })
     if (!claim) throw new Error('Expected role downgrade completion claim.')
-    const applicationName = `relay_complete_auth_${crypto.randomUUID()}`
+    const applicationName = `cosmos_complete_auth_${crypto.randomUUID()}`
     const completePool = new Pool({
       connectionString: databaseUrl,
       application_name: applicationName,
@@ -733,7 +733,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       await blocker.query('BEGIN')
       transaction = true
       await blocker.query(`
-        UPDATE relay_space_memberships SET role = 'viewer'
+        UPDATE cosmos_space_memberships SET role = 'viewer'
         WHERE organization_id = $1 AND space_id = $2 AND actor_id = $3
       `, [claim.organizationId, claim.spaceId, claim.requestedBy])
       const completion = new PostgresExecutionRepository(completePool).complete({
@@ -750,10 +750,10 @@ describeWithDatabase('PostgresExecutionRepository', () => {
         SELECT
           command_record.status AS command_status,
           attempt.status AS attempt_status,
-          (SELECT count(*) FROM relay_messages
+          (SELECT count(*) FROM cosmos_messages
             WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND role = 'agent') AS outputs
-        FROM relay_commands command_record
-        JOIN relay_attempts attempt
+        FROM cosmos_commands command_record
+        JOIN cosmos_attempts attempt
           ON attempt.organization_id = command_record.organization_id
           AND attempt.space_id = command_record.space_id
           AND attempt.session_id = command_record.session_id
@@ -769,7 +769,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       blocker.release()
       await completePool.end()
       await pool.query(`
-        UPDATE relay_space_memberships SET role = 'member'
+        UPDATE cosmos_space_memberships SET role = 'member'
         WHERE organization_id = $1 AND space_id = $2 AND actor_id = $3
       `, [claim.organizationId, claim.spaceId, claim.requestedBy])
     }
@@ -787,7 +787,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
     if (!claim) throw new Error('Expected heartbeat revocation claim.')
 
     await pool.query(`
-      DELETE FROM relay_space_memberships
+      DELETE FROM cosmos_space_memberships
       WHERE organization_id = $1 AND space_id = $2 AND actor_id = $3
     `, [claim.organizationId, claim.spaceId, claim.requestedBy])
     try {
@@ -811,23 +811,23 @@ describeWithDatabase('PostgresExecutionRepository', () => {
           turn_record.status AS turn_status,
           session_record.status AS session_status,
           attempt.provider_model,
-          (SELECT count(*) FROM relay_messages message
+          (SELECT count(*) FROM cosmos_messages message
             WHERE message.organization_id = $1
               AND message.space_id = $2
               AND message.session_id = $3
               AND message.role = 'agent') AS outputs
-        FROM relay_commands command_record
-        JOIN relay_turns turn_record
+        FROM cosmos_commands command_record
+        JOIN cosmos_turns turn_record
           ON turn_record.organization_id = command_record.organization_id
           AND turn_record.space_id = command_record.space_id
           AND turn_record.session_id = command_record.session_id
           AND turn_record.id = command_record.resource_id
-        JOIN relay_attempts attempt
+        JOIN cosmos_attempts attempt
           ON attempt.organization_id = turn_record.organization_id
           AND attempt.space_id = turn_record.space_id
           AND attempt.session_id = turn_record.session_id
           AND attempt.turn_id = turn_record.id
-        JOIN relay_sessions session_record
+        JOIN cosmos_sessions session_record
           ON session_record.organization_id = command_record.organization_id
           AND session_record.space_id = command_record.space_id
           AND session_record.id = command_record.session_id
@@ -847,7 +847,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
 
       const events = await pool.query<{ event_type: string; status: string }>(`
         SELECT event_type, payload->>'status' AS status
-        FROM relay_session_events
+        FROM cosmos_session_events
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
         ORDER BY sequence DESC
         LIMIT 2
@@ -858,7 +858,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       ])
     } finally {
       await pool.query(`
-        INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
+        INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role)
         VALUES ($1, $2, $3, 'member')
         ON CONFLICT (organization_id, space_id, actor_id) DO UPDATE SET role = EXCLUDED.role
       `, [claim.organizationId, claim.spaceId, claim.requestedBy])
@@ -878,7 +878,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       claim: first, leaseDurationMs: 2_000, now: heartbeatAt,
     })).resolves.toBe(true)
     const lease = await pool.query<{ lease_expires_at: Date }>(`
-      SELECT lease_expires_at FROM relay_commands
+      SELECT lease_expires_at FROM cosmos_commands
       WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
     `, [first.organizationId, first.spaceId, first.sessionId, first.commandId])
     expect(lease.rows[0].lease_expires_at.toISOString()).toBe(
@@ -895,9 +895,9 @@ describeWithDatabase('PostgresExecutionRepository', () => {
     })).resolves.toBe('requeued')
     const retryBoundary = await pool.query<{ attempts: number; attempt_rows: string; lease_owner: string | null }>(`
       SELECT attempts, lease_owner,
-        (SELECT count(*) FROM relay_attempts
+        (SELECT count(*) FROM cosmos_attempts
           WHERE organization_id = $1 AND space_id = $2 AND session_id = $3) AS attempt_rows
-      FROM relay_commands
+      FROM cosmos_commands
       WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
     `, [first.organizationId, first.spaceId, first.sessionId, first.commandId])
     expect(retryBoundary.rows[0]).toEqual({ attempts: 1, attempt_rows: '1', lease_owner: null })
@@ -941,7 +941,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       provider_model: string | null
       failure_message: string
     }>(`
-      SELECT number, provider_model, failure_message FROM relay_attempts
+      SELECT number, provider_model, failure_message FROM cosmos_attempts
       WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
       ORDER BY number
     `, [second.organizationId, second.spaceId, second.sessionId])
@@ -965,12 +965,12 @@ describeWithDatabase('PostgresExecutionRepository', () => {
     if (!claim) throw new Error('Expected success claim.')
 
     await pool.query(`
-      CREATE FUNCTION relay_test_reject_completion_event() RETURNS trigger
+      CREATE FUNCTION cosmos_test_reject_completion_event() RETURNS trigger
       LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected completion event failure'; END; $$;
-      CREATE TRIGGER relay_test_reject_completion_event
-      BEFORE INSERT ON relay_session_events
+      CREATE TRIGGER cosmos_test_reject_completion_event
+      BEFORE INSERT ON cosmos_session_events
       FOR EACH ROW WHEN (NEW.event_type = 'message.created')
-      EXECUTE FUNCTION relay_test_reject_completion_event();
+      EXECUTE FUNCTION cosmos_test_reject_completion_event();
     `)
     try {
       await expect(repository.complete({
@@ -981,15 +981,15 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       })).rejects.toThrow('injected completion event failure')
     } finally {
       await pool.query(`
-        DROP TRIGGER relay_test_reject_completion_event ON relay_session_events;
-        DROP FUNCTION relay_test_reject_completion_event();
+        DROP TRIGGER cosmos_test_reject_completion_event ON cosmos_session_events;
+        DROP FUNCTION cosmos_test_reject_completion_event();
       `)
     }
     const rolledBack = await pool.query<{ command_status: string; agent_messages: string }>(`
       SELECT
-        (SELECT status FROM relay_commands
+        (SELECT status FROM cosmos_commands
           WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4) AS command_status,
-        (SELECT count(*) FROM relay_messages
+        (SELECT count(*) FROM cosmos_messages
           WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND role = 'agent') AS agent_messages
     `, [claim.organizationId, claim.spaceId, claim.sessionId, claim.commandId])
     expect(rolledBack.rows[0]).toEqual({ command_status: 'running', agent_messages: '0' })
@@ -1017,16 +1017,16 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       event_types: string[]
     }>(`
       SELECT
-        (SELECT status FROM relay_commands WHERE id = $4) AS command_status,
-        (SELECT status FROM relay_turns WHERE id = $5) AS turn_status,
-        (SELECT status FROM relay_sessions WHERE id = $3) AS session_status,
-        (SELECT status FROM relay_attempts WHERE id = $6) AS attempt_status,
-        (SELECT provider_model FROM relay_attempts WHERE id = $6) AS provider_model,
-        (SELECT count(*) FROM relay_messages
+        (SELECT status FROM cosmos_commands WHERE id = $4) AS command_status,
+        (SELECT status FROM cosmos_turns WHERE id = $5) AS turn_status,
+        (SELECT status FROM cosmos_sessions WHERE id = $3) AS session_status,
+        (SELECT status FROM cosmos_attempts WHERE id = $6) AS attempt_status,
+        (SELECT provider_model FROM cosmos_attempts WHERE id = $6) AS provider_model,
+        (SELECT count(*) FROM cosmos_messages
           WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND role = 'agent') AS agent_messages,
-        ARRAY(SELECT sequence::text FROM relay_session_events
+        ARRAY(SELECT sequence::text FROM cosmos_session_events
           WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 ORDER BY sequence) AS sequences,
-        ARRAY(SELECT event_type FROM relay_session_events
+        ARRAY(SELECT event_type FROM cosmos_session_events
           WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 ORDER BY sequence) AS event_types
     `, [claim.organizationId, claim.spaceId, claim.sessionId, claim.commandId, claim.turnId, claim.attemptId])
     expect(facts.rows[0]).toEqual({
@@ -1072,7 +1072,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       status: string
       archived_at: Date | null
       automation_auto_archived_at: Date | null
-    }>('SELECT status, archived_at, automation_auto_archived_at FROM relay_sessions WHERE id = $1', [created.session.id])
+    }>('SELECT status, archived_at, automation_auto_archived_at FROM cosmos_sessions WHERE id = $1', [created.session.id])
     expect(queued.rows[0]).toEqual({
       status: 'queued', archived_at: null, automation_auto_archived_at: null,
     })
@@ -1101,13 +1101,13 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       policy_reasons: string[]
     }>(`
       SELECT session.status, session.archived_at, session.automation_auto_archived_at,
-        (SELECT count(*)::text FROM relay_session_events event
+        (SELECT count(*)::text FROM cosmos_session_events event
           WHERE event.session_id = session.id AND event.event_type = 'session.archived') AS archive_events,
-        (SELECT count(*)::text FROM relay_audit_events audit
+        (SELECT count(*)::text FROM cosmos_audit_events audit
           WHERE audit.session_id = session.id AND audit.action = 'session.archive') AS archive_audits,
-        ARRAY(SELECT policy_reason FROM relay_audit_events audit
+        ARRAY(SELECT policy_reason FROM cosmos_audit_events audit
           WHERE audit.session_id = session.id AND audit.action = 'session.archive') AS policy_reasons
-      FROM relay_sessions session WHERE session.id = $1
+      FROM cosmos_sessions session WHERE session.id = $1
     `, [created.session.id])
     expect(facts.rows[0]).toMatchObject({
       status: 'completed', archive_events: '1', archive_audits: '1',
@@ -1127,14 +1127,14 @@ describeWithDatabase('PostgresExecutionRepository', () => {
     })).resolves.toBe(true)
     const visible = await pool.query(`
       SELECT archived_at, automation_auto_archived_at
-      FROM relay_sessions WHERE id = $1
+      FROM cosmos_sessions WHERE id = $1
     `, [disabled.session.id])
     expect(visible.rows[0]).toEqual({ archived_at: null, automation_auto_archived_at: null })
     await expect(pool.query(`
-      UPDATE relay_sessions SET automation_auto_archive = false WHERE id = $1
+      UPDATE cosmos_sessions SET automation_auto_archive = false WHERE id = $1
     `, [created.session.id])).rejects.toMatchObject({ code: '55000' })
     await expect(pool.query(`
-      UPDATE relay_sessions SET automation_auto_archived_at = clock_timestamp() WHERE id = $1
+      UPDATE cosmos_sessions SET automation_auto_archived_at = clock_timestamp() WHERE id = $1
     `, [disabled.session.id])).rejects.toMatchObject({ code: '55000' })
   })
 
@@ -1147,7 +1147,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
     })
     if (!claim) throw new Error('Expected authorization claim.')
     await pool.query(`
-      DELETE FROM relay_space_memberships
+      DELETE FROM cosmos_space_memberships
       WHERE organization_id = $1 AND space_id = $2 AND actor_id = $3
     `, [claim.organizationId, claim.spaceId, claim.requestedBy])
     await expect(repository.complete({
@@ -1162,11 +1162,11 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       provider_model: string | null
     }>(`
       SELECT
-        (SELECT count(*) FROM relay_messages
+        (SELECT count(*) FROM cosmos_messages
           WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND role = 'agent') AS agent_messages,
-        (SELECT status FROM relay_attempts
+        (SELECT status FROM cosmos_attempts
           WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4) AS attempt_status,
-        (SELECT provider_model FROM relay_attempts
+        (SELECT provider_model FROM cosmos_attempts
           WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4) AS provider_model
     `, [claim.organizationId, claim.spaceId, claim.sessionId, claim.attemptId])
     expect(facts.rows[0]).toEqual({
@@ -1176,13 +1176,13 @@ describeWithDatabase('PostgresExecutionRepository', () => {
     })
     const canceled = await pool.query<{ command: string; turn: string; attempt: string; session: string }>(`
       SELECT
-        (SELECT status FROM relay_commands
+        (SELECT status FROM cosmos_commands
           WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4) AS command,
-        (SELECT status FROM relay_turns
+        (SELECT status FROM cosmos_turns
           WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $5) AS turn,
-        (SELECT status FROM relay_attempts
+        (SELECT status FROM cosmos_attempts
           WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $6) AS attempt,
-        (SELECT status FROM relay_sessions
+        (SELECT status FROM cosmos_sessions
           WHERE organization_id = $1 AND space_id = $2 AND id = $3) AS session
     `, [claim.organizationId, claim.spaceId, claim.sessionId, claim.commandId, claim.turnId, claim.attemptId])
     expect(canceled.rows[0]).toEqual({
@@ -1194,7 +1194,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       now: new Date(now.getTime() + 101),
     })).resolves.toEqual({ requeued: 0, failed: 0, canceled: 0 })
     await pool.query(`
-      INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
+      INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role)
       VALUES ($1, $2, $3, 'member')
     `, [claim.organizationId, claim.spaceId, claim.requestedBy])
   })
@@ -1208,7 +1208,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
     })
     if (!claim) throw new Error('Expected revoked terminal claim.')
     await pool.query(`
-      DELETE FROM relay_space_memberships
+      DELETE FROM cosmos_space_memberships
       WHERE organization_id = $1 AND space_id = $2 AND actor_id = $3
     `, [claim.organizationId, claim.spaceId, claim.requestedBy])
     try {
@@ -1230,8 +1230,8 @@ describeWithDatabase('PostgresExecutionRepository', () => {
           attempt.status AS attempt_status,
           command_record.failure_code AS command_failure,
           attempt.failure_code AS attempt_failure
-        FROM relay_commands command_record
-        JOIN relay_attempts attempt
+        FROM cosmos_commands command_record
+        JOIN cosmos_attempts attempt
           ON attempt.organization_id = command_record.organization_id
           AND attempt.space_id = command_record.space_id
           AND attempt.session_id = command_record.session_id
@@ -1250,7 +1250,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       })
     } finally {
       await pool.query(`
-        INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
+        INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role)
         VALUES ($1, $2, $3, 'member')
       `, [claim.organizationId, claim.spaceId, claim.requestedBy])
     }
@@ -1292,7 +1292,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
     })).resolves.toEqual({ requeued: 0, failed: 1, canceled: 0 })
     const events = await pool.query<{ actor_kind: string; failure_code: string }>(`
       SELECT actor_kind, payload->>'failureCode' AS failure_code
-      FROM relay_session_events
+      FROM cosmos_session_events
       WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
         AND event_type = 'attempt.updated' AND payload->>'status' = 'failed'
       ORDER BY sequence
@@ -1306,7 +1306,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
   it('cancels an unattempted queued execution when requested_by has lost write access', async () => {
     const created = await createSession()
     await pool.query(`
-      DELETE FROM relay_space_memberships
+      DELETE FROM cosmos_space_memberships
       WHERE organization_id = $1 AND space_id = $2 AND actor_id = 'execution-user'
     `, [created.session.organizationId, created.session.spaceId])
     try {
@@ -1315,13 +1315,13 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       })).resolves.toBeNull()
       const facts = await pool.query<{ command: string; turn: string; session: string; attempts: number }>(`
         SELECT
-          (SELECT status FROM relay_commands
+          (SELECT status FROM cosmos_commands
             WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4) AS command,
-          (SELECT status FROM relay_turns
+          (SELECT status FROM cosmos_turns
             WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $5) AS turn,
-          (SELECT status FROM relay_sessions
+          (SELECT status FROM cosmos_sessions
             WHERE organization_id = $1 AND space_id = $2 AND id = $3) AS session,
-          (SELECT attempts FROM relay_commands
+          (SELECT attempts FROM cosmos_commands
             WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4) AS attempts
       `, [
         created.session.organizationId,
@@ -1339,7 +1339,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
         payload: unknown
       }>(`
         SELECT event_type, sequence, payload
-        FROM relay_session_events
+        FROM cosmos_session_events
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
         ORDER BY sequence DESC
         LIMIT 1
@@ -1351,7 +1351,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       }])
     } finally {
       await pool.query(`
-        INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
+        INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role)
         VALUES ($1, $2, 'execution-user', 'member')
       `, [created.session.organizationId, created.session.spaceId])
     }
@@ -1359,7 +1359,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
 
   it('does not claim after a concurrent role downgrade commits first', async () => {
     const created = await createSession()
-    const applicationName = `relay_execution_auth_${crypto.randomUUID()}`
+    const applicationName = `cosmos_execution_auth_${crypto.randomUUID()}`
     const claimPool = new Pool({
       connectionString: databaseUrl,
       application_name: applicationName,
@@ -1371,7 +1371,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       await authorizationClient.query('BEGIN')
       authorizationTransaction = true
       await authorizationClient.query(`
-        UPDATE relay_space_memberships
+        UPDATE cosmos_space_memberships
         SET role = 'viewer'
         WHERE organization_id = $1 AND space_id = $2 AND actor_id = 'execution-user'
       `, [created.session.organizationId, created.session.spaceId])
@@ -1387,11 +1387,11 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       await expect(claim).resolves.toBeNull()
       const beforeRecovery = await pool.query<{ status: string; attempts: number; attempt_rows: string }>(`
         SELECT command_record.status, command_record.attempts,
-          (SELECT count(*) FROM relay_attempts attempt
+          (SELECT count(*) FROM cosmos_attempts attempt
             WHERE attempt.organization_id = command_record.organization_id
               AND attempt.space_id = command_record.space_id
               AND attempt.session_id = command_record.session_id) AS attempt_rows
-        FROM relay_commands command_record
+        FROM cosmos_commands command_record
         WHERE command_record.organization_id = $1
           AND command_record.space_id = $2
           AND command_record.session_id = $3
@@ -1409,7 +1409,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
         leaseDurationMs: 1_000,
       })).resolves.toBeNull()
       const recovered = await pool.query<{ status: string }>(`
-        SELECT status FROM relay_commands
+        SELECT status FROM cosmos_commands
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
       `, [
         created.session.organizationId,
@@ -1423,7 +1423,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       authorizationClient.release()
       await claimPool.end()
       await pool.query(`
-        UPDATE relay_space_memberships
+        UPDATE cosmos_space_memberships
         SET role = 'member'
         WHERE organization_id = $1 AND space_id = $2 AND actor_id = 'execution-user'
       `, [created.session.organizationId, created.session.spaceId])
@@ -1447,7 +1447,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       now: new Date(now.getTime() + 10),
     })).resolves.toBe('requeued')
     await pool.query(`
-      DELETE FROM relay_space_memberships
+      DELETE FROM cosmos_space_memberships
       WHERE organization_id = $1 AND space_id = $2 AND actor_id = $3
     `, [first.organizationId, first.spaceId, first.requestedBy])
     try {
@@ -1470,22 +1470,22 @@ describeWithDatabase('PostgresExecutionRepository', () => {
           command_record.attempts AS command_attempts,
           turn_record.status AS turn_status,
           session_record.status AS session_status,
-          ARRAY(SELECT status FROM relay_attempts
+          ARRAY(SELECT status FROM cosmos_attempts
             WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
             ORDER BY number) AS attempt_statuses,
-          (SELECT event_type FROM relay_session_events
+          (SELECT event_type FROM cosmos_session_events
             WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
             ORDER BY sequence DESC LIMIT 1) AS last_event_type,
-          (SELECT payload FROM relay_session_events
+          (SELECT payload FROM cosmos_session_events
             WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
             ORDER BY sequence DESC LIMIT 1) AS last_event_payload
-        FROM relay_commands command_record
-        JOIN relay_turns turn_record
+        FROM cosmos_commands command_record
+        JOIN cosmos_turns turn_record
           ON turn_record.organization_id = command_record.organization_id
           AND turn_record.space_id = command_record.space_id
           AND turn_record.session_id = command_record.session_id
           AND turn_record.id = command_record.resource_id
-        JOIN relay_sessions session_record
+        JOIN cosmos_sessions session_record
           ON session_record.organization_id = command_record.organization_id
           AND session_record.space_id = command_record.space_id
           AND session_record.id = command_record.session_id
@@ -1505,7 +1505,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       })
     } finally {
       await pool.query(`
-        INSERT INTO relay_space_memberships (organization_id, space_id, actor_id, role)
+        INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role)
         VALUES ($1, $2, $3, 'member')
       `, [first.organizationId, first.spaceId, first.requestedBy])
     }
@@ -1516,11 +1516,11 @@ describeWithDatabase('PostgresExecutionRepository', () => {
     const turnId = `protocol-zero-turn-${sequence}`
     const commandId = `protocol-zero-command-${sequence}`
     await pool.query(`
-      UPDATE relay_sessions SET status = 'queued'
+      UPDATE cosmos_sessions SET status = 'queued'
       WHERE organization_id = $1 AND space_id = $2 AND id = $3
     `, [draft.session.organizationId, draft.session.spaceId, draft.session.id])
     await pool.query(`
-      INSERT INTO relay_turns (
+      INSERT INTO cosmos_turns (
         id, organization_id, space_id, session_id, ordinal, initiator_type,
         initiator_id, input_message_id, status, queued_at, version
       ) VALUES ($4, $1, $2, $3, 1, 'user', 'execution-user', $5, 'queued', now(), 1)
@@ -1532,7 +1532,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       draft.message?.id,
     ])
     await pool.query(`
-      INSERT INTO relay_commands (
+      INSERT INTO cosmos_commands (
         id, organization_id, space_id, session_id, type, status, resource_type,
         resource_id, accepted_at, available_at, protocol_version
       ) VALUES ($5, $1, $2, $3, 'session.start', 'accepted', 'turn', $4, now(), now(), 0)
@@ -1547,7 +1547,7 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       leaseOwner: 'protocol-worker', leaseDurationMs: 1_000,
     })).resolves.toBeNull()
     const command = await pool.query<{ status: string; attempts: number }>(`
-      SELECT status, attempts FROM relay_commands
+      SELECT status, attempts FROM cosmos_commands
       WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
     `, [draft.session.organizationId, draft.session.spaceId, draft.session.id, commandId])
     expect(command.rows).toEqual([{ status: 'accepted', attempts: 0 }])

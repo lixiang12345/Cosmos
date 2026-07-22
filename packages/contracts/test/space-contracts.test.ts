@@ -7,7 +7,7 @@ import {
 } from '../src/index.js'
 
 const space = {
-  id: 'space-platform', organizationId: 'relay', name: 'Platform', slug: 'platform',
+  id: 'space-platform', organizationId: 'cosmos', name: 'Platform', slug: 'platform',
   description: 'Platform workspace.', isDefault: true, status: 'active',
   defaultExpertId: null, defaultEnvironmentId: null, settings: {}, version: 1,
   createdAt: '2026-07-22T00:00:00.000Z', updatedAt: '2026-07-22T00:00:00.000Z',

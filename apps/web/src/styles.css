@@ -12523,7 +12523,7 @@ button:disabled {
   border: 2px solid var(--border-strong);
   border-top-color: var(--primary);
   border-radius: 50%;
-  animation: relay-spin 0.8s linear infinite;
+  animation: cosmos-spin 0.8s linear infinite;
 }
 
 .sessions-load-state {
@@ -12575,7 +12575,7 @@ button:disabled {
   list-style: none;
 }
 
-@keyframes relay-spin {
+@keyframes cosmos-spin {
   to { transform: rotate(360deg); }
 }
 

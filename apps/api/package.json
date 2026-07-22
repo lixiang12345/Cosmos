@@ -1,5 +1,5 @@
 {
-  "name": "@relay/api",
+  "name": "@cosmos/api",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -27,7 +27,7 @@
     "@aws-sdk/client-s3": "^3.1091.0",
     "@fastify/cors": "^11.1.0",
     "@fastify/helmet": "13.1.0",
-    "@relay/contracts": "workspace:*",
+    "@cosmos/contracts": "workspace:*",
     "fastify": "^5.6.2",
     "jose": "^6.2.3",
     "pg": "^8.22.0"

@@ -9,7 +9,7 @@ const describeWithDatabase = databaseUrl ? describe : describe.skip
 const migrationsDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '../migrations')
 
 describeWithDatabase('001 to 002 identity migration', () => {
-  const schema = `relay_migration_${crypto.randomUUID().replaceAll('-', '')}`
+  const schema = `cosmos_migration_${crypto.randomUUID().replaceAll('-', '')}`
   const adminPool = new Pool({ connectionString: databaseUrl })
   const migrationPool = new Pool({
     connectionString: databaseUrl,
@@ -32,7 +32,7 @@ describeWithDatabase('001 to 002 identity migration', () => {
     await migrationPool.query(migration001)
 
     await migrationPool.query(`
-      INSERT INTO relay_sessions (
+      INSERT INTO cosmos_sessions (
         id, organization_id, space_id, title, summary, expert_id, expert_name,
         repository, base_branch, visibility, status, source,
         created_at, updated_at, last_activity_at, version
@@ -42,7 +42,7 @@ describeWithDatabase('001 to 002 identity migration', () => {
         ('session-b', 'org-a', 'space-b', 'B', '', 'expert-a', 'Expert A',
           'org/repo', 'main', 'private', 'active', 'manual', now(), now(), now(), 1);
 
-      INSERT INTO relay_idempotency_records (
+      INSERT INTO cosmos_idempotency_records (
         organization_id, space_id, idempotency_key_hash, request_hash, session_id, expires_at
       ) VALUES
         ('org-a', 'space-a', 'same-hash', 'request-a', 'session-a', now() + interval '1 day'),
@@ -54,7 +54,7 @@ describeWithDatabase('001 to 002 identity migration', () => {
     const sessions = await migrationPool.query<{
       id: string
       created_by: string
-    }>('SELECT id, created_by FROM relay_sessions ORDER BY id')
+    }>('SELECT id, created_by FROM cosmos_sessions ORDER BY id')
     expect(sessions.rows).toEqual([
       { id: 'session-a', created_by: 'system:migration' },
       { id: 'session-b', created_by: 'system:migration' },
@@ -63,7 +63,7 @@ describeWithDatabase('001 to 002 identity migration', () => {
     const records = await migrationPool.query<{
       actor_id: string
       canonical_path: string
-    }>('SELECT actor_id, canonical_path FROM relay_idempotency_records ORDER BY canonical_path')
+    }>('SELECT actor_id, canonical_path FROM cosmos_idempotency_records ORDER BY canonical_path')
     expect(records.rows).toEqual([
       {
         actor_id: 'system:migration',
@@ -75,7 +75,7 @@ describeWithDatabase('001 to 002 identity migration', () => {
       },
     ])
 
-    const memberships = await migrationPool.query('SELECT actor_id FROM relay_organization_memberships')
+    const memberships = await migrationPool.query('SELECT actor_id FROM cosmos_organization_memberships')
     expect(memberships.rows).toEqual([])
   })
 })

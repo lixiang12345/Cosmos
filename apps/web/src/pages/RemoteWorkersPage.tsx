@@ -1,4 +1,4 @@
-import type { SessionWorkerDto } from '@relay/contracts'
+import type { SessionWorkerDto } from '@cosmos/contracts'
 import {
   AlertTriangle,
   ArrowLeft,
@@ -18,16 +18,16 @@ import { GlobalControls } from '../components/GlobalControls'
 import { IconButton } from '../components/ui'
 import { usePreferences, type Locale } from '../preferences'
 import {
-  RelayApiError,
+  CosmosApiError,
   listSessionWorkers,
-  type RelayApiAuthContext,
-} from '../services/relayApi'
+  type CosmosApiAuthContext,
+} from '../services/cosmosApi'
 
 export type RemoteWorkersPageProps = {
   organizationId: string
   spaceId: string
   sessionId: string
-  auth: RelayApiAuthContext
+  auth: CosmosApiAuthContext
   credentialVersion: number
   onOpenNavigation?: () => void
   onBackToSession: () => void
@@ -47,7 +47,7 @@ function text(locale: Locale, zh: string, en: string) {
 }
 
 function errorMessage(cause: unknown, fallback: string) {
-  if (cause instanceof RelayApiError && cause.status === 404) {
+  if (cause instanceof CosmosApiError && cause.status === 404) {
     return cause.message
   }
   return cause instanceof Error && cause.message ? cause.message : fallback
@@ -86,7 +86,7 @@ export function RemoteWorkersPage({
   onBackToSession,
 }: RemoteWorkersPageProps) {
   const { locale } = usePreferences()
-  const requestAuth = useMemo<RelayApiAuthContext>(() => ({
+  const requestAuth = useMemo<CosmosApiAuthContext>(() => ({
     accessToken: auth.accessToken,
     requestIdentity: auth.requestIdentity,
     onUnauthorized: auth.onUnauthorized,
