@@ -15,13 +15,6 @@ import { S3ObjectStore } from './object-storage.js'
 import { loadWorkerConfig } from './worker-config.js'
 import { maintainWorkerReadiness } from './worker-readiness-heartbeat.js'
 
-const config = loadWorkerConfig()
-const pool = createRuntimePool('relay_worker_runtime', {
-  connectionString: config.databaseUrl,
-  connectionTimeoutMillis: config.databaseConnectionTimeoutMs,
-  query_timeout: config.databaseQueryTimeoutMs,
-  statement_timeout: config.databaseStatementTimeoutMs,
-})
 const logger: ExecutionWorkerLogger = {
   info(event, fields = {}) {
     console.info(JSON.stringify({ level: 'info', event, ...fields }))
@@ -30,6 +23,13 @@ const logger: ExecutionWorkerLogger = {
     console.error(JSON.stringify({ level: 'error', event, ...fields }))
   },
 }
+const config = loadWorkerConfig()
+const pool = createRuntimePool('relay_worker_runtime', {
+  connectionString: config.databaseUrl,
+  connectionTimeoutMillis: config.databaseConnectionTimeoutMs,
+  query_timeout: config.databaseQueryTimeoutMs,
+  statement_timeout: config.databaseStatementTimeoutMs,
+}, () => logger.error('worker_database_client_error'))
 const shutdown = new AbortController()
 
 process.once('SIGINT', () => shutdown.abort())

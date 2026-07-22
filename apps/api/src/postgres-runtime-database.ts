@@ -65,8 +65,12 @@ export async function queryWithApiDatabaseContext<Row extends QueryResultRow>(
 export function createRuntimePool(
   role: RuntimeDatabaseRole,
   config: Omit<PoolConfig, 'options'>,
+  onClientError: (error: Error) => void,
 ): Pool {
-  return new PostgresPool({ ...config, options: `-c role=${role}` })
+  const pool = new PostgresPool({ ...config, options: `-c role=${role}` })
+  pool.on('error', onClientError)
+  pool.on('connect', (client) => client.on('error', onClientError))
+  return pool
 }
 
 export async function assertRuntimeDatabaseRole(pool: Pool, expected: RuntimeDatabaseRole) {

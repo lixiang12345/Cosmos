@@ -42,7 +42,9 @@ if (poolConfig && (config.migrateOnStart || config.authentication.mode === 'deve
     await migrationPool.end()
   }
 }
-const pool = poolConfig ? createRuntimePool('relay_api_runtime', poolConfig) : undefined
+const pool = poolConfig ? createRuntimePool('relay_api_runtime', poolConfig, () => {
+  console.error(JSON.stringify({ level: 'error', event: 'api_database_client_error' }))
+}) : undefined
 if (pool) await assertRuntimeDatabaseRole(pool, 'relay_api_runtime')
 const authenticate = config.authentication.mode === 'oidc'
   ? createJwtAuthenticator(config.authentication)

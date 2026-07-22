@@ -12,7 +12,7 @@ try {
     query_timeout: config.databaseQueryTimeoutMs,
     statement_timeout: config.databaseStatementTimeoutMs,
     max: 1,
-  })
+  }, () => { process.exitCode = 1 })
   await assertRuntimeDatabaseRole(pool, 'relay_worker_runtime')
   const ready = await new PostgresWorkerReadinessRepository(pool).hasRecentHeartbeat({
     workerId: config.workerId,

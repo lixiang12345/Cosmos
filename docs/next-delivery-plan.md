@@ -8,7 +8,7 @@
 
 ## 结论
 
-Space 管理与 Advisor 受控执行已完成。下一条垂直切片是 **生产硬化**：补齐对象存储、配额、PITR/恢复、限流、实时撤权、通知/SLO 和负载/故障演练证据。
+Space 管理与 Advisor 受控执行已完成。生产硬化代码切片已覆盖对象存储、配额、PITR/恢复、限流、实时撤权、通知/SLO、负载/Session journey 和本地依赖故障演练；下一阶段仍需目标环境 execution soak、外部依赖证据与剩余 P1 产品延期项审计。
 
 ```text
 Organization → Space defaults → Expert published revision + Environment ready revision → Session execution snapshot
@@ -279,6 +279,27 @@ Space Admin 可以在统一、克制的 Cosmos 风格控制面中：
 - 当前数字只是开发机 GET smoke，不能证明生产容量或 SLO；staging 仍须运行 Session create/send、SSE、queue backlog、provider/object-store/DB fault、lease fencing、rolling deploy 和数小时 soak。
 - DB pool、queue depth/age、lease age、outbox/audit lag 的低基数 runtime metrics 仍需独立监控权限/采集链路，不能让普通 tenant API role 获得跨租户运营查询。
 
+## 生产硬化-8：Session journey 与数据库 readiness 故障演练（已完成代码切片）
+
+### 交付结果
+
+- 新增 `pnpm soak:session`，默认只允许显式批准的 loopback 写入；远端必须使用 HTTPS、再次显式批准、提供精确 Organization/Space/Expert ID，并从 Secret Manager 注入短期 OIDC token。
+- 每个 journey 真实覆盖 draft create、相同 `Idempotency-Key` 完整重放、detail/messages/events、CAS rename、过期 ETag 412、archive/restore，并最终归档 fixture；输出不含 URL、Session ID、正文或 credential。
+- 新增 `pnpm drill:database-readiness`：本地停止 PostgreSQL，验证 API health 保持而 ready fail-closed，随后恢复数据库与 runtime；EXIT/signal trap 保证尽力恢复。
+- 演练发现并修复 `pg.Pool` 与 active client error 未监听会终止 API/Worker 的缺陷；共享运行时连接池现在要求显式脱敏 handler，API/Worker 只记录固定事件名而不序列化连接错误。
+
+### 验证证据
+
+- 本地 2 journeys / concurrency 2 完成全部写路径并观察 4 个 create timeline events；fixture 最终归档，未触发 Worker 或模型 provider。
+- PostgreSQL 停止后 API health 200、ready 503；API 容器 ID 保持不变且 restart count 从 0 到 0；PostgreSQL 恢复后 ready 200，Compose 四服务恢复 healthy。
+- Contracts 60、API 29 files / 224 tests、Web 20 files / 207 tests、ops 6 tests、PostgreSQL 29 files / 149 tests、`pnpm check` 与 `pnpm openapi:lint` 通过。
+
+### 明确延期
+
+- 当前 journey 故意使用 draft，不能证明 Session start/send、SSE live、queue backlog、Worker lease 或 provider 行为；这些必须在有预算、隔离 tenant 和短期 OIDC credential 的 staging execution soak 中执行。
+- 本地单 PostgreSQL stop/recovery 不能证明生产连接池耗尽、托管数据库 failover、跨区 RTO/RPO 或数据完整性；目标环境仍需受变更窗口保护的演练和外部告警证据。
+- staging URL/identity、Prometheus/Alertmanager、云对象存储和 provider 故障注入控制当前未提供，仓库不会伪造其执行结果。
+
 ## M4 排序
 
 后续按以下顺序推进：
@@ -286,7 +307,7 @@ Space Admin 可以在统一、克制的 Cosmos 风格控制面中：
 1. **Automation 权威模型（M4-A 已完成）**：已交付 Trigger 唯一资源、Event 去重/脱敏/匹配、ServiceAccount Session dispatch 与同源 Run History；上述延期项在后续 Automation hardening 收口。
 2. **Space 管理（M4-B 已完成）**：已交付 Default、默认 Expert/Environment、删除迁移预览和真实 scope 切换；实际迁移执行保持 capability-gated。
 3. **Advisor 受控执行（M4-C 已完成）**：plan/diff/confirm、受控工具、失败恢复和审计；OAuth/Secret 只返回人工步骤，不伪造完成。
-4. **生产硬化（进行中）**：对象存储、orphan GC、Organization 配额/共享限流、PITR/恢复门禁、SSE 实时撤权、通知/SLO、Worker telemetry 和有界负载/故障演练代码切片已完成；下一项是目标环境 soak/故障证据与剩余产品延期项审计。
+4. **生产硬化（进行中）**：对象存储、orphan GC、Organization 配额/共享限流、PITR/恢复门禁、SSE 实时撤权、通知/SLO、Worker telemetry、有界负载、Session journey 和本地依赖故障演练代码切片已完成；下一项是独立运维指标采集权限/链路、目标环境 execution soak，以及剩余产品延期项审计。
 
 Pinned Sessions、Artifact 高级搜索和高级启动覆盖属于 P2，在上述 P1 控制面闭环之后处理。
 
