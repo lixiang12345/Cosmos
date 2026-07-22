@@ -23,6 +23,9 @@
     "db:restore": "sh ops/postgres/restore.sh",
     "db:pitr-preflight": "sh ops/postgres/pitr-preflight.sh",
     "object-storage:gc": "pnpm --filter @relay/api object-storage:gc",
+    "load:smoke": "node ops/load/http-smoke.mjs",
+    "drill:worker-readiness": "sh ops/drills/worker-readiness.sh",
+    "test:ops": "sh -n ops/postgres/backup.sh ops/postgres/restore.sh ops/postgres/pitr-preflight.sh ops/drills/worker-readiness.sh && node --test ops/load/http-smoke.test.mjs",
     "test:integration": "pnpm --filter @relay/api test:integration",
     "build": "pnpm --filter @relay/contracts build && pnpm --filter @relay/api build && pnpm --filter @relay/web build",
     "lint": "eslint .",
@@ -30,7 +33,7 @@
     "openapi:bundle": "redocly bundle docs/api-contract.yaml --output dist/api-contract.yaml",
     "test": "pnpm --filter @relay/contracts build && pnpm --recursive --if-present test",
     "typecheck": "pnpm --filter @relay/contracts build && pnpm --recursive --if-present typecheck",
-    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:ops && pnpm build"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -47,3 +47,13 @@ groups:
         annotations:
           summary: Relay SSE connections exceed 90% of the configured per-instance limit
           runbook: docs/observability-slo-runbook.md#relaysseconnectioncapacityhigh
+      - alert: RelayWorkerExecutionUnavailable
+        expr: max by (cluster, environment, service) (relay_execution_enabled) == 1 and max by (cluster, environment, service) (relay_worker_execution_ready) == 0
+        for: 2m
+        labels:
+          severity: page
+          service: relay-worker
+          slo: execution-readiness
+        annotations:
+          summary: Relay execution is enabled but no recent Worker heartbeat is available
+          runbook: docs/observability-slo-runbook.md#relayworkerexecutionunavailable

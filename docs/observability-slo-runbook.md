@@ -15,6 +15,7 @@ curl --fail --silent --oauth2-bearer "$METRICS_SCRAPE_TOKEN" https://relay.inter
 - `relay_http_requests_total`：固定 HTTP method、Fastify route template 和 status class，禁止 actor/tenant/resource ID label。
 - `relay_http_request_duration_ms`：固定延迟桶；聚合器从 bucket 计算 p95/p99。
 - `relay_sse_connections_active` / `relay_sse_connections_limit`：当前实例的活跃 SSE 数和配置上限。
+- `relay_execution_enabled` / `relay_worker_execution_ready`：执行开关和基于数据库最新 heartbeat 的 Worker readiness；只在受保护 scrape 时查询，不改变 `/api/ready` 的控制面语义。
 
 这些值是进程内、重启归零的 scrape 指标。Prometheus 必须抓取每个 API replica，并按 `cluster/environment/service/instance/release` 外部标签聚合；不得把单实例 counter 当成全局权威或账单数据。
 
@@ -61,3 +62,9 @@ curl --fail --silent --oauth2-bearer "$METRICS_SCRAPE_TOKEN" https://relay.inter
 1. 检查 instance 是否负载不均、断线重连风暴或客户端未释放连接，并核对 429 `SSE_CONNECTION_LIMIT_EXCEEDED`。
 2. 先恢复负载均衡/客户端 backoff；提高上限前必须有连接内存、file descriptor 和撤权延迟压测证据。
 3. 告警恢复后确认活跃 gauge 回落、重连成功且 Session event sequence 无 gap。
+
+## RelayWorkerExecutionUnavailable
+
+1. 确认 API health/ready 仍可用，并检查 Worker container/process、最新 heartbeat、数据库连接和 lease age。
+2. 执行关闭时该告警必须静默；执行已启用时不要通过关闭告警规则掩盖 Worker 全部失联。
+3. Worker 恢复后确认 capability 重新变为 enabled、新命令可被领取、过期 lease 由 fencing 规则恢复且没有重复外部副作用。

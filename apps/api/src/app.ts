@@ -709,6 +709,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     retryAfterSeconds: positiveInteger(options.sessionEventStream?.retryAfterSeconds, 5, 3_600),
   }
   metrics?.setSseConnectionLimit(eventStream.maxConnections)
+  metrics?.setExecutionState(executionEnabled, false)
   const eventStreamLimiter = createSessionEventStreamLimiter(eventStream)
   const requestRateLimitOptions = options.rateLimit === false
     ? null
@@ -1327,6 +1328,15 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         retryable: false,
       })
     }
+    let workerReady = false
+    if (executionEnabled && options.executionReadinessCheck) {
+      try {
+        workerReady = await options.executionReadinessCheck()
+      } catch (error) {
+        request.log.error({ err: error }, 'Metrics Worker readiness check failed')
+      }
+    }
+    metrics.setExecutionState(executionEnabled, workerReady)
     reply.type('text/plain; version=0.0.4; charset=utf-8')
     return metrics.renderPrometheus()
   })

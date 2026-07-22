@@ -247,7 +247,7 @@ Space Admin 可以在统一、克制的 Cosmos 风格控制面中：
 - 新增受保护的 `GET /api/metrics` Prometheus exposition；没有 `METRICS_SCRAPE_TOKEN` 时 conceal 为 404，错误 bearer 返回 401，token 只从服务端环境/Secret Manager 注入且不进入输出、日志或 label。
 - API 记录固定 method、Fastify route template、status class 的 request counter、固定 request-duration histogram，以及成对维护的 SSE active/configured-limit gauge；不使用 actor、tenant、Session、resource ID 等高基数或私密 label。
 - `ops/observability/relay-alerts.yaml` 提供按 cluster/environment/service 聚合的 99.9% availability fast-burn、target down、p95 latency 和单实例 SSE capacity 规则；结构与禁止高基数 label 由代码测试门禁。
-- `docs/observability-slo-runbook.md` 定义 scrape token、安全聚合、page/ticket 路由、15 分钟 ACK/升级、合成通知演练和四类告警处置步骤。
+- `docs/observability-slo-runbook.md` 定义 scrape token、安全聚合、page/ticket 路由、15 分钟 ACK/升级、合成通知演练和五类告警处置步骤。
 
 ### 验证证据
 
@@ -260,6 +260,25 @@ Space Admin 可以在统一、克制的 Cosmos 风格控制面中：
 - 仓库不能证明目标环境已部署 Prometheus/Alertmanager、dashboard、receiver 和 24x7 on-call；上线前仍须执行 `promtool check rules`、合成 page 送达/ACK/升级演练，并保存不含凭据的证据。
 - 当前指标覆盖 API HTTP 与 SSE 容量；DB pool、queue age、worker lease、provider/object-store error、outbox/audit lag 和业务旅程指标在下一负载/故障与 worker telemetry 切片继续补齐。
 
+## 生产硬化-7：Worker telemetry 与有界负载/故障演练（已完成代码切片）
+
+### 交付结果
+
+- metrics scrape 通过既有数据库 heartbeat readiness 查询输出 `relay_execution_enabled` 与 `relay_worker_execution_ready`；只有执行已启用且全部 Worker heartbeat 失效时才触发 `RelayWorkerExecutionUnavailable` page。
+- 新增 `pnpm load:smoke`：默认只打 loopback read path，严格限制 request/concurrency/timeout，远端必须显式批准且只允许 HTTPS；credential 只从环境读取，输出不含 URL、token 或响应正文。
+- 新增 `pnpm drill:worker-readiness`：本地停止 Worker、等待 heartbeat 过期、验证 execution capability 关闭而 health/ready 保持，再重启并确认恢复；EXIT/signal trap 保证尽力恢复 Worker。
+- `pnpm test:ops` 将 PostgreSQL/故障脚本语法和 load harness 的边界、percentile、threshold、credential 不回显纳入 `pnpm check`。
+
+### 验证证据
+
+- 本地真实 API 运行 500 requests / concurrency 25：500 success、0 error、p95 73.86ms、p99 84.05ms、max 97.31ms。
+- Worker 停止后 execution capability 在 freshness window 内关闭，API health/ready 保持；Worker 重启后 capability 恢复，演练结束 Compose 四服务 healthy。
+
+### 明确延期
+
+- 当前数字只是开发机 GET smoke，不能证明生产容量或 SLO；staging 仍须运行 Session create/send、SSE、queue backlog、provider/object-store/DB fault、lease fencing、rolling deploy 和数小时 soak。
+- DB pool、queue depth/age、lease age、outbox/audit lag 的低基数 runtime metrics 仍需独立监控权限/采集链路，不能让普通 tenant API role 获得跨租户运营查询。
+
 ## M4 排序
 
 后续按以下顺序推进：
@@ -267,7 +286,7 @@ Space Admin 可以在统一、克制的 Cosmos 风格控制面中：
 1. **Automation 权威模型（M4-A 已完成）**：已交付 Trigger 唯一资源、Event 去重/脱敏/匹配、ServiceAccount Session dispatch 与同源 Run History；上述延期项在后续 Automation hardening 收口。
 2. **Space 管理（M4-B 已完成）**：已交付 Default、默认 Expert/Environment、删除迁移预览和真实 scope 切换；实际迁移执行保持 capability-gated。
 3. **Advisor 受控执行（M4-C 已完成）**：plan/diff/confirm、受控工具、失败恢复和审计；OAuth/Secret 只返回人工步骤，不伪造完成。
-4. **生产硬化（进行中）**：对象存储、orphan GC、Organization 配额/共享限流、PITR/恢复门禁、SSE 实时撤权和通知/SLO 代码门禁已完成；下一项是负载与故障演练及 worker telemetry。
+4. **生产硬化（进行中）**：对象存储、orphan GC、Organization 配额/共享限流、PITR/恢复门禁、SSE 实时撤权、通知/SLO、Worker telemetry 和有界负载/故障演练代码切片已完成；下一项是目标环境 soak/故障证据与剩余产品延期项审计。
 
 Pinned Sessions、Artifact 高级搜索和高级启动覆盖属于 P2，在上述 P1 控制面闭环之后处理。
 

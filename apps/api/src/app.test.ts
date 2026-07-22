@@ -375,7 +375,8 @@ describe('Relay API', () => {
 
   it('serves low-cardinality Prometheus metrics only with the server-side scrape token', async () => {
     const token = 'metrics-token-for-tests-0123456789'
-    const app = createApp({ metricsScrapeToken: token })
+    const executionReadinessCheck = vi.fn().mockResolvedValue(true)
+    const app = createApp({ metricsScrapeToken: token, executionReadinessCheck })
     openApps.push(app)
 
     expect((await app.inject({ method: 'GET', url: '/api/metrics' })).statusCode).toBe(401)
@@ -395,7 +396,10 @@ describe('Relay API', () => {
     expect(response.body).toContain('# TYPE relay_http_requests_total counter')
     expect(response.body).toContain('route="/api/health"')
     expect(response.body).toContain('# TYPE relay_sse_connections_active gauge')
+    expect(response.body).toContain('relay_execution_enabled 1')
+    expect(response.body).toContain('relay_worker_execution_ready 1')
     expect(response.body).not.toContain(token)
+    expect(executionReadinessCheck).toHaveBeenCalledOnce()
 
     const disabled = createApp()
     openApps.push(disabled)

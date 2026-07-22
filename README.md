@@ -83,7 +83,7 @@ pnpm openapi:lint
 pnpm openapi:bundle
 ```
 
-也可单独执行 `pnpm lint`、`pnpm typecheck`、`pnpm test` 或 `pnpm build`。根命令会先构建 `@relay/contracts`，确保 API 与 Web 使用同一份生成类型。Pull Request 和主分支推送必须通过 `.github/workflows/required-checks.yml`：Node 22 + pnpm 11.7.0 冻结锁文件安装、生产依赖审计、全量检查、PostgreSQL 17 集成测试、OpenAPI lint/bundle、带 checksum 和 release/RLS/ACL/数据约束验证的逻辑备份与隔离恢复、连续 WAL 归档 live preflight、生产 migration/API/Web 容器与同源代理 smoke、CycloneDX SBOM、HIGH/CRITICAL 镜像扫描、空白错误检查和脱敏 Secret 扫描。生产恢复边界与季度演练步骤见 [PostgreSQL 备份与恢复 Runbook](./docs/postgres-recovery-runbook.md)。
+也可单独执行 `pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm test:ops` 或 `pnpm build`。根命令会先构建 `@relay/contracts`，确保 API 与 Web 使用同一份生成类型。Pull Request 和主分支推送必须通过 `.github/workflows/required-checks.yml`：Node 22 + pnpm 11.7.0 冻结锁文件安装、生产依赖审计、全量检查、PostgreSQL 17 集成测试、OpenAPI lint/bundle、带 checksum 和 release/RLS/ACL/数据约束验证的逻辑备份与隔离恢复、连续 WAL 归档 live preflight、生产 migration/API/Web 容器与同源代理 smoke、CycloneDX SBOM、HIGH/CRITICAL 镜像扫描、空白错误检查和脱敏 Secret 扫描。生产恢复边界与季度演练步骤见 [PostgreSQL 备份与恢复 Runbook](./docs/postgres-recovery-runbook.md)；有界负载与 Worker 故障步骤见 [Load Smoke 与 Worker 故障演练 Runbook](./docs/load-failure-runbook.md)。
 
 ## 当前后端范围
 

@@ -31,6 +31,8 @@ export class RelayMetrics {
   private readonly durations = new Map<string, DurationSeries>()
   private activeSseConnections = 0
   private sseConnectionLimit = 0
+  private executionEnabled = false
+  private workerExecutionReady = false
 
   recordRequest(method: string, route: string, statusCode: number, durationMs: number) {
     const normalizedMethod = method.toUpperCase()
@@ -60,6 +62,11 @@ export class RelayMetrics {
 
   setSseConnectionLimit(limit: number) {
     if (Number.isSafeInteger(limit) && limit > 0) this.sseConnectionLimit = limit
+  }
+
+  setExecutionState(enabled: boolean, workerReady: boolean) {
+    this.executionEnabled = enabled
+    this.workerExecutionReady = enabled && workerReady
   }
 
   sseConnectionClosed() {
@@ -97,6 +104,12 @@ export class RelayMetrics {
       '# HELP relay_sse_connections_limit Configured per-instance Session event stream limit.',
       '# TYPE relay_sse_connections_limit gauge',
       `relay_sse_connections_limit ${this.sseConnectionLimit}`,
+      '# HELP relay_execution_enabled Whether Agent execution is enabled for this API instance.',
+      '# TYPE relay_execution_enabled gauge',
+      `relay_execution_enabled ${this.executionEnabled ? 1 : 0}`,
+      '# HELP relay_worker_execution_ready Whether a recent Worker heartbeat permits new execution.',
+      '# TYPE relay_worker_execution_ready gauge',
+      `relay_worker_execution_ready ${this.workerExecutionReady ? 1 : 0}`,
       '',
     )
     return `${lines.join('\n')}\n`
