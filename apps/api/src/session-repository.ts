@@ -37,6 +37,7 @@ export type CreateSessionRecord = {
   idempotencyKey: string
   request: CreateSessionRequest
   source?: 'manual' | 'automation'
+  automationAutoArchive?: boolean
   executionAvailability?: 'available' | 'disabled' | 'worker_unavailable'
 }
 

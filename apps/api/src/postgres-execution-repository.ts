@@ -711,25 +711,52 @@ export class PostgresExecutionRepository implements ExecutionRepository {
       `, [execution.organization_id, execution.space_id, execution.session_id, execution.turn_id, completedAt])
       if (turn.rowCount !== 1) throw new Error('Locked execution Turn could not be completed.')
       const session = await client.query<{
+        auto_archived: boolean
         first_sequence: string
         status: 'queued' | 'completed'
         version: number
       }>(`
-        UPDATE relay_sessions
-        SET status = CASE WHEN EXISTS (
+        WITH completion_state AS (
+          SELECT
+            EXISTS (
               SELECT 1 FROM relay_turns queued_turn
-              WHERE queued_turn.organization_id = relay_sessions.organization_id
-                AND queued_turn.space_id = relay_sessions.space_id
-                AND queued_turn.session_id = relay_sessions.id
+              WHERE queued_turn.organization_id = $1
+                AND queued_turn.space_id = $2
+                AND queued_turn.session_id = $3
                 AND queued_turn.status = 'queued'
-            ) THEN 'queued' ELSE 'completed' END,
+            ) AS has_queued_turn,
+            COALESCE(automation_auto_archive, false) AND archived_at IS NULL AS should_auto_archive
+          FROM relay_sessions
+          WHERE organization_id = $1 AND space_id = $2 AND id = $3
+        )
+        UPDATE relay_sessions
+        SET status = CASE WHEN completion_state.has_queued_turn THEN 'queued' ELSE 'completed' END,
+            archived_at = CASE
+              WHEN NOT completion_state.has_queued_turn AND completion_state.should_auto_archive THEN $4
+              ELSE relay_sessions.archived_at
+            END,
+            automation_auto_archived_at = CASE
+              WHEN NOT completion_state.has_queued_turn AND completion_state.should_auto_archive THEN $4
+              ELSE relay_sessions.automation_auto_archived_at
+            END,
             updated_at = $4,
             last_activity_at = $4,
             version = version + 1,
-            last_event_sequence = last_event_sequence + 3
+            last_event_sequence = last_event_sequence + CASE
+              WHEN NOT completion_state.has_queued_turn AND completion_state.should_auto_archive THEN 4
+              ELSE 3
+            END
+        FROM completion_state
         WHERE organization_id = $1 AND space_id = $2 AND id = $3
           AND status = 'active'
-        RETURNING last_event_sequence - 2 AS first_sequence, status, version
+        RETURNING
+          last_event_sequence - CASE
+            WHEN NOT completion_state.has_queued_turn AND completion_state.should_auto_archive THEN 3
+            ELSE 2
+          END AS first_sequence,
+          status,
+          version,
+          NOT completion_state.has_queued_turn AND completion_state.should_auto_archive AS auto_archived
       `, [execution.organization_id, execution.space_id, execution.session_id, completedAt])
       const firstSequence = Number(session.rows[0]?.first_sequence)
       if (!Number.isSafeInteger(firstSequence)) throw new Error('Execution event sequence could not be reserved.')
@@ -774,6 +801,21 @@ export class PostgresExecutionRepository implements ExecutionRepository {
         version: session.rows[0].version,
         occurredAt: completedAt,
       })
+      if (session.rows[0].auto_archived) {
+        await this.insertAutomationArchiveLedger(client, {
+          organizationId: execution.organization_id,
+          spaceId: execution.space_id,
+          sessionId: execution.session_id,
+          commandId: execution.command_id,
+          actorId: execution.lease_owner,
+          auditActorId: input.claim.requestedBy,
+          auditActorKind: input.claim.requestedByKind,
+          requestId: execution.request_id,
+          sequence: firstSequence + 3,
+          version: session.rows[0].version,
+          occurredAt: completedAt,
+        })
+      }
       return true
     })
   }
@@ -1531,6 +1573,55 @@ export class PostgresExecutionRepository implements ExecutionRepository {
       event.occurredAt,
     ])
     if (inserted.rowCount !== 1) throw new Error('Session event could not be inserted.')
+  }
+
+  private async insertAutomationArchiveLedger(
+    client: PoolClient,
+    event: {
+      organizationId: string
+      spaceId: string
+      sessionId: string
+      commandId: string
+      actorId: string
+      auditActorId: string
+      auditActorKind: 'user' | 'service_account'
+      requestId: string
+      sequence: number
+      version: number
+      occurredAt: string
+    },
+  ) {
+    await client.query(`
+      INSERT INTO relay_session_events (
+        organization_id, space_id, session_id, event_id, sequence,
+        event_type, resource_type, resource_id, payload, actor_id, actor_kind,
+        message_id, turn_id, attempt_id, command_id, request_id, occurred_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, 'session.archived', 'session', $3, $6::jsonb,
+        $7, 'worker', NULL, NULL, NULL, $8, $9, $10
+      )
+    `, [
+      event.organizationId, event.spaceId, event.sessionId, this.createId(), event.sequence,
+      JSON.stringify({ archivedAt: event.occurredAt, version: event.version, reason: 'automation' }),
+      event.actorId, event.commandId, event.requestId, event.occurredAt,
+    ])
+    await client.query(`
+      INSERT INTO relay_audit_events (
+        organization_id, audit_event_id, space_id, session_id, actor_id,
+        actor_kind, action, target_type, target_id, result, request_id,
+        idempotency_key_hash, policy_decision, policy_reason, before_state,
+        after_state, occurred_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, 'session.archive', 'session', $4,
+        'success', $7, NULL, 'allow', 'automation_auto_archive', $8::jsonb, $9::jsonb, $10
+      )
+    `, [
+      event.organizationId, this.createId(), event.spaceId, event.sessionId, event.auditActorId,
+      event.auditActorKind, event.requestId,
+      JSON.stringify({ archivedAt: null, version: event.version - 1 }),
+      JSON.stringify({ archivedAt: event.occurredAt, version: event.version }),
+      event.occurredAt,
+    ])
   }
 
   private async insertAttemptEvent(

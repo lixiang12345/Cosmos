@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { AutomationStateConflictError } from './automation-repository.js'
 import { runMigrations } from './migrations.js'
 import { PostgresAutomationRepository } from './postgres-automation-repository.js'
+import { PostgresSessionRepository } from './postgres-session-repository.js'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 const describeWithDatabase = databaseUrl ? describe : describe.skip
@@ -114,7 +115,7 @@ describeWithDatabase('Automation authority under the restricted API runtime role
       source: 'github' as const,
       eventType: 'pull_request.opened',
       filter: { '==': [{ var: 'action' }, 'opened'] },
-      autoArchive: false,
+      autoArchive: true,
       serviceAccountId: 'automation-service',
     }
     const created = await repository.createAutomation({
@@ -177,6 +178,29 @@ describeWithDatabase('Automation authority under the restricted API runtime role
     })
     await expect(repository.receiveEvent({ ...eventRecord, requestId: 'request-event-replay' }))
       .resolves.toMatchObject({ duplicate: true, event: { id: received.event.id }, match: null })
+    const session = await new PostgresSessionRepository(apiPool).create({
+      organizationId: 'automation-org', spaceId: 'automation-space',
+      actorId: 'automation-service', actorKind: 'service_account',
+      actorAudience: 'automation-test-audience', requestId: 'request-dispatch-session',
+      idempotencyKey: `automation-event:${received.event.id}`,
+      source: 'automation', automationAutoArchive: received.match!.automation.autoArchive,
+      request: {
+        expertId: 'expert-published', title: 'Automation Session', visibility: 'space', start: true,
+        message: { content: 'Handle the matched Automation Event.', attachments: [] },
+      },
+    })
+    await expect(repository.completeDispatch({
+      organizationId: 'automation-org', spaceId: 'automation-space', actorId: 'automation-owner',
+      requestId: 'request-dispatch-complete', eventId: received.event.id, sessionId: session.session.id,
+    })).resolves.toMatchObject({ status: 'dispatched', sessionId: session.session.id })
+    await expect(repository.listRuns('automation-org', 'automation-space', 'automation-owner'))
+      .resolves.toEqual([expect.objectContaining({
+        automationId: automation!.id,
+        eventId: received.event.id,
+        autoArchive: true,
+        autoArchivedAt: null,
+        session: expect.objectContaining({ id: session.session.id, source: 'automation' }),
+      })])
     const [current] = await repository.listAutomations('automation-org', 'automation-space', 'automation-owner')
     expect(current?.matchCount).toBe(1)
     await expect(repository.listEvents('automation-org', 'automation-space', 'automation-member'))

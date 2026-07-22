@@ -2687,6 +2687,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
             requestId: request.id,
             idempotencyKey: `automation-event:${receipt.event.id}`,
             source: 'automation',
+            automationAutoArchive: receipt.match.automation.autoArchive,
             executionAvailability,
             request: CreateSessionRequestSchema.parse({
               expertId: receipt.match.automation.expertId,

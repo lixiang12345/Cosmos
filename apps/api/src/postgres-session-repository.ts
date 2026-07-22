@@ -32,6 +32,7 @@ import {
   ExpertNotPublishedError,
   IdempotencyConflictError,
   SessionConfigurationNotFoundError,
+  SessionConfigurationValidationError,
   canWriteSpace,
   createSessionRecords,
   createSessionFollowUpRecords,
@@ -2502,6 +2503,12 @@ export class PostgresSessionRepository implements SessionRepository {
   }
 
   private async createInTransaction(client: PoolClient, record: CreateSessionRecord): Promise<CreateSessionResult> {
+    if ((record.source === 'automation') !== (record.automationAutoArchive !== undefined)) {
+      throw new SessionConfigurationValidationError(
+        'Automation Sessions require an immutable auto-archive snapshot.',
+        { source: ['Automation Sessions require the autoArchive snapshot.'] },
+      )
+    }
     const access = await client.query<SpaceAccess>(`
       SELECT organization_membership.role AS "organizationRole", space_membership.role AS "spaceRole"
       FROM relay_organization_memberships organization_membership
@@ -2615,10 +2622,10 @@ export class PostgresSessionRepository implements SessionRepository {
     }
     await client.query(`
       INSERT INTO relay_sessions (
-        ${sessionColumns}, created_by
+        ${sessionColumns}, automation_auto_archive, created_by
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-        $15, $16, $17, $18, $19::jsonb, $20, $21, $22, $23, NULL, $24, $25
+        $15, $16, $17, $18, $19::jsonb, $20, $21, $22, $23, NULL, $24, $25, $26
       )
     `, [
       session.id, session.organizationId, session.spaceId, session.title, session.summary,
@@ -2628,7 +2635,8 @@ export class PostgresSessionRepository implements SessionRepository {
       session.repositoryId ?? null,
       session.configurationResolutionVersion, session.repository, session.baseBranch,
       session.visibility, session.status, JSON.stringify(session.attachments), session.source,
-      session.createdAt, session.updatedAt, session.lastActivityAt, session.version, record.actorId,
+      session.createdAt, session.updatedAt, session.lastActivityAt, session.version,
+      record.automationAutoArchive ?? null, record.actorId,
     ])
     if (startRecords.message) {
       await client.query(`

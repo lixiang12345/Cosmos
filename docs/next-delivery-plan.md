@@ -35,7 +35,7 @@ Environment 已具备 Cloud/Daemon 类型、immutable revision、provisioning wo
 | --- | --- | --- |
 | Environment provider | 控制面和 worker 编排已完成；Compose 未配置 Cloud provider credential 或在线 Daemon pool | 新 Environment 会真实进入 failed/unavailable，可配置 provider 后 retry |
 | Automation 外部入口 | 当前是受认证 manager/internal test Event ingress；仅保存脱敏 payload/headers | 外部 webhook 验签、原文密文存储、异步 router worker 与 replay/dead-letter 尚未完成 |
-| Automation 生命周期 | `autoArchive` 已持久化；Trigger 使用 CAS 直接更新并回到 paused | 自动归档执行、delete/archive，以及随 Expert draft revision 发布切换仍未完成 |
+| Automation 生命周期 | `autoArchive` 已由 Session immutable snapshot 和 Worker 最终 Turn 事务执行；Trigger 使用 CAS 直接更新并回到 paused | Trigger delete/archive，以及随 Expert draft revision 发布切换仍未完成 |
 | Space 删除迁移 | 已计算源/目标与 Sessions/Experts/Environments/Automations/Files 影响，并阻止 Default Space 迁移 | 逐资源迁移执行、恢复/回滚与最终 archive/delete 仍 capability-gated |
 | Files | Worker 内部 append 与只读浏览已存在；FileVersion 已支持 checksum 校验的 S3-compatible object backend 与 inline 历史兼容 | 生产 bucket/IAM/retention、orphan GC 和对象备份恢复证据仍未完成 |
 | Agent execution | 基础对话和只读 Workspace tools 可用，coding sandbox/外部写工具未开放 | 不能把执行结果当成完整代码交付能力 |
@@ -109,8 +109,29 @@ Space Admin 可以在统一、克制的 Cosmos 风格控制面中：
 
 - 外部 provider webhook 验签、原始 headers/payload 密文存储和 provider-specific schema 脱敏。
 - 独立异步 Event router worker、replay/dead-letter、Subscription fan-in；当前匹配与 Session dispatch 在受认证 API 请求内完成。
-- `autoArchive` 执行器与 Trigger delete/archive；当前只持久化 auto-archive 设置。
+- Trigger delete/archive；`autoArchive` Worker 执行闭环已在 M4-A2 完成。
 - Trigger update 随 Expert draft revision 发布切换；当前 `relay_expert_triggers` 是 CAS versioned 权威资源，更新后回到 paused。
+
+## M4-A2：Automation autoArchive 权威执行（已完成）
+
+### 交付结果
+
+- Migration `075_automation_auto_archive.sql` 为 Automation Session 保存 immutable `automation_auto_archive` snapshot 和只允许 Worker 写入的 `automation_auto_archived_at` 事实；历史 Automation Session 保守回填为 false，不回查可变 Trigger 推断旧行为。
+- 最后一个 queued Turn 成功时，Worker 在同一 completion 事务内写 completed、archivedAt、autoArchivedAt、连续 `session.archived` Event 和 `session.archive` Audit；仍有 queued Turn、配置 false、已人工归档或 fencing 失败时不写自动归档事实。
+- Automation Run DTO/OpenAPI/Web 同源显示 `autoArchive` 与 `autoArchivedAt`，区分“已启用”与“Worker 已实际自动归档”，不从通用 archivedAt 猜测原因。
+- 数据库 trigger 阻止 API、migration owner 或后续代码改写 snapshot/自动归档事实；Worker stale completion 重放不重复 Event/Audit。
+
+### 验证证据
+
+- PostgreSQL execution 专项覆盖两 Turn 延迟归档、最终 Turn 原子归档、配置 false、stale completion、snapshot/fact 非 Worker 篡改拒绝；Automation repository 专项覆盖 Event → Session snapshot → Run projection。
+- `pnpm check` 通过：Contracts 60、API 224、Web 207、ops 7 tests 与 production build；`pnpm openapi:lint` 和完整 PostgreSQL integration 29 files / 151 tests 通过。
+- Docker 重建后 API、Worker、Web、PostgreSQL 均 healthy，health/ready 200，运行日志无 fatal/panic/unhandled/raw connection error；镜像内 migration `075` SHA-256 与仓库一致。
+- 生产 Run History 在桌面与 `390×844` 验证 loading/empty 状态，无横向溢出、文本重叠或浏览器告警/错误；主库无现成 Automation Run，因此未为 UI smoke 触发模型，自动归档事实由 PostgreSQL/Web 专项测试覆盖。
+
+### 明确延期
+
+- Trigger archive/delete、completed Session 的 retention/deletion policy，以及随 Expert draft revision 发布切换仍需独立生命周期设计。
+- 外部 webhook 验签、原文密文存储、异步 router、replay/dead-letter 仍未完成；autoArchive 不改变当前受认证 Event ingress 的边界。
 
 ## M4-B：Space 管理（已完成）
 

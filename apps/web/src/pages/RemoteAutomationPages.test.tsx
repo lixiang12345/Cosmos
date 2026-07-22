@@ -151,6 +151,8 @@ const run: AutomationRunDto = {
   source: dispatchedEvent.source,
   eventType: dispatchedEvent.eventType,
   receivedAt: now,
+  autoArchive: true,
+  autoArchivedAt: null,
   session,
 }
 
@@ -355,6 +357,7 @@ describe('Remote Automation pages', () => {
     expect(await screen.findByText(session.title)).toBeInTheDocument()
     expect(screen.getByText(automation.name)).toBeInTheDocument()
     expect(screen.getByText(session.id)).toBeInTheDocument()
+    expect(screen.getByText('启用自动归档')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '打开' }))
     expect(onOpenSession).toHaveBeenCalledWith(session.id)
   })

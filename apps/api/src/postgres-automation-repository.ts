@@ -667,6 +667,8 @@ export class PostgresAutomationRepository implements AutomationRepository {
       session_updated_at: TimestampValue
       session_last_activity_at: TimestampValue
       session_archived_at: TimestampValue | null
+      session_automation_auto_archive: boolean
+      session_automation_auto_archived_at: TimestampValue | null
       session_version: number
     }>(this.pool, { organizationId, spaceId, actorId }, `
       SELECT ${eventColumns}, trigger.name AS automation_name,
@@ -683,7 +685,10 @@ export class PostgresAutomationRepository implements AutomationRepository {
         session.status AS session_status, session.attachments AS session_attachments,
         session.source AS session_source, session.created_at AS session_created_at,
         session.updated_at AS session_updated_at, session.last_activity_at AS session_last_activity_at,
-        session.archived_at AS session_archived_at, session.version AS session_version
+        session.archived_at AS session_archived_at,
+        session.automation_auto_archive AS session_automation_auto_archive,
+        session.automation_auto_archived_at AS session_automation_auto_archived_at,
+        session.version AS session_version
       FROM relay_automation_events event
       JOIN relay_expert_triggers trigger
         ON trigger.organization_id = event.organization_id
@@ -701,6 +706,8 @@ export class PostgresAutomationRepository implements AutomationRepository {
       source: row.source,
       eventType: row.event_type,
       receivedAt: timestamp(row.received_at),
+      autoArchive: row.session_automation_auto_archive,
+      autoArchivedAt: nullableTimestamp(row.session_automation_auto_archived_at),
       session: SessionDtoSchema.parse({
         id: row.session_id_value,
         organizationId: row.organization_id,

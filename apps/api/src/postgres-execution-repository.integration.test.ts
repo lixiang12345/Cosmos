@@ -34,6 +34,11 @@ describeWithDatabase('PostgresExecutionRepository', () => {
     max: 24,
     options: `-c search_path=${schema}`,
   })
+  const workerPool = new Pool({
+    connectionString: databaseUrl,
+    max: 4,
+    options: `-c role=relay_worker_runtime -c search_path=${schema}`,
+  })
   let sequence = 0
 
   beforeAll(async () => {
@@ -90,11 +95,16 @@ describeWithDatabase('PostgresExecutionRepository', () => {
 
   afterAll(async () => {
     await pool.end()
+    await workerPool.end()
     await adminPool.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
     await adminPool.end()
   })
 
-  async function createSession(options: { start?: boolean; maxAttempts?: number } = {}) {
+  async function createSession(options: {
+    start?: boolean
+    maxAttempts?: number
+    automationAutoArchive?: boolean
+  } = {}) {
     sequence += 1
     const task = `Execute pinned task ${sequence}.`
     const request: CreateSessionRequest = {
@@ -114,6 +124,8 @@ describeWithDatabase('PostgresExecutionRepository', () => {
       requestId: `execution-request-${sequence}`,
       idempotencyKey: `execution-idempotency-${sequence}`,
       request,
+      source: options.automationAutoArchive === undefined ? 'manual' : 'automation',
+      automationAutoArchive: options.automationAutoArchive,
     })
     return { ...result, task }
   }
@@ -1031,6 +1043,99 @@ describeWithDatabase('PostgresExecutionRepository', () => {
         'attempt.updated', 'session.updated',
       ],
     })
+  })
+
+  it('auto-archives an Automation Session exactly when its final queued Turn succeeds', async () => {
+    const created = await createSession({ automationAutoArchive: true })
+    const execution = new PostgresExecutionRepository(workerPool)
+    const sessions = new PostgresSessionRepository(pool)
+    const firstClaim = await execution.claimNext({
+      leaseOwner: 'automation-auto-archive-worker-1', leaseDurationMs: 30_000,
+    })
+    if (!firstClaim) throw new Error('Expected the first Automation Turn claim.')
+    await sessions.send({
+      organizationId: created.session.organizationId,
+      spaceId: created.session.spaceId,
+      sessionId: created.session.id,
+      actorId: 'execution-user',
+      actorKind: 'user',
+      requestId: 'automation-follow-up-request',
+      idempotencyKey: 'automation-follow-up-key',
+      request: { content: 'Queue one more Automation Turn.', attachments: [] },
+    })
+    await expect(execution.complete({
+      claim: firstClaim,
+      output: 'The first Automation Turn completed.',
+      providerModel: 'provider-model-automation-first',
+    })).resolves.toBe(true)
+    const queued = await pool.query<{
+      status: string
+      archived_at: Date | null
+      automation_auto_archived_at: Date | null
+    }>('SELECT status, archived_at, automation_auto_archived_at FROM relay_sessions WHERE id = $1', [created.session.id])
+    expect(queued.rows[0]).toEqual({
+      status: 'queued', archived_at: null, automation_auto_archived_at: null,
+    })
+
+    const secondClaim = await execution.claimNext({
+      leaseOwner: 'automation-auto-archive-worker-2', leaseDurationMs: 30_000,
+    })
+    if (!secondClaim) throw new Error('Expected the final Automation Turn claim.')
+    await expect(execution.complete({
+      claim: secondClaim,
+      output: 'The final Automation Turn completed.',
+      providerModel: 'provider-model-automation-final',
+    })).resolves.toBe(true)
+    await expect(execution.complete({
+      claim: secondClaim,
+      output: 'A stale completion must not archive twice.',
+      providerModel: 'provider-model-automation-stale',
+    })).resolves.toBe(false)
+
+    const facts = await pool.query<{
+      status: string
+      archived_at: Date | null
+      automation_auto_archived_at: Date | null
+      archive_events: string
+      archive_audits: string
+      policy_reasons: string[]
+    }>(`
+      SELECT session.status, session.archived_at, session.automation_auto_archived_at,
+        (SELECT count(*)::text FROM relay_session_events event
+          WHERE event.session_id = session.id AND event.event_type = 'session.archived') AS archive_events,
+        (SELECT count(*)::text FROM relay_audit_events audit
+          WHERE audit.session_id = session.id AND audit.action = 'session.archive') AS archive_audits,
+        ARRAY(SELECT policy_reason FROM relay_audit_events audit
+          WHERE audit.session_id = session.id AND audit.action = 'session.archive') AS policy_reasons
+      FROM relay_sessions session WHERE session.id = $1
+    `, [created.session.id])
+    expect(facts.rows[0]).toMatchObject({
+      status: 'completed', archive_events: '1', archive_audits: '1',
+      policy_reasons: ['automation_auto_archive'],
+    })
+    expect(facts.rows[0]?.archived_at).toEqual(facts.rows[0]?.automation_auto_archived_at)
+
+    const disabled = await createSession({ automationAutoArchive: false })
+    const disabledClaim = await execution.claimNext({
+      leaseOwner: 'automation-no-auto-archive-worker', leaseDurationMs: 30_000,
+    })
+    if (!disabledClaim) throw new Error('Expected the non-auto-archive Automation claim.')
+    await expect(execution.complete({
+      claim: disabledClaim,
+      output: 'This Automation Session remains visible.',
+      providerModel: 'provider-model-automation-visible',
+    })).resolves.toBe(true)
+    const visible = await pool.query(`
+      SELECT archived_at, automation_auto_archived_at
+      FROM relay_sessions WHERE id = $1
+    `, [disabled.session.id])
+    expect(visible.rows[0]).toEqual({ archived_at: null, automation_auto_archived_at: null })
+    await expect(pool.query(`
+      UPDATE relay_sessions SET automation_auto_archive = false WHERE id = $1
+    `, [created.session.id])).rejects.toMatchObject({ code: '55000' })
+    await expect(pool.query(`
+      UPDATE relay_sessions SET automation_auto_archived_at = clock_timestamp() WHERE id = $1
+    `, [disabled.session.id])).rejects.toMatchObject({ code: '55000' })
   })
 
   it('discards completion after authorization is revoked without any partial write', async () => {

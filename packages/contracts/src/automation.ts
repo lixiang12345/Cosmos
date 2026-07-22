@@ -220,6 +220,8 @@ export const AutomationRunDtoSchema = z.object({
   source: AutomationSourceSchema,
   eventType: EventTypeSchema,
   receivedAt: TimestampSchema,
+  autoArchive: z.boolean(),
+  autoArchivedAt: TimestampSchema.nullable(),
   session: SessionDtoSchema,
 }).strict()
 export type AutomationRunDto = z.infer<typeof AutomationRunDtoSchema>

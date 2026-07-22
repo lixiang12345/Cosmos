@@ -5308,7 +5308,7 @@ components:
       additionalProperties: false
     RuntimeAutomationRun:
       type: object
-      required: [automationId, automationName, eventId, source, eventType, receivedAt, session]
+      required: [automationId, automationName, eventId, source, eventType, receivedAt, autoArchive, autoArchivedAt, session]
       properties:
         automationId:
           $ref: '#/components/schemas/RuntimeIdentifier'
@@ -5326,6 +5326,14 @@ components:
           maxLength: 256
         receivedAt:
           $ref: '#/components/schemas/Timestamp'
+        autoArchive:
+          type: boolean
+          description: Immutable Trigger setting captured when this Automation Session was created.
+        autoArchivedAt:
+          description: Worker completion time when the final queued Turn caused automatic archival; null until that fact occurs.
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
         session:
           $ref: '#/components/schemas/RuntimeSession'
       additionalProperties: false
