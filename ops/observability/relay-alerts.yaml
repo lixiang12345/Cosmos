@@ -57,3 +57,33 @@ groups:
         annotations:
           summary: Relay execution is enabled but no recent Worker heartbeat is available
           runbook: docs/observability-slo-runbook.md#relayworkerexecutionunavailable
+      - alert: RelayCommandQueueAgeHigh
+        expr: max by (cluster, environment, service) (relay_observer_commands_oldest_age_seconds{status=~"accepted|queued|running"}) > 300 and sum by (cluster, environment, service) (relay_observer_commands_total{status=~"accepted|queued|running"}) > 0
+        for: 10m
+        labels:
+          severity: ticket
+          service: relay-worker
+          slo: queue-age
+        annotations:
+          summary: Relay command queue has active work older than five minutes
+          runbook: docs/observability-slo-runbook.md#relaycommandqueueagehigh
+      - alert: RelayOutboxLagHigh
+        expr: max by (cluster, environment, service) (relay_observer_outbox_oldest_age_seconds{stream=~"session|environment|automation|space"}) > 300 and sum by (cluster, environment, service) (relay_observer_outbox_pending_total{stream=~"session|environment|automation|space"}) > 0
+        for: 10m
+        labels:
+          severity: ticket
+          service: relay-worker
+          slo: outbox-lag
+        annotations:
+          summary: Relay has unpublished Outbox work older than five minutes
+          runbook: docs/observability-slo-runbook.md#relayoutboxlaghigh
+      - alert: RelayObserverWorkerHeartbeatStale
+        expr: sum by (cluster, environment, service) (relay_observer_workers_total{state="fresh"}) == 0 and sum by (cluster, environment, service) (relay_observer_workers_total{state="stale"}) > 0
+        for: 5m
+        labels:
+          severity: ticket
+          service: relay-worker
+          slo: worker-heartbeat
+        annotations:
+          summary: All observed Worker heartbeats are stale
+          runbook: docs/observability-slo-runbook.md#relayobserverworkerheartbeatstale

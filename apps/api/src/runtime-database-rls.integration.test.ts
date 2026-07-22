@@ -31,6 +31,11 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
     max: 1,
     options: `-c role=relay_worker_runtime -c search_path=${schema}`,
   })
+  const observerPool = new Pool({
+    connectionString: databaseUrl,
+    max: 1,
+    options: `-c role=relay_observer_runtime -c search_path=${schema}`,
+  })
   const sessions = new PostgresSessionRepository(apiPool)
   const artifacts = new PostgresArtifactRepository(apiPool)
   const execution = new PostgresExecutionRepository(workerPool)
@@ -102,6 +107,7 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
   afterAll(async () => {
     await apiPool.end()
     await workerPool.end()
+    await observerPool.end()
     await migrationPool.end()
     await adminPool.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
     await adminPool.end()
@@ -110,6 +116,7 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
   it('forces RLS on every tenant table and assumes non-bypass runtime roles', async () => {
     await expect(assertRuntimeDatabaseRole(apiPool, 'relay_api_runtime')).resolves.toBeUndefined()
     await expect(assertRuntimeDatabaseRole(workerPool, 'relay_worker_runtime')).resolves.toBeUndefined()
+    await expect(assertRuntimeDatabaseRole(observerPool, 'relay_observer_runtime')).resolves.toBeUndefined()
 
     const roleRows = await adminPool.query<{
       rolname: string
@@ -120,12 +127,19 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
     }>(`
       SELECT rolname, rolsuper, rolbypassrls, rolcanlogin, rolinherit
       FROM pg_roles
-      WHERE rolname IN ('relay_api_runtime', 'relay_worker_runtime')
+      WHERE rolname IN ('relay_api_runtime', 'relay_worker_runtime', 'relay_observer_runtime')
       ORDER BY rolname
     `)
     expect(roleRows.rows).toEqual([
       {
         rolname: 'relay_api_runtime',
+        rolsuper: false,
+        rolbypassrls: false,
+        rolcanlogin: false,
+        rolinherit: false,
+      },
+      {
+        rolname: 'relay_observer_runtime',
         rolsuper: false,
         rolbypassrls: false,
         rolcanlogin: false,
@@ -160,6 +174,51 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
       rls_tables: '50',
       forced_tables: '50',
     })
+  })
+
+  it('allows aggregate observer metrics without exposing tenant or payload columns', async () => {
+    const privileges = await observerPool.query<{
+      command_status: boolean
+      command_started_at: boolean
+      heartbeat_time: boolean
+      heartbeat_id: boolean
+      job_created_at: boolean
+      job_updated_at: boolean
+    }>(`
+      SELECT
+        has_column_privilege(current_user, 'relay_commands', 'status', 'SELECT') AS command_status,
+        has_column_privilege(current_user, 'relay_commands', 'started_at', 'SELECT') AS command_started_at,
+        has_column_privilege(current_user, 'relay_worker_heartbeats', 'last_seen_at', 'SELECT') AS heartbeat_time,
+        has_column_privilege(current_user, 'relay_worker_heartbeats', 'worker_id', 'SELECT') AS heartbeat_id,
+        has_column_privilege(current_user, 'relay_environment_provisioning_jobs', 'created_at', 'SELECT') AS job_created_at,
+        has_column_privilege(current_user, 'relay_environment_provisioning_jobs', 'updated_at', 'SELECT') AS job_updated_at
+    `)
+    expect(privileges.rows[0]).toEqual({
+      command_status: true,
+      command_started_at: false,
+      heartbeat_time: true,
+      heartbeat_id: false,
+      job_created_at: true,
+      job_updated_at: false,
+    })
+    const commands = await observerPool.query<{ status: string; count: string }>(`
+      SELECT status, count(*)::text AS count
+      FROM relay_commands
+      GROUP BY status
+      ORDER BY status
+    `)
+    expect(commands.rows).toEqual([{ status: 'accepted', count: '2' }])
+
+    const outbox = await observerPool.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM relay_outbox_events WHERE published_at IS NULL',
+    )
+    expect(outbox.rows[0]).toEqual({ count: '2' })
+    await expect(observerPool.query('SELECT organization_id FROM relay_commands'))
+      .rejects.toMatchObject({ code: '42501' })
+    await expect(observerPool.query('SELECT payload FROM relay_outbox_events'))
+      .rejects.toMatchObject({ code: '42501' })
+    await expect(observerPool.query('UPDATE relay_commands SET status = status'))
+      .rejects.toMatchObject({ code: '42501' })
   })
 
   it('appends fingerprint-only security failures outside rolled-back domain transactions', async () => {

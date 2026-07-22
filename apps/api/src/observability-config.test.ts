@@ -24,6 +24,9 @@ describe('observability deployment assets', () => {
       'RelayApiLatencyP95High',
       'RelaySseConnectionCapacityHigh',
       'RelayWorkerExecutionUnavailable',
+      'RelayCommandQueueAgeHigh',
+      'RelayOutboxLagHigh',
+      'RelayObserverWorkerHeartbeatStale',
     ]))
     expect(rules.filter((rule) => rule.alert).every((rule) => (
       typeof rule.for === 'string'

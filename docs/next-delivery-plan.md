@@ -300,6 +300,26 @@ Space Admin 可以在统一、克制的 Cosmos 风格控制面中：
 - 本地单 PostgreSQL stop/recovery 不能证明生产连接池耗尽、托管数据库 failover、跨区 RTO/RPO 或数据完整性；目标环境仍需受变更窗口保护的演练和外部告警证据。
 - staging URL/identity、Prometheus/Alertmanager、云对象存储和 provider 故障注入控制当前未提供，仓库不会伪造其执行结果。
 
+## 生产硬化-9：独立 observer 运维指标采集（已完成代码切片）
+
+### 交付结果
+
+- Migration `074_observer_runtime_metrics.sql` 创建 `relay_observer_runtime` NOLOGIN/NOINHERIT/NOBYPASSRLS 角色，只授予命令、Environment provisioning、Worker heartbeat 和四类 Outbox 的状态/时间列 SELECT；没有 payload、tenant/resource/actor 列、写权限或 API tenant context。
+- 新增 `pnpm metrics:database` 独立采集器，使用 observer role 查询跨租户聚合并输出 Prometheus textfile 兼容格式；active Command/Environment 状态、Outbox stream 和 Worker `fresh|stale` 标签均固定有界。
+- 新增 queue age、Outbox lag、observer heartbeat stale 告警与 Runbook；终态 Command 历史和旧 heartbeat 不会伪造为 active backlog。
+- API/Worker tenant runtime role 继续保持原有 FORCE RLS 与权限边界，observer 采集不进入 `/api/metrics` 或普通控制面 API。
+
+### 验证证据
+
+- Restricted-role PostgreSQL integration 29 files / 150 tests：observer 可跨 tenant 聚合 `relay_commands`/Outbox，读取 tenant/payload 或执行 UPDATE 均被 42501 拒绝，角色仍为 NOLOGIN/NOBYPASSRLS。
+- `pnpm metrics:database` 真实 PostgreSQL 输出固定 active/status/stream/freshness 系列；输出不含 organization、payload、actor 或 resource 标签。
+- `pnpm check`、`pnpm openapi:lint`、Docker API/Worker rebuild 后四服务 healthy，health/ready 200，runtime 日志无 fatal/unhandled/raw connection error。
+
+### 明确延期
+
+- 当前采集器是 stdout/textfile 兼容独立进程，不代表目标环境已经部署 Prometheus scrape、recording rule、dashboard、Alertmanager receiver 或 on-call；这些仍需 staging/production IaC 与送达证据。
+- observer 只提供低基数 queue/lease/heartbeat/outbox 指标；DB pool wait、provider/object-store error、audit lag 和业务旅程指标仍需后续独立设计，禁止通过扩大列权限临时读取正文。
+
 ## M4 排序
 
 后续按以下顺序推进：
@@ -307,7 +327,7 @@ Space Admin 可以在统一、克制的 Cosmos 风格控制面中：
 1. **Automation 权威模型（M4-A 已完成）**：已交付 Trigger 唯一资源、Event 去重/脱敏/匹配、ServiceAccount Session dispatch 与同源 Run History；上述延期项在后续 Automation hardening 收口。
 2. **Space 管理（M4-B 已完成）**：已交付 Default、默认 Expert/Environment、删除迁移预览和真实 scope 切换；实际迁移执行保持 capability-gated。
 3. **Advisor 受控执行（M4-C 已完成）**：plan/diff/confirm、受控工具、失败恢复和审计；OAuth/Secret 只返回人工步骤，不伪造完成。
-4. **生产硬化（进行中）**：对象存储、orphan GC、Organization 配额/共享限流、PITR/恢复门禁、SSE 实时撤权、通知/SLO、Worker telemetry、有界负载、Session journey 和本地依赖故障演练代码切片已完成；下一项是独立运维指标采集权限/链路、目标环境 execution soak，以及剩余产品延期项审计。
+4. **生产硬化（进行中）**：对象存储、orphan GC、Organization 配额/共享限流、PITR/恢复门禁、SSE 实时撤权、通知/SLO、Worker telemetry、有界负载、Session journey、本地依赖故障演练和独立 observer 运维指标代码切片已完成；下一项是目标环境 execution soak 与剩余产品延期项审计。
 
 Pinned Sessions、Artifact 高级搜索和高级启动覆盖属于 P2，在上述 P1 控制面闭环之后处理。
 

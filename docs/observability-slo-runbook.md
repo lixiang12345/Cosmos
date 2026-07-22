@@ -19,6 +19,16 @@ curl --fail --silent --oauth2-bearer "$METRICS_SCRAPE_TOKEN" https://relay.inter
 
 这些值是进程内、重启归零的 scrape 指标。Prometheus 必须抓取每个 API replica，并按 `cluster/environment/service/instance/release` 外部标签聚合；不得把单实例 counter 当成全局权威或账单数据。
 
+## 独立数据库运维指标
+
+跨租户 queue、lease、heartbeat 和 Outbox 统计不能由普通 API/Worker tenant role 查询。migration `074_observer_runtime_metrics.sql` 创建 `relay_observer_runtime` NOLOGIN、NOINHERIT、NOBYPASSRLS 角色，仅授予状态/时间列的 SELECT；它没有 payload、actor、tenant ID、resource ID 或写权限。部署平台从 Secret Manager 注入 `OBSERVABILITY_DATABASE_URL`，以该角色执行：
+
+```bash
+pnpm metrics:database
+```
+
+采集器只输出固定低基数系列：命令 `accepted|queued|running`、Environment provisioning `queued|running`、Outbox `session|environment|automation|space`，以及 Worker `fresh|stale`；`OBSERVABILITY_WORKER_FRESHNESS_SECONDS` 默认 30 秒且限制在 5-300 秒。推荐将 stdout 接入独立 Prometheus textfile/sidecar 链路，不把结果转发到 tenant API。采集器查询失败必须让采集任务失败，不输出部分或伪造的零值。
+
 ## SLO 与规则
 
 规则文件为 `ops/observability/relay-alerts.yaml`，部署前执行 `promtool check rules`。当前代码门禁只验证 YAML 结构、必需告警和低基数表达式；目标环境必须再验证 Prometheus 版本兼容、规则加载和至少一次合成通知送达。
@@ -68,3 +78,21 @@ curl --fail --silent --oauth2-bearer "$METRICS_SCRAPE_TOKEN" https://relay.inter
 1. 确认 API health/ready 仍可用，并检查 Worker container/process、最新 heartbeat、数据库连接和 lease age。
 2. 执行关闭时该告警必须静默；执行已启用时不要通过关闭告警规则掩盖 Worker 全部失联。
 3. Worker 恢复后确认 capability 重新变为 enabled、新命令可被领取、过期 lease 由 fencing 规则恢复且没有重复外部副作用。
+
+## RelayCommandQueueAgeHigh
+
+1. 按 active status 区分 accepted、queued、running，检查 Worker poll、数据库连接/锁等待和 lease expiry；不要把 terminal command 历史量当作 backlog。
+2. 若 Worker 全部失联，按 `RelayWorkerExecutionUnavailable` 处理；若仅 queue age 上升，先限制新入口并采集数据库/Worker 现场证据。
+3. 恢复后确认 oldest age 回落、command lease/fencing 没有重复副作用，并记录受影响 Session 数量而非写入 metrics label。
+
+## RelayOutboxLagHigh
+
+1. 按固定 stream 定位 unpublished backlog，检查发布器权限、数据库锁、网络和下游 receiver；禁止读取或打印 payload。
+2. 重启/重放必须保持 event ID 幂等，先在隔离批次验证再扩容；不得直接 UPDATE/DELETE append-only ledger。
+3. 恢复后确认每个 stream 的 oldest age 和 pending count 回落，并保存不含正文的 event/时间线证据。
+
+## RelayObserverWorkerHeartbeatStale
+
+1. 核对 observer freshness window、Worker ID 数量和最近发布；stale heartbeat 是运维信号，不等于当前 execution capability，后者以 API gauge 为准。
+2. 检查 Worker 容器、数据库连接和 lease；不要通过删除 heartbeat 或放宽 freshness window 掩盖故障。
+3. 所有 Worker 恢复 fresh 后确认告警消退，并执行一次 bounded command/Session journey 验证领取链路。

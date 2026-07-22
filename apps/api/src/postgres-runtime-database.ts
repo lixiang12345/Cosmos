@@ -1,7 +1,10 @@
 import type { Pool, PoolClient, PoolConfig, QueryResult, QueryResultRow } from 'pg'
 import { Pool as PostgresPool } from 'pg'
 
-export type RuntimeDatabaseRole = 'relay_api_runtime' | 'relay_worker_runtime'
+export type RuntimeDatabaseRole =
+  | 'relay_api_runtime'
+  | 'relay_worker_runtime'
+  | 'relay_observer_runtime'
 
 export type ApiDatabaseContext = {
   actorId: string
