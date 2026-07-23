@@ -35,6 +35,9 @@ import {
   WebhookDtoSchema,
   WebhookListResponseSchema,
   WebhookMutationResponseSchema,
+  McpServerDtoSchema,
+  McpServerListResponseSchema,
+  McpServerMutationResponseSchema,
   SessionDtoSchema,
   SessionControlResponseSchema,
   SessionEventDtoSchema,
@@ -106,6 +109,10 @@ import {
   type WebhookListResponse,
   type WebhookMutationResponse,
   type CreateWebhookRequest,
+  type McpServerDto,
+  type McpServerListResponse,
+  type McpServerMutationResponse,
+  type CreateMcpServerRequest,
   type SpaceDto,
   type SpaceListResponse,
   type SpaceMigrationPreview,
@@ -507,6 +514,10 @@ function webhooksPath(organizationId: string, spaceId: string) {
   return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/webhooks`
 }
 
+function mcpServersPath(organizationId: string, spaceId: string) {
+  return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/mcp-servers`
+}
+
 function automationsPath(organizationId: string, spaceId: string) {
   return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/automations`
 }
@@ -623,7 +634,7 @@ function assertControlPlaneScope(
   resource: TenantScopedResource,
   organizationId: string,
   spaceId: string,
-  resourceType: 'Expert' | 'Environment' | 'Automation' | 'Repository' | 'Secret' | 'Webhook',
+  resourceType: 'Expert' | 'Environment' | 'Automation' | 'Repository' | 'Secret' | 'Webhook' | 'McpServer',
   resourceId?: string,
 ) {
   if (
@@ -1658,6 +1669,74 @@ export function archiveWebhook(
     method: 'DELETE',
     headers: { Accept: 'application/json', 'If-Match': `"${version}"` },
   }, WebhookMutationResponseSchema.nullable(), auth)
+}
+
+export function listMcpServers(
+  organizationId: string,
+  spaceId: string,
+  auth?: CosmosApiAuthContext,
+  signal?: AbortSignal,
+  options?: CosmosCatalogListOptions,
+): Promise<McpServerListResponse> {
+  return request(catalogListPath(mcpServersPath(organizationId, spaceId), options), {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    signal,
+  }, McpServerListResponseSchema, auth).then((response) => {
+    for (const server of response.items) {
+      assertControlPlaneScope(server, organizationId, spaceId, 'McpServer')
+    }
+    return response
+  })
+}
+
+export function getMcpServer(
+  organizationId: string,
+  spaceId: string,
+  mcpServerId: string,
+  auth?: CosmosApiAuthContext,
+  signal?: AbortSignal,
+): Promise<McpServerDto> {
+  return request(`${mcpServersPath(organizationId, spaceId)}/${encodeURIComponent(mcpServerId)}`, {
+    method: 'GET', headers: { Accept: 'application/json' }, signal,
+  }, McpServerDtoSchema, auth).then((server) => {
+    assertControlPlaneScope(server, organizationId, spaceId, 'McpServer')
+    return server
+  })
+}
+
+export function createMcpServer(
+  organizationId: string,
+  spaceId: string,
+  input: CreateMcpServerRequest,
+  idempotencyKey: string,
+  auth?: CosmosApiAuthContext,
+): Promise<McpServerMutationResponse> {
+  return request(mcpServersPath(organizationId, spaceId), {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey,
+    },
+    body: JSON.stringify(input),
+  }, McpServerMutationResponseSchema, auth).then((response) => {
+    assertControlPlaneScope(response.server, organizationId, spaceId, 'McpServer')
+    return response
+  })
+}
+
+export function archiveMcpServer(
+  organizationId: string,
+  spaceId: string,
+  mcpServerId: string,
+  version: number,
+  auth?: CosmosApiAuthContext,
+): Promise<McpServerMutationResponse | null> {
+  return request(`${mcpServersPath(organizationId, spaceId)}/${encodeURIComponent(mcpServerId)}`, {
+    method: 'DELETE',
+    headers: { Accept: 'application/json', 'If-Match': `"${version}"` },
+  }, McpServerMutationResponseSchema.nullable(), auth)
 }
 
 export function listSpaces(

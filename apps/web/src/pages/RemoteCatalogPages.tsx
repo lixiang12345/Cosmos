@@ -10,6 +10,7 @@ import {
   type ExpertRevisionListResponse,
   type ExpertStatus,
   type ExpertSummaryDto,
+  type McpServerDto,
   type RepositoryDto,
   type SecretDto,
   type WebhookDto,
@@ -24,6 +25,7 @@ import {
   Clock3,
   Container,
   Copy,
+  Database,
   FolderGit2,
   GitBranch,
   History,
@@ -68,6 +70,9 @@ import {
   getWebhook,
   createWebhook,
   archiveWebhook,
+  getMcpServer,
+  createMcpServer,
+  archiveMcpServer,
   listExpertRevisions,
   listEnvironmentRevisions,
   publishExpert,
@@ -134,6 +139,10 @@ export type RemoteSecretsPageProps = RemoteCatalogListState<SecretDto>
   & { onOpenNavigation?: () => void; canManage?: boolean; onCatalogChange?: () => void }
 
 export type RemoteWebhooksPageProps = RemoteCatalogListState<WebhookDto>
+  & RemoteCatalogRequestProps
+  & { onOpenNavigation?: () => void; canManage?: boolean; onCatalogChange?: () => void }
+
+export type RemoteMcpServersPageProps = RemoteCatalogListState<McpServerDto>
   & RemoteCatalogRequestProps
   & { onOpenNavigation?: () => void; canManage?: boolean; onCatalogChange?: () => void }
 
@@ -1754,6 +1763,226 @@ export function RemoteWebhooksPage({
               <span />
               <button type="button" className="cosmos-button cosmos-button--primary" disabled={mutating} onClick={submitWebhook}>
                 <Webhook aria-hidden="true" />{text(locale, '创建并显示密钥', 'Create and reveal secret')}
+              </button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
+    </main>
+  )
+}
+
+function McpConnectionLabel({ status }: { status: McpServerDto['connectionStatus'] }) {
+  const { locale } = usePreferences()
+  const map: Record<McpServerDto['connectionStatus'], { label: string; tone: string }> = {
+    connected: { label: text(locale, '已连接', 'Connected'), tone: 'ok' },
+    action_required: { label: text(locale, '需处理', 'Action required'), tone: 'warn' },
+    archived: { label: text(locale, '已归档', 'Archived'), tone: 'muted' },
+  }
+  const entry = map[status]
+  return <span className={`cosmos-status-label cosmos-status-label--${entry.tone}`}>{entry.label}</span>
+}
+
+type McpDraft = { name: string; transport: McpServerDto['transport']; endpoint: string; command: string }
+const initialMcpDraft: McpDraft = { name: '', transport: 'http', endpoint: '', command: '' }
+
+export function RemoteMcpServersPage({
+  items,
+  loading,
+  ready,
+  error,
+  onRetry,
+  organizationId,
+  spaceId,
+  auth,
+  credentialVersion,
+  canManage,
+  onOpenNavigation,
+}: RemoteMcpServersPageProps) {
+  const { locale } = usePreferences()
+  const [selectedId, setSelectedId] = useState<string>()
+  const [formOpen, setFormOpen] = useState(false)
+  const [draft, setDraft] = useState<McpDraft>(initialMcpDraft)
+  const [mutating, setMutating] = useState(false)
+  const [mutationError, setMutationError] = useState<Error | null>(null)
+  const state = listState(loading, ready, error)
+  const selectedSummary = items.find((item) => item.id === selectedId) ?? items[0]
+  const selectedMcpServerId = state === 'ready' ? selectedSummary?.id : undefined
+  const requestAuth = useMemo<CosmosApiAuthContext>(() => ({
+    accessToken: auth.accessToken,
+    requestIdentity: auth.requestIdentity,
+    onUnauthorized: auth.onUnauthorized,
+  }), [auth.accessToken, auth.onUnauthorized, auth.requestIdentity])
+  const identity = useMemo(() => selectedMcpServerId ? ({
+    organizationId,
+    spaceId,
+    mcpServerId: selectedMcpServerId,
+    requestIdentity: requestAuth.requestIdentity,
+    credentialVersion,
+  }) : undefined, [credentialVersion, organizationId, requestAuth.requestIdentity, selectedMcpServerId, spaceId])
+  const load = useCallback((signal: AbortSignal) => {
+    if (!selectedMcpServerId) throw new Error('No MCP server selected.')
+    return getMcpServer(organizationId, spaceId, selectedMcpServerId, requestAuth, signal)
+  }, [organizationId, requestAuth, selectedMcpServerId, spaceId])
+  const detail = useRemoteDetail(identity, load)
+  const server = detail.status === 'ready' ? detail.item : selectedSummary
+
+  const closeForm = useCallback(() => { setDraft(initialMcpDraft); setMutationError(null); setFormOpen(false) }, [])
+
+  const submitServer = useCallback(async () => {
+    const name = draft.name.trim()
+    const isStdio = draft.transport === 'stdio'
+    const target = isStdio ? draft.command.trim() : draft.endpoint.trim()
+    if (!name || !target) {
+      setMutationError(new Error(isStdio
+        ? text(locale, '名称和启动命令均为必填。', 'Name and launch command are both required.')
+        : text(locale, '名称和 Endpoint 均为必填。', 'Name and endpoint are both required.')))
+      return
+    }
+    setMutating(true)
+    setMutationError(null)
+    try {
+      await createMcpServer(organizationId, spaceId, {
+        name,
+        transport: draft.transport,
+        endpoint: isStdio ? undefined : target,
+        command: isStdio ? target : undefined,
+      }, crypto.randomUUID(), requestAuth)
+      closeForm()
+      onRetry()
+    } catch (cause) {
+      setMutationError(cause instanceof Error ? cause : new Error(String(cause)))
+    } finally {
+      setMutating(false)
+    }
+  }, [closeForm, draft, locale, onRetry, organizationId, requestAuth, spaceId])
+
+  const archiveSelected = useCallback(async () => {
+    if (!server) return
+    setMutating(true)
+    setMutationError(null)
+    try {
+      await archiveMcpServer(organizationId, spaceId, server.id, server.version, requestAuth)
+      setSelectedId(undefined)
+      onRetry()
+    } catch (cause) {
+      setMutationError(cause instanceof Error ? cause : new Error(String(cause)))
+    } finally {
+      setMutating(false)
+    }
+  }, [onRetry, organizationId, requestAuth, spaceId, server])
+
+  return (
+    <main className="cosmos-page remote-catalog-page">
+      <PageHeader
+        icon={Database}
+        title={text(locale, 'MCP Registry', 'MCP Registry')}
+        description={text(locale, '管理可供专家调用的 Model Context Protocol servers，然后在专家编辑器中固定。', 'Manage Model Context Protocol servers available to Experts, then pin them from the Expert editor.')}
+        onOpenNavigation={onOpenNavigation}
+        readOnly={!canManage}
+        actions={canManage ? (
+          <button type="button" className="cosmos-button cosmos-button--primary" onClick={() => setFormOpen(true)}>
+            <Plus aria-hidden="true" />{text(locale, '新增 Server', 'Add server')}
+          </button>
+        ) : undefined}
+      />
+      <div className="cosmos-page__scroll">
+        {state === 'loading' ? <LoadState status="loading" resource={text(locale, 'MCP servers', 'MCP servers')} onRetry={onRetry} /> : null}
+        {state === 'error' ? <LoadState status="error" resource={text(locale, 'MCP servers', 'MCP servers')} error={error} onRetry={onRetry} /> : null}
+        {state === 'ready' && items.length === 0 ? (
+          <section className="cosmos-panel remote-catalog-empty"><Database aria-hidden="true" /><strong>{text(locale, '注册表为空', 'Registry is empty')}</strong><p>{text(locale, '新增第一个 MCP server 作为专家的工具来源。', 'Add the first MCP server as an Expert tool source.')}</p></section>
+        ) : null}
+        {state === 'ready' && items.length > 0 ? (
+          <section className="remote-environment-layout">
+            <aside className="cosmos-panel remote-environment-list" aria-label={text(locale, 'MCP server 列表', 'MCP server list')}>
+              <header className="cosmos-section-heading">
+                <div><span>Registry</span><h2>{text(locale, `${items.length} 个 Server`, `${items.length} servers`)}</h2></div>
+                <IconButton icon={RefreshCw} label={text(locale, '刷新 MCP server 列表', 'Refresh MCP server list')} onClick={onRetry} />
+              </header>
+              {items.map((item) => (
+                <button
+                  type="button"
+                  className={`remote-environment-row${item.id === selectedMcpServerId ? ' remote-environment-row--selected' : ''}`}
+                  aria-pressed={item.id === selectedMcpServerId}
+                  key={item.id}
+                  onClick={() => setSelectedId(item.id)}
+                >
+                  <span className="cosmos-resource-row__icon"><Database aria-hidden="true" /></span>
+                  <span><strong>{item.name}</strong><small>{item.transport === 'stdio' ? item.command : item.endpoint}</small></span>
+                  <McpConnectionLabel status={item.connectionStatus} />
+                  <ChevronRight aria-hidden="true" />
+                </button>
+              ))}
+            </aside>
+            <section className="cosmos-panel remote-environment-detail" aria-label={text(locale, 'MCP server 详情', 'MCP server detail')}>
+              {server ? (
+                <>
+                  <header className="cosmos-section-heading">
+                    <div><span>MCP server</span><h2>{server.name}</h2></div>
+                    <McpConnectionLabel status={server.connectionStatus} />
+                  </header>
+                  <section className="remote-detail-section">
+                    <header><Link2 aria-hidden="true" /><h3>{text(locale, '连接', 'Connection')}</h3></header>
+                    <dl className="remote-detail-list">
+                      <div><dt>Transport</dt><dd>{server.transport}</dd></div>
+                      <div><dt>{server.transport === 'stdio' ? text(locale, '启动命令', 'Launch command') : 'Endpoint'}</dt><dd><code>{server.transport === 'stdio' ? server.command : server.endpoint}</code></dd></div>
+                      <div><dt>{text(locale, '工具数', 'Tools discovered')}</dt><dd>{server.toolCount}</dd></div>
+                    </dl>
+                  </section>
+                  {mutationError ? <InlineError error={mutationError} /> : null}
+                  <footer className="remote-detail-footer">
+                    <span><Clock3 aria-hidden="true" />{text(locale, '更新于', 'Updated')} {formatDate(server.updatedAt, locale)}</span>
+                    {canManage ? (
+                      <button type="button" className="cosmos-button cosmos-button--danger" disabled={mutating} onClick={archiveSelected}>
+                        <Trash2 aria-hidden="true" />{text(locale, '归档 Server', 'Archive server')}
+                      </button>
+                    ) : null}
+                  </footer>
+                </>
+              ) : (
+                <div className="remote-detail-unavailable"><CircleOff aria-hidden="true" />{detail.error?.message ?? text(locale, '无法加载 MCP server 详情。', 'Unable to load the MCP server detail.')}</div>
+              )}
+            </section>
+          </section>
+        ) : null}
+      </div>
+      {formOpen ? (
+        <div className="cosmos-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeForm() }}>
+          <section className="cosmos-modal" role="dialog" aria-modal="true" aria-label={text(locale, '新增 MCP Server', 'Add MCP server')}>
+            <header><h2>{text(locale, '新增 MCP Server', 'Add MCP server')}</h2><IconButton icon={X} label={text(locale, '关闭', 'Close')} onClick={closeForm} /></header>
+            <div className="cosmos-modal__body">
+              <div className="cosmos-form-grid">
+                <label className="cosmos-field cosmos-field--wide">
+                  <span>{text(locale, '名称', 'Name')}</span>
+                  <input autoFocus value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Internal Docs MCP" />
+                </label>
+                <label className="cosmos-field">
+                  <span>Transport</span>
+                  <select value={draft.transport} onChange={(event) => setDraft({ ...draft, transport: event.target.value as McpServerDto['transport'] })}>
+                    <option value="http">HTTP</option>
+                    <option value="sse">SSE</option>
+                    <option value="stdio">stdio</option>
+                  </select>
+                </label>
+                {draft.transport === 'stdio' ? (
+                  <label className="cosmos-field cosmos-field--wide">
+                    <span>{text(locale, '启动命令', 'Launch command')}</span>
+                    <input value={draft.command} onChange={(event) => setDraft({ ...draft, command: event.target.value })} placeholder="npx @company/mcp-server" />
+                  </label>
+                ) : (
+                  <label className="cosmos-field cosmos-field--wide">
+                    <span>Endpoint</span>
+                    <input type="url" value={draft.endpoint} onChange={(event) => setDraft({ ...draft, endpoint: event.target.value })} placeholder="https://mcp.example.com/api" />
+                  </label>
+                )}
+              </div>
+              {mutationError ? <InlineError error={mutationError} /> : null}
+            </div>
+            <footer className="cosmos-modal__footer">
+              <button type="button" className="cosmos-button cosmos-button--ghost" onClick={closeForm}>{text(locale, '取消', 'Cancel')}</button>
+              <span />
+              <button type="button" className="cosmos-button cosmos-button--primary" disabled={mutating} onClick={submitServer}>
+                <Database aria-hidden="true" />{text(locale, '新增 Server', 'Add server')}
               </button>
             </footer>
           </section>

@@ -67,6 +67,7 @@ const RemoteEnvironmentsPage = lazy(() => import('./pages/RemoteCatalogPages').t
 const RemoteRepositoriesPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteRepositoriesPage })))
 const RemoteSecretsPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteSecretsPage })))
 const RemoteWebhooksPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteWebhooksPage })))
+const RemoteMcpServersPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteMcpServersPage })))
 const RemoteFilesPage = lazy(() => import('./pages/RemoteFilesPage').then((module) => ({ default: module.RemoteFilesPage })))
 const RemoteWorkersPage = lazy(() => import('./pages/RemoteWorkersPage').then((module) => ({ default: module.RemoteWorkersPage })))
 const RemoteApprovalsPage = lazy(() => import('./pages/RemoteApprovalsPage').then((module) => ({ default: module.RemoteApprovalsPage })))
@@ -2148,7 +2149,21 @@ function CosmosApp() {
               onOpenNavigation={openNavigation}
             />} />
         <Route path="/integrations" element={demoMode ? <IntegrationsControlPage onOpenNavigation={openNavigation} /> : productionUnavailable} />
-        <Route path="/mcp" element={demoMode ? <McpRegistryPage onOpenNavigation={openNavigation} /> : productionUnavailable} />
+        <Route path="/mcp" element={demoMode
+          ? <McpRegistryPage onOpenNavigation={openNavigation} />
+          : <RemoteMcpServersPage
+              items={catalog.mcpServers.items}
+              loading={catalog.mcpServers.loading}
+              ready={catalog.mcpServers.ready}
+              error={catalog.mcpServers.error}
+              onRetry={catalog.mcpServers.retry}
+              organizationId={organizationId}
+              spaceId={activeSpace.id}
+              auth={catalogAuth}
+              credentialVersion={credentialVersion}
+              canManage={expertManagementEnabled}
+              onOpenNavigation={openNavigation}
+            />} />
         <Route path="/webhooks" element={demoMode
           ? <WebhooksPage onOpenNavigation={openNavigation} />
           : <RemoteWebhooksPage

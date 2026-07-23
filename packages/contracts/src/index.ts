@@ -401,3 +401,20 @@ export {
   type WebhookScope,
   type WebhookStatus,
 } from './webhook.js'
+
+export {
+  CreateMcpServerRequestSchema,
+  McpConnectionStatusSchema,
+  McpServerDtoSchema,
+  McpServerListResponseSchema,
+  McpServerMutationResponseSchema,
+  McpTransportSchema,
+  UpdateMcpServerRequestSchema,
+  type CreateMcpServerRequest,
+  type McpConnectionStatus,
+  type McpServerDto,
+  type McpServerListResponse,
+  type McpServerMutationResponse,
+  type McpTransport,
+  type UpdateMcpServerRequest,
+} from './mcp.js'

@@ -82,6 +82,7 @@ const migrationVersions = [
   '077_repository_catalog.sql',
   '078_secret_catalog.sql',
   '079_webhook_catalog.sql',
+  '080_mcp_server_catalog.sql',
 ]
 
 function poolWithVersions(versions: string[]) {

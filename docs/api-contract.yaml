@@ -58,6 +58,10 @@ tags:
     description: Space-scoped source repositories and their connection status.
   - name: Secrets
     description: Space-scoped write-only Secret values and their non-sensitive metadata.
+  - name: Webhooks
+    description: Space-scoped outbound HTTPS endpoints with write-once signing secrets.
+  - name: MCP Registry
+    description: Space-scoped Model Context Protocol servers that Experts can pin as tool sources.
   - name: Events
     description: Immutable external inputs, matching, dispatch, and replay diagnostics.
   - name: Subscriptions
@@ -3439,6 +3443,157 @@ paths:
         '500':
           $ref: '#/components/responses/RuntimeInternalError'
 
+  /organizations/{organizationId}/spaces/{spaceId}/mcp-servers:
+    parameters:
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
+    get:
+      tags: [MCP Registry]
+      operationId: listMcpServers
+      x-cosmos-implementation-status: implemented
+      summary: List MCP servers in a Space
+      responses:
+        '200':
+          description: MCP server list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeMcpServerListResponse'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+    post:
+      tags: [MCP Registry]
+      operationId: createMcpServer
+      x-cosmos-implementation-status: implemented
+      summary: Register an MCP server in a Space
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeCreateMcpServerRequest'
+      responses:
+        '201':
+          description: MCP server registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeMcpServerMutationResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+
+  /organizations/{organizationId}/spaces/{spaceId}/mcp-servers/{mcpServerId}:
+    parameters:
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
+      - $ref: '#/components/parameters/RuntimeMcpServerId'
+    get:
+      tags: [MCP Registry]
+      operationId: getMcpServer
+      x-cosmos-implementation-status: implemented
+      summary: Get an MCP server
+      responses:
+        '200':
+          description: MCP server
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeMcpServer'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+    patch:
+      tags: [MCP Registry]
+      operationId: updateMcpServer
+      x-cosmos-implementation-status: implemented
+      summary: Update an MCP server
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeUpdateMcpServerRequest'
+      responses:
+        '200':
+          description: Updated MCP server
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeMcpServerMutationResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
+        '412':
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '428':
+          $ref: '#/components/responses/RuntimePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+    delete:
+      tags: [MCP Registry]
+      operationId: archiveMcpServer
+      x-cosmos-implementation-status: implemented
+      summary: Archive an MCP server
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Archived MCP server
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeMcpServerMutationResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
+        '412':
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '428':
+          $ref: '#/components/responses/RuntimePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -3553,6 +3708,13 @@ components:
       in: path
       required: true
       description: Runtime Webhook identifier.
+      schema:
+        $ref: '#/components/schemas/RuntimeIdentifier'
+    RuntimeMcpServerId:
+      name: mcpServerId
+      in: path
+      required: true
+      description: Runtime MCP server identifier.
       schema:
         $ref: '#/components/schemas/RuntimeIdentifier'
     SubscriptionId:
@@ -5947,6 +6109,126 @@ components:
               minLength: 1
               description: Write-once signing secret. Returned only on fresh creation, null on replay.
             - type: 'null'
+        replayed:
+          type: boolean
+      additionalProperties: false
+    RuntimeMcpServer:
+      type: object
+      description: Registered MCP server metadata. Exactly one of endpoint (http/sse) or command (stdio) is populated.
+      required: [id, organizationId, spaceId, name, transport, endpoint, command, connectionStatus, toolCount, version, createdBy, createdAt, updatedAt, archivedAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        spaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        transport:
+          type: string
+          enum: [stdio, sse, http]
+        endpoint:
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 2048
+            - type: 'null'
+        command:
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 2048
+            - type: 'null'
+        connectionStatus:
+          type: string
+          enum: [connected, action_required, archived]
+        toolCount:
+          type: integer
+          minimum: 0
+        version:
+          type: integer
+          minimum: 1
+        createdBy:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        updatedAt:
+          $ref: '#/components/schemas/Timestamp'
+        archivedAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+      additionalProperties: false
+    RuntimeMcpServerListResponse:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/RuntimeMcpServer'
+        page:
+          type: object
+          required: [nextCursor, hasMore]
+          properties:
+            nextCursor:
+              oneOf:
+                - type: string
+                  minLength: 1
+                  maxLength: 2048
+                - type: 'null'
+            hasMore:
+              type: boolean
+          additionalProperties: false
+      additionalProperties: false
+    RuntimeCreateMcpServerRequest:
+      type: object
+      required: [name, transport]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        transport:
+          type: string
+          enum: [stdio, sse, http]
+        endpoint:
+          type: string
+          minLength: 1
+          maxLength: 2048
+          description: Required for http and sse transports.
+        command:
+          type: string
+          minLength: 1
+          maxLength: 2048
+          description: Required for stdio transport.
+      additionalProperties: false
+    RuntimeUpdateMcpServerRequest:
+      type: object
+      properties:
+        endpoint:
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 2048
+            - type: 'null'
+        command:
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 2048
+            - type: 'null'
+      additionalProperties: false
+    RuntimeMcpServerMutationResponse:
+      type: object
+      required: [server, replayed]
+      properties:
+        server:
+          $ref: '#/components/schemas/RuntimeMcpServer'
         replayed:
           type: boolean
       additionalProperties: false
