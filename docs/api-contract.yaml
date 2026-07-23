@@ -64,6 +64,8 @@ tags:
     description: Space-scoped Model Context Protocol servers that Experts can pin as tool sources.
   - name: Daemons
     description: Space-scoped self-hosted execution machines that provide scheduler capacity within an Environment pool.
+  - name: Integrations
+    description: Space-scoped connections to external providers (GitHub, Slack, Jira, PagerDuty, Linear, or custom) with connection health tracking.
   - name: Events
     description: Immutable external inputs, matching, dispatch, and replay diagnostics.
   - name: Subscriptions
@@ -3747,6 +3749,157 @@ paths:
         '500':
           $ref: '#/components/responses/RuntimeInternalError'
 
+  /organizations/{organizationId}/spaces/{spaceId}/integrations:
+    parameters:
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
+    get:
+      tags: [Integrations]
+      operationId: listIntegrations
+      x-cosmos-implementation-status: implemented
+      summary: List integrations in a Space
+      responses:
+        '200':
+          description: Integration list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeIntegrationListResponse'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+    post:
+      tags: [Integrations]
+      operationId: createIntegration
+      x-cosmos-implementation-status: implemented
+      summary: Connect an integration in a Space
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeCreateIntegrationRequest'
+      responses:
+        '201':
+          description: Integration connected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeIntegrationMutationResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+
+  /organizations/{organizationId}/spaces/{spaceId}/integrations/{integrationId}:
+    parameters:
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
+      - $ref: '#/components/parameters/RuntimeIntegrationId'
+    get:
+      tags: [Integrations]
+      operationId: getIntegration
+      x-cosmos-implementation-status: implemented
+      summary: Get an integration
+      responses:
+        '200':
+          description: Integration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeIntegration'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+    patch:
+      tags: [Integrations]
+      operationId: updateIntegration
+      x-cosmos-implementation-status: implemented
+      summary: Update an integration
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeUpdateIntegrationRequest'
+      responses:
+        '200':
+          description: Updated integration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeIntegrationMutationResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
+        '412':
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '428':
+          $ref: '#/components/responses/RuntimePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+    delete:
+      tags: [Integrations]
+      operationId: archiveIntegration
+      x-cosmos-implementation-status: implemented
+      summary: Archive an integration
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Archived integration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeIntegrationMutationResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
+        '412':
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '428':
+          $ref: '#/components/responses/RuntimePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -3875,6 +4028,13 @@ components:
       in: path
       required: true
       description: Runtime daemon identifier.
+      schema:
+        $ref: '#/components/schemas/RuntimeIdentifier'
+    RuntimeIntegrationId:
+      name: integrationId
+      in: path
+      required: true
+      description: Runtime integration identifier.
       schema:
         $ref: '#/components/schemas/RuntimeIdentifier'
     SubscriptionId:
@@ -6520,6 +6680,150 @@ components:
       properties:
         daemon:
           $ref: '#/components/schemas/RuntimeDaemon'
+        replayed:
+          type: boolean
+      additionalProperties: false
+    RuntimeIntegration:
+      type: object
+      description: Space-scoped third-party integration connection metadata.
+      required: [id, organizationId, spaceId, type, name, connectionStatus, health, scopes, externalAccount, diagnostic, connectedAt, lastEventAt, version, createdBy, createdAt, updatedAt, archivedAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        spaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        type:
+          type: string
+          enum: [github, slack, jira, pagerduty, linear, custom]
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        connectionStatus:
+          type: string
+          enum: [connected, action_required, disconnected, archived]
+        health:
+          type: string
+          enum: [healthy, degraded, unknown]
+        scopes:
+          type: array
+          maxItems: 64
+          items:
+            type: string
+            minLength: 1
+            maxLength: 256
+        externalAccount:
+          oneOf:
+            - type: string
+              maxLength: 256
+            - type: 'null'
+        diagnostic:
+          oneOf:
+            - type: string
+              maxLength: 2048
+            - type: 'null'
+        connectedAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        lastEventAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        version:
+          type: integer
+          minimum: 1
+        createdBy:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        updatedAt:
+          $ref: '#/components/schemas/Timestamp'
+        archivedAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+      additionalProperties: false
+    RuntimeIntegrationListResponse:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/RuntimeIntegration'
+        page:
+          type: object
+          required: [nextCursor, hasMore]
+          properties:
+            nextCursor:
+              oneOf:
+                - type: string
+                  minLength: 1
+                  maxLength: 2048
+                - type: 'null'
+            hasMore:
+              type: boolean
+          additionalProperties: false
+      additionalProperties: false
+    RuntimeCreateIntegrationRequest:
+      type: object
+      required: [type, name]
+      properties:
+        type:
+          type: string
+          enum: [github, slack, jira, pagerduty, linear, custom]
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        externalAccount:
+          type: string
+          maxLength: 256
+        scopes:
+          type: array
+          maxItems: 64
+          items:
+            type: string
+            minLength: 1
+            maxLength: 256
+      additionalProperties: false
+    RuntimeUpdateIntegrationRequest:
+      type: object
+      properties:
+        connectionStatus:
+          type: string
+          enum: [connected, action_required, disconnected]
+        health:
+          type: string
+          enum: [healthy, degraded, unknown]
+        scopes:
+          type: array
+          maxItems: 64
+          items:
+            type: string
+            minLength: 1
+            maxLength: 256
+        externalAccount:
+          oneOf:
+            - type: string
+              maxLength: 256
+            - type: 'null'
+        diagnostic:
+          oneOf:
+            - type: string
+              maxLength: 2048
+            - type: 'null'
+      additionalProperties: false
+    RuntimeIntegrationMutationResponse:
+      type: object
+      required: [integration, replayed]
+      properties:
+        integration:
+          $ref: '#/components/schemas/RuntimeIntegration'
         replayed:
           type: boolean
       additionalProperties: false

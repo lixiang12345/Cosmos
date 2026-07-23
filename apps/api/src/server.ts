@@ -24,6 +24,7 @@ import { PostgresSecretRepository } from './postgres-secret-repository.js'
 import { PostgresWebhookRepository } from './postgres-webhook-repository.js'
 import { PostgresMcpServerRepository } from './postgres-mcp-server-repository.js'
 import { PostgresDaemonRepository } from './postgres-daemon-repository.js'
+import { PostgresIntegrationRepository } from './postgres-integration-repository.js'
 import { PostgresOrganizationQuotaRepository } from './organization-quota-repository.js'
 import { S3ObjectStore } from './object-storage.js'
 import { InMemorySessionRepository } from './session-repository.js'
@@ -107,6 +108,7 @@ const app = createApp({
   webhookRepository: pool ? new PostgresWebhookRepository(pool) : undefined,
   mcpServerRepository: pool ? new PostgresMcpServerRepository(pool) : undefined,
   daemonRepository: pool ? new PostgresDaemonRepository(pool) : undefined,
+  integrationRepository: pool ? new PostgresIntegrationRepository(pool) : undefined,
   fileRepository: pool ? new PostgresFileRepository(pool, objectStore) : undefined,
   toolApprovalRepository: pool ? new PostgresToolApprovalRepository(pool) : undefined,
   serviceAccountPolicyRepository: pool ? new PostgresServiceAccountPolicyRepository(pool) : undefined,

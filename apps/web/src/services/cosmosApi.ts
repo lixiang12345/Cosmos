@@ -41,6 +41,9 @@ import {
   DaemonDtoSchema,
   DaemonListResponseSchema,
   DaemonMutationResponseSchema,
+  IntegrationDtoSchema,
+  IntegrationListResponseSchema,
+  IntegrationMutationResponseSchema,
   SessionDtoSchema,
   SessionControlResponseSchema,
   SessionEventDtoSchema,
@@ -121,6 +124,11 @@ import {
   type DaemonMutationResponse,
   type CreateDaemonRequest,
   type UpdateDaemonRequest,
+  type IntegrationDto,
+  type IntegrationListResponse,
+  type IntegrationMutationResponse,
+  type CreateIntegrationRequest,
+  type UpdateIntegrationRequest,
   type SpaceDto,
   type SpaceListResponse,
   type SpaceMigrationPreview,
@@ -526,6 +534,10 @@ function mcpServersPath(organizationId: string, spaceId: string) {
   return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/mcp-servers`
 }
 
+function integrationsPath(organizationId: string, spaceId: string) {
+  return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/integrations`
+}
+
 function daemonsPath(organizationId: string, spaceId: string) {
   return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/daemons`
 }
@@ -646,7 +658,7 @@ function assertControlPlaneScope(
   resource: TenantScopedResource,
   organizationId: string,
   spaceId: string,
-  resourceType: 'Expert' | 'Environment' | 'Automation' | 'Repository' | 'Secret' | 'Webhook' | 'McpServer' | 'Daemon',
+  resourceType: 'Expert' | 'Environment' | 'Automation' | 'Repository' | 'Secret' | 'Webhook' | 'McpServer' | 'Daemon' | 'Integration',
   resourceId?: string,
 ) {
   if (
@@ -1838,6 +1850,95 @@ export function archiveDaemon(
     method: 'DELETE',
     headers: { Accept: 'application/json', 'If-Match': `"${version}"` },
   }, DaemonMutationResponseSchema.nullable(), auth)
+}
+
+export function listIntegrations(
+  organizationId: string,
+  spaceId: string,
+  auth?: CosmosApiAuthContext,
+  signal?: AbortSignal,
+  options?: CosmosCatalogListOptions,
+): Promise<IntegrationListResponse> {
+  return request(catalogListPath(integrationsPath(organizationId, spaceId), options), {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    signal,
+  }, IntegrationListResponseSchema, auth).then((response) => {
+    for (const integration of response.items) {
+      assertControlPlaneScope(integration, organizationId, spaceId, 'Integration')
+    }
+    return response
+  })
+}
+
+export function getIntegration(
+  organizationId: string,
+  spaceId: string,
+  integrationId: string,
+  auth?: CosmosApiAuthContext,
+  signal?: AbortSignal,
+): Promise<IntegrationDto> {
+  return request(`${integrationsPath(organizationId, spaceId)}/${encodeURIComponent(integrationId)}`, {
+    method: 'GET', headers: { Accept: 'application/json' }, signal,
+  }, IntegrationDtoSchema, auth).then((integration) => {
+    assertControlPlaneScope(integration, organizationId, spaceId, 'Integration')
+    return integration
+  })
+}
+
+export function createIntegration(
+  organizationId: string,
+  spaceId: string,
+  input: CreateIntegrationRequest,
+  idempotencyKey: string,
+  auth?: CosmosApiAuthContext,
+): Promise<IntegrationMutationResponse> {
+  return request(integrationsPath(organizationId, spaceId), {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey,
+    },
+    body: JSON.stringify(input),
+  }, IntegrationMutationResponseSchema, auth).then((response) => {
+    assertControlPlaneScope(response.integration, organizationId, spaceId, 'Integration')
+    return response
+  })
+}
+
+export function updateIntegration(
+  organizationId: string,
+  spaceId: string,
+  integrationId: string,
+  version: number,
+  input: UpdateIntegrationRequest,
+  idempotencyKey: string,
+  auth?: CosmosApiAuthContext,
+): Promise<IntegrationMutationResponse | null> {
+  return request(`${integrationsPath(organizationId, spaceId)}/${encodeURIComponent(integrationId)}`, {
+    method: 'PATCH',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': `"${version}"`,
+    },
+    body: JSON.stringify(input),
+  }, IntegrationMutationResponseSchema.nullable(), auth)
+}
+
+export function archiveIntegration(
+  organizationId: string,
+  spaceId: string,
+  integrationId: string,
+  version: number,
+  auth?: CosmosApiAuthContext,
+): Promise<IntegrationMutationResponse | null> {
+  return request(`${integrationsPath(organizationId, spaceId)}/${encodeURIComponent(integrationId)}`, {
+    method: 'DELETE',
+    headers: { Accept: 'application/json', 'If-Match': `"${version}"` },
+  }, IntegrationMutationResponseSchema.nullable(), auth)
 }
 
 export function listSpaces(

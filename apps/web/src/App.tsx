@@ -69,6 +69,7 @@ const RemoteSecretsPage = lazy(() => import('./pages/RemoteCatalogPages').then((
 const RemoteWebhooksPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteWebhooksPage })))
 const RemoteMcpServersPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteMcpServersPage })))
 const RemoteDaemonsPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteDaemonsPage })))
+const RemoteIntegrationsPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteIntegrationsPage })))
 const RemoteFilesPage = lazy(() => import('./pages/RemoteFilesPage').then((module) => ({ default: module.RemoteFilesPage })))
 const RemoteWorkersPage = lazy(() => import('./pages/RemoteWorkersPage').then((module) => ({ default: module.RemoteWorkersPage })))
 const RemoteApprovalsPage = lazy(() => import('./pages/RemoteApprovalsPage').then((module) => ({ default: module.RemoteApprovalsPage })))
@@ -2164,7 +2165,21 @@ function CosmosApp() {
               credentialVersion={credentialVersion}
               onOpenNavigation={openNavigation}
             />} />
-        <Route path="/integrations" element={demoMode ? <IntegrationsControlPage onOpenNavigation={openNavigation} /> : productionUnavailable} />
+        <Route path="/integrations" element={demoMode
+          ? <IntegrationsControlPage onOpenNavigation={openNavigation} />
+          : <RemoteIntegrationsPage
+              items={catalog.integrations.items}
+              loading={catalog.integrations.loading}
+              ready={catalog.integrations.ready}
+              error={catalog.integrations.error}
+              onRetry={catalog.integrations.retry}
+              organizationId={organizationId}
+              spaceId={activeSpace.id}
+              auth={catalogAuth}
+              credentialVersion={credentialVersion}
+              canManage={expertManagementEnabled}
+              onOpenNavigation={openNavigation}
+            />} />
         <Route path="/mcp" element={demoMode
           ? <McpRegistryPage onOpenNavigation={openNavigation} />
           : <RemoteMcpServersPage

@@ -90,6 +90,11 @@ import {
   DaemonDtoSchema,
   DaemonListResponseSchema,
   DaemonMutationResponseSchema,
+  CreateIntegrationRequestSchema,
+  UpdateIntegrationRequestSchema,
+  IntegrationDtoSchema,
+  IntegrationListResponseSchema,
+  IntegrationMutationResponseSchema,
   type ApiError,
   type SessionEventDto,
   type SessionEventPage,
@@ -208,6 +213,13 @@ import {
   DaemonVersionConflictError,
   type DaemonRepository,
 } from './daemon-repository.js'
+import {
+  EmptyIntegrationRepository,
+  IntegrationDuplicateError,
+  IntegrationIdempotencyConflictError,
+  IntegrationVersionConflictError,
+  type IntegrationRepository,
+} from './integration-repository.js'
 import type { OrganizationQuotaRepository } from './organization-quota-repository.js'
 import { CosmosMetrics } from './metrics.js'
 import {
@@ -384,6 +396,7 @@ export type CreateAppOptions = {
   webhookRepository?: WebhookRepository
   mcpServerRepository?: McpServerRepository
   daemonRepository?: DaemonRepository
+  integrationRepository?: IntegrationRepository
   sessionRepository?: SessionRepository
   sessionTimelineRepository?: SessionTimelineRepository
   artifactRepository?: ArtifactRepository
@@ -753,6 +766,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   const webhookRepository = options.webhookRepository ?? new EmptyWebhookRepository()
   const mcpServerRepository = options.mcpServerRepository ?? new EmptyMcpServerRepository()
   const daemonRepository = options.daemonRepository ?? new EmptyDaemonRepository()
+  const integrationRepository = options.integrationRepository ?? new EmptyIntegrationRepository()
   const advisorPlanRepository = options.advisorPlanRepository ?? new EmptyAdvisorPlanRepository()
   const advisorPlanExecutor = new AdvisorPlanExecutor(advisorPlanRepository, spaceRepository)
   const contextEngineGateway = options.contextEngineGateway
@@ -1763,6 +1777,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   const canManageWebhooks = canManageExperts
   const canManageMcpServers = canManageExperts
   const canManageDaemons = canManageExperts
+  const canManageIntegrations = canManageExperts
 
   function denyExpertMutation(request: FastifyRequest, reply: FastifyReply) {
     return sendApiError(reply, 403, request, {
@@ -1816,6 +1831,14 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     return sendApiError(reply, 403, request, {
       code: 'PERMISSION_DENIED',
       message: 'Only Space Managers and Organization Administrators can manage daemons.',
+      retryable: false,
+    })
+  }
+
+  function denyIntegrationMutation(request: FastifyRequest, reply: FastifyReply) {
+    return sendApiError(reply, 403, request, {
+      code: 'PERMISSION_DENIED',
+      message: 'Only Space Managers and Organization Administrators can manage integrations.',
       retryable: false,
     })
   }
@@ -5077,6 +5100,191 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
           })
         }
         if (error instanceof DaemonIdempotencyConflictError) {
+          return sendApiError(reply, 409, request, {
+            code: 'IDEMPOTENCY_KEY_REUSED', message: error.message, retryable: false,
+          })
+        }
+        throw error
+      }
+    },
+  )
+
+  // ── Integrations ────────────────────────────────────────────────────────────
+
+  type IntegrationParams = { organizationId: string; spaceId: string }
+  type IntegrationIdParams = IntegrationParams & { integrationId: string }
+
+  app.get<{ Params: IntegrationParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/integrations',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      const { organizationId, spaceId } = authorization
+      const { items, nextCursor, hasMore } = await integrationRepository.listIntegrations(
+        organizationId, spaceId, authorization.actor.id,
+      )
+      return IntegrationListResponseSchema.parse({ items, page: { nextCursor, hasMore } })
+    },
+  )
+
+  app.get<{ Params: IntegrationIdParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/integrations/:integrationId',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      const { organizationId, spaceId } = authorization
+      const integration = await integrationRepository.getIntegration(
+        organizationId, spaceId, request.params.integrationId, authorization.actor.id,
+      )
+      if (!integration) return sendResourceNotFound(reply, request)
+      return IntegrationDtoSchema.parse(integration)
+    },
+  )
+
+  app.post<{ Params: IntegrationParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/integrations',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageIntegrations(authorization.access)) return denyIntegrationMutation(request, reply)
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
+          fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      const parsed = CreateIntegrationRequestSchema.safeParse(request.body)
+      if (!parsed.success) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED', message: 'The integration request is invalid.', retryable: false,
+          fieldErrors: validationFieldErrors(parsed.error.issues),
+        })
+      }
+      try {
+        const result = await integrationRepository.createIntegration({
+          organizationId: authorization.organizationId,
+          spaceId: authorization.spaceId,
+          actorId: authorization.actor.id,
+          requestId: request.id,
+          idempotencyKey,
+          request: parsed.data,
+        })
+        const response = IntegrationMutationResponseSchema.parse(result)
+        reply.header('Idempotency-Replayed', String(response.replayed))
+        reply.header('ETag', resourceEtag(response.integration))
+        reply.header('Location', `/api/v1/organizations/${authorization.organizationId}/spaces/${authorization.spaceId}/integrations/${response.integration.id}`)
+        return reply.code(response.replayed ? 200 : 201).send(response)
+      } catch (error) {
+        if (error instanceof IntegrationDuplicateError) {
+          return sendApiError(reply, 409, request, {
+            code: 'CONFLICT', message: error.message, retryable: false, fieldErrors: {},
+          })
+        }
+        throw error
+      }
+    },
+  )
+
+  app.patch<{ Params: IntegrationIdParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/integrations/:integrationId',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageIntegrations(authorization.access)) return denyIntegrationMutation(request, reply)
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
+          fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      const expectedVersion = requireIfMatchVersion(request, reply, 'integration')
+      if (expectedVersion === null) return
+      const parsed = UpdateIntegrationRequestSchema.safeParse(request.body)
+      if (!parsed.success) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED', message: 'The integration update is invalid.', retryable: false,
+          fieldErrors: validationFieldErrors(parsed.error.issues),
+        })
+      }
+      try {
+        const result = await integrationRepository.updateIntegration({
+          organizationId: authorization.organizationId,
+          spaceId: authorization.spaceId,
+          integrationId: request.params.integrationId,
+          actorId: authorization.actor.id,
+          requestId: request.id,
+          expectedVersion,
+          idempotencyKey,
+          request: parsed.data,
+        })
+        if (!result) return sendResourceNotFound(reply, request)
+        const response = IntegrationMutationResponseSchema.parse(result)
+        reply.header('Idempotency-Replayed', String(response.replayed))
+        reply.header('ETag', resourceEtag(response.integration))
+        return response
+      } catch (error) {
+        if (error instanceof IntegrationVersionConflictError) {
+          return sendApiError(reply, 412, request, {
+            code: 'PRECONDITION_FAILED', message: error.message, retryable: false,
+            details: { expectedVersion: error.expectedVersion, currentVersion: error.actualVersion },
+          })
+        }
+        if (error instanceof IntegrationIdempotencyConflictError) {
+          return sendApiError(reply, 409, request, {
+            code: 'IDEMPOTENCY_KEY_REUSED', message: error.message, retryable: false,
+          })
+        }
+        throw error
+      }
+    },
+  )
+
+  app.delete<{ Params: IntegrationIdParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/integrations/:integrationId',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageIntegrations(authorization.access)) return denyIntegrationMutation(request, reply)
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
+          fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      const expectedVersion = requireIfMatchVersion(request, reply, 'integration')
+      if (expectedVersion === null) return
+      if (request.body !== undefined) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED', message: 'Archiving an integration does not accept a request body.', retryable: false,
+          fieldErrors: { body: ['Send the request without a body.'] },
+        })
+      }
+      try {
+        const result = await integrationRepository.archiveIntegration({
+          organizationId: authorization.organizationId,
+          spaceId: authorization.spaceId,
+          integrationId: request.params.integrationId,
+          actorId: authorization.actor.id,
+          requestId: request.id,
+          expectedVersion,
+          idempotencyKey,
+        })
+        if (!result) return sendResourceNotFound(reply, request)
+        const response = IntegrationMutationResponseSchema.parse(result)
+        reply.header('Idempotency-Replayed', String(response.replayed))
+        reply.header('ETag', resourceEtag(response.integration))
+        return response
+      } catch (error) {
+        if (error instanceof IntegrationVersionConflictError) {
+          return sendApiError(reply, 412, request, {
+            code: 'PRECONDITION_FAILED', message: error.message, retryable: false,
+            details: { expectedVersion: error.expectedVersion, currentVersion: error.actualVersion },
+          })
+        }
+        if (error instanceof IntegrationIdempotencyConflictError) {
           return sendApiError(reply, 409, request, {
             code: 'IDEMPOTENCY_KEY_REUSED', message: error.message, retryable: false,
           })

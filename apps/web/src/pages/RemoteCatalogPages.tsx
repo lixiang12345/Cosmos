@@ -11,16 +11,19 @@ import {
   type ExpertStatus,
   type ExpertSummaryDto,
   type DaemonDto,
+  type IntegrationDto,
   type McpServerDto,
   type RepositoryDto,
   type SecretDto,
   type WebhookDto,
 } from '@cosmos/contracts'
 import {
+  Activity,
   AlertTriangle,
   ArrowLeft,
   Bot,
   Box,
+  CheckCircle2,
   ChevronRight,
   CircleOff,
   Clock3,
@@ -30,6 +33,8 @@ import {
   FolderGit2,
   GitBranch,
   History,
+  PlugZap,
+  Wrench,
   KeyRound,
   EyeOff,
   Link2,
@@ -79,6 +84,9 @@ import {
   createDaemon,
   updateDaemon,
   archiveDaemon,
+  createIntegration,
+  updateIntegration,
+  archiveIntegration,
   listExpertRevisions,
   listEnvironmentRevisions,
   publishExpert,
@@ -155,6 +163,10 @@ export type RemoteMcpServersPageProps = RemoteCatalogListState<McpServerDto>
 export type RemoteDaemonsPageProps = RemoteCatalogListState<DaemonDto>
   & RemoteCatalogRequestProps
   & { onOpenNavigation?: () => void; canManage?: boolean; environments?: EnvironmentSummaryDto[] }
+
+export type RemoteIntegrationsPageProps = RemoteCatalogListState<IntegrationDto>
+  & RemoteCatalogRequestProps
+  & { onOpenNavigation?: () => void; canManage?: boolean }
 
 type DetailStatus = 'idle' | 'loading' | 'ready' | 'not_found' | 'error'
 
@@ -2243,6 +2255,231 @@ export function RemoteDaemonsPage({
               <span />
               <button type="button" className="cosmos-button cosmos-button--primary" disabled={mutating} onClick={submitDaemon}>
                 <Server aria-hidden="true" />{text(locale, '注册机器', 'Register machine')}
+              </button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
+    </main>
+  )
+}
+
+const integrationIcons: Record<IntegrationDto['type'], typeof GitBranch> = {
+  github: GitBranch,
+  slack: PlugZap,
+  jira: CheckCircle2,
+  pagerduty: AlertTriangle,
+  linear: Activity,
+  custom: Wrench,
+}
+
+const integrationTypeLabels: Record<IntegrationDto['type'], string> = {
+  github: 'GitHub',
+  slack: 'Slack',
+  jira: 'Jira',
+  pagerduty: 'PagerDuty',
+  linear: 'Linear',
+  custom: 'Custom',
+}
+
+function IntegrationStatusLabel({ status }: { status: IntegrationDto['connectionStatus'] }) {
+  const { locale } = usePreferences()
+  const map: Record<IntegrationDto['connectionStatus'], { label: string; tone: string }> = {
+    connected: { label: text(locale, '已连接', 'Connected'), tone: 'ok' },
+    action_required: { label: text(locale, '需要处理', 'Action required'), tone: 'warn' },
+    disconnected: { label: text(locale, '未连接', 'Disconnected'), tone: 'muted' },
+    archived: { label: text(locale, '已归档', 'Archived'), tone: 'muted' },
+  }
+  const entry = map[status]
+  return <span className={`cosmos-status-label cosmos-status-label--${entry.tone}`}>{entry.label}</span>
+}
+
+function IntegrationHealthLabel({ health }: { health: IntegrationDto['health'] }) {
+  const { locale } = usePreferences()
+  const map: Record<IntegrationDto['health'], { label: string; tone: string }> = {
+    healthy: { label: text(locale, '健康', 'Healthy'), tone: 'ok' },
+    degraded: { label: text(locale, '降级', 'Degraded'), tone: 'warn' },
+    unknown: { label: text(locale, '未知', 'Unknown'), tone: 'muted' },
+  }
+  const entry = map[health]
+  return <span className={`cosmos-status-label cosmos-status-label--${entry.tone}`}>{entry.label}</span>
+}
+
+type IntegrationDraft = { type: IntegrationDto['type']; name: string; externalAccount: string; scopes: string }
+const initialIntegrationDraft: IntegrationDraft = { type: 'github', name: '', externalAccount: '', scopes: '' }
+
+export function RemoteIntegrationsPage({
+  items,
+  loading,
+  ready,
+  error,
+  onRetry,
+  organizationId,
+  spaceId,
+  auth,
+  canManage,
+  onOpenNavigation,
+}: RemoteIntegrationsPageProps) {
+  const { locale } = usePreferences()
+  const [formOpen, setFormOpen] = useState(false)
+  const [draft, setDraft] = useState<IntegrationDraft>(initialIntegrationDraft)
+  const [workingId, setWorkingId] = useState<string>()
+  const [mutationError, setMutationError] = useState<Error | null>(null)
+  const state = listState(loading, ready, error)
+  const requestAuth = useMemo<CosmosApiAuthContext>(() => ({
+    accessToken: auth.accessToken,
+    requestIdentity: auth.requestIdentity,
+    onUnauthorized: auth.onUnauthorized,
+  }), [auth.accessToken, auth.onUnauthorized, auth.requestIdentity])
+
+  const closeForm = useCallback(() => { setDraft(initialIntegrationDraft); setMutationError(null); setFormOpen(false) }, [])
+
+  const submitIntegration = useCallback(async () => {
+    const name = draft.name.trim()
+    if (!name) {
+      setMutationError(new Error(text(locale, '名称为必填。', 'Name is required.')))
+      return
+    }
+    const scopes = draft.scopes.split(',').map((entry) => entry.trim()).filter(Boolean)
+    setWorkingId('__create__')
+    setMutationError(null)
+    try {
+      await createIntegration(organizationId, spaceId, {
+        type: draft.type,
+        name,
+        externalAccount: draft.externalAccount.trim() || undefined,
+        scopes: scopes.length ? scopes : undefined,
+      }, crypto.randomUUID(), requestAuth)
+      closeForm()
+      onRetry()
+    } catch (cause) {
+      setMutationError(cause instanceof Error ? cause : new Error(String(cause)))
+    } finally {
+      setWorkingId(undefined)
+    }
+  }, [closeForm, draft, locale, onRetry, organizationId, requestAuth, spaceId])
+
+  const reconnect = useCallback(async (integration: IntegrationDto) => {
+    setWorkingId(integration.id)
+    setMutationError(null)
+    try {
+      await updateIntegration(organizationId, spaceId, integration.id, integration.version, {
+        connectionStatus: 'connected',
+        health: 'healthy',
+        diagnostic: null,
+      }, crypto.randomUUID(), requestAuth)
+      onRetry()
+    } catch (cause) {
+      setMutationError(cause instanceof Error ? cause : new Error(String(cause)))
+    } finally {
+      setWorkingId(undefined)
+    }
+  }, [onRetry, organizationId, requestAuth, spaceId])
+
+  const archiveSelected = useCallback(async (integration: IntegrationDto) => {
+    setWorkingId(integration.id)
+    setMutationError(null)
+    try {
+      await archiveIntegration(organizationId, spaceId, integration.id, integration.version, requestAuth)
+      onRetry()
+    } catch (cause) {
+      setMutationError(cause instanceof Error ? cause : new Error(String(cause)))
+    } finally {
+      setWorkingId(undefined)
+    }
+  }, [onRetry, organizationId, requestAuth, spaceId])
+
+  const active = items.filter((item) => item.connectionStatus !== 'archived')
+
+  return (
+    <main className="cosmos-page remote-catalog-page">
+      <PageHeader
+        icon={PlugZap}
+        title={text(locale, '集成', 'Integrations')}
+        description={text(locale, '连接该 Space 的开发与协作系统，管理连接健康与授权范围。', 'Connect development and collaboration systems for this Space and manage connection health and scopes.')}
+        onOpenNavigation={onOpenNavigation}
+        readOnly={!canManage}
+        actions={canManage ? (
+          <button type="button" className="cosmos-button cosmos-button--primary" onClick={() => setFormOpen(true)}>
+            <Plus aria-hidden="true" />{text(locale, '添加集成', 'Add integration')}
+          </button>
+        ) : undefined}
+      />
+      <div className="cosmos-page__scroll">
+        {state === 'loading' ? <LoadState status="loading" resource={text(locale, 'integrations', 'integrations')} onRetry={onRetry} /> : null}
+        {state === 'error' ? <LoadState status="error" resource={text(locale, 'integrations', 'integrations')} error={error} onRetry={onRetry} /> : null}
+        {state === 'ready' && active.length === 0 ? (
+          <section className="cosmos-panel remote-catalog-empty"><PlugZap aria-hidden="true" /><strong>{text(locale, '还没有集成', 'No integrations yet')}</strong><p>{text(locale, '连接第一个开发或协作系统，为该 Space 引入外部事件与操作。', 'Connect the first development or collaboration system to bring external events and actions into this Space.')}</p></section>
+        ) : null}
+        {mutationError ? <InlineError error={mutationError} /> : null}
+        {state === 'ready' && active.length > 0 ? (
+          <div className="cosmos-integration-grid">
+            {active.map((integration) => {
+              const IntegrationIcon = integrationIcons[integration.type]
+              const working = workingId === integration.id
+              const needsRepair = integration.connectionStatus === 'action_required' || integration.health === 'degraded'
+              return (
+                <article className="cosmos-panel cosmos-integration-card" key={integration.id}>
+                  <header>
+                    <span className="cosmos-integration-card__icon"><IntegrationIcon aria-hidden="true" /></span>
+                    <IntegrationStatusLabel status={integration.connectionStatus} />
+                  </header>
+                  <h2>{integration.name}</h2>
+                  <p>{integration.externalAccount || text(locale, '尚未绑定账号', 'No account connected')}</p>
+                  <dl>
+                    <div><dt>{text(locale, '类型', 'Type')}</dt><dd>{integrationTypeLabels[integration.type]}</dd></div>
+                    <div><dt>{text(locale, '健康状态', 'Health')}</dt><dd><IntegrationHealthLabel health={integration.health} /></dd></div>
+                    <div><dt>Scopes</dt><dd>{integration.scopes.join(', ') || '—'}</dd></div>
+                    <div><dt>{text(locale, '最近事件', 'Last event')}</dt><dd>{integration.lastEventAt ? formatDate(integration.lastEventAt, locale) : text(locale, '暂无', 'None')}</dd></div>
+                  </dl>
+                  {integration.diagnostic ? <div className="cosmos-diagnostic"><AlertTriangle aria-hidden="true" /><span><strong>{text(locale, '诊断', 'Diagnostic')}</strong>{integration.diagnostic}</span></div> : null}
+                  {canManage ? (
+                    <footer className="remote-integration-actions">
+                      <button type="button" className={needsRepair ? 'cosmos-button cosmos-button--primary' : 'cosmos-button cosmos-button--secondary'} disabled={working} onClick={() => reconnect(integration)}>
+                        {working ? <LoaderCircle className="cosmos-spin" aria-hidden="true" /> : needsRepair ? <Wrench aria-hidden="true" /> : <RefreshCw aria-hidden="true" />}
+                        {needsRepair ? text(locale, '修复连接', 'Repair connection') : text(locale, '标记已连接', 'Mark connected')}
+                      </button>
+                      <IconButton icon={Trash2} label={text(locale, '归档集成', 'Archive integration')} onClick={() => archiveSelected(integration)} />
+                    </footer>
+                  ) : null}
+                </article>
+              )
+            })}
+          </div>
+        ) : null}
+      </div>
+      {formOpen ? (
+        <div className="cosmos-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeForm() }}>
+          <section className="cosmos-modal" role="dialog" aria-modal="true" aria-label={text(locale, '添加集成', 'Add integration')}>
+            <header><h2>{text(locale, '添加集成', 'Add integration')}</h2><IconButton icon={X} label={text(locale, '关闭', 'Close')} onClick={closeForm} /></header>
+            <div className="cosmos-modal__body">
+              <div className="cosmos-form-grid">
+                <label className="cosmos-field">
+                  <span>{text(locale, '类型', 'Type')}</span>
+                  <select value={draft.type} onChange={(event) => setDraft({ ...draft, type: event.target.value as IntegrationDto['type'] })}>
+                    {(Object.keys(integrationTypeLabels) as IntegrationDto['type'][]).map((type) => <option key={type} value={type}>{integrationTypeLabels[type]}</option>)}
+                  </select>
+                </label>
+                <label className="cosmos-field cosmos-field--wide">
+                  <span>{text(locale, '名称', 'Name')}</span>
+                  <input autoFocus value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Production GitHub" />
+                </label>
+                <label className="cosmos-field cosmos-field--wide">
+                  <span>{text(locale, '外部账号（可选）', 'External account (optional)')}</span>
+                  <input value={draft.externalAccount} onChange={(event) => setDraft({ ...draft, externalAccount: event.target.value })} placeholder="acme-inc" />
+                </label>
+                <label className="cosmos-field cosmos-field--wide">
+                  <span>{text(locale, '授权范围（逗号分隔）', 'Scopes (comma separated)')}</span>
+                  <input value={draft.scopes} onChange={(event) => setDraft({ ...draft, scopes: event.target.value })} placeholder="repo, read:org" />
+                </label>
+              </div>
+              {mutationError ? <InlineError error={mutationError} /> : null}
+            </div>
+            <footer className="cosmos-modal__footer">
+              <button type="button" className="cosmos-button cosmos-button--ghost" onClick={closeForm}>{text(locale, '取消', 'Cancel')}</button>
+              <span />
+              <button type="button" className="cosmos-button cosmos-button--primary" disabled={workingId === '__create__'} onClick={submitIntegration}>
+                <PlugZap aria-hidden="true" />{text(locale, '添加集成', 'Add integration')}
               </button>
             </footer>
           </section>

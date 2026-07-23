@@ -433,3 +433,22 @@ export {
   type DaemonStatus,
   type UpdateDaemonRequest,
 } from './daemon.js'
+
+export {
+  CreateIntegrationRequestSchema,
+  IntegrationConnectionStatusSchema,
+  IntegrationDtoSchema,
+  IntegrationHealthSchema,
+  IntegrationListResponseSchema,
+  IntegrationMutationResponseSchema,
+  IntegrationTypeSchema,
+  UpdateIntegrationRequestSchema,
+  type CreateIntegrationRequest,
+  type IntegrationConnectionStatus,
+  type IntegrationDto,
+  type IntegrationHealth,
+  type IntegrationListResponse,
+  type IntegrationMutationResponse,
+  type IntegrationType,
+  type UpdateIntegrationRequest,
+} from './integration.js'
