@@ -64,6 +64,7 @@ const RemoteExpertsPage = lazy(() => import('./pages/RemoteCatalogPages').then((
 const RemoteExpertDetailPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteExpertDetailPage })))
 const RemoteExpertEditorPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteExpertEditorPage })))
 const RemoteEnvironmentsPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteEnvironmentsPage })))
+const RemoteRepositoriesPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteRepositoriesPage })))
 const RemoteFilesPage = lazy(() => import('./pages/RemoteFilesPage').then((module) => ({ default: module.RemoteFilesPage })))
 const RemoteWorkersPage = lazy(() => import('./pages/RemoteWorkersPage').then((module) => ({ default: module.RemoteWorkersPage })))
 const RemoteApprovalsPage = lazy(() => import('./pages/RemoteApprovalsPage').then((module) => ({ default: module.RemoteApprovalsPage })))
@@ -2130,7 +2131,20 @@ function CosmosApp() {
               onOpenNavigation={openNavigation}
             />} />
         <Route path="/daemons" element={demoMode ? <DaemonsPage onOpenNavigation={openNavigation} /> : productionUnavailable} />
-        <Route path="/repositories" element={demoMode ? <RepositoriesControlPage onOpenNavigation={openNavigation} /> : productionUnavailable} />
+        <Route path="/repositories" element={demoMode
+          ? <RepositoriesControlPage onOpenNavigation={openNavigation} />
+          : <RemoteRepositoriesPage
+              items={catalog.repositories.items}
+              loading={catalog.repositories.loading}
+              ready={catalog.repositories.ready}
+              error={catalog.repositories.error}
+              onRetry={catalog.repositories.retry}
+              organizationId={organizationId}
+              spaceId={activeSpace.id}
+              auth={catalogAuth}
+              credentialVersion={credentialVersion}
+              onOpenNavigation={openNavigation}
+            />} />
         <Route path="/integrations" element={demoMode ? <IntegrationsControlPage onOpenNavigation={openNavigation} /> : productionUnavailable} />
         <Route path="/mcp" element={demoMode ? <McpRegistryPage onOpenNavigation={openNavigation} /> : productionUnavailable} />
         <Route path="/webhooks" element={demoMode ? <WebhooksPage onOpenNavigation={openNavigation} /> : productionUnavailable} />

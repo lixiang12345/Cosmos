@@ -25,6 +25,8 @@ import {
   FileListResponseSchema,
   FileVersionListResponseSchema,
   MeResponseSchema,
+  RepositoryDtoSchema,
+  RepositoryListResponseSchema,
   RuntimeCapabilitiesSchema,
   RetryTurnResponseSchema,
   SessionDtoSchema,
@@ -88,6 +90,8 @@ import {
   type SessionMessagePage,
   type SessionWorkerListResponse,
   type CreateSpaceRequestInput,
+  type RepositoryDto,
+  type RepositoryListResponse,
   type SpaceDto,
   type SpaceListResponse,
   type SpaceMigrationPreview,
@@ -477,6 +481,10 @@ function environmentsPath(organizationId: string, spaceId: string) {
   return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/environments`
 }
 
+function repositoriesPath(organizationId: string, spaceId: string) {
+  return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/repositories`
+}
+
 function automationsPath(organizationId: string, spaceId: string) {
   return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/automations`
 }
@@ -593,7 +601,7 @@ function assertControlPlaneScope(
   resource: TenantScopedResource,
   organizationId: string,
   spaceId: string,
-  resourceType: 'Expert' | 'Environment' | 'Automation',
+  resourceType: 'Expert' | 'Environment' | 'Automation' | 'Repository',
   resourceId?: string,
 ) {
   if (
@@ -1457,6 +1465,40 @@ export function listExperts(
       assertControlPlaneScope(expert, organizationId, spaceId, 'Expert')
     }
     return response
+  })
+}
+
+export function listRepositories(
+  organizationId: string,
+  spaceId: string,
+  auth?: CosmosApiAuthContext,
+  signal?: AbortSignal,
+  options?: CosmosCatalogListOptions,
+): Promise<RepositoryListResponse> {
+  return request(catalogListPath(repositoriesPath(organizationId, spaceId), options), {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    signal,
+  }, RepositoryListResponseSchema, auth).then((response) => {
+    for (const repository of response.items) {
+      assertControlPlaneScope(repository, organizationId, spaceId, 'Repository')
+    }
+    return response
+  })
+}
+
+export function getRepository(
+  organizationId: string,
+  spaceId: string,
+  repositoryId: string,
+  auth?: CosmosApiAuthContext,
+  signal?: AbortSignal,
+): Promise<RepositoryDto> {
+  return request(`${repositoriesPath(organizationId, spaceId)}/${encodeURIComponent(repositoryId)}`, {
+    method: 'GET', headers: { Accept: 'application/json' }, signal,
+  }, RepositoryDtoSchema, auth).then((repository) => {
+    assertControlPlaneScope(repository, organizationId, spaceId, 'Repository')
+    return repository
   })
 }
 

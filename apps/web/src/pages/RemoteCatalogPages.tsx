@@ -10,6 +10,7 @@ import {
   type ExpertRevisionListResponse,
   type ExpertStatus,
   type ExpertSummaryDto,
+  type RepositoryDto,
 } from '@cosmos/contracts'
 import {
   AlertTriangle,
@@ -20,6 +21,7 @@ import {
   CircleOff,
   Clock3,
   Container,
+  FolderGit2,
   GitBranch,
   History,
   LoaderCircle,
@@ -52,6 +54,7 @@ import {
   disableEnvironment,
   getEnvironment,
   getExpert,
+  getRepository,
   listExpertRevisions,
   listEnvironmentRevisions,
   publishExpert,
@@ -108,6 +111,10 @@ export type RemoteExpertEditorPageProps = RemoteCatalogRequestProps & {
 export type RemoteEnvironmentsPageProps = RemoteCatalogListState<EnvironmentSummaryDto>
   & RemoteCatalogRequestProps
   & { onOpenNavigation?: () => void; canManage?: boolean }
+
+export type RemoteRepositoriesPageProps = RemoteCatalogListState<RepositoryDto>
+  & RemoteCatalogRequestProps
+  & { onOpenNavigation?: () => void }
 
 type DetailStatus = 'idle' | 'loading' | 'ready' | 'not_found' | 'error'
 
@@ -1163,5 +1170,117 @@ function EnvironmentDetail({
       {canManage && environment.status !== 'archived' ? <div className="remote-environment-actions"><button type="button" className="cosmos-button cosmos-button--secondary" disabled={Boolean(busy) || ['provisioning', 'updating'].includes(environment.status)} onClick={onEdit}><Pencil aria-hidden="true" />{text(locale, '新建配置版本', 'New revision')}</button>{environment.status === 'failed' ? <button type="button" className="cosmos-button cosmos-button--primary" disabled={Boolean(busy)} onClick={onRetry}><RefreshCw aria-hidden="true" />{busy === 'retry' ? text(locale, '重试中…', 'Retrying…') : text(locale, '重试', 'Retry')}</button> : null}<button type="button" className="cosmos-button cosmos-button--secondary" disabled={Boolean(busy) || environment.status === 'disabled'} onClick={onDisable}><Power aria-hidden="true" />{busy === 'disable' ? text(locale, '停用中…', 'Disabling…') : text(locale, '停用', 'Disable')}</button>{confirmArchive ? <><button type="button" className="cosmos-button cosmos-button--secondary" disabled={Boolean(busy)} onClick={() => setConfirmArchive(false)}>{text(locale, '取消', 'Cancel')}</button><button type="button" className="cosmos-button cosmos-button--ghost remote-expert-danger" disabled={Boolean(busy)} onClick={onArchive}><Trash2 aria-hidden="true" />{busy === 'archive' ? text(locale, '归档中…', 'Archiving…') : text(locale, '确认归档', 'Confirm archive')}</button></> : <button type="button" className="cosmos-button cosmos-button--ghost remote-expert-danger" disabled={Boolean(busy)} onClick={() => setConfirmArchive(true)}><Trash2 aria-hidden="true" />{text(locale, '归档', 'Archive')}</button>}</div> : null}
       <footer className="remote-detail-footer"><Clock3 aria-hidden="true" />{text(locale, '创建于', 'Created')} {formatDate(environment.createdAt, locale)}</footer>
     </>
+  )
+}
+
+function RepositoryStatusLabel({ status }: { status: RepositoryDto['connectionStatus'] }) {
+  const { locale } = usePreferences()
+  const map: Record<RepositoryDto['connectionStatus'], { label: string; tone: string }> = {
+    connected: { label: text(locale, '已连接', 'Connected'), tone: 'ok' },
+    action_required: { label: text(locale, '需处理', 'Action required'), tone: 'warn' },
+    archived: { label: text(locale, '已归档', 'Archived'), tone: 'muted' },
+  }
+  const entry = map[status]
+  return <span className={`cosmos-status-label cosmos-status-label--${entry.tone}`}>{entry.label}</span>
+}
+
+export function RemoteRepositoriesPage({
+  items,
+  loading,
+  ready,
+  error,
+  onRetry,
+  organizationId,
+  spaceId,
+  auth,
+  credentialVersion,
+  onOpenNavigation,
+}: RemoteRepositoriesPageProps) {
+  const { locale } = usePreferences()
+  const [selectedId, setSelectedId] = useState<string>()
+  const state = listState(loading, ready, error)
+  const selectedSummary = items.find((item) => item.id === selectedId) ?? items[0]
+  const selectedRepositoryId = state === 'ready' ? selectedSummary?.id : undefined
+  const requestAuth = useMemo<CosmosApiAuthContext>(() => ({
+    accessToken: auth.accessToken,
+    requestIdentity: auth.requestIdentity,
+    onUnauthorized: auth.onUnauthorized,
+  }), [auth.accessToken, auth.onUnauthorized, auth.requestIdentity])
+  const identity = useMemo(() => selectedRepositoryId ? ({
+    organizationId,
+    spaceId,
+    repositoryId: selectedRepositoryId,
+    requestIdentity: requestAuth.requestIdentity,
+    credentialVersion,
+  }) : undefined, [credentialVersion, organizationId, requestAuth.requestIdentity, selectedRepositoryId, spaceId])
+  const load = useCallback((signal: AbortSignal) => {
+    if (!selectedRepositoryId) throw new Error('No Repository selected.')
+    return getRepository(organizationId, spaceId, selectedRepositoryId, requestAuth, signal)
+  }, [organizationId, requestAuth, selectedRepositoryId, spaceId])
+  const detail = useRemoteDetail(identity, load)
+  const repository = detail.status === 'ready' ? detail.item : selectedSummary
+
+  return (
+    <main className="cosmos-page remote-catalog-page">
+      <PageHeader
+        icon={FolderGit2}
+        title={text(locale, '代码仓库', 'Repositories')}
+        description={text(locale, '当前 Space 中由服务端管理的仓库连接', 'Server-managed repository connections in this Space')}
+        onOpenNavigation={onOpenNavigation}
+        readOnly
+      />
+      <div className="cosmos-page__scroll">
+        {state === 'loading' ? <LoadState status="loading" resource={text(locale, '代码仓库', 'Repositories')} onRetry={onRetry} /> : null}
+        {state === 'error' ? <LoadState status="error" resource={text(locale, '代码仓库', 'Repositories')} error={error} onRetry={onRetry} /> : null}
+        {state === 'ready' && items.length === 0 ? (
+          <section className="cosmos-panel remote-catalog-empty"><FolderGit2 aria-hidden="true" /><strong>{text(locale, '暂无仓库', 'No Repositories')}</strong><p>{text(locale, '通过 Integrations 连接 GitHub 或 GitLab 后，仓库会显示在这里。', 'Connect GitHub or GitLab from Integrations and repositories will appear here.')}</p></section>
+        ) : null}
+        {state === 'ready' && items.length > 0 ? (
+          <section className="remote-environment-layout">
+            <aside className="cosmos-panel remote-environment-list" aria-label={text(locale, '仓库列表', 'Repository list')}>
+              <header className="cosmos-section-heading">
+                <div><span>Catalog</span><h2>{text(locale, `${items.length} 个仓库`, `${items.length} Repositories`)}</h2></div>
+                <IconButton icon={RefreshCw} label={text(locale, '刷新仓库列表', 'Refresh Repository list')} onClick={onRetry} />
+              </header>
+              {items.map((item) => (
+                <button
+                  type="button"
+                  className={`remote-environment-row${item.id === selectedRepositoryId ? ' remote-environment-row--selected' : ''}`}
+                  aria-pressed={item.id === selectedRepositoryId}
+                  key={item.id}
+                  onClick={() => setSelectedId(item.id)}
+                >
+                  <span className="cosmos-resource-row__icon"><FolderGit2 aria-hidden="true" /></span>
+                  <span><strong>{item.fullName}</strong><small>{item.provider}</small></span>
+                  <RepositoryStatusLabel status={item.connectionStatus} />
+                  <ChevronRight aria-hidden="true" />
+                </button>
+              ))}
+            </aside>
+            <section className="cosmos-panel remote-environment-detail" aria-label={text(locale, '仓库详情', 'Repository detail')}>
+              {repository ? (
+                <>
+                  <header className="cosmos-section-heading">
+                    <div><span>{repository.provider}</span><h2>{repository.fullName}</h2></div>
+                    <RepositoryStatusLabel status={repository.connectionStatus} />
+                  </header>
+                  <section className="remote-detail-section">
+                    <header><GitBranch aria-hidden="true" /><h3>{text(locale, '配置', 'Configuration')}</h3></header>
+                    <dl className="remote-detail-list">
+                      <div><dt>{text(locale, '默认分支', 'Default branch')}</dt><dd><GitBranch aria-hidden="true" />{repository.defaultBranch}</dd></div>
+                      <div><dt>{text(locale, '提供方', 'Provider')}</dt><dd>{repository.provider}</dd></div>
+                      <div><dt>{text(locale, '安装 ID', 'Installation ID')}</dt><dd>{repository.installationId ? <code>{repository.installationId}</code> : '—'}</dd></div>
+                    </dl>
+                  </section>
+                  <footer className="remote-detail-footer"><Clock3 aria-hidden="true" />{text(locale, '创建于', 'Created')} {formatDate(repository.createdAt, locale)}</footer>
+                </>
+              ) : (
+                <div className="remote-detail-unavailable"><CircleOff aria-hidden="true" />{detail.error?.message ?? text(locale, '无法加载仓库详情。', 'Unable to load the Repository detail.')}</div>
+              )}
+            </section>
+          </section>
+        ) : null}
+      </div>
+    </main>
   )
 }
