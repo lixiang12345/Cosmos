@@ -721,12 +721,14 @@ function writePreference(key: string, value: string) {
 }
 
 function getInitialTheme(): Theme {
-  if (typeof window === 'undefined') return 'dark'
+  // The live Cosmos product is light by default; only follow an explicit OS
+  // dark preference or a stored choice away from that baseline.
+  if (typeof window === 'undefined') return 'light'
 
   const stored = readPreference(PREFERENCE_STORAGE_KEYS.theme)
   if (stored === 'dark' || stored === 'light') return stored
 
-  return window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
 function getInitialLocale(): Locale {
@@ -750,7 +752,7 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
       themeColor.name = 'theme-color'
       document.head.append(themeColor)
     }
-    themeColor.content = theme === 'dark' ? '#0a0a0a' : '#f5f5f5'
+    themeColor.content = theme === 'dark' ? '#0c0d0e' : '#ffffff'
     writePreference(PREFERENCE_STORAGE_KEYS.theme, theme)
   }, [theme])
 

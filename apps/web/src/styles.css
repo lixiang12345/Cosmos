@@ -13,7 +13,7 @@
   --text: #eef1ef;
   --text-secondary: #9ea6a1;
   --text-muted: #818a85;
-  --brand: #65c987;
+  --brand: #22c55e;
   --brand-strong: #4fb574;
   --brand-soft: #14271b;
   --info: #77a7e8;
@@ -3207,9 +3207,9 @@
   --text: #151916;
   --text-secondary: #58605b;
   --text-muted: #68716b;
-  --brand: #378b50;
-  --brand-strong: #327e48;
-  --brand-soft: #e6f2e9;
+  --brand: #0f7d38;
+  --brand-strong: #0b6a2f;
+  --brand-soft: rgba(26, 160, 73, 0.1);
   --info: #4279bd;
   --info-soft: #e8f0fa;
   --warning: #9a6819;
