@@ -81,6 +81,7 @@ const migrationVersions = [
   '076_automation_trigger_archive.sql',
   '077_repository_catalog.sql',
   '078_secret_catalog.sql',
+  '079_webhook_catalog.sql',
 ]
 
 function poolWithVersions(versions: string[]) {

@@ -12,6 +12,7 @@ import {
   type ExpertSummaryDto,
   type RepositoryDto,
   type SecretDto,
+  type WebhookDto,
 } from '@cosmos/contracts'
 import {
   AlertTriangle,
@@ -22,11 +23,14 @@ import {
   CircleOff,
   Clock3,
   Container,
+  Copy,
   FolderGit2,
   GitBranch,
   History,
   KeyRound,
   EyeOff,
+  Link2,
+  Webhook,
   LoaderCircle,
   LockKeyhole,
   Menu,
@@ -61,6 +65,9 @@ import {
   getSecret,
   createSecret,
   archiveSecret,
+  getWebhook,
+  createWebhook,
+  archiveWebhook,
   listExpertRevisions,
   listEnvironmentRevisions,
   publishExpert,
@@ -123,6 +130,10 @@ export type RemoteRepositoriesPageProps = RemoteCatalogListState<RepositoryDto>
   & { onOpenNavigation?: () => void }
 
 export type RemoteSecretsPageProps = RemoteCatalogListState<SecretDto>
+  & RemoteCatalogRequestProps
+  & { onOpenNavigation?: () => void; canManage?: boolean; onCatalogChange?: () => void }
+
+export type RemoteWebhooksPageProps = RemoteCatalogListState<WebhookDto>
   & RemoteCatalogRequestProps
   & { onOpenNavigation?: () => void; canManage?: boolean; onCatalogChange?: () => void }
 
@@ -1505,6 +1516,244 @@ export function RemoteSecretsPage({
               <span />
               <button type="button" className="cosmos-button cosmos-button--primary" disabled={mutating} onClick={submitSecret}>
                 <KeyRound aria-hidden="true" />{text(locale, '创建且不回显', 'Create without readback')}
+              </button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
+    </main>
+  )
+}
+
+function WebhookScopeLabel({ scope }: { scope: WebhookDto['scope'] }) {
+  const { locale } = usePreferences()
+  const map: Record<WebhookDto['scope'], { label: string; tone: string }> = {
+    shared: { label: text(locale, '共享', 'Shared'), tone: 'ok' },
+    personal: { label: text(locale, '个人', 'Personal'), tone: 'muted' },
+  }
+  const entry = map[scope]
+  return <span className={`cosmos-status-label cosmos-status-label--${entry.tone}`}>{entry.label}</span>
+}
+
+type WebhookDraft = { name: string; url: string; scope: WebhookDto['scope']; description: string }
+const initialWebhookDraft: WebhookDraft = { name: '', url: '', scope: 'shared', description: '' }
+
+export function RemoteWebhooksPage({
+  items,
+  loading,
+  ready,
+  error,
+  onRetry,
+  organizationId,
+  spaceId,
+  auth,
+  credentialVersion,
+  canManage,
+  onOpenNavigation,
+}: RemoteWebhooksPageProps) {
+  const { locale } = usePreferences()
+  const [selectedId, setSelectedId] = useState<string>()
+  const [formOpen, setFormOpen] = useState(false)
+  const [draft, setDraft] = useState<WebhookDraft>(initialWebhookDraft)
+  const [mutating, setMutating] = useState(false)
+  const [mutationError, setMutationError] = useState<Error | null>(null)
+  const [revealedSecret, setRevealedSecret] = useState<string>()
+  const [copied, setCopied] = useState(false)
+  const state = listState(loading, ready, error)
+  const selectedSummary = items.find((item) => item.id === selectedId) ?? items[0]
+  const selectedWebhookId = state === 'ready' ? selectedSummary?.id : undefined
+  const requestAuth = useMemo<CosmosApiAuthContext>(() => ({
+    accessToken: auth.accessToken,
+    requestIdentity: auth.requestIdentity,
+    onUnauthorized: auth.onUnauthorized,
+  }), [auth.accessToken, auth.onUnauthorized, auth.requestIdentity])
+  const identity = useMemo(() => selectedWebhookId ? ({
+    organizationId,
+    spaceId,
+    webhookId: selectedWebhookId,
+    requestIdentity: requestAuth.requestIdentity,
+    credentialVersion,
+  }) : undefined, [credentialVersion, organizationId, requestAuth.requestIdentity, selectedWebhookId, spaceId])
+  const load = useCallback((signal: AbortSignal) => {
+    if (!selectedWebhookId) throw new Error('No Webhook selected.')
+    return getWebhook(organizationId, spaceId, selectedWebhookId, requestAuth, signal)
+  }, [organizationId, requestAuth, selectedWebhookId, spaceId])
+  const detail = useRemoteDetail(identity, load)
+  const webhook = detail.status === 'ready' ? detail.item : selectedSummary
+
+  const closeForm = useCallback(() => { setDraft(initialWebhookDraft); setMutationError(null); setFormOpen(false) }, [])
+
+  const submitWebhook = useCallback(async () => {
+    const name = draft.name.trim()
+    const url = draft.url.trim()
+    if (!name || !url) {
+      setMutationError(new Error(text(locale, '名称和目标 URL 均为必填。', 'Name and target URL are both required.')))
+      return
+    }
+    setMutating(true)
+    setMutationError(null)
+    try {
+      const response = await createWebhook(organizationId, spaceId, {
+        name,
+        url,
+        scope: draft.scope,
+        description: draft.description.trim() || null,
+      }, crypto.randomUUID(), requestAuth)
+      closeForm()
+      if (response.signingSecret) setRevealedSecret(response.signingSecret)
+      onRetry()
+    } catch (cause) {
+      setMutationError(cause instanceof Error ? cause : new Error(String(cause)))
+    } finally {
+      setMutating(false)
+    }
+  }, [closeForm, draft, locale, onRetry, organizationId, requestAuth, spaceId])
+
+  const archiveSelected = useCallback(async () => {
+    if (!webhook) return
+    setMutating(true)
+    setMutationError(null)
+    try {
+      await archiveWebhook(organizationId, spaceId, webhook.id, webhook.version, requestAuth)
+      setSelectedId(undefined)
+      onRetry()
+    } catch (cause) {
+      setMutationError(cause instanceof Error ? cause : new Error(String(cause)))
+    } finally {
+      setMutating(false)
+    }
+  }, [onRetry, organizationId, requestAuth, spaceId, webhook])
+
+  const copySecret = useCallback(() => {
+    if (!revealedSecret) return
+    navigator.clipboard?.writeText(revealedSecret)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 2000)
+  }, [revealedSecret])
+
+  return (
+    <main className="cosmos-page remote-catalog-page">
+      <PageHeader
+        icon={Webhook}
+        title={text(locale, 'Webhooks', 'Webhooks')}
+        description={text(locale, '面向 Datadog、CircleCI 等的 HTTPS 端点，可在 Automations 中作为 Webhook 触发器接入。', 'Custom HTTPS endpoints for Datadog, CircleCI, etc. Wire them as a Webhook trigger from Automations.')}
+        onOpenNavigation={onOpenNavigation}
+        readOnly={!canManage}
+        actions={canManage ? (
+          <button type="button" className="cosmos-button cosmos-button--primary" onClick={() => setFormOpen(true)}>
+            <Plus aria-hidden="true" />{text(locale, '创建 Webhook', 'Create webhook')}
+          </button>
+        ) : undefined}
+      />
+      <div className="cosmos-page__scroll">
+        {revealedSecret ? (
+          <section className="cosmos-one-time-secret" role="status">
+            <KeyRound aria-hidden="true" />
+            <div>
+              <strong>{text(locale, '签名密钥仅显示一次', 'Signing secret shown once')}</strong>
+              <p>{text(locale, '关闭后无法再次查看。请立即复制并妥善保存，用于校验 Webhook 请求签名。', 'It cannot be viewed again after dismissal. Copy it now and store it safely to verify Webhook request signatures.')}</p>
+              <code>{revealedSecret}</code>
+            </div>
+            <div>
+              <IconButton icon={Copy} label={copied ? text(locale, '已复制', 'Copied') : text(locale, '复制密钥', 'Copy secret')} onClick={copySecret} />
+              <IconButton icon={EyeOff} label={text(locale, '隐藏且不再显示', 'Hide permanently')} onClick={() => setRevealedSecret(undefined)} />
+            </div>
+          </section>
+        ) : null}
+        {state === 'loading' ? <LoadState status="loading" resource={text(locale, 'Webhooks', 'Webhooks')} onRetry={onRetry} /> : null}
+        {state === 'error' ? <LoadState status="error" resource={text(locale, 'Webhooks', 'Webhooks')} error={error} onRetry={onRetry} /> : null}
+        {state === 'ready' && items.length === 0 ? (
+          <section className="cosmos-panel remote-catalog-empty"><Webhook aria-hidden="true" /><strong>{text(locale, '还没有 Webhook', 'No Webhooks')}</strong><p>{text(locale, '创建第一个 HTTPS 端点，之后可在 Automations 中作为触发器接入。', 'Create the first HTTPS endpoint, then wire it as a trigger from Automations.')}</p></section>
+        ) : null}
+        {state === 'ready' && items.length > 0 ? (
+          <section className="remote-environment-layout">
+            <aside className="cosmos-panel remote-environment-list" aria-label={text(locale, 'Webhook 列表', 'Webhook list')}>
+              <header className="cosmos-section-heading">
+                <div><span>Catalog</span><h2>{text(locale, `${items.length} 个 Webhook`, `${items.length} Webhooks`)}</h2></div>
+                <IconButton icon={RefreshCw} label={text(locale, '刷新 Webhook 列表', 'Refresh Webhook list')} onClick={onRetry} />
+              </header>
+              {items.map((item) => (
+                <button
+                  type="button"
+                  className={`remote-environment-row${item.id === selectedWebhookId ? ' remote-environment-row--selected' : ''}`}
+                  aria-pressed={item.id === selectedWebhookId}
+                  key={item.id}
+                  onClick={() => setSelectedId(item.id)}
+                >
+                  <span className="cosmos-resource-row__icon"><Webhook aria-hidden="true" /></span>
+                  <span><strong>{item.name}</strong><small>{item.url}</small></span>
+                  <WebhookScopeLabel scope={item.scope} />
+                  <ChevronRight aria-hidden="true" />
+                </button>
+              ))}
+            </aside>
+            <section className="cosmos-panel remote-environment-detail" aria-label={text(locale, 'Webhook 详情', 'Webhook detail')}>
+              {webhook ? (
+                <>
+                  <header className="cosmos-section-heading">
+                    <div><span>Webhook</span><h2>{webhook.name}</h2></div>
+                    <WebhookScopeLabel scope={webhook.scope} />
+                  </header>
+                  <section className="remote-detail-section">
+                    <header><Link2 aria-hidden="true" /><h3>{text(locale, '端点', 'Endpoint')}</h3></header>
+                    <dl className="remote-detail-list">
+                      <div><dt>{text(locale, '目标 URL', 'Target URL')}</dt><dd><code>{webhook.url}</code></dd></div>
+                      <div><dt>{text(locale, '签名密钥', 'Signing secret')}</dt><dd><EyeOff aria-hidden="true" />•••• {webhook.secretLastFour ?? '••••'}</dd></div>
+                      <div><dt>{text(locale, '事件数', 'Events delivered')}</dt><dd>{webhook.eventCount}</dd></div>
+                      <div><dt>{text(locale, '说明', 'Description')}</dt><dd>{webhook.description ?? '—'}</dd></div>
+                    </dl>
+                  </section>
+                  {mutationError ? <InlineError error={mutationError} /> : null}
+                  <footer className="remote-detail-footer">
+                    <span><Clock3 aria-hidden="true" />{text(locale, '更新于', 'Updated')} {formatDate(webhook.updatedAt, locale)}</span>
+                    {canManage ? (
+                      <button type="button" className="cosmos-button cosmos-button--danger" disabled={mutating} onClick={archiveSelected}>
+                        <Trash2 aria-hidden="true" />{text(locale, '归档 Webhook', 'Archive webhook')}
+                      </button>
+                    ) : null}
+                  </footer>
+                </>
+              ) : (
+                <div className="remote-detail-unavailable"><CircleOff aria-hidden="true" />{detail.error?.message ?? text(locale, '无法加载 Webhook 详情。', 'Unable to load the Webhook detail.')}</div>
+              )}
+            </section>
+          </section>
+        ) : null}
+      </div>
+      {formOpen ? (
+        <div className="cosmos-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeForm() }}>
+          <section className="cosmos-modal" role="dialog" aria-modal="true" aria-label={text(locale, '创建 Webhook', 'Create webhook')}>
+            <header><h2>{text(locale, '创建 Webhook', 'Create webhook')}</h2><IconButton icon={X} label={text(locale, '关闭', 'Close')} onClick={closeForm} /></header>
+            <div className="cosmos-modal__body">
+              <div className="cosmos-form-grid">
+                <label className="cosmos-field cosmos-field--wide">
+                  <span>{text(locale, '名称', 'Name')}</span>
+                  <input autoFocus value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="datadog-alerts" />
+                </label>
+                <label className="cosmos-field cosmos-field--wide">
+                  <span>{text(locale, '目标 URL（HTTPS）', 'Target URL (HTTPS)')}</span>
+                  <input type="url" value={draft.url} onChange={(event) => setDraft({ ...draft, url: event.target.value })} placeholder="https://example.com/hooks/cosmos" />
+                </label>
+                <label className="cosmos-field">
+                  <span>{text(locale, '作用域', 'Scope')}</span>
+                  <select value={draft.scope} onChange={(event) => setDraft({ ...draft, scope: event.target.value as WebhookDto['scope'] })}>
+                    <option value="shared">{text(locale, '共享', 'Shared')}</option>
+                    <option value="personal">{text(locale, '个人', 'Personal')}</option>
+                  </select>
+                </label>
+                <label className="cosmos-field cosmos-field--wide">
+                  <span>{text(locale, '说明', 'Description')}</span>
+                  <textarea value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} />
+                </label>
+              </div>
+              <div className="cosmos-security-note cosmos-security-note--compact"><KeyRound aria-hidden="true" /><span><strong>{text(locale, '签名密钥仅在创建时显示一次', 'Signing secret shown once at creation')}</strong>{text(locale, '创建后请立即复制密钥，服务端仅以只写方式保存，之后无法再次查看。', 'Copy the secret immediately after creation; the server stores it write-only and it cannot be viewed again.')}</span></div>
+              {mutationError ? <InlineError error={mutationError} /> : null}
+            </div>
+            <footer className="cosmos-modal__footer">
+              <button type="button" className="cosmos-button cosmos-button--ghost" onClick={closeForm}>{text(locale, '取消', 'Cancel')}</button>
+              <span />
+              <button type="button" className="cosmos-button cosmos-button--primary" disabled={mutating} onClick={submitWebhook}>
+                <Webhook aria-hidden="true" />{text(locale, '创建并显示密钥', 'Create and reveal secret')}
               </button>
             </footer>
           </section>

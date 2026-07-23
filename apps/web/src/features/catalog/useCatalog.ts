@@ -1,10 +1,11 @@
-import type { EnvironmentSummaryDto, ExpertSummaryDto, RepositoryDto, SecretDto } from '@cosmos/contracts'
+import type { EnvironmentSummaryDto, ExpertSummaryDto, RepositoryDto, SecretDto, WebhookDto } from '@cosmos/contracts'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   listEnvironments,
   listExperts,
   listRepositories,
   listSecrets,
+  listWebhooks,
   type CosmosApiAuthContext,
 } from '../../services/cosmosApi'
 
@@ -71,6 +72,7 @@ export type CatalogReadModel = {
   environments: CatalogResourceState<EnvironmentSummaryDto>
   repositories: CatalogResourceState<RepositoryDto>
   secrets: CatalogResourceState<SecretDto>
+  webhooks: CatalogResourceState<WebhookDto>
 }
 
 type RequestIdentity = object
@@ -201,10 +203,22 @@ export function useCatalog({
     [auth, organizationId, spaceId],
   )
 
+  const loadWebhooks = useCallback(
+    (signal: AbortSignal) => loadCatalogPages(signal, (cursor) => listWebhooks(
+      organizationId,
+      spaceId,
+      auth,
+      signal,
+      { limit: 100, ...(cursor ? { cursor } : {}) },
+    )),
+    [auth, organizationId, spaceId],
+  )
+
   return {
     experts: useCatalogResource(requestEnabled, identity, loadExperts),
     environments: useCatalogResource(requestEnabled, identity, loadEnvironments),
     repositories: useCatalogResource(requestEnabled, identity, loadRepositories),
     secrets: useCatalogResource(requestEnabled, identity, loadSecrets),
+    webhooks: useCatalogResource(requestEnabled, identity, loadWebhooks),
   }
 }

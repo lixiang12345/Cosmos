@@ -386,3 +386,18 @@ export {
   type SecretScope,
   type SecretStatus,
 } from './secret.js'
+
+export {
+  CreateWebhookRequestSchema,
+  WebhookDtoSchema,
+  WebhookListResponseSchema,
+  WebhookMutationResponseSchema,
+  WebhookScopeSchema,
+  WebhookStatusSchema,
+  type CreateWebhookRequest,
+  type WebhookDto,
+  type WebhookListResponse,
+  type WebhookMutationResponse,
+  type WebhookScope,
+  type WebhookStatus,
+} from './webhook.js'

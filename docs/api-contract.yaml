@@ -3322,6 +3322,123 @@ paths:
         '500':
           $ref: '#/components/responses/RuntimeInternalError'
 
+  /organizations/{organizationId}/spaces/{spaceId}/webhooks:
+    parameters:
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
+    get:
+      tags: [Webhooks]
+      operationId: listWebhooks
+      x-cosmos-implementation-status: implemented
+      summary: List Webhook metadata in a Space
+      description: Signing secrets and their opaque stored references are never returned.
+      responses:
+        '200':
+          description: Webhook metadata list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeWebhookListResponse'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+    post:
+      tags: [Webhooks]
+      operationId: createWebhook
+      x-cosmos-implementation-status: implemented
+      summary: Create a Webhook in a Space
+      description: The signing secret is returned exactly once in this response and can never be read back afterwards.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeCreateWebhookRequest'
+      responses:
+        '201':
+          description: Webhook created; the response contains metadata plus the one-time signing secret
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeWebhookMutationResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+
+  /organizations/{organizationId}/spaces/{spaceId}/webhooks/{webhookId}:
+    parameters:
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
+      - $ref: '#/components/parameters/RuntimeWebhookId'
+    get:
+      tags: [Webhooks]
+      operationId: getWebhook
+      x-cosmos-implementation-status: implemented
+      summary: Get Webhook metadata
+      description: The signing secret and its opaque stored reference are never returned.
+      responses:
+        '200':
+          description: Webhook metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeWebhook'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+    delete:
+      tags: [Webhooks]
+      operationId: archiveWebhook
+      x-cosmos-implementation-status: implemented
+      summary: Archive a Webhook
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Archived Webhook metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeWebhookMutationResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
+        '412':
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '428':
+          $ref: '#/components/responses/RuntimePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -3429,6 +3546,13 @@ components:
       in: path
       required: true
       description: Runtime Secret identifier.
+      schema:
+        $ref: '#/components/schemas/RuntimeIdentifier'
+    RuntimeWebhookId:
+      name: webhookId
+      in: path
+      required: true
+      description: Runtime Webhook identifier.
       schema:
         $ref: '#/components/schemas/RuntimeIdentifier'
     SubscriptionId:
@@ -5712,6 +5836,117 @@ components:
       properties:
         secret:
           $ref: '#/components/schemas/RuntimeSecret'
+        replayed:
+          type: boolean
+      additionalProperties: false
+    RuntimeWebhook:
+      type: object
+      description: Non-sensitive Webhook metadata. The signing secret is excluded and only surfaced once at creation.
+      required: [id, organizationId, spaceId, name, url, scope, description, eventCount, secretLastFour, status, version, createdBy, createdAt, updatedAt, archivedAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        spaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        url:
+          type: string
+          format: uri
+          maxLength: 2048
+        scope:
+          type: string
+          enum: [shared, personal]
+        description:
+          oneOf:
+            - type: string
+            - type: 'null'
+        eventCount:
+          type: integer
+          minimum: 0
+        secretLastFour:
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 4
+            - type: 'null'
+        status:
+          type: string
+          enum: [active, archived]
+        version:
+          type: integer
+          minimum: 1
+        createdBy:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        updatedAt:
+          $ref: '#/components/schemas/Timestamp'
+        archivedAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+      additionalProperties: false
+    RuntimeWebhookListResponse:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/RuntimeWebhook'
+        page:
+          type: object
+          required: [nextCursor, hasMore]
+          properties:
+            nextCursor:
+              oneOf:
+                - type: string
+                  minLength: 1
+                  maxLength: 2048
+                - type: 'null'
+            hasMore:
+              type: boolean
+          additionalProperties: false
+      additionalProperties: false
+    RuntimeCreateWebhookRequest:
+      type: object
+      required: [name, url]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        url:
+          type: string
+          format: uri
+          maxLength: 2048
+        scope:
+          type: string
+          enum: [shared, personal]
+          default: shared
+        description:
+          oneOf:
+            - type: string
+            - type: 'null'
+      additionalProperties: false
+    RuntimeWebhookMutationResponse:
+      type: object
+      required: [webhook, signingSecret, replayed]
+      properties:
+        webhook:
+          $ref: '#/components/schemas/RuntimeWebhook'
+        signingSecret:
+          oneOf:
+            - type: string
+              minLength: 1
+              description: Write-once signing secret. Returned only on fresh creation, null on replay.
+            - type: 'null'
         replayed:
           type: boolean
       additionalProperties: false

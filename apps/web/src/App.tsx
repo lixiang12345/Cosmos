@@ -66,6 +66,7 @@ const RemoteExpertEditorPage = lazy(() => import('./pages/RemoteCatalogPages').t
 const RemoteEnvironmentsPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteEnvironmentsPage })))
 const RemoteRepositoriesPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteRepositoriesPage })))
 const RemoteSecretsPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteSecretsPage })))
+const RemoteWebhooksPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteWebhooksPage })))
 const RemoteFilesPage = lazy(() => import('./pages/RemoteFilesPage').then((module) => ({ default: module.RemoteFilesPage })))
 const RemoteWorkersPage = lazy(() => import('./pages/RemoteWorkersPage').then((module) => ({ default: module.RemoteWorkersPage })))
 const RemoteApprovalsPage = lazy(() => import('./pages/RemoteApprovalsPage').then((module) => ({ default: module.RemoteApprovalsPage })))
@@ -2148,7 +2149,21 @@ function CosmosApp() {
             />} />
         <Route path="/integrations" element={demoMode ? <IntegrationsControlPage onOpenNavigation={openNavigation} /> : productionUnavailable} />
         <Route path="/mcp" element={demoMode ? <McpRegistryPage onOpenNavigation={openNavigation} /> : productionUnavailable} />
-        <Route path="/webhooks" element={demoMode ? <WebhooksPage onOpenNavigation={openNavigation} /> : productionUnavailable} />
+        <Route path="/webhooks" element={demoMode
+          ? <WebhooksPage onOpenNavigation={openNavigation} />
+          : <RemoteWebhooksPage
+              items={catalog.webhooks.items}
+              loading={catalog.webhooks.loading}
+              ready={catalog.webhooks.ready}
+              error={catalog.webhooks.error}
+              onRetry={catalog.webhooks.retry}
+              organizationId={organizationId}
+              spaceId={activeSpace.id}
+              auth={catalogAuth}
+              credentialVersion={credentialVersion}
+              canManage={expertManagementEnabled}
+              onOpenNavigation={openNavigation}
+            />} />
         <Route path="/secrets" element={demoMode
           ? <SecretsPage onOpenNavigation={openNavigation} />
           : <RemoteSecretsPage

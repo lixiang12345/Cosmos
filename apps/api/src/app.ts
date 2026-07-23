@@ -76,6 +76,10 @@ import {
   SecretDtoSchema,
   SecretListResponseSchema,
   SecretMutationResponseSchema,
+  CreateWebhookRequestSchema,
+  WebhookDtoSchema,
+  WebhookListResponseSchema,
+  WebhookMutationResponseSchema,
   type ApiError,
   type SessionEventDto,
   type SessionEventPage,
@@ -172,6 +176,13 @@ import {
   SecretVersionConflictError,
   type SecretRepository,
 } from './secret-repository.js'
+import {
+  EmptyWebhookRepository,
+  WebhookDuplicateError,
+  WebhookIdempotencyConflictError,
+  WebhookVersionConflictError,
+  type WebhookRepository,
+} from './webhook-repository.js'
 import type { OrganizationQuotaRepository } from './organization-quota-repository.js'
 import { CosmosMetrics } from './metrics.js'
 import {
@@ -345,6 +356,7 @@ export type CreateAppOptions = {
   spaceRepository?: SpaceRepository
   repositoryRepository?: RepositoryRepository
   secretRepository?: SecretRepository
+  webhookRepository?: WebhookRepository
   sessionRepository?: SessionRepository
   sessionTimelineRepository?: SessionTimelineRepository
   artifactRepository?: ArtifactRepository
@@ -711,6 +723,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   const spaceRepository = options.spaceRepository ?? new EmptySpaceRepository()
   const repositoryRepository = options.repositoryRepository ?? new EmptyRepositoryRepository()
   const secretRepository = options.secretRepository ?? new EmptySecretRepository()
+  const webhookRepository = options.webhookRepository ?? new EmptyWebhookRepository()
   const advisorPlanRepository = options.advisorPlanRepository ?? new EmptyAdvisorPlanRepository()
   const advisorPlanExecutor = new AdvisorPlanExecutor(advisorPlanRepository, spaceRepository)
   const contextEngineGateway = options.contextEngineGateway
@@ -1718,6 +1731,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   const canManageAutomations = canManageExperts
   const canManageRepositories = canManageExperts
   const canManageSecrets = canManageExperts
+  const canManageWebhooks = canManageExperts
 
   function denyExpertMutation(request: FastifyRequest, reply: FastifyReply) {
     return sendApiError(reply, 403, request, {
@@ -1747,6 +1761,14 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     return sendApiError(reply, 403, request, {
       code: 'PERMISSION_DENIED',
       message: 'Only Space Managers and Organization Administrators can manage Secrets.',
+      retryable: false,
+    })
+  }
+
+  function denyWebhookMutation(request: FastifyRequest, reply: FastifyReply) {
+    return sendApiError(reply, 403, request, {
+      code: 'PERMISSION_DENIED',
+      message: 'Only Space Managers and Organization Administrators can manage Webhooks.',
       retryable: false,
     })
   }
@@ -4497,6 +4519,141 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
           })
         }
         if (error instanceof SecretIdempotencyConflictError) {
+          return sendApiError(reply, 409, request, {
+            code: 'IDEMPOTENCY_KEY_REUSED', message: error.message, retryable: false,
+          })
+        }
+        throw error
+      }
+    },
+  )
+
+  // ── Webhooks ──────────────────────────────────────────────────────────────
+
+  type WebhookParams = { organizationId: string; spaceId: string }
+  type WebhookIdParams = WebhookParams & { webhookId: string }
+
+  app.get<{ Params: WebhookParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/webhooks',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      const { organizationId, spaceId } = authorization
+      const { items, nextCursor, hasMore } = await webhookRepository.listWebhooks(
+        organizationId, spaceId, authorization.actor.id,
+      )
+      return WebhookListResponseSchema.parse({ items, page: { nextCursor, hasMore } })
+    },
+  )
+
+  app.get<{ Params: WebhookIdParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/webhooks/:webhookId',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      const { organizationId, spaceId } = authorization
+      const webhook = await webhookRepository.getWebhook(
+        organizationId, spaceId, request.params.webhookId, authorization.actor.id,
+      )
+      if (!webhook) return sendResourceNotFound(reply, request)
+      return WebhookDtoSchema.parse(webhook)
+    },
+  )
+
+  app.post<{ Params: WebhookParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/webhooks',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageWebhooks(authorization.access)) return denyWebhookMutation(request, reply)
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
+          fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      const parsed = CreateWebhookRequestSchema.safeParse(request.body)
+      if (!parsed.success) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED', message: 'The Webhook request is invalid.', retryable: false,
+          fieldErrors: validationFieldErrors(parsed.error.issues),
+        })
+      }
+      try {
+        const result = await webhookRepository.createWebhook({
+          organizationId: authorization.organizationId,
+          spaceId: authorization.spaceId,
+          actorId: authorization.actor.id,
+          requestId: request.id,
+          idempotencyKey,
+          request: parsed.data,
+        })
+        const response = WebhookMutationResponseSchema.parse(result)
+        reply.header('Idempotency-Replayed', String(response.replayed))
+        reply.header('ETag', resourceEtag(response.webhook))
+        reply.header('Location', `/api/v1/organizations/${authorization.organizationId}/spaces/${authorization.spaceId}/webhooks/${response.webhook.id}`)
+        return reply.code(response.replayed ? 200 : 201).send(response)
+      } catch (error) {
+        if (error instanceof WebhookDuplicateError) {
+          return sendApiError(reply, 409, request, {
+            code: 'CONFLICT', message: error.message, retryable: false, fieldErrors: {},
+          })
+        }
+        if (error instanceof WebhookIdempotencyConflictError) {
+          return sendApiError(reply, 409, request, {
+            code: 'IDEMPOTENCY_KEY_REUSED', message: error.message, retryable: false,
+          })
+        }
+        throw error
+      }
+    },
+  )
+
+  app.delete<{ Params: WebhookIdParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/webhooks/:webhookId',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageWebhooks(authorization.access)) return denyWebhookMutation(request, reply)
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
+          fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      const expectedVersion = requireIfMatchVersion(request, reply, 'Webhook')
+      if (expectedVersion === null) return
+      if (request.body !== undefined) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED', message: 'Archiving a Webhook does not accept a request body.', retryable: false,
+          fieldErrors: { body: ['Send the request without a body.'] },
+        })
+      }
+      try {
+        const result = await webhookRepository.archiveWebhook({
+          organizationId: authorization.organizationId,
+          spaceId: authorization.spaceId,
+          webhookId: request.params.webhookId,
+          actorId: authorization.actor.id,
+          requestId: request.id,
+          expectedVersion,
+          idempotencyKey,
+        })
+        if (!result) return sendResourceNotFound(reply, request)
+        const response = WebhookMutationResponseSchema.parse(result)
+        reply.header('Idempotency-Replayed', String(response.replayed))
+        reply.header('ETag', resourceEtag(response.webhook))
+        return response
+      } catch (error) {
+        if (error instanceof WebhookVersionConflictError) {
+          return sendApiError(reply, 412, request, {
+            code: 'PRECONDITION_FAILED', message: error.message, retryable: false,
+            details: { expectedVersion: error.expectedVersion, currentVersion: error.actualVersion },
+          })
+        }
+        if (error instanceof WebhookIdempotencyConflictError) {
           return sendApiError(reply, 409, request, {
             code: 'IDEMPOTENCY_KEY_REUSED', message: error.message, retryable: false,
           })

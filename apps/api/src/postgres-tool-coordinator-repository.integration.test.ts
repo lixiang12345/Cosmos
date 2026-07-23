@@ -391,6 +391,6 @@ describeWithDatabase('Postgres ToolCall and Approval governance', () => {
         AND relkind = 'r' AND relname NOT IN ('cosmos_schema_migrations', 'cosmos_worker_heartbeats')
         AND relrowsecurity AND relforcerowsecurity
     `)
-    expect(protectedTables.rows[0].count).toBe('56')
+    expect(protectedTables.rows[0].count).toBe('59')
   })
 })

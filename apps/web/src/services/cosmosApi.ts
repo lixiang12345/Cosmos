@@ -32,6 +32,9 @@ import {
   SecretDtoSchema,
   SecretListResponseSchema,
   SecretMutationResponseSchema,
+  WebhookDtoSchema,
+  WebhookListResponseSchema,
+  WebhookMutationResponseSchema,
   SessionDtoSchema,
   SessionControlResponseSchema,
   SessionEventDtoSchema,
@@ -99,6 +102,10 @@ import {
   type SecretListResponse,
   type SecretMutationResponse,
   type CreateSecretRequest,
+  type WebhookDto,
+  type WebhookListResponse,
+  type WebhookMutationResponse,
+  type CreateWebhookRequest,
   type SpaceDto,
   type SpaceListResponse,
   type SpaceMigrationPreview,
@@ -496,6 +503,10 @@ function secretsPath(organizationId: string, spaceId: string) {
   return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/secrets`
 }
 
+function webhooksPath(organizationId: string, spaceId: string) {
+  return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/webhooks`
+}
+
 function automationsPath(organizationId: string, spaceId: string) {
   return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/automations`
 }
@@ -612,7 +623,7 @@ function assertControlPlaneScope(
   resource: TenantScopedResource,
   organizationId: string,
   spaceId: string,
-  resourceType: 'Expert' | 'Environment' | 'Automation' | 'Repository' | 'Secret',
+  resourceType: 'Expert' | 'Environment' | 'Automation' | 'Repository' | 'Secret' | 'Webhook',
   resourceId?: string,
 ) {
   if (
@@ -1579,6 +1590,74 @@ export function archiveSecret(
     method: 'DELETE',
     headers: { Accept: 'application/json', 'If-Match': `"${version}"` },
   }, SecretDtoSchema.nullable(), auth)
+}
+
+export function listWebhooks(
+  organizationId: string,
+  spaceId: string,
+  auth?: CosmosApiAuthContext,
+  signal?: AbortSignal,
+  options?: CosmosCatalogListOptions,
+): Promise<WebhookListResponse> {
+  return request(catalogListPath(webhooksPath(organizationId, spaceId), options), {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    signal,
+  }, WebhookListResponseSchema, auth).then((response) => {
+    for (const webhook of response.items) {
+      assertControlPlaneScope(webhook, organizationId, spaceId, 'Webhook')
+    }
+    return response
+  })
+}
+
+export function getWebhook(
+  organizationId: string,
+  spaceId: string,
+  webhookId: string,
+  auth?: CosmosApiAuthContext,
+  signal?: AbortSignal,
+): Promise<WebhookDto> {
+  return request(`${webhooksPath(organizationId, spaceId)}/${encodeURIComponent(webhookId)}`, {
+    method: 'GET', headers: { Accept: 'application/json' }, signal,
+  }, WebhookDtoSchema, auth).then((webhook) => {
+    assertControlPlaneScope(webhook, organizationId, spaceId, 'Webhook')
+    return webhook
+  })
+}
+
+export function createWebhook(
+  organizationId: string,
+  spaceId: string,
+  input: CreateWebhookRequest,
+  idempotencyKey: string,
+  auth?: CosmosApiAuthContext,
+): Promise<WebhookMutationResponse> {
+  return request(webhooksPath(organizationId, spaceId), {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey,
+    },
+    body: JSON.stringify(input),
+  }, WebhookMutationResponseSchema, auth).then((response) => {
+    assertControlPlaneScope(response.webhook, organizationId, spaceId, 'Webhook')
+    return response
+  })
+}
+
+export function archiveWebhook(
+  organizationId: string,
+  spaceId: string,
+  webhookId: string,
+  version: number,
+  auth?: CosmosApiAuthContext,
+): Promise<WebhookMutationResponse | null> {
+  return request(`${webhooksPath(organizationId, spaceId)}/${encodeURIComponent(webhookId)}`, {
+    method: 'DELETE',
+    headers: { Accept: 'application/json', 'If-Match': `"${version}"` },
+  }, WebhookMutationResponseSchema.nullable(), auth)
 }
 
 export function listSpaces(
