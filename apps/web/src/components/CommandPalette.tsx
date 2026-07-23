@@ -104,11 +104,7 @@ export function CommandPalette({
 
   const normalizedQuery = query.trim().toLocaleLowerCase()
   const matches = (command: Command) => !normalizedQuery || `${command.label} ${command.detail} ${command.keywords}`.toLocaleLowerCase().includes(normalizedQuery)
-  const filteredNavigation = navigationCommands
-    .filter((command) => prototypeNavigation || [
-      'new-session', 'home', 'sessions', 'context', 'experts', 'environments',
-    ].includes(command.id))
-    .filter(matches)
+  const filteredNavigation = navigationCommands.filter(matches)
   const filteredSessions = sessionCommands.filter(matches)
   const commands = useMemo(() => [...filteredNavigation, ...filteredSessions], [filteredNavigation, filteredSessions])
   const safeActiveIndex = Math.min(activeIndex, Math.max(0, commands.length - 1))

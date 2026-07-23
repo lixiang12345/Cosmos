@@ -1,10 +1,9 @@
 import { DEFAULT_AGENT_MODEL, type AdvisorPlanDto, type ContextPackResponse, type EnvironmentSummaryDto, type SessionDto, type SessionEventDto, type SessionMessageDto } from '@cosmos/contracts'
-import { AlertTriangle, CheckCircle2, Home, LoaderCircle, Menu, RefreshCw, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, LoaderCircle, RefreshCw, X } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from './auth/context'
 import { CommandPalette } from './components/CommandPalette'
-import { GlobalControls } from './components/GlobalControls'
 import { NewTaskDialog, type SessionCatalogStatus } from './components/NewTaskDialog'
 import { Sidebar } from './components/Sidebar'
 import { IconButton } from './components/ui'
@@ -287,41 +286,6 @@ function RouteFallback() {
         <LoaderCircle className="cosmos-spin" aria-hidden="true" />
         <p>{locale === 'zh' ? '正在加载...' : 'Loading...'}</p>
       </section>
-    </main>
-  )
-}
-
-function ProductionUnavailablePage({ onOpenNavigation }: { onOpenNavigation: () => void }) {
-  const { locale } = usePreferences()
-  const navigate = useNavigate()
-  return (
-    <main className="cosmos-page">
-      <header className="cosmos-page-header remote-catalog-header">
-        <div className="cosmos-page-header__identity">
-          <IconButton
-            icon={Menu}
-            label={locale === 'zh' ? '打开导航' : 'Open navigation'}
-            className="cosmos-mobile-menu"
-            onClick={onOpenNavigation}
-          />
-          <div>
-            <h1>{locale === 'zh' ? '此模块尚未开放' : 'This module is not available'}</h1>
-            <p>{locale === 'zh' ? '生产模式仅开放已接入服务端权威数据的模块。' : 'Production mode exposes only server-authoritative modules.'}</p>
-          </div>
-        </div>
-        <div className="cosmos-page-header__actions"><GlobalControls className="cosmos-global-controls" /></div>
-      </header>
-      <div className="cosmos-page__content">
-        <section className="cosmos-panel remote-catalog-state" role="status">
-          <AlertTriangle aria-hidden="true" />
-          <p>{locale === 'zh'
-            ? '此页面的写入 API、权限和审计链路尚未完成，因此不会显示原型操作。'
-            : 'The write API, authorization, and audit path are incomplete, so prototype actions are hidden.'}</p>
-          <button type="button" className="cosmos-button cosmos-button--primary" onClick={() => navigate('/home')}>
-            <Home aria-hidden="true" />{locale === 'zh' ? '返回首页' : 'Back to Home'}
-          </button>
-        </section>
-      </div>
     </main>
   )
 }
@@ -1907,7 +1871,6 @@ function CosmosApp() {
   const openNavigation = () => setNavigationOpen(true)
   const openSession = (runId: string) => navigate(`/sessions/${runId}`)
   const pageProps = { runs: scopedRuns, onOpenNavigation: openNavigation, onNewTask: openNewTask }
-  const productionUnavailable = <ProductionUnavailablePage onOpenNavigation={openNavigation} />
 
   const materializeAutomationSession = (result: InjectEventResult) => {
     if (!demoMode) return
@@ -1963,7 +1926,6 @@ function CosmosApp() {
     <div className={`app-shell${sidebarCollapsed ? ' app-shell--sidebar-collapsed' : ''}`}>
       <Sidebar
         runs={scopedRuns}
-        prototypeNavigation={demoMode}
         open={navigationOpen}
         collapsed={sidebarCollapsed}
         onClose={() => setNavigationOpen(false)}
@@ -1999,7 +1961,7 @@ function CosmosApp() {
             onDelete={deleteSession}
           />
         } />
-        <Route path="/runs" element={demoMode ? <RunsOverview {...pageProps} /> : productionUnavailable} />
+        <Route path="/runs" element={demoMode ? <RunsOverview {...pageProps} /> : <Navigate to="/sessions" replace />} />
         <Route path="/sessions/:sessionId" element={
           <SessionRoute
             runs={scopedRuns}
@@ -2235,8 +2197,8 @@ function CosmosApp() {
               activeSpaceId={workspace.space.id}
               onOpenNavigation={openNavigation}
             />} />
-        <Route path="/governance" element={demoMode ? <Navigate to="/approvals" replace /> : productionUnavailable} />
-        <Route path="/activity" element={demoMode ? <Navigate to="/automations/events" replace /> : productionUnavailable} />
+        <Route path="/governance" element={<Navigate to="/approvals" replace />} />
+        <Route path="/activity" element={<Navigate to="/automations/events" replace />} />
         <Route path="*" element={<Navigate to="/home" replace />} />
         </Routes>
       </Suspense>

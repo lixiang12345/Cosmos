@@ -404,18 +404,24 @@ describe('Cosmos prototype', () => {
     expect(screen.queryByRole('link', { name: '首页' })).not.toBeInTheDocument()
   })
 
-  it('exposes only production-backed resources in the production sidebar', async () => {
+  it('exposes every server-backed surface in the production sidebar', async () => {
     renderAuthenticatedApp('/context')
 
     expect(await screen.findByRole('heading', { level: 1, name: '代码上下文' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '专家' })).toHaveAttribute('href', '/experts')
-    expect(screen.getByRole('link', { name: '环境' })).toHaveAttribute('href', '/environments')
-    expect(screen.getByRole('button', { name: '文件' })).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByRole('link', { name: '组织' })).toHaveAttribute('href', '/files/organization')
-    expect(screen.getByRole('link', { name: '个人' })).toHaveAttribute('href', '/files/user')
-    expect(screen.queryByRole('button', { name: '配置' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: '集成' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: '密钥' })).not.toBeInTheDocument()
+    const navigation = screen.getByRole('navigation', { name: '主导航' })
+    expect(within(navigation).getByRole('link', { name: '专家' })).toHaveAttribute('href', '/experts')
+    expect(within(navigation).getByRole('link', { name: '环境' })).toHaveAttribute('href', '/environments')
+    expect(within(navigation).getByRole('link', { name: '守护进程' })).toHaveAttribute('href', '/daemons')
+    expect(within(navigation).getByRole('link', { name: '集成' })).toHaveAttribute('href', '/integrations')
+    expect(within(navigation).getByRole('link', { name: 'MCP 注册表' })).toHaveAttribute('href', '/mcp')
+    expect(within(navigation).getByRole('link', { name: 'Webhooks' })).toHaveAttribute('href', '/webhooks')
+    expect(within(navigation).getByRole('link', { name: '密钥' })).toHaveAttribute('href', '/secrets')
+    expect(within(navigation).getByRole('link', { name: '仓库' })).toHaveAttribute('href', '/repositories')
+    expect(within(navigation).getByRole('link', { name: '空间' })).toHaveAttribute('href', '/spaces')
+    expect(within(navigation).getByRole('link', { name: '设置' })).toHaveAttribute('href', '/settings')
+    expect(within(navigation).getByRole('link', { name: '自动化' })).toHaveAttribute('href', '/automations')
+    expect(within(navigation).getByRole('link', { name: '组织' })).toHaveAttribute('href', '/files/organization')
+    expect(within(navigation).getByRole('link', { name: '个人' })).toHaveAttribute('href', '/files/user')
   })
 
   it('supports the Cosmos global navigation shortcuts', async () => {
@@ -1546,16 +1552,10 @@ describe('Cosmos prototype', () => {
     expect(screen.queryByText('手动创建')).not.toBeInTheDocument()
   })
 
-  it('hides prototype navigation and tools throughout production mode', async () => {
+  it('redirects the legacy /runs route to Sessions in production mode', async () => {
     renderAuthenticatedApp('/runs')
 
-    expect(await screen.findByRole('heading', { name: '此模块尚未开放' })).toBeInTheDocument()
-    const navigation = screen.getByRole('navigation')
-    expect(within(navigation).queryByRole('link', { name: '守护进程' })).not.toBeInTheDocument()
-    expect(within(navigation).queryByRole('link', { name: '文件' })).not.toBeInTheDocument()
-    expect(within(navigation).queryByRole('link', { name: '自动化' })).not.toBeInTheDocument()
-    expect(within(navigation).getByRole('link', { name: '专家' })).toBeInTheDocument()
-    expect(within(navigation).getByRole('link', { name: '环境' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: '会话' })).toBeInTheDocument()
   })
 
   it('does not expose filename attachments or prompt simulation on production Home', async () => {

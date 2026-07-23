@@ -38,7 +38,6 @@ import { IconButton, StatusBadge } from './ui'
 
 type SidebarProps = {
   runs: Run[]
-  prototypeNavigation?: boolean
   open: boolean
   collapsed: boolean
   onClose: () => void
@@ -127,7 +126,6 @@ function SidebarLink({ item, nested = false, badge, onNavigate }: { item: NavIte
 
 export function Sidebar({
   runs,
-  prototypeNavigation = true,
   open,
   collapsed,
   onClose,
@@ -242,7 +240,7 @@ export function Sidebar({
             ) : null}
           </div>
 
-          {prototypeNavigation ? <div className="sidebar__configuration">
+          <div className="sidebar__configuration">
             <button type="button" className="sidebar-configuration-toggle" aria-label={copy.configuration} data-tooltip={copy.configuration} aria-expanded={configurationOpen} onClick={() => toggleNavigationGroup(setConfigurationOpen)}>
               <SlidersHorizontal aria-hidden="true" />
               <span>{copy.configuration}</span>
@@ -258,11 +256,9 @@ export function Sidebar({
                 ))}
               </div>
             ) : null}
-          </div> : <div className="sidebar__core-resources">
-            {coreResourceItems.map((item) => <SidebarLink key={item.to} item={item} onNavigate={onClose} />)}
-          </div>}
+          </div>
 
-          {prototypeNavigation ? <div className="sidebar__configuration sidebar__automations">
+          <div className="sidebar__configuration sidebar__automations">
             <button type="button" className="sidebar-configuration-toggle" aria-label={copy.automations} data-tooltip={copy.automations} aria-expanded={automationsOpen} onClick={() => toggleNavigationGroup(setAutomationsOpen)}>
               <Workflow aria-hidden="true" />
               <span>{copy.automations}</span>
@@ -273,7 +269,7 @@ export function Sidebar({
                 {automationItems.map((item) => <SidebarLink key={item.to} item={item} nested onNavigate={onClose} />)}
               </div>
             ) : null}
-          </div> : null}
+          </div>
 
           {pinnedRuns.length ? <div className="sidebar__group sidebar__favorites">
             <div className="sidebar__group-heading"><p className="sidebar__group-label">{copy.pinned}</p><Pin aria-hidden="true" /></div>
