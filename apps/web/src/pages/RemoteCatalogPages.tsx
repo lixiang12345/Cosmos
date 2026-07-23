@@ -10,6 +10,7 @@ import {
   type ExpertRevisionListResponse,
   type ExpertStatus,
   type ExpertSummaryDto,
+  type DaemonDto,
   type McpServerDto,
   type RepositoryDto,
   type SecretDto,
@@ -44,6 +45,7 @@ import {
   RefreshCw,
   Rocket,
   Save,
+  Server,
   ServerCog,
   ShieldCheck,
   Trash2,
@@ -73,6 +75,10 @@ import {
   getMcpServer,
   createMcpServer,
   archiveMcpServer,
+  getDaemon,
+  createDaemon,
+  updateDaemon,
+  archiveDaemon,
   listExpertRevisions,
   listEnvironmentRevisions,
   publishExpert,
@@ -145,6 +151,10 @@ export type RemoteWebhooksPageProps = RemoteCatalogListState<WebhookDto>
 export type RemoteMcpServersPageProps = RemoteCatalogListState<McpServerDto>
   & RemoteCatalogRequestProps
   & { onOpenNavigation?: () => void; canManage?: boolean; onCatalogChange?: () => void }
+
+export type RemoteDaemonsPageProps = RemoteCatalogListState<DaemonDto>
+  & RemoteCatalogRequestProps
+  & { onOpenNavigation?: () => void; canManage?: boolean; environments?: EnvironmentSummaryDto[] }
 
 type DetailStatus = 'idle' | 'loading' | 'ready' | 'not_found' | 'error'
 
@@ -1983,6 +1993,256 @@ export function RemoteMcpServersPage({
               <span />
               <button type="button" className="cosmos-button cosmos-button--primary" disabled={mutating} onClick={submitServer}>
                 <Database aria-hidden="true" />{text(locale, '新增 Server', 'Add server')}
+              </button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
+    </main>
+  )
+}
+
+function DaemonStatusLabel({ status, enabled }: { status: DaemonDto['status']; enabled: boolean }) {
+  const { locale } = usePreferences()
+  if (status === 'archived') {
+    return <span className="cosmos-status-label cosmos-status-label--muted">{text(locale, '已归档', 'Archived')}</span>
+  }
+  if (!enabled) {
+    return <span className="cosmos-status-label cosmos-status-label--muted">{text(locale, '已停用', 'Disabled')}</span>
+  }
+  const map: Record<Exclude<DaemonDto['status'], 'archived'>, { label: string; tone: string }> = {
+    online: { label: text(locale, '在线', 'Online'), tone: 'ok' },
+    offline: { label: text(locale, '离线', 'Offline'), tone: 'warn' },
+    degraded: { label: text(locale, '降级', 'Degraded'), tone: 'warn' },
+  }
+  const entry = map[status]
+  return <span className={`cosmos-status-label cosmos-status-label--${entry.tone}`}>{entry.label}</span>
+}
+
+type DaemonDraft = { name: string; environmentId: string; description: string; capabilities: string; concurrencySlots: number }
+const initialDaemonDraft: DaemonDraft = { name: '', environmentId: '', description: '', capabilities: '', concurrencySlots: 4 }
+
+export function RemoteDaemonsPage({
+  items,
+  loading,
+  ready,
+  error,
+  onRetry,
+  organizationId,
+  spaceId,
+  auth,
+  credentialVersion,
+  canManage,
+  environments = [],
+  onOpenNavigation,
+}: RemoteDaemonsPageProps) {
+  const { locale } = usePreferences()
+  const [selectedId, setSelectedId] = useState<string>()
+  const [formOpen, setFormOpen] = useState(false)
+  const [draft, setDraft] = useState<DaemonDraft>(initialDaemonDraft)
+  const [mutating, setMutating] = useState(false)
+  const [mutationError, setMutationError] = useState<Error | null>(null)
+  const state = listState(loading, ready, error)
+  const selectedSummary = items.find((item) => item.id === selectedId) ?? items[0]
+  const selectedDaemonId = state === 'ready' ? selectedSummary?.id : undefined
+  const requestAuth = useMemo<CosmosApiAuthContext>(() => ({
+    accessToken: auth.accessToken,
+    requestIdentity: auth.requestIdentity,
+    onUnauthorized: auth.onUnauthorized,
+  }), [auth.accessToken, auth.onUnauthorized, auth.requestIdentity])
+  const identity = useMemo(() => selectedDaemonId ? ({
+    organizationId,
+    spaceId,
+    daemonId: selectedDaemonId,
+    requestIdentity: requestAuth.requestIdentity,
+    credentialVersion,
+  }) : undefined, [credentialVersion, organizationId, requestAuth.requestIdentity, selectedDaemonId, spaceId])
+  const load = useCallback((signal: AbortSignal) => {
+    if (!selectedDaemonId) throw new Error('No daemon selected.')
+    return getDaemon(organizationId, spaceId, selectedDaemonId, requestAuth, signal)
+  }, [organizationId, requestAuth, selectedDaemonId, spaceId])
+  const detail = useRemoteDetail(identity, load)
+  const daemon = detail.status === 'ready' ? detail.item : selectedSummary
+
+  const environmentName = useCallback((environmentId: string) => (
+    environments.find((environment) => environment.id === environmentId)?.name ?? environmentId
+  ), [environments])
+
+  const closeForm = useCallback(() => { setDraft(initialDaemonDraft); setMutationError(null); setFormOpen(false) }, [])
+
+  const submitDaemon = useCallback(async () => {
+    const name = draft.name.trim()
+    const environmentId = draft.environmentId || environments[0]?.id
+    if (!name || !environmentId) {
+      setMutationError(new Error(text(locale, '名称和执行环境均为必填。', 'Name and environment are both required.')))
+      return
+    }
+    const capabilities = draft.capabilities.split(',').map((entry) => entry.trim()).filter(Boolean)
+    setMutating(true)
+    setMutationError(null)
+    try {
+      await createDaemon(organizationId, spaceId, {
+        name,
+        environmentId,
+        description: draft.description.trim() || undefined,
+        capabilities: capabilities.length ? capabilities : undefined,
+        concurrencySlots: draft.concurrencySlots,
+      }, crypto.randomUUID(), requestAuth)
+      closeForm()
+      onRetry()
+    } catch (cause) {
+      setMutationError(cause instanceof Error ? cause : new Error(String(cause)))
+    } finally {
+      setMutating(false)
+    }
+  }, [closeForm, draft, environments, locale, onRetry, organizationId, requestAuth, spaceId])
+
+  const toggleEnabled = useCallback(async () => {
+    if (!daemon) return
+    setMutating(true)
+    setMutationError(null)
+    try {
+      await updateDaemon(organizationId, spaceId, daemon.id, daemon.version, { enabled: !daemon.enabled }, crypto.randomUUID(), requestAuth)
+      onRetry()
+    } catch (cause) {
+      setMutationError(cause instanceof Error ? cause : new Error(String(cause)))
+    } finally {
+      setMutating(false)
+    }
+  }, [daemon, onRetry, organizationId, requestAuth, spaceId])
+
+  const archiveSelected = useCallback(async () => {
+    if (!daemon) return
+    setMutating(true)
+    setMutationError(null)
+    try {
+      await archiveDaemon(organizationId, spaceId, daemon.id, daemon.version, requestAuth)
+      setSelectedId(undefined)
+      onRetry()
+    } catch (cause) {
+      setMutationError(cause instanceof Error ? cause : new Error(String(cause)))
+    } finally {
+      setMutating(false)
+    }
+  }, [daemon, onRetry, organizationId, requestAuth, spaceId])
+
+  return (
+    <main className="cosmos-page remote-catalog-page">
+      <PageHeader
+        icon={Server}
+        title={text(locale, 'Daemon Pools', 'Daemon pools')}
+        description={text(locale, '管理自托管执行机器与容量，供调度器分配 Session 运行。', 'Manage self-hosted execution machines and capacity for the scheduler to assign Session runs.')}
+        onOpenNavigation={onOpenNavigation}
+        readOnly={!canManage}
+        actions={canManage ? (
+          <button type="button" className="cosmos-button cosmos-button--primary" disabled={environments.length === 0} onClick={() => setFormOpen(true)}>
+            <Plus aria-hidden="true" />{text(locale, '注册机器', 'Register machine')}
+          </button>
+        ) : undefined}
+      />
+      <div className="cosmos-page__scroll">
+        {state === 'loading' ? <LoadState status="loading" resource={text(locale, 'daemons', 'daemons')} onRetry={onRetry} /> : null}
+        {state === 'error' ? <LoadState status="error" resource={text(locale, 'daemons', 'daemons')} error={error} onRetry={onRetry} /> : null}
+        {state === 'ready' && items.length === 0 ? (
+          <section className="cosmos-panel remote-catalog-empty"><Server aria-hidden="true" /><strong>{text(locale, '没有已注册机器', 'No machines registered')}</strong><p>{text(locale, '注册第一台 Daemon 为该 Space 提供执行容量。', 'Register the first daemon to provide execution capacity for this Space.')}</p></section>
+        ) : null}
+        {state === 'ready' && items.length > 0 ? (
+          <section className="remote-environment-layout">
+            <aside className="cosmos-panel remote-environment-list" aria-label={text(locale, 'Daemon 列表', 'Daemon list')}>
+              <header className="cosmos-section-heading">
+                <div><span>Pools</span><h2>{text(locale, `${items.filter((item) => item.enabled).length}/${items.length} 台在线`, `${items.filter((item) => item.enabled).length}/${items.length} online`)}</h2></div>
+                <IconButton icon={RefreshCw} label={text(locale, '刷新 Daemon 列表', 'Refresh daemon list')} onClick={onRetry} />
+              </header>
+              {items.map((item) => (
+                <button
+                  type="button"
+                  className={`remote-environment-row${item.id === selectedDaemonId ? ' remote-environment-row--selected' : ''}`}
+                  aria-pressed={item.id === selectedDaemonId}
+                  key={item.id}
+                  onClick={() => setSelectedId(item.id)}
+                >
+                  <span className="cosmos-resource-row__icon"><Server aria-hidden="true" /></span>
+                  <span><strong>{item.name}</strong><small>{environmentName(item.environmentId)}</small></span>
+                  <DaemonStatusLabel status={item.status} enabled={item.enabled} />
+                  <ChevronRight aria-hidden="true" />
+                </button>
+              ))}
+            </aside>
+            <section className="cosmos-panel remote-environment-detail" aria-label={text(locale, 'Daemon 详情', 'Daemon detail')}>
+              {daemon ? (
+                <>
+                  <header className="cosmos-section-heading">
+                    <div><span>Daemon</span><h2>{daemon.name}</h2></div>
+                    <DaemonStatusLabel status={daemon.status} enabled={daemon.enabled} />
+                  </header>
+                  {daemon.description ? <p className="remote-detail-lead">{daemon.description}</p> : null}
+                  <section className="remote-detail-section">
+                    <header><ServerCog aria-hidden="true" /><h3>{text(locale, '容量', 'Capacity')}</h3></header>
+                    <dl className="remote-detail-list">
+                      <div><dt>{text(locale, '执行环境', 'Environment')}</dt><dd>{environmentName(daemon.environmentId)}</dd></div>
+                      <div><dt>{text(locale, '并发槽位', 'Concurrency slots')}</dt><dd>{daemon.concurrencySlots}</dd></div>
+                      <div><dt>{text(locale, '能力', 'Capabilities')}</dt><dd>{daemon.capabilities.length ? <code>{daemon.capabilities.join(' · ')}</code> : text(locale, '未声明', 'None declared')}</dd></div>
+                      <div><dt>{text(locale, '最近心跳', 'Last heartbeat')}</dt><dd>{daemon.lastHeartbeatAt ? formatDate(daemon.lastHeartbeatAt, locale) : text(locale, '从未', 'Never')}</dd></div>
+                    </dl>
+                  </section>
+                  {mutationError ? <InlineError error={mutationError} /> : null}
+                  <footer className="remote-detail-footer">
+                    <span><Clock3 aria-hidden="true" />{text(locale, '更新于', 'Updated')} {formatDate(daemon.updatedAt, locale)}</span>
+                    {canManage ? (
+                      <div className="remote-detail-actions">
+                        <button type="button" className="cosmos-button cosmos-button--secondary" disabled={mutating} onClick={toggleEnabled}>
+                          <Power aria-hidden="true" />{daemon.enabled ? text(locale, '停用', 'Disable') : text(locale, '启用', 'Enable')}
+                        </button>
+                        <button type="button" className="cosmos-button cosmos-button--danger" disabled={mutating} onClick={archiveSelected}>
+                          <Trash2 aria-hidden="true" />{text(locale, '归档机器', 'Archive machine')}
+                        </button>
+                      </div>
+                    ) : null}
+                  </footer>
+                </>
+              ) : (
+                <div className="remote-detail-unavailable"><CircleOff aria-hidden="true" />{detail.error?.message ?? text(locale, '无法加载 Daemon 详情。', 'Unable to load the daemon detail.')}</div>
+              )}
+            </section>
+          </section>
+        ) : null}
+      </div>
+      {formOpen ? (
+        <div className="cosmos-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeForm() }}>
+          <section className="cosmos-modal" role="dialog" aria-modal="true" aria-label={text(locale, '注册 Daemon', 'Register daemon')}>
+            <header><h2>{text(locale, '注册 Daemon', 'Register daemon')}</h2><IconButton icon={X} label={text(locale, '关闭', 'Close')} onClick={closeForm} /></header>
+            <div className="cosmos-modal__body">
+              <div className="cosmos-form-grid">
+                <label className="cosmos-field cosmos-field--wide">
+                  <span>{text(locale, '名称', 'Name')}</span>
+                  <input autoFocus value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Commerce runner" />
+                </label>
+                <label className="cosmos-field cosmos-field--wide">
+                  <span>{text(locale, '执行环境', 'Environment')}</span>
+                  <select value={draft.environmentId || environments[0]?.id || ''} onChange={(event) => setDraft({ ...draft, environmentId: event.target.value })}>
+                    {environments.map((environment) => <option key={environment.id} value={environment.id}>{environment.name}</option>)}
+                  </select>
+                </label>
+                <label className="cosmos-field cosmos-field--wide">
+                  <span>{text(locale, '描述', 'Description')}</span>
+                  <input value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} placeholder={text(locale, '执行仓库感知的专家运行。', 'Executes repository-aware Expert runs.')} />
+                </label>
+                <label className="cosmos-field cosmos-field--wide">
+                  <span>{text(locale, '能力（逗号分隔）', 'Capabilities (comma separated)')}</span>
+                  <input value={draft.capabilities} onChange={(event) => setDraft({ ...draft, capabilities: event.target.value })} placeholder="code-search, shell, git" />
+                </label>
+                <label className="cosmos-field">
+                  <span>{text(locale, '并发槽位', 'Concurrency slots')}</span>
+                  <input type="number" min={1} max={64} value={draft.concurrencySlots} onChange={(event) => setDraft({ ...draft, concurrencySlots: Math.min(64, Math.max(1, Number(event.target.value) || 1)) })} />
+                </label>
+              </div>
+              {mutationError ? <InlineError error={mutationError} /> : null}
+            </div>
+            <footer className="cosmos-modal__footer">
+              <button type="button" className="cosmos-button cosmos-button--ghost" onClick={closeForm}>{text(locale, '取消', 'Cancel')}</button>
+              <span />
+              <button type="button" className="cosmos-button cosmos-button--primary" disabled={mutating} onClick={submitDaemon}>
+                <Server aria-hidden="true" />{text(locale, '注册机器', 'Register machine')}
               </button>
             </footer>
           </section>

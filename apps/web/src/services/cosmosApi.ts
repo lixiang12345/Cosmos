@@ -38,6 +38,9 @@ import {
   McpServerDtoSchema,
   McpServerListResponseSchema,
   McpServerMutationResponseSchema,
+  DaemonDtoSchema,
+  DaemonListResponseSchema,
+  DaemonMutationResponseSchema,
   SessionDtoSchema,
   SessionControlResponseSchema,
   SessionEventDtoSchema,
@@ -113,6 +116,11 @@ import {
   type McpServerListResponse,
   type McpServerMutationResponse,
   type CreateMcpServerRequest,
+  type DaemonDto,
+  type DaemonListResponse,
+  type DaemonMutationResponse,
+  type CreateDaemonRequest,
+  type UpdateDaemonRequest,
   type SpaceDto,
   type SpaceListResponse,
   type SpaceMigrationPreview,
@@ -518,6 +526,10 @@ function mcpServersPath(organizationId: string, spaceId: string) {
   return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/mcp-servers`
 }
 
+function daemonsPath(organizationId: string, spaceId: string) {
+  return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/daemons`
+}
+
 function automationsPath(organizationId: string, spaceId: string) {
   return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/automations`
 }
@@ -634,7 +646,7 @@ function assertControlPlaneScope(
   resource: TenantScopedResource,
   organizationId: string,
   spaceId: string,
-  resourceType: 'Expert' | 'Environment' | 'Automation' | 'Repository' | 'Secret' | 'Webhook' | 'McpServer',
+  resourceType: 'Expert' | 'Environment' | 'Automation' | 'Repository' | 'Secret' | 'Webhook' | 'McpServer' | 'Daemon',
   resourceId?: string,
 ) {
   if (
@@ -1737,6 +1749,95 @@ export function archiveMcpServer(
     method: 'DELETE',
     headers: { Accept: 'application/json', 'If-Match': `"${version}"` },
   }, McpServerMutationResponseSchema.nullable(), auth)
+}
+
+export function listDaemons(
+  organizationId: string,
+  spaceId: string,
+  auth?: CosmosApiAuthContext,
+  signal?: AbortSignal,
+  options?: CosmosCatalogListOptions,
+): Promise<DaemonListResponse> {
+  return request(catalogListPath(daemonsPath(organizationId, spaceId), options), {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    signal,
+  }, DaemonListResponseSchema, auth).then((response) => {
+    for (const daemon of response.items) {
+      assertControlPlaneScope(daemon, organizationId, spaceId, 'Daemon')
+    }
+    return response
+  })
+}
+
+export function getDaemon(
+  organizationId: string,
+  spaceId: string,
+  daemonId: string,
+  auth?: CosmosApiAuthContext,
+  signal?: AbortSignal,
+): Promise<DaemonDto> {
+  return request(`${daemonsPath(organizationId, spaceId)}/${encodeURIComponent(daemonId)}`, {
+    method: 'GET', headers: { Accept: 'application/json' }, signal,
+  }, DaemonDtoSchema, auth).then((daemon) => {
+    assertControlPlaneScope(daemon, organizationId, spaceId, 'Daemon')
+    return daemon
+  })
+}
+
+export function createDaemon(
+  organizationId: string,
+  spaceId: string,
+  input: CreateDaemonRequest,
+  idempotencyKey: string,
+  auth?: CosmosApiAuthContext,
+): Promise<DaemonMutationResponse> {
+  return request(daemonsPath(organizationId, spaceId), {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey,
+    },
+    body: JSON.stringify(input),
+  }, DaemonMutationResponseSchema, auth).then((response) => {
+    assertControlPlaneScope(response.daemon, organizationId, spaceId, 'Daemon')
+    return response
+  })
+}
+
+export function updateDaemon(
+  organizationId: string,
+  spaceId: string,
+  daemonId: string,
+  version: number,
+  input: UpdateDaemonRequest,
+  idempotencyKey: string,
+  auth?: CosmosApiAuthContext,
+): Promise<DaemonMutationResponse | null> {
+  return request(`${daemonsPath(organizationId, spaceId)}/${encodeURIComponent(daemonId)}`, {
+    method: 'PATCH',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': `"${version}"`,
+    },
+    body: JSON.stringify(input),
+  }, DaemonMutationResponseSchema.nullable(), auth)
+}
+
+export function archiveDaemon(
+  organizationId: string,
+  spaceId: string,
+  daemonId: string,
+  version: number,
+  auth?: CosmosApiAuthContext,
+): Promise<DaemonMutationResponse | null> {
+  return request(`${daemonsPath(organizationId, spaceId)}/${encodeURIComponent(daemonId)}`, {
+    method: 'DELETE',
+    headers: { Accept: 'application/json', 'If-Match': `"${version}"` },
+  }, DaemonMutationResponseSchema.nullable(), auth)
 }
 
 export function listSpaces(

@@ -62,6 +62,8 @@ tags:
     description: Space-scoped outbound HTTPS endpoints with write-once signing secrets.
   - name: MCP Registry
     description: Space-scoped Model Context Protocol servers that Experts can pin as tool sources.
+  - name: Daemons
+    description: Space-scoped self-hosted execution machines that provide scheduler capacity within an Environment pool.
   - name: Events
     description: Immutable external inputs, matching, dispatch, and replay diagnostics.
   - name: Subscriptions
@@ -3594,6 +3596,157 @@ paths:
         '500':
           $ref: '#/components/responses/RuntimeInternalError'
 
+  /organizations/{organizationId}/spaces/{spaceId}/daemons:
+    parameters:
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
+    get:
+      tags: [Daemons]
+      operationId: listDaemons
+      x-cosmos-implementation-status: implemented
+      summary: List daemons in a Space
+      responses:
+        '200':
+          description: Daemon list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeDaemonListResponse'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+    post:
+      tags: [Daemons]
+      operationId: createDaemon
+      x-cosmos-implementation-status: implemented
+      summary: Register a daemon in a Space
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeCreateDaemonRequest'
+      responses:
+        '201':
+          description: Daemon registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeDaemonMutationResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+
+  /organizations/{organizationId}/spaces/{spaceId}/daemons/{daemonId}:
+    parameters:
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
+      - $ref: '#/components/parameters/RuntimeDaemonId'
+    get:
+      tags: [Daemons]
+      operationId: getDaemon
+      x-cosmos-implementation-status: implemented
+      summary: Get a daemon
+      responses:
+        '200':
+          description: Daemon
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeDaemon'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+    patch:
+      tags: [Daemons]
+      operationId: updateDaemon
+      x-cosmos-implementation-status: implemented
+      summary: Update a daemon
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeUpdateDaemonRequest'
+      responses:
+        '200':
+          description: Updated daemon
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeDaemonMutationResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
+        '412':
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '428':
+          $ref: '#/components/responses/RuntimePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+    delete:
+      tags: [Daemons]
+      operationId: archiveDaemon
+      x-cosmos-implementation-status: implemented
+      summary: Archive a daemon
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Archived daemon
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeDaemonMutationResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
+        '412':
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '428':
+          $ref: '#/components/responses/RuntimePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -3715,6 +3868,13 @@ components:
       in: path
       required: true
       description: Runtime MCP server identifier.
+      schema:
+        $ref: '#/components/schemas/RuntimeIdentifier'
+    RuntimeDaemonId:
+      name: daemonId
+      in: path
+      required: true
+      description: Runtime daemon identifier.
       schema:
         $ref: '#/components/schemas/RuntimeIdentifier'
     SubscriptionId:
@@ -6229,6 +6389,137 @@ components:
       properties:
         server:
           $ref: '#/components/schemas/RuntimeMcpServer'
+        replayed:
+          type: boolean
+      additionalProperties: false
+    RuntimeDaemon:
+      type: object
+      description: Registered daemon (self-hosted execution machine) metadata.
+      required: [id, organizationId, spaceId, environmentId, name, description, capabilities, enabled, status, concurrencySlots, lastHeartbeatAt, version, createdBy, createdAt, updatedAt, archivedAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        spaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        environmentId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        description:
+          type: string
+          maxLength: 2048
+        capabilities:
+          type: array
+          maxItems: 64
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+        enabled:
+          type: boolean
+        status:
+          type: string
+          enum: [online, offline, degraded, archived]
+        concurrencySlots:
+          type: integer
+          minimum: 1
+          maximum: 64
+        lastHeartbeatAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        version:
+          type: integer
+          minimum: 1
+        createdBy:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        updatedAt:
+          $ref: '#/components/schemas/Timestamp'
+        archivedAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+      additionalProperties: false
+    RuntimeDaemonListResponse:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/RuntimeDaemon'
+        page:
+          type: object
+          required: [nextCursor, hasMore]
+          properties:
+            nextCursor:
+              oneOf:
+                - type: string
+                  minLength: 1
+                  maxLength: 2048
+                - type: 'null'
+            hasMore:
+              type: boolean
+          additionalProperties: false
+      additionalProperties: false
+    RuntimeCreateDaemonRequest:
+      type: object
+      required: [name, environmentId]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        environmentId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        description:
+          type: string
+          maxLength: 2048
+        capabilities:
+          type: array
+          maxItems: 64
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+        concurrencySlots:
+          type: integer
+          minimum: 1
+          maximum: 64
+      additionalProperties: false
+    RuntimeUpdateDaemonRequest:
+      type: object
+      properties:
+        description:
+          type: string
+          maxLength: 2048
+        capabilities:
+          type: array
+          maxItems: 64
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+        concurrencySlots:
+          type: integer
+          minimum: 1
+          maximum: 64
+        enabled:
+          type: boolean
+      additionalProperties: false
+    RuntimeDaemonMutationResponse:
+      type: object
+      required: [daemon, replayed]
+      properties:
+        daemon:
+          $ref: '#/components/schemas/RuntimeDaemon'
         replayed:
           type: boolean
       additionalProperties: false

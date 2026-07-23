@@ -418,3 +418,18 @@ export {
   type McpTransport,
   type UpdateMcpServerRequest,
 } from './mcp.js'
+
+export {
+  CreateDaemonRequestSchema,
+  DaemonDtoSchema,
+  DaemonListResponseSchema,
+  DaemonMutationResponseSchema,
+  DaemonStatusSchema,
+  UpdateDaemonRequestSchema,
+  type CreateDaemonRequest,
+  type DaemonDto,
+  type DaemonListResponse,
+  type DaemonMutationResponse,
+  type DaemonStatus,
+  type UpdateDaemonRequest,
+} from './daemon.js'

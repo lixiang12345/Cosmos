@@ -85,6 +85,11 @@ import {
   McpServerDtoSchema,
   McpServerListResponseSchema,
   McpServerMutationResponseSchema,
+  CreateDaemonRequestSchema,
+  UpdateDaemonRequestSchema,
+  DaemonDtoSchema,
+  DaemonListResponseSchema,
+  DaemonMutationResponseSchema,
   type ApiError,
   type SessionEventDto,
   type SessionEventPage,
@@ -195,6 +200,14 @@ import {
   McpServerVersionConflictError,
   type McpServerRepository,
 } from './mcp-server-repository.js'
+import {
+  EmptyDaemonRepository,
+  DaemonDuplicateError,
+  DaemonEnvironmentNotFoundError,
+  DaemonIdempotencyConflictError,
+  DaemonVersionConflictError,
+  type DaemonRepository,
+} from './daemon-repository.js'
 import type { OrganizationQuotaRepository } from './organization-quota-repository.js'
 import { CosmosMetrics } from './metrics.js'
 import {
@@ -370,6 +383,7 @@ export type CreateAppOptions = {
   secretRepository?: SecretRepository
   webhookRepository?: WebhookRepository
   mcpServerRepository?: McpServerRepository
+  daemonRepository?: DaemonRepository
   sessionRepository?: SessionRepository
   sessionTimelineRepository?: SessionTimelineRepository
   artifactRepository?: ArtifactRepository
@@ -738,6 +752,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   const secretRepository = options.secretRepository ?? new EmptySecretRepository()
   const webhookRepository = options.webhookRepository ?? new EmptyWebhookRepository()
   const mcpServerRepository = options.mcpServerRepository ?? new EmptyMcpServerRepository()
+  const daemonRepository = options.daemonRepository ?? new EmptyDaemonRepository()
   const advisorPlanRepository = options.advisorPlanRepository ?? new EmptyAdvisorPlanRepository()
   const advisorPlanExecutor = new AdvisorPlanExecutor(advisorPlanRepository, spaceRepository)
   const contextEngineGateway = options.contextEngineGateway
@@ -1747,6 +1762,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   const canManageSecrets = canManageExperts
   const canManageWebhooks = canManageExperts
   const canManageMcpServers = canManageExperts
+  const canManageDaemons = canManageExperts
 
   function denyExpertMutation(request: FastifyRequest, reply: FastifyReply) {
     return sendApiError(reply, 403, request, {
@@ -1792,6 +1808,14 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     return sendApiError(reply, 403, request, {
       code: 'PERMISSION_DENIED',
       message: 'Only Space Managers and Organization Administrators can manage MCP servers.',
+      retryable: false,
+    })
+  }
+
+  function denyDaemonMutation(request: FastifyRequest, reply: FastifyReply) {
+    return sendApiError(reply, 403, request, {
+      code: 'PERMISSION_DENIED',
+      message: 'Only Space Managers and Organization Administrators can manage daemons.',
       retryable: false,
     })
   }
@@ -4862,6 +4886,197 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
           })
         }
         if (error instanceof McpServerIdempotencyConflictError) {
+          return sendApiError(reply, 409, request, {
+            code: 'IDEMPOTENCY_KEY_REUSED', message: error.message, retryable: false,
+          })
+        }
+        throw error
+      }
+    },
+  )
+
+  // ── Daemon Pools ────────────────────────────────────────────────────────────
+
+  type DaemonParams = { organizationId: string; spaceId: string }
+  type DaemonIdParams = DaemonParams & { daemonId: string }
+
+  app.get<{ Params: DaemonParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/daemons',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      const { organizationId, spaceId } = authorization
+      const { items, nextCursor, hasMore } = await daemonRepository.listDaemons(
+        organizationId, spaceId, authorization.actor.id,
+      )
+      return DaemonListResponseSchema.parse({ items, page: { nextCursor, hasMore } })
+    },
+  )
+
+  app.get<{ Params: DaemonIdParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/daemons/:daemonId',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      const { organizationId, spaceId } = authorization
+      const daemon = await daemonRepository.getDaemon(
+        organizationId, spaceId, request.params.daemonId, authorization.actor.id,
+      )
+      if (!daemon) return sendResourceNotFound(reply, request)
+      return DaemonDtoSchema.parse(daemon)
+    },
+  )
+
+  app.post<{ Params: DaemonParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/daemons',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageDaemons(authorization.access)) return denyDaemonMutation(request, reply)
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
+          fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      const parsed = CreateDaemonRequestSchema.safeParse(request.body)
+      if (!parsed.success) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED', message: 'The daemon request is invalid.', retryable: false,
+          fieldErrors: validationFieldErrors(parsed.error.issues),
+        })
+      }
+      try {
+        const result = await daemonRepository.createDaemon({
+          organizationId: authorization.organizationId,
+          spaceId: authorization.spaceId,
+          actorId: authorization.actor.id,
+          requestId: request.id,
+          idempotencyKey,
+          request: parsed.data,
+        })
+        const response = DaemonMutationResponseSchema.parse(result)
+        reply.header('Idempotency-Replayed', String(response.replayed))
+        reply.header('ETag', resourceEtag(response.daemon))
+        reply.header('Location', `/api/v1/organizations/${authorization.organizationId}/spaces/${authorization.spaceId}/daemons/${response.daemon.id}`)
+        return reply.code(response.replayed ? 200 : 201).send(response)
+      } catch (error) {
+        if (error instanceof DaemonEnvironmentNotFoundError) {
+          return sendApiError(reply, 422, request, {
+            code: 'UNPROCESSABLE_ENTITY', message: error.message, retryable: false,
+            fieldErrors: { environmentId: ['Environment does not exist in this Space.'] },
+          })
+        }
+        if (error instanceof DaemonDuplicateError) {
+          return sendApiError(reply, 409, request, {
+            code: 'CONFLICT', message: error.message, retryable: false, fieldErrors: {},
+          })
+        }
+        throw error
+      }
+    },
+  )
+
+  app.patch<{ Params: DaemonIdParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/daemons/:daemonId',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageDaemons(authorization.access)) return denyDaemonMutation(request, reply)
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
+          fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      const expectedVersion = requireIfMatchVersion(request, reply, 'daemon')
+      if (expectedVersion === null) return
+      const parsed = UpdateDaemonRequestSchema.safeParse(request.body)
+      if (!parsed.success) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED', message: 'The daemon update is invalid.', retryable: false,
+          fieldErrors: validationFieldErrors(parsed.error.issues),
+        })
+      }
+      try {
+        const result = await daemonRepository.updateDaemon({
+          organizationId: authorization.organizationId,
+          spaceId: authorization.spaceId,
+          daemonId: request.params.daemonId,
+          actorId: authorization.actor.id,
+          requestId: request.id,
+          expectedVersion,
+          idempotencyKey,
+          request: parsed.data,
+        })
+        if (!result) return sendResourceNotFound(reply, request)
+        const response = DaemonMutationResponseSchema.parse(result)
+        reply.header('Idempotency-Replayed', String(response.replayed))
+        reply.header('ETag', resourceEtag(response.daemon))
+        return response
+      } catch (error) {
+        if (error instanceof DaemonVersionConflictError) {
+          return sendApiError(reply, 412, request, {
+            code: 'PRECONDITION_FAILED', message: error.message, retryable: false,
+            details: { expectedVersion: error.expectedVersion, currentVersion: error.actualVersion },
+          })
+        }
+        if (error instanceof DaemonIdempotencyConflictError) {
+          return sendApiError(reply, 409, request, {
+            code: 'IDEMPOTENCY_KEY_REUSED', message: error.message, retryable: false,
+          })
+        }
+        throw error
+      }
+    },
+  )
+
+  app.delete<{ Params: DaemonIdParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/daemons/:daemonId',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageDaemons(authorization.access)) return denyDaemonMutation(request, reply)
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
+          fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      const expectedVersion = requireIfMatchVersion(request, reply, 'daemon')
+      if (expectedVersion === null) return
+      if (request.body !== undefined) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED', message: 'Archiving a daemon does not accept a request body.', retryable: false,
+          fieldErrors: { body: ['Send the request without a body.'] },
+        })
+      }
+      try {
+        const result = await daemonRepository.archiveDaemon({
+          organizationId: authorization.organizationId,
+          spaceId: authorization.spaceId,
+          daemonId: request.params.daemonId,
+          actorId: authorization.actor.id,
+          requestId: request.id,
+          expectedVersion,
+          idempotencyKey,
+        })
+        if (!result) return sendResourceNotFound(reply, request)
+        const response = DaemonMutationResponseSchema.parse(result)
+        reply.header('Idempotency-Replayed', String(response.replayed))
+        reply.header('ETag', resourceEtag(response.daemon))
+        return response
+      } catch (error) {
+        if (error instanceof DaemonVersionConflictError) {
+          return sendApiError(reply, 412, request, {
+            code: 'PRECONDITION_FAILED', message: error.message, retryable: false,
+            details: { expectedVersion: error.expectedVersion, currentVersion: error.actualVersion },
+          })
+        }
+        if (error instanceof DaemonIdempotencyConflictError) {
           return sendApiError(reply, 409, request, {
             code: 'IDEMPOTENCY_KEY_REUSED', message: error.message, retryable: false,
           })

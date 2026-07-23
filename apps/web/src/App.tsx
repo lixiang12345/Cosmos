@@ -68,6 +68,7 @@ const RemoteRepositoriesPage = lazy(() => import('./pages/RemoteCatalogPages').t
 const RemoteSecretsPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteSecretsPage })))
 const RemoteWebhooksPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteWebhooksPage })))
 const RemoteMcpServersPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteMcpServersPage })))
+const RemoteDaemonsPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteDaemonsPage })))
 const RemoteFilesPage = lazy(() => import('./pages/RemoteFilesPage').then((module) => ({ default: module.RemoteFilesPage })))
 const RemoteWorkersPage = lazy(() => import('./pages/RemoteWorkersPage').then((module) => ({ default: module.RemoteWorkersPage })))
 const RemoteApprovalsPage = lazy(() => import('./pages/RemoteApprovalsPage').then((module) => ({ default: module.RemoteApprovalsPage })))
@@ -2133,7 +2134,22 @@ function CosmosApp() {
               canManage={expertManagementEnabled}
               onOpenNavigation={openNavigation}
             />} />
-        <Route path="/daemons" element={demoMode ? <DaemonsPage onOpenNavigation={openNavigation} /> : productionUnavailable} />
+        <Route path="/daemons" element={demoMode
+          ? <DaemonsPage onOpenNavigation={openNavigation} />
+          : <RemoteDaemonsPage
+              items={catalog.daemons.items}
+              loading={catalog.daemons.loading}
+              ready={catalog.daemons.ready}
+              error={catalog.daemons.error}
+              onRetry={catalog.daemons.retry}
+              organizationId={organizationId}
+              spaceId={activeSpace.id}
+              auth={catalogAuth}
+              credentialVersion={credentialVersion}
+              canManage={expertManagementEnabled}
+              environments={catalog.environments.items}
+              onOpenNavigation={openNavigation}
+            />} />
         <Route path="/repositories" element={demoMode
           ? <RepositoriesControlPage onOpenNavigation={openNavigation} />
           : <RemoteRepositoriesPage
