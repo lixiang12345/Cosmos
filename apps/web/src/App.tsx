@@ -77,6 +77,7 @@ const RemoteAutomationsPage = lazy(() => import('./pages/RemoteAutomationPages')
 const RemoteAutomationEventLogPage = lazy(() => import('./pages/RemoteAutomationPages').then((module) => ({ default: module.RemoteAutomationEventLogPage })))
 const RemoteAutomationRunHistoryPage = lazy(() => import('./pages/RemoteAutomationPages').then((module) => ({ default: module.RemoteAutomationRunHistoryPage })))
 const RemoteSpacesPage = lazy(() => import('./pages/RemoteSpacesPage').then((module) => ({ default: module.RemoteSpacesPage })))
+const RemoteSettingsPage = lazy(() => import('./pages/RemoteSettingsPage').then((module) => ({ default: module.RemoteSettingsPage })))
 const CosmosHomePage = lazy(() => import('./pages/CosmosOperationsPages').then((module) => ({ default: module.CosmosHomePage })))
 const ContextWorkspacePage = lazy(() => import('./pages/ContextWorkspacePage').then((module) => ({ default: module.ContextWorkspacePage })))
 const CosmosFilesPage = lazy(() => import('./pages/CosmosOperationsPages').then((module) => ({ default: module.CosmosFilesPage })))
@@ -2226,7 +2227,14 @@ function CosmosApp() {
               onOpenNavigation={openNavigation}
             />} />
         <Route path="/spaces" element={demoMode ? <SpacesPage onOpenNavigation={openNavigation} /> : <RemoteSpacesPage key={workspace.space.id} organizationId={organizationId} accessibleSpaces={organization.spaces} activeSpaceId={workspace.space.id} auth={catalogAuth} credentialVersion={credentialVersion} canManage={expertManagementEnabled} onSelectSpace={(spaceId) => workspace.selectSpace(organizationId, spaceId)} onWorkspaceRefresh={refreshWorkspace} onOpenNavigation={openNavigation} />} />
-        <Route path="/settings" element={demoMode ? <SettingsPage onOpenNavigation={openNavigation} /> : productionUnavailable} />
+        <Route path="/settings" element={demoMode
+          ? <SettingsPage onOpenNavigation={openNavigation} />
+          : <RemoteSettingsPage
+              me={workspace.me}
+              organization={organization}
+              activeSpaceId={workspace.space.id}
+              onOpenNavigation={openNavigation}
+            />} />
         <Route path="/governance" element={demoMode ? <Navigate to="/approvals" replace /> : productionUnavailable} />
         <Route path="/activity" element={demoMode ? <Navigate to="/automations/events" replace /> : productionUnavailable} />
         <Route path="*" element={<Navigate to="/home" replace />} />

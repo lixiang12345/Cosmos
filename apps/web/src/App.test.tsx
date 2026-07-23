@@ -1547,7 +1547,7 @@ describe('Cosmos prototype', () => {
   })
 
   it('hides prototype navigation and tools throughout production mode', async () => {
-    renderAuthenticatedApp('/settings')
+    renderAuthenticatedApp('/runs')
 
     expect(await screen.findByRole('heading', { name: '此模块尚未开放' })).toBeInTheDocument()
     const navigation = screen.getByRole('navigation')
