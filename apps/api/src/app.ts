@@ -67,6 +67,11 @@ import {
   UpdateExpertRequestSchema,
   UpdateEnvironmentRequestSchema,
   UpdateSpaceRequestSchema,
+  CreateRepositoryRequestSchema,
+  UpdateRepositoryRequestSchema,
+  RepositoryDtoSchema,
+  RepositoryListResponseSchema,
+  RepositoryMutationResponseSchema,
   type ApiError,
   type SessionEventDto,
   type SessionEventPage,
@@ -149,6 +154,13 @@ import {
   type FileRepository,
 } from './file-repository.js'
 import { ObjectStorageError } from './object-storage.js'
+import {
+  EmptyRepositoryRepository,
+  RepositoryDuplicateError,
+  RepositoryIdempotencyConflictError,
+  RepositoryVersionConflictError,
+  type RepositoryRepository,
+} from './repository-repository.js'
 import type { OrganizationQuotaRepository } from './organization-quota-repository.js'
 import { CosmosMetrics } from './metrics.js'
 import {
@@ -320,6 +332,7 @@ export type CreateAppOptions = {
   advisorPlanRepository?: AdvisorPlanRepository
   automationRepository?: AutomationRepository
   spaceRepository?: SpaceRepository
+  repositoryRepository?: RepositoryRepository
   sessionRepository?: SessionRepository
   sessionTimelineRepository?: SessionTimelineRepository
   artifactRepository?: ArtifactRepository
@@ -684,6 +697,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     ?? new EmptyConfigurationCatalogRepository()
   const automationRepository = options.automationRepository ?? new EmptyAutomationRepository()
   const spaceRepository = options.spaceRepository ?? new EmptySpaceRepository()
+  const repositoryRepository = options.repositoryRepository ?? new EmptyRepositoryRepository()
   const advisorPlanRepository = options.advisorPlanRepository ?? new EmptyAdvisorPlanRepository()
   const advisorPlanExecutor = new AdvisorPlanExecutor(advisorPlanRepository, spaceRepository)
   const contextEngineGateway = options.contextEngineGateway
@@ -1689,6 +1703,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
 
   const canManageEnvironments = canManageExperts
   const canManageAutomations = canManageExperts
+  const canManageRepositories = canManageExperts
 
   function denyExpertMutation(request: FastifyRequest, reply: FastifyReply) {
     return sendApiError(reply, 403, request, {
@@ -4146,6 +4161,191 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       reply.header('Idempotency-Replayed', String(result.replayed))
       reply.header('ETag', sessionEtag(response.session))
       return reply.code(202).send(response)
+    },
+  )
+
+  // ── Repositories ────────────────────────────────────────────────────────────
+
+  type RepositoryParams = { organizationId: string; spaceId: string }
+  type RepositoryIdParams = RepositoryParams & { repositoryId: string }
+
+  app.get<{ Params: RepositoryParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/repositories',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      const { organizationId, spaceId } = authorization
+      const { items, nextCursor, hasMore } = await repositoryRepository.listRepositories(
+        organizationId, spaceId, authorization.actor.id,
+      )
+      return RepositoryListResponseSchema.parse({ items, page: { nextCursor, hasMore } })
+    },
+  )
+
+  app.get<{ Params: RepositoryIdParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/repositories/:repositoryId',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      const { organizationId, spaceId } = authorization
+      const repository = await repositoryRepository.getRepository(
+        organizationId, spaceId, request.params.repositoryId, authorization.actor.id,
+      )
+      if (!repository) return sendResourceNotFound(reply, request)
+      return RepositoryDtoSchema.parse(repository)
+    },
+  )
+
+  app.post<{ Params: RepositoryParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/repositories',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageRepositories(authorization.access)) return denyAutomationMutation(request, reply)
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
+          fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      const parsed = CreateRepositoryRequestSchema.safeParse(request.body)
+      if (!parsed.success) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED', message: 'The Repository request is invalid.', retryable: false,
+          fieldErrors: validationFieldErrors(parsed.error.issues),
+        })
+      }
+      try {
+        const result = await repositoryRepository.createRepository({
+          organizationId: authorization.organizationId,
+          spaceId: authorization.spaceId,
+          actorId: authorization.actor.id,
+          requestId: request.id,
+          idempotencyKey,
+          request: parsed.data,
+        })
+        const response = RepositoryMutationResponseSchema.parse(result)
+        reply.header('Idempotency-Replayed', String(response.replayed))
+        reply.header('ETag', resourceEtag(response.repository))
+        reply.header('Location', `/api/v1/organizations/${authorization.organizationId}/spaces/${authorization.spaceId}/repositories/${response.repository.id}`)
+        return reply.code(response.replayed ? 200 : 201).send(response)
+      } catch (error) {
+        if (error instanceof RepositoryDuplicateError) {
+          return sendApiError(reply, 409, request, {
+            code: 'CONFLICT', message: error.message, retryable: false, fieldErrors: {},
+          })
+        }
+        throw error
+      }
+    },
+  )
+
+  app.patch<{ Params: RepositoryIdParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/repositories/:repositoryId',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageRepositories(authorization.access)) return denyAutomationMutation(request, reply)
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
+          fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      const expectedVersion = requireIfMatchVersion(request, reply, 'Repository')
+      if (expectedVersion === null) return
+      const parsed = UpdateRepositoryRequestSchema.safeParse(request.body)
+      if (!parsed.success) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED', message: 'The Repository update is invalid.', retryable: false,
+          fieldErrors: validationFieldErrors(parsed.error.issues),
+        })
+      }
+      try {
+        const result = await repositoryRepository.updateRepository({
+          organizationId: authorization.organizationId,
+          spaceId: authorization.spaceId,
+          repositoryId: request.params.repositoryId,
+          actorId: authorization.actor.id,
+          requestId: request.id,
+          expectedVersion,
+          idempotencyKey,
+          request: parsed.data,
+        })
+        if (!result) return sendResourceNotFound(reply, request)
+        const response = RepositoryMutationResponseSchema.parse(result)
+        reply.header('Idempotency-Replayed', String(response.replayed))
+        reply.header('ETag', resourceEtag(response.repository))
+        return response
+      } catch (error) {
+        if (error instanceof RepositoryVersionConflictError) {
+          return sendApiError(reply, 412, request, {
+            code: 'PRECONDITION_FAILED', message: error.message, retryable: false,
+            details: { expectedVersion: error.expectedVersion, currentVersion: error.actualVersion },
+          })
+        }
+        if (error instanceof RepositoryIdempotencyConflictError) {
+          return sendApiError(reply, 409, request, {
+            code: 'IDEMPOTENCY_KEY_REUSED', message: error.message, retryable: false,
+          })
+        }
+        throw error
+      }
+    },
+  )
+
+  app.delete<{ Params: RepositoryIdParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/repositories/:repositoryId',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageRepositories(authorization.access)) return denyAutomationMutation(request, reply)
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
+          fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      const expectedVersion = requireIfMatchVersion(request, reply, 'Repository')
+      if (expectedVersion === null) return
+      if (request.body !== undefined) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED', message: 'Archiving a Repository does not accept a request body.', retryable: false,
+          fieldErrors: { body: ['Send the request without a body.'] },
+        })
+      }
+      try {
+        const result = await repositoryRepository.archiveRepository({
+          organizationId: authorization.organizationId,
+          spaceId: authorization.spaceId,
+          repositoryId: request.params.repositoryId,
+          actorId: authorization.actor.id,
+          requestId: request.id,
+          expectedVersion,
+          idempotencyKey,
+        })
+        if (!result) return sendResourceNotFound(reply, request)
+        const response = RepositoryMutationResponseSchema.parse(result)
+        reply.header('Idempotency-Replayed', String(response.replayed))
+        reply.header('ETag', resourceEtag(response.repository))
+        return response
+      } catch (error) {
+        if (error instanceof RepositoryVersionConflictError) {
+          return sendApiError(reply, 412, request, {
+            code: 'PRECONDITION_FAILED', message: error.message, retryable: false,
+            details: { expectedVersion: error.expectedVersion, currentVersion: error.actualVersion },
+          })
+        }
+        if (error instanceof RepositoryIdempotencyConflictError) {
+          return sendApiError(reply, 409, request, {
+            code: 'IDEMPOTENCY_KEY_REUSED', message: error.message, retryable: false,
+          })
+        }
+        throw error
+      }
     },
   )
 

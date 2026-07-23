@@ -79,6 +79,7 @@ const migrationVersions = [
   '074_observer_runtime_metrics.sql',
   '075_automation_auto_archive.sql',
   '076_automation_trigger_archive.sql',
+  '077_repository_catalog.sql',
 ]
 
 function poolWithVersions(versions: string[]) {

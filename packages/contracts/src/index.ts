@@ -354,3 +354,20 @@ export {
   type ToolCallStatus,
   type ToolRiskLevel,
 } from './tool-approval.js'
+
+export {
+  RepositoryConnectionStatusSchema,
+  RepositoryDtoSchema,
+  RepositoryListResponseSchema,
+  RepositoryMutationResponseSchema,
+  RepositoryProviderSchema,
+  CreateRepositoryRequestSchema,
+  UpdateRepositoryRequestSchema,
+  type CreateRepositoryRequest,
+  type RepositoryConnectionStatus,
+  type RepositoryDto,
+  type RepositoryListResponse,
+  type RepositoryMutationResponse,
+  type RepositoryProvider,
+  type UpdateRepositoryRequest,
+} from './repository.js'

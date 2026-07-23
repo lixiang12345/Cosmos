@@ -54,6 +54,8 @@ tags:
     description: Searchable Session deliverables and external references.
   - name: Automations
     description: Management projections over the canonical Triggers stored in Expert revisions.
+  - name: Repositories
+    description: Space-scoped source repositories and their connection status.
   - name: Events
     description: Immutable external inputs, matching, dispatch, and replay diagnostics.
   - name: Subscriptions
@@ -3050,6 +3052,157 @@ paths:
         '500':
           $ref: '#/components/responses/RuntimeInternalError'
 
+  /organizations/{organizationId}/spaces/{spaceId}/repositories:
+    parameters:
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
+    get:
+      tags: [Repositories]
+      operationId: listRepositories
+      x-cosmos-implementation-status: implemented
+      summary: List Repositories in a Space
+      responses:
+        '200':
+          description: Repository list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeRepositoryListResponse'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+    post:
+      tags: [Repositories]
+      operationId: createRepository
+      x-cosmos-implementation-status: implemented
+      summary: Connect a Repository to a Space
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeCreateRepositoryRequest'
+      responses:
+        '201':
+          description: Repository connected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeRepositoryMutationResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+
+  /organizations/{organizationId}/spaces/{spaceId}/repositories/{repositoryId}:
+    parameters:
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
+      - $ref: '#/components/parameters/RuntimeRepositoryId'
+    get:
+      tags: [Repositories]
+      operationId: getRepository
+      x-cosmos-implementation-status: implemented
+      summary: Get a Repository
+      responses:
+        '200':
+          description: Repository
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeRepository'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+    patch:
+      tags: [Repositories]
+      operationId: updateRepository
+      x-cosmos-implementation-status: implemented
+      summary: Update a Repository
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeUpdateRepositoryRequest'
+      responses:
+        '200':
+          description: Updated Repository
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeRepositoryMutationResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
+        '412':
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '428':
+          $ref: '#/components/responses/RuntimePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+    delete:
+      tags: [Repositories]
+      operationId: archiveRepository
+      x-cosmos-implementation-status: implemented
+      summary: Archive a Repository
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Archived Repository
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeRepositoryMutationResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
+        '412':
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '428':
+          $ref: '#/components/responses/RuntimePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -3145,6 +3298,13 @@ components:
       schema:
         type: string
         format: uuid
+    RuntimeRepositoryId:
+      name: repositoryId
+      in: path
+      required: true
+      description: Runtime Repository identifier.
+      schema:
+        $ref: '#/components/schemas/RuntimeIdentifier'
     SubscriptionId:
       name: subscriptionId
       in: path
@@ -5211,6 +5371,117 @@ components:
           oneOf:
             - $ref: '#/components/schemas/Timestamp'
             - type: 'null'
+      additionalProperties: false
+    RuntimeRepository:
+      type: object
+      required: [id, organizationId, spaceId, provider, fullName, defaultBranch, installationId, connectionStatus, version, createdBy, createdAt, updatedAt, archivedAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        spaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        provider:
+          type: string
+          enum: [github, gitlab, unknown]
+        fullName:
+          type: string
+          minLength: 1
+          maxLength: 512
+        defaultBranch:
+          type: string
+          minLength: 1
+          maxLength: 256
+        installationId:
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 256
+            - type: 'null'
+        connectionStatus:
+          type: string
+          enum: [connected, action_required, archived]
+        version:
+          type: integer
+          minimum: 1
+        createdBy:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        updatedAt:
+          $ref: '#/components/schemas/Timestamp'
+        archivedAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+      additionalProperties: false
+    RuntimeRepositoryListResponse:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/RuntimeRepository'
+        page:
+          type: object
+          required: [nextCursor, hasMore]
+          properties:
+            nextCursor:
+              oneOf:
+                - type: string
+                  minLength: 1
+                  maxLength: 2048
+                - type: 'null'
+            hasMore:
+              type: boolean
+          additionalProperties: false
+      additionalProperties: false
+    RuntimeCreateRepositoryRequest:
+      type: object
+      required: [provider, fullName]
+      properties:
+        provider:
+          type: string
+          enum: [github, gitlab, unknown]
+        fullName:
+          type: string
+          minLength: 1
+          maxLength: 512
+        defaultBranch:
+          type: string
+          minLength: 1
+          maxLength: 256
+          default: main
+        installationId:
+          type: string
+          minLength: 1
+          maxLength: 256
+      additionalProperties: false
+    RuntimeUpdateRepositoryRequest:
+      type: object
+      properties:
+        defaultBranch:
+          type: string
+          minLength: 1
+          maxLength: 256
+        installationId:
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 256
+            - type: 'null'
+      additionalProperties: false
+    RuntimeRepositoryMutationResponse:
+      type: object
+      required: [repository, replayed]
+      properties:
+        repository:
+          $ref: '#/components/schemas/RuntimeRepository'
+        replayed:
+          type: boolean
       additionalProperties: false
     RuntimeAutomationTestRequest:
       type: object

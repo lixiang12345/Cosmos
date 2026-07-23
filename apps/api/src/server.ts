@@ -19,6 +19,7 @@ import { PostgresSpaceRepository } from './postgres-space-repository.js'
 import { PostgresToolApprovalRepository } from './postgres-tool-approval-repository.js'
 import { PostgresServiceAccountPolicyRepository } from './service-account-policy-repository.js'
 import { PostgresWorkerReadinessRepository } from './postgres-worker-readiness-repository.js'
+import { PostgresRepositoryRepository } from './postgres-repository-repository.js'
 import { PostgresOrganizationQuotaRepository } from './organization-quota-repository.js'
 import { S3ObjectStore } from './object-storage.js'
 import { InMemorySessionRepository } from './session-repository.js'
@@ -97,6 +98,7 @@ const app = createApp({
   advisorPlanRepository: pool ? new PostgresAdvisorPlanRepository(pool) : undefined,
   automationRepository: pool ? new PostgresAutomationRepository(pool) : undefined,
   spaceRepository: pool ? new PostgresSpaceRepository(pool) : undefined,
+  repositoryRepository: pool ? new PostgresRepositoryRepository(pool) : undefined,
   fileRepository: pool ? new PostgresFileRepository(pool, objectStore) : undefined,
   toolApprovalRepository: pool ? new PostgresToolApprovalRepository(pool) : undefined,
   serviceAccountPolicyRepository: pool ? new PostgresServiceAccountPolicyRepository(pool) : undefined,
