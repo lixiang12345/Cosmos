@@ -72,6 +72,10 @@ import {
   RepositoryDtoSchema,
   RepositoryListResponseSchema,
   RepositoryMutationResponseSchema,
+  CreateSecretRequestSchema,
+  SecretDtoSchema,
+  SecretListResponseSchema,
+  SecretMutationResponseSchema,
   type ApiError,
   type SessionEventDto,
   type SessionEventPage,
@@ -161,6 +165,13 @@ import {
   RepositoryVersionConflictError,
   type RepositoryRepository,
 } from './repository-repository.js'
+import {
+  EmptySecretRepository,
+  SecretDuplicateError,
+  SecretIdempotencyConflictError,
+  SecretVersionConflictError,
+  type SecretRepository,
+} from './secret-repository.js'
 import type { OrganizationQuotaRepository } from './organization-quota-repository.js'
 import { CosmosMetrics } from './metrics.js'
 import {
@@ -333,6 +344,7 @@ export type CreateAppOptions = {
   automationRepository?: AutomationRepository
   spaceRepository?: SpaceRepository
   repositoryRepository?: RepositoryRepository
+  secretRepository?: SecretRepository
   sessionRepository?: SessionRepository
   sessionTimelineRepository?: SessionTimelineRepository
   artifactRepository?: ArtifactRepository
@@ -698,6 +710,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   const automationRepository = options.automationRepository ?? new EmptyAutomationRepository()
   const spaceRepository = options.spaceRepository ?? new EmptySpaceRepository()
   const repositoryRepository = options.repositoryRepository ?? new EmptyRepositoryRepository()
+  const secretRepository = options.secretRepository ?? new EmptySecretRepository()
   const advisorPlanRepository = options.advisorPlanRepository ?? new EmptyAdvisorPlanRepository()
   const advisorPlanExecutor = new AdvisorPlanExecutor(advisorPlanRepository, spaceRepository)
   const contextEngineGateway = options.contextEngineGateway
@@ -1704,6 +1717,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   const canManageEnvironments = canManageExperts
   const canManageAutomations = canManageExperts
   const canManageRepositories = canManageExperts
+  const canManageSecrets = canManageExperts
 
   function denyExpertMutation(request: FastifyRequest, reply: FastifyReply) {
     return sendApiError(reply, 403, request, {
@@ -1725,6 +1739,14 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     return sendApiError(reply, 403, request, {
       code: 'PERMISSION_DENIED',
       message: 'Only Space Managers and Organization Administrators can manage Automations and Events.',
+      retryable: false,
+    })
+  }
+
+  function denySecretMutation(request: FastifyRequest, reply: FastifyReply) {
+    return sendApiError(reply, 403, request, {
+      code: 'PERMISSION_DENIED',
+      message: 'Only Space Managers and Organization Administrators can manage Secrets.',
       retryable: false,
     })
   }
@@ -4340,6 +4362,141 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
           })
         }
         if (error instanceof RepositoryIdempotencyConflictError) {
+          return sendApiError(reply, 409, request, {
+            code: 'IDEMPOTENCY_KEY_REUSED', message: error.message, retryable: false,
+          })
+        }
+        throw error
+      }
+    },
+  )
+
+  // ── Secrets ─────────────────────────────────────────────────────────────────
+
+  type SecretParams = { organizationId: string; spaceId: string }
+  type SecretIdParams = SecretParams & { secretId: string }
+
+  app.get<{ Params: SecretParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/secrets',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      const { organizationId, spaceId } = authorization
+      const { items, nextCursor, hasMore } = await secretRepository.listSecrets(
+        organizationId, spaceId, authorization.actor.id,
+      )
+      return SecretListResponseSchema.parse({ items, page: { nextCursor, hasMore } })
+    },
+  )
+
+  app.get<{ Params: SecretIdParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/secrets/:secretId',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      const { organizationId, spaceId } = authorization
+      const secret = await secretRepository.getSecret(
+        organizationId, spaceId, request.params.secretId, authorization.actor.id,
+      )
+      if (!secret) return sendResourceNotFound(reply, request)
+      return SecretDtoSchema.parse(secret)
+    },
+  )
+
+  app.post<{ Params: SecretParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/secrets',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageSecrets(authorization.access)) return denySecretMutation(request, reply)
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
+          fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      const parsed = CreateSecretRequestSchema.safeParse(request.body)
+      if (!parsed.success) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED', message: 'The Secret request is invalid.', retryable: false,
+          fieldErrors: validationFieldErrors(parsed.error.issues),
+        })
+      }
+      try {
+        const result = await secretRepository.createSecret({
+          organizationId: authorization.organizationId,
+          spaceId: authorization.spaceId,
+          actorId: authorization.actor.id,
+          requestId: request.id,
+          idempotencyKey,
+          request: parsed.data,
+        })
+        const response = SecretMutationResponseSchema.parse(result)
+        reply.header('Idempotency-Replayed', String(response.replayed))
+        reply.header('ETag', resourceEtag(response.secret))
+        reply.header('Location', `/api/v1/organizations/${authorization.organizationId}/spaces/${authorization.spaceId}/secrets/${response.secret.id}`)
+        return reply.code(response.replayed ? 200 : 201).send(response)
+      } catch (error) {
+        if (error instanceof SecretDuplicateError) {
+          return sendApiError(reply, 409, request, {
+            code: 'CONFLICT', message: error.message, retryable: false, fieldErrors: {},
+          })
+        }
+        if (error instanceof SecretIdempotencyConflictError) {
+          return sendApiError(reply, 409, request, {
+            code: 'IDEMPOTENCY_KEY_REUSED', message: error.message, retryable: false,
+          })
+        }
+        throw error
+      }
+    },
+  )
+
+  app.delete<{ Params: SecretIdParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/secrets/:secretId',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageSecrets(authorization.access)) return denySecretMutation(request, reply)
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
+          fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      const expectedVersion = requireIfMatchVersion(request, reply, 'Secret')
+      if (expectedVersion === null) return
+      if (request.body !== undefined) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED', message: 'Archiving a Secret does not accept a request body.', retryable: false,
+          fieldErrors: { body: ['Send the request without a body.'] },
+        })
+      }
+      try {
+        const result = await secretRepository.archiveSecret({
+          organizationId: authorization.organizationId,
+          spaceId: authorization.spaceId,
+          secretId: request.params.secretId,
+          actorId: authorization.actor.id,
+          requestId: request.id,
+          expectedVersion,
+          idempotencyKey,
+        })
+        if (!result) return sendResourceNotFound(reply, request)
+        const response = SecretMutationResponseSchema.parse(result)
+        reply.header('Idempotency-Replayed', String(response.replayed))
+        reply.header('ETag', resourceEtag(response.secret))
+        return response
+      } catch (error) {
+        if (error instanceof SecretVersionConflictError) {
+          return sendApiError(reply, 412, request, {
+            code: 'PRECONDITION_FAILED', message: error.message, retryable: false,
+            details: { expectedVersion: error.expectedVersion, currentVersion: error.actualVersion },
+          })
+        }
+        if (error instanceof SecretIdempotencyConflictError) {
           return sendApiError(reply, 409, request, {
             code: 'IDEMPOTENCY_KEY_REUSED', message: error.message, retryable: false,
           })

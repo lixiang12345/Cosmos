@@ -371,3 +371,18 @@ export {
   type RepositoryProvider,
   type UpdateRepositoryRequest,
 } from './repository.js'
+
+export {
+  CreateSecretRequestSchema,
+  SecretDtoSchema,
+  SecretListResponseSchema,
+  SecretMutationResponseSchema,
+  SecretScopeSchema,
+  SecretStatusSchema,
+  type CreateSecretRequest,
+  type SecretDto,
+  type SecretListResponse,
+  type SecretMutationResponse,
+  type SecretScope,
+  type SecretStatus,
+} from './secret.js'

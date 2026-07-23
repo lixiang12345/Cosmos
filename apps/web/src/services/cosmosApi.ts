@@ -29,6 +29,9 @@ import {
   RepositoryListResponseSchema,
   RuntimeCapabilitiesSchema,
   RetryTurnResponseSchema,
+  SecretDtoSchema,
+  SecretListResponseSchema,
+  SecretMutationResponseSchema,
   SessionDtoSchema,
   SessionControlResponseSchema,
   SessionEventDtoSchema,
@@ -92,6 +95,10 @@ import {
   type CreateSpaceRequestInput,
   type RepositoryDto,
   type RepositoryListResponse,
+  type SecretDto,
+  type SecretListResponse,
+  type SecretMutationResponse,
+  type CreateSecretRequest,
   type SpaceDto,
   type SpaceListResponse,
   type SpaceMigrationPreview,
@@ -485,6 +492,10 @@ function repositoriesPath(organizationId: string, spaceId: string) {
   return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/repositories`
 }
 
+function secretsPath(organizationId: string, spaceId: string) {
+  return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/secrets`
+}
+
 function automationsPath(organizationId: string, spaceId: string) {
   return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/automations`
 }
@@ -601,7 +612,7 @@ function assertControlPlaneScope(
   resource: TenantScopedResource,
   organizationId: string,
   spaceId: string,
-  resourceType: 'Expert' | 'Environment' | 'Automation' | 'Repository',
+  resourceType: 'Expert' | 'Environment' | 'Automation' | 'Repository' | 'Secret',
   resourceId?: string,
 ) {
   if (
@@ -1500,6 +1511,74 @@ export function getRepository(
     assertControlPlaneScope(repository, organizationId, spaceId, 'Repository')
     return repository
   })
+}
+
+export function listSecrets(
+  organizationId: string,
+  spaceId: string,
+  auth?: CosmosApiAuthContext,
+  signal?: AbortSignal,
+  options?: CosmosCatalogListOptions,
+): Promise<SecretListResponse> {
+  return request(catalogListPath(secretsPath(organizationId, spaceId), options), {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    signal,
+  }, SecretListResponseSchema, auth).then((response) => {
+    for (const secret of response.items) {
+      assertControlPlaneScope(secret, organizationId, spaceId, 'Secret')
+    }
+    return response
+  })
+}
+
+export function getSecret(
+  organizationId: string,
+  spaceId: string,
+  secretId: string,
+  auth?: CosmosApiAuthContext,
+  signal?: AbortSignal,
+): Promise<SecretDto> {
+  return request(`${secretsPath(organizationId, spaceId)}/${encodeURIComponent(secretId)}`, {
+    method: 'GET', headers: { Accept: 'application/json' }, signal,
+  }, SecretDtoSchema, auth).then((secret) => {
+    assertControlPlaneScope(secret, organizationId, spaceId, 'Secret')
+    return secret
+  })
+}
+
+export function createSecret(
+  organizationId: string,
+  spaceId: string,
+  input: CreateSecretRequest,
+  idempotencyKey: string,
+  auth?: CosmosApiAuthContext,
+): Promise<SecretMutationResponse> {
+  return request(secretsPath(organizationId, spaceId), {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey,
+    },
+    body: JSON.stringify(input),
+  }, SecretMutationResponseSchema, auth).then((response) => {
+    assertControlPlaneScope(response.secret, organizationId, spaceId, 'Secret')
+    return response
+  })
+}
+
+export function archiveSecret(
+  organizationId: string,
+  spaceId: string,
+  secretId: string,
+  version: number,
+  auth?: CosmosApiAuthContext,
+): Promise<SecretDto | null> {
+  return request(`${secretsPath(organizationId, spaceId)}/${encodeURIComponent(secretId)}`, {
+    method: 'DELETE',
+    headers: { Accept: 'application/json', 'If-Match': `"${version}"` },
+  }, SecretDtoSchema.nullable(), auth)
 }
 
 export function listSpaces(

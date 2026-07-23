@@ -65,6 +65,7 @@ const RemoteExpertDetailPage = lazy(() => import('./pages/RemoteCatalogPages').t
 const RemoteExpertEditorPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteExpertEditorPage })))
 const RemoteEnvironmentsPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteEnvironmentsPage })))
 const RemoteRepositoriesPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteRepositoriesPage })))
+const RemoteSecretsPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteSecretsPage })))
 const RemoteFilesPage = lazy(() => import('./pages/RemoteFilesPage').then((module) => ({ default: module.RemoteFilesPage })))
 const RemoteWorkersPage = lazy(() => import('./pages/RemoteWorkersPage').then((module) => ({ default: module.RemoteWorkersPage })))
 const RemoteApprovalsPage = lazy(() => import('./pages/RemoteApprovalsPage').then((module) => ({ default: module.RemoteApprovalsPage })))
@@ -2148,7 +2149,21 @@ function CosmosApp() {
         <Route path="/integrations" element={demoMode ? <IntegrationsControlPage onOpenNavigation={openNavigation} /> : productionUnavailable} />
         <Route path="/mcp" element={demoMode ? <McpRegistryPage onOpenNavigation={openNavigation} /> : productionUnavailable} />
         <Route path="/webhooks" element={demoMode ? <WebhooksPage onOpenNavigation={openNavigation} /> : productionUnavailable} />
-        <Route path="/secrets" element={demoMode ? <SecretsPage onOpenNavigation={openNavigation} /> : productionUnavailable} />
+        <Route path="/secrets" element={demoMode
+          ? <SecretsPage onOpenNavigation={openNavigation} />
+          : <RemoteSecretsPage
+              items={catalog.secrets.items}
+              loading={catalog.secrets.loading}
+              ready={catalog.secrets.ready}
+              error={catalog.secrets.error}
+              onRetry={catalog.secrets.retry}
+              organizationId={organizationId}
+              spaceId={activeSpace.id}
+              auth={catalogAuth}
+              credentialVersion={credentialVersion}
+              canManage={expertManagementEnabled}
+              onOpenNavigation={openNavigation}
+            />} />
         <Route path="/spaces" element={demoMode ? <SpacesPage onOpenNavigation={openNavigation} /> : <RemoteSpacesPage key={workspace.space.id} organizationId={organizationId} accessibleSpaces={organization.spaces} activeSpaceId={workspace.space.id} auth={catalogAuth} credentialVersion={credentialVersion} canManage={expertManagementEnabled} onSelectSpace={(spaceId) => workspace.selectSpace(organizationId, spaceId)} onWorkspaceRefresh={refreshWorkspace} onOpenNavigation={openNavigation} />} />
         <Route path="/settings" element={demoMode ? <SettingsPage onOpenNavigation={openNavigation} /> : productionUnavailable} />
         <Route path="/governance" element={demoMode ? <Navigate to="/approvals" replace /> : productionUnavailable} />

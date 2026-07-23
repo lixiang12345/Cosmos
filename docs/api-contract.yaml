@@ -56,6 +56,8 @@ tags:
     description: Management projections over the canonical Triggers stored in Expert revisions.
   - name: Repositories
     description: Space-scoped source repositories and their connection status.
+  - name: Secrets
+    description: Space-scoped write-only Secret values and their non-sensitive metadata.
   - name: Events
     description: Immutable external inputs, matching, dispatch, and replay diagnostics.
   - name: Subscriptions
@@ -3203,6 +3205,123 @@ paths:
         '500':
           $ref: '#/components/responses/RuntimeInternalError'
 
+  /organizations/{organizationId}/spaces/{spaceId}/secrets:
+    parameters:
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
+    get:
+      tags: [Secrets]
+      operationId: listSecrets
+      x-cosmos-implementation-status: implemented
+      summary: List Secret metadata in a Space
+      description: Secret values and their opaque stored references are never returned.
+      responses:
+        '200':
+          description: Secret metadata list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeSecretListResponse'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+    post:
+      tags: [Secrets]
+      operationId: createSecret
+      x-cosmos-implementation-status: implemented
+      summary: Create a write-only Secret in a Space
+      description: The plaintext value is accepted only as write-only input and cannot be read back.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeCreateSecretRequest'
+      responses:
+        '201':
+          description: Secret created; the response contains metadata only
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeSecretMutationResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+
+  /organizations/{organizationId}/spaces/{spaceId}/secrets/{secretId}:
+    parameters:
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
+      - $ref: '#/components/parameters/RuntimeSecretId'
+    get:
+      tags: [Secrets]
+      operationId: getSecret
+      x-cosmos-implementation-status: implemented
+      summary: Get Secret metadata
+      description: The Secret value and its opaque stored reference are never returned.
+      responses:
+        '200':
+          description: Secret metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeSecret'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+    delete:
+      tags: [Secrets]
+      operationId: archiveSecret
+      x-cosmos-implementation-status: implemented
+      summary: Archive a Secret
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Archived Secret metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeSecretMutationResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
+        '412':
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '428':
+          $ref: '#/components/responses/RuntimePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -3303,6 +3422,13 @@ components:
       in: path
       required: true
       description: Runtime Repository identifier.
+      schema:
+        $ref: '#/components/schemas/RuntimeIdentifier'
+    RuntimeSecretId:
+      name: secretId
+      in: path
+      required: true
+      description: Runtime Secret identifier.
       schema:
         $ref: '#/components/schemas/RuntimeIdentifier'
     SubscriptionId:
@@ -5480,6 +5606,112 @@ components:
       properties:
         repository:
           $ref: '#/components/schemas/RuntimeRepository'
+        replayed:
+          type: boolean
+      additionalProperties: false
+    RuntimeSecret:
+      type: object
+      description: Non-sensitive Secret metadata. Secret values and opaque stored references are excluded.
+      required: [id, organizationId, spaceId, name, scope, description, vmInstall, lastFour, status, version, createdBy, createdAt, updatedAt, archivedAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        spaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+          pattern: '^[A-Z][A-Z0-9_]*$'
+        scope:
+          type: string
+          enum: [private, shared]
+        description:
+          oneOf:
+            - type: string
+            - type: 'null'
+        vmInstall:
+          type: boolean
+        lastFour:
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 4
+            - type: 'null'
+        status:
+          type: string
+          enum: [active, archived]
+        version:
+          type: integer
+          minimum: 1
+        createdBy:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        updatedAt:
+          $ref: '#/components/schemas/Timestamp'
+        archivedAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+      additionalProperties: false
+    RuntimeSecretListResponse:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/RuntimeSecret'
+        page:
+          type: object
+          required: [nextCursor, hasMore]
+          properties:
+            nextCursor:
+              oneOf:
+                - type: string
+                  minLength: 1
+                  maxLength: 2048
+                - type: 'null'
+            hasMore:
+              type: boolean
+          additionalProperties: false
+      additionalProperties: false
+    RuntimeCreateSecretRequest:
+      type: object
+      required: [name, value]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+          pattern: '^[A-Z][A-Z0-9_]*$'
+        scope:
+          type: string
+          enum: [private, shared]
+          default: private
+        value:
+          type: string
+          minLength: 1
+          writeOnly: true
+          description: Plaintext write-only input. It is never returned or stored readably.
+        description:
+          oneOf:
+            - type: string
+            - type: 'null'
+        vmInstall:
+          type: boolean
+          default: true
+      additionalProperties: false
+    RuntimeSecretMutationResponse:
+      type: object
+      required: [secret, replayed]
+      properties:
+        secret:
+          $ref: '#/components/schemas/RuntimeSecret'
         replayed:
           type: boolean
       additionalProperties: false

@@ -11,6 +11,7 @@ import {
   type ExpertStatus,
   type ExpertSummaryDto,
   type RepositoryDto,
+  type SecretDto,
 } from '@cosmos/contracts'
 import {
   AlertTriangle,
@@ -24,6 +25,8 @@ import {
   FolderGit2,
   GitBranch,
   History,
+  KeyRound,
+  EyeOff,
   LoaderCircle,
   LockKeyhole,
   Menu,
@@ -55,6 +58,9 @@ import {
   getEnvironment,
   getExpert,
   getRepository,
+  getSecret,
+  createSecret,
+  archiveSecret,
   listExpertRevisions,
   listEnvironmentRevisions,
   publishExpert,
@@ -115,6 +121,10 @@ export type RemoteEnvironmentsPageProps = RemoteCatalogListState<EnvironmentSumm
 export type RemoteRepositoriesPageProps = RemoteCatalogListState<RepositoryDto>
   & RemoteCatalogRequestProps
   & { onOpenNavigation?: () => void }
+
+export type RemoteSecretsPageProps = RemoteCatalogListState<SecretDto>
+  & RemoteCatalogRequestProps
+  & { onOpenNavigation?: () => void; canManage?: boolean; onCatalogChange?: () => void }
 
 type DetailStatus = 'idle' | 'loading' | 'ready' | 'not_found' | 'error'
 
@@ -1281,6 +1291,225 @@ export function RemoteRepositoriesPage({
           </section>
         ) : null}
       </div>
+    </main>
+  )
+}
+
+function SecretScopeLabel({ scope }: { scope: SecretDto['scope'] }) {
+  const { locale } = usePreferences()
+  const map: Record<SecretDto['scope'], { label: string; tone: string }> = {
+    private: { label: text(locale, '私有', 'Private'), tone: 'muted' },
+    shared: { label: text(locale, '共享', 'Shared'), tone: 'ok' },
+  }
+  const entry = map[scope]
+  return <span className={`cosmos-status-label cosmos-status-label--${entry.tone}`}>{entry.label}</span>
+}
+
+type SecretDraft = { name: string; scope: SecretDto['scope']; value: string; description: string; vmInstall: boolean }
+const initialSecretDraft: SecretDraft = { name: '', scope: 'private', value: '', description: '', vmInstall: true }
+
+export function RemoteSecretsPage({
+  items,
+  loading,
+  ready,
+  error,
+  onRetry,
+  organizationId,
+  spaceId,
+  auth,
+  credentialVersion,
+  canManage,
+  onOpenNavigation,
+}: RemoteSecretsPageProps) {
+  const { locale } = usePreferences()
+  const [selectedId, setSelectedId] = useState<string>()
+  const [formOpen, setFormOpen] = useState(false)
+  const [draft, setDraft] = useState<SecretDraft>(initialSecretDraft)
+  const [mutating, setMutating] = useState(false)
+  const [mutationError, setMutationError] = useState<Error | null>(null)
+  const state = listState(loading, ready, error)
+  const selectedSummary = items.find((item) => item.id === selectedId) ?? items[0]
+  const selectedSecretId = state === 'ready' ? selectedSummary?.id : undefined
+  const requestAuth = useMemo<CosmosApiAuthContext>(() => ({
+    accessToken: auth.accessToken,
+    requestIdentity: auth.requestIdentity,
+    onUnauthorized: auth.onUnauthorized,
+  }), [auth.accessToken, auth.onUnauthorized, auth.requestIdentity])
+  const identity = useMemo(() => selectedSecretId ? ({
+    organizationId,
+    spaceId,
+    secretId: selectedSecretId,
+    requestIdentity: requestAuth.requestIdentity,
+    credentialVersion,
+  }) : undefined, [credentialVersion, organizationId, requestAuth.requestIdentity, selectedSecretId, spaceId])
+  const load = useCallback((signal: AbortSignal) => {
+    if (!selectedSecretId) throw new Error('No Secret selected.')
+    return getSecret(organizationId, spaceId, selectedSecretId, requestAuth, signal)
+  }, [organizationId, requestAuth, selectedSecretId, spaceId])
+  const detail = useRemoteDetail(identity, load)
+  const secret = detail.status === 'ready' ? detail.item : selectedSummary
+
+  const closeForm = useCallback(() => { setDraft(initialSecretDraft); setMutationError(null); setFormOpen(false) }, [])
+
+  const submitSecret = useCallback(async () => {
+    const name = draft.name.trim()
+    const value = draft.value
+    if (!name || !value) {
+      setMutationError(new Error(text(locale, '名称和密钥值均为必填。', 'Name and secret value are both required.')))
+      return
+    }
+    setMutating(true)
+    setMutationError(null)
+    try {
+      await createSecret(organizationId, spaceId, {
+        name,
+        scope: draft.scope,
+        value,
+        description: draft.description.trim() || null,
+        vmInstall: draft.vmInstall,
+      }, crypto.randomUUID(), requestAuth)
+      closeForm()
+      onRetry()
+    } catch (cause) {
+      setMutationError(cause instanceof Error ? cause : new Error(String(cause)))
+    } finally {
+      setMutating(false)
+    }
+  }, [closeForm, draft, locale, onRetry, organizationId, requestAuth, spaceId])
+
+  const archiveSelected = useCallback(async () => {
+    if (!secret) return
+    setMutating(true)
+    setMutationError(null)
+    try {
+      await archiveSecret(organizationId, spaceId, secret.id, secret.version, requestAuth)
+      setSelectedId(undefined)
+      onRetry()
+    } catch (cause) {
+      setMutationError(cause instanceof Error ? cause : new Error(String(cause)))
+    } finally {
+      setMutating(false)
+    }
+  }, [onRetry, organizationId, requestAuth, secret, spaceId])
+
+  return (
+    <main className="cosmos-page remote-catalog-page">
+      <PageHeader
+        icon={KeyRound}
+        title={text(locale, '密钥', 'Secrets')}
+        description={text(locale, '写入一次即只写；在作用域内自动以大写下划线环境变量注入 Expert 环境。', 'Write-once then write-only; injected into Expert VMs as upper-snake-case env vars within scope.')}
+        onOpenNavigation={onOpenNavigation}
+        readOnly={!canManage}
+        actions={canManage ? (
+          <button type="button" className="cosmos-button cosmos-button--primary" onClick={() => setFormOpen(true)}>
+            <Plus aria-hidden="true" />{text(locale, '创建密钥', 'Create secret')}
+          </button>
+        ) : undefined}
+      />
+      <div className="cosmos-page__scroll">
+        {state === 'loading' ? <LoadState status="loading" resource={text(locale, '密钥', 'Secrets')} onRetry={onRetry} /> : null}
+        {state === 'error' ? <LoadState status="error" resource={text(locale, '密钥', 'Secrets')} error={error} onRetry={onRetry} /> : null}
+        {state === 'ready' && items.length === 0 ? (
+          <section className="cosmos-panel remote-catalog-empty"><KeyRound aria-hidden="true" /><strong>{text(locale, '还没有密钥', 'No Secrets')}</strong><p>{text(locale, '创建第一个只写凭证，作用域内的 Expert 会自动获得对应环境变量。', 'Create the first write-only credential; in-scope Experts receive the matching env var automatically.')}</p></section>
+        ) : null}
+        {state === 'ready' && items.length > 0 ? (
+          <section className="remote-environment-layout">
+            <aside className="cosmos-panel remote-environment-list" aria-label={text(locale, '密钥列表', 'Secret list')}>
+              <header className="cosmos-section-heading">
+                <div><span>Catalog</span><h2>{text(locale, `${items.length} 个密钥`, `${items.length} Secrets`)}</h2></div>
+                <IconButton icon={RefreshCw} label={text(locale, '刷新密钥列表', 'Refresh Secret list')} onClick={onRetry} />
+              </header>
+              {items.map((item) => (
+                <button
+                  type="button"
+                  className={`remote-environment-row${item.id === selectedSecretId ? ' remote-environment-row--selected' : ''}`}
+                  aria-pressed={item.id === selectedSecretId}
+                  key={item.id}
+                  onClick={() => setSelectedId(item.id)}
+                >
+                  <span className="cosmos-resource-row__icon"><KeyRound aria-hidden="true" /></span>
+                  <span><strong>{item.name}</strong><small>{item.description ?? text(locale, '无说明', 'No description')}</small></span>
+                  <SecretScopeLabel scope={item.scope} />
+                  <ChevronRight aria-hidden="true" />
+                </button>
+              ))}
+            </aside>
+            <section className="cosmos-panel remote-environment-detail" aria-label={text(locale, '密钥详情', 'Secret detail')}>
+              {secret ? (
+                <>
+                  <header className="cosmos-section-heading">
+                    <div><span>{text(locale, '密钥', 'Secret')}</span><h2>{secret.name}</h2></div>
+                    <SecretScopeLabel scope={secret.scope} />
+                  </header>
+                  <section className="remote-detail-section">
+                    <header><ShieldCheck aria-hidden="true" /><h3>{text(locale, '属性', 'Attributes')}</h3></header>
+                    <dl className="remote-detail-list">
+                      <div><dt>{text(locale, '密钥值', 'Secret value')}</dt><dd><EyeOff aria-hidden="true" />•••• {secret.lastFour ?? '••••'}</dd></div>
+                      <div><dt>{text(locale, '作用域', 'Scope')}</dt><dd>{secret.scope === 'shared' ? text(locale, '共享给组织成员', 'Shared with organization members') : text(locale, '仅本人会话可读', 'Readable only by your sessions')}</dd></div>
+                      <div><dt>{text(locale, '注入 VM', 'Inject into VMs')}</dt><dd>{secret.vmInstall ? text(locale, '自动', 'Auto') : text(locale, '关闭', 'Off')}</dd></div>
+                      <div><dt>{text(locale, '说明', 'Description')}</dt><dd>{secret.description ?? '—'}</dd></div>
+                    </dl>
+                  </section>
+                  {mutationError ? <InlineError error={mutationError} /> : null}
+                  <footer className="remote-detail-footer">
+                    <span><Clock3 aria-hidden="true" />{text(locale, '更新于', 'Updated')} {formatDate(secret.updatedAt, locale)}</span>
+                    {canManage ? (
+                      <button type="button" className="cosmos-button cosmos-button--danger" disabled={mutating} onClick={archiveSelected}>
+                        <Trash2 aria-hidden="true" />{text(locale, '归档密钥', 'Archive secret')}
+                      </button>
+                    ) : null}
+                  </footer>
+                </>
+              ) : (
+                <div className="remote-detail-unavailable"><CircleOff aria-hidden="true" />{detail.error?.message ?? text(locale, '无法加载密钥详情。', 'Unable to load the Secret detail.')}</div>
+              )}
+            </section>
+          </section>
+        ) : null}
+      </div>
+      {formOpen ? (
+        <div className="cosmos-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeForm() }}>
+          <section className="cosmos-modal" role="dialog" aria-modal="true" aria-label={text(locale, '创建密钥', 'Create secret')}>
+            <header><h2>{text(locale, '创建密钥', 'Create secret')}</h2><IconButton icon={X} label={text(locale, '关闭', 'Close')} onClick={closeForm} /></header>
+            <div className="cosmos-modal__body">
+              <div className="cosmos-form-grid">
+                <label className="cosmos-field cosmos-field--wide">
+                  <span>{text(locale, '名称（大写下划线）', 'Name (upper snake case)')}</span>
+                  <input autoFocus value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value.toUpperCase() })} placeholder="OPENAI_API_KEY" />
+                </label>
+                <label className="cosmos-field">
+                  <span>{text(locale, '作用域', 'Scope')}</span>
+                  <select value={draft.scope} onChange={(event) => setDraft({ ...draft, scope: event.target.value as SecretDto['scope'] })}>
+                    <option value="private">{text(locale, '私有', 'Private')}</option>
+                    <option value="shared">{text(locale, '共享', 'Shared')}</option>
+                  </select>
+                </label>
+                <label className="cosmos-field cosmos-inline-toggle">
+                  <input type="checkbox" checked={draft.vmInstall} onChange={(event) => setDraft({ ...draft, vmInstall: event.target.checked })} />
+                  <span>{text(locale, '自动注入 VM', 'Auto-inject into VMs')}</span>
+                </label>
+                <label className="cosmos-field cosmos-field--wide">
+                  <span>{text(locale, '密钥值', 'Secret value')}</span>
+                  <input type="password" autoComplete="new-password" value={draft.value} onChange={(event) => setDraft({ ...draft, value: event.target.value })} placeholder="••••••••••••" />
+                </label>
+                <label className="cosmos-field cosmos-field--wide">
+                  <span>{text(locale, '说明', 'Description')}</span>
+                  <textarea value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} />
+                </label>
+              </div>
+              <div className="cosmos-security-note cosmos-security-note--compact"><EyeOff aria-hidden="true" /><span><strong>{text(locale, '保存后不可查看', 'Not viewable after save')}</strong>{text(locale, '密钥值仅保留末四位用于识别，服务端以只写方式存储。', 'Only the last four characters are retained for identification; the value is stored write-only on the server.')}</span></div>
+              {mutationError ? <InlineError error={mutationError} /> : null}
+            </div>
+            <footer className="cosmos-modal__footer">
+              <button type="button" className="cosmos-button cosmos-button--ghost" onClick={closeForm}>{text(locale, '取消', 'Cancel')}</button>
+              <span />
+              <button type="button" className="cosmos-button cosmos-button--primary" disabled={mutating} onClick={submitSecret}>
+                <KeyRound aria-hidden="true" />{text(locale, '创建且不回显', 'Create without readback')}
+              </button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
     </main>
   )
 }

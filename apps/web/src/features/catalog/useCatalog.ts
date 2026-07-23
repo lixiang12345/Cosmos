@@ -1,9 +1,10 @@
-import type { EnvironmentSummaryDto, ExpertSummaryDto, RepositoryDto } from '@cosmos/contracts'
+import type { EnvironmentSummaryDto, ExpertSummaryDto, RepositoryDto, SecretDto } from '@cosmos/contracts'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   listEnvironments,
   listExperts,
   listRepositories,
+  listSecrets,
   type CosmosApiAuthContext,
 } from '../../services/cosmosApi'
 
@@ -69,6 +70,7 @@ export type CatalogReadModel = {
   experts: CatalogResourceState<ExpertSummaryDto>
   environments: CatalogResourceState<EnvironmentSummaryDto>
   repositories: CatalogResourceState<RepositoryDto>
+  secrets: CatalogResourceState<SecretDto>
 }
 
 type RequestIdentity = object
@@ -188,10 +190,21 @@ export function useCatalog({
     )),
     [auth, organizationId, spaceId],
   )
+  const loadSecrets = useCallback(
+    (signal: AbortSignal) => loadCatalogPages(signal, (cursor) => listSecrets(
+      organizationId,
+      spaceId,
+      auth,
+      signal,
+      { limit: 100, ...(cursor ? { cursor } : {}) },
+    )),
+    [auth, organizationId, spaceId],
+  )
 
   return {
     experts: useCatalogResource(requestEnabled, identity, loadExperts),
     environments: useCatalogResource(requestEnabled, identity, loadEnvironments),
     repositories: useCatalogResource(requestEnabled, identity, loadRepositories),
+    secrets: useCatalogResource(requestEnabled, identity, loadSecrets),
   }
 }
