@@ -35,7 +35,70 @@ describeWithDatabase('Space authority under the restricted API runtime role', ()
         ('space-org','space-target','space-owner','space_manager'),
         ('space-org','space-default','space-member','member'),
         ('other-org','space-hidden','other-owner','space_manager');
+      INSERT INTO cosmos_spaces (organization_id,id,name) VALUES
+        ('space-org','space-source','Source Space');
+      INSERT INTO cosmos_space_memberships (organization_id,space_id,actor_id,role) VALUES
+        ('space-org','space-source','space-owner','space_manager');
+      INSERT INTO cosmos_webhooks (organization_id,space_id,id,name,url,signing_secret_ciphertext,created_by) VALUES
+        ('space-org','space-source','webhook-a','alerts','https://hooks.example.com/a','sha256:salt:hash','space-owner'),
+        ('space-org','space-source','webhook-b','builds','https://hooks.example.com/b','sha256:salt:hash','space-owner');
+      INSERT INTO cosmos_webhook_audit_events (organization_id,space_id,id,webhook_id,actor_id,action,request_id) VALUES
+        ('space-org','space-source','webhook-audit-a','webhook-a','space-owner','create','req-seed');
     `)
+  })
+
+
+  it('executes the webhooks slice atomically across parent and child tables', async () => {
+    const result = await repository.executeMigration({
+      organizationId: 'space-org', spaceId: 'space-source', actorId: 'space-owner',
+      requestId: 'req-migrate-1', idempotencyKey: 'migrate-key-1',
+      request: { targetSpaceId: 'space-target', resourceType: 'webhooks' },
+    })
+    expect(result?.migration).toMatchObject({ status: 'completed', resourceMigrated: 2, resourceTotal: 2 })
+
+    const rows = await migrationPool.query(
+      "SELECT space_id, count(*)::int AS n FROM cosmos_webhooks GROUP BY space_id ORDER BY space_id",
+    )
+    expect(rows.rows).toEqual([{ space_id: 'space-target', n: 2 }])
+    const audit = await migrationPool.query(
+      "SELECT space_id FROM cosmos_webhook_audit_events WHERE id = 'webhook-audit-a'",
+    )
+    expect(audit.rows[0]).toEqual({ space_id: 'space-target' })
+
+    const replayed = await repository.executeMigration({
+      organizationId: 'space-org', spaceId: 'space-source', actorId: 'space-owner',
+      requestId: 'req-migrate-1r', idempotencyKey: 'migrate-key-1',
+      request: { targetSpaceId: 'space-target', resourceType: 'webhooks' },
+    })
+    expect(replayed).toMatchObject({ replayed: true, migration: { id: result?.migration.id } })
+  })
+
+  it('fails and rolls back on a target name conflict without moving anything', async () => {
+    await migrationPool.query(`
+      INSERT INTO cosmos_webhooks (organization_id,space_id,id,name,url,signing_secret_ciphertext,created_by) VALUES
+        ('space-org','space-source','webhook-c','alerts','https://hooks.example.com/c','sha256:salt:hash','space-owner');
+    `)
+    const result = await repository.executeMigration({
+      organizationId: 'space-org', spaceId: 'space-source', actorId: 'space-owner',
+      requestId: 'req-migrate-2', idempotencyKey: 'migrate-key-2',
+      request: { targetSpaceId: 'space-target', resourceType: 'webhooks' },
+    })
+    expect(result?.migration.status).toBe('failed')
+    expect(result?.migration.errorMessage).toContain('same name')
+
+    const still = await migrationPool.query(
+      "SELECT space_id FROM cosmos_webhooks WHERE id = 'webhook-c'",
+    )
+    expect(still.rows[0]).toEqual({ space_id: 'space-source' })
+  })
+
+  it('conceals migration execution from actors outside the tenant', async () => {
+    const result = await repository.executeMigration({
+      organizationId: 'space-org', spaceId: 'space-source', actorId: 'other-owner',
+      requestId: 'req-migrate-3', idempotencyKey: 'migrate-key-3',
+      request: { targetSpaceId: 'space-target', resourceType: 'webhooks' },
+    })
+    expect(result).toBeNull()
   })
 
   afterAll(async () => {
@@ -45,7 +108,7 @@ describeWithDatabase('Space authority under the restricted API runtime role', ()
 
   it('lists only memberships, creates idempotently, and rejects non-admin create', async () => {
     const listed = await repository.listSpaces('space-org', 'space-owner')
-    expect(listed.map(({ id }) => id)).toEqual(['space-default', 'space-target'])
+    expect(listed.map(({ id }) => id)).toEqual(['space-default', 'space-source', 'space-target'])
     expect(listed[0]).toMatchObject({ isDefault: true, slug: 'space-default' })
     const request = { name: 'Release Engineering', slug: 'release-engineering', description: 'Release work.' }
     const created = await repository.createSpace({ organizationId: 'space-org', actorId: 'space-owner', requestId: 'create', idempotencyKey: 'create-space', request })

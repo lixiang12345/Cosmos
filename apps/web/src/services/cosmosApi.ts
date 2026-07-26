@@ -64,6 +64,8 @@ import {
   SpaceDtoSchema,
   SpaceListResponseSchema,
   SpaceMigrationPreviewSchema,
+  SpaceMigrationDtoSchema,
+  SpaceMigrationListResponseSchema,
   SpaceMutationResponseSchema,
   StartSessionResponseSchema,
   type ApiError,
@@ -155,6 +157,9 @@ import {
   type SpaceDto,
   type SpaceListResponse,
   type SpaceMigrationPreview,
+  type SpaceMigrationDto,
+  type SpaceMigrationListResponse,
+  type CreateSpaceMigrationRequest,
   type UpdateSpaceRequestInput,
   type SendSessionMessageResponse,
   type StartSessionResponse,
@@ -2311,6 +2316,35 @@ export function previewSpaceMigration(
   return request(`${spacePath(organizationId, spaceId)}/migration-preview?${query}`, {
     method: 'GET', headers: { Accept: 'application/json' }, signal,
   }, SpaceMigrationPreviewSchema, auth)
+}
+
+export function listSpaceMigrations(
+  organizationId: string,
+  spaceId: string,
+  auth?: CosmosApiAuthContext,
+  signal?: AbortSignal,
+): Promise<SpaceMigrationListResponse> {
+  return request(`${spacePath(organizationId, spaceId)}/migrations`, {
+    method: 'GET', headers: { Accept: 'application/json' }, signal,
+  }, SpaceMigrationListResponseSchema, auth)
+}
+
+export function executeSpaceMigration(
+  organizationId: string,
+  spaceId: string,
+  input: CreateSpaceMigrationRequest,
+  idempotencyKey: string,
+  auth?: CosmosApiAuthContext,
+): Promise<SpaceMigrationDto> {
+  return request(`${spacePath(organizationId, spaceId)}/migrations`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey,
+    },
+    body: JSON.stringify(input),
+  }, SpaceMigrationDtoSchema, auth)
 }
 
 export function getExpert(

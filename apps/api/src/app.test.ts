@@ -356,12 +356,14 @@ function testSpaceRepository(): SpaceRepository {
   return {
     listSpaces: vi.fn(async () => [spaceDto]),
     getSpace: vi.fn(async () => spaceDto),
+    executeMigration: vi.fn(async () => null),
+    listMigrations: vi.fn(async () => []),
     createSpace: vi.fn(async () => ({ space: { ...spaceDto, id: 'created-space', slug: 'created-space', isDefault: false, version: 1 }, replayed: false })),
     updateSpace: vi.fn(async () => ({ space: { ...spaceDto, description: 'Updated.', version: 3 }, replayed: false })),
     setDefaultSpace: vi.fn(async () => ({ space: { ...spaceDto, isDefault: true, version: 3 }, replayed: false })),
     previewMigration: vi.fn(async () => SpaceMigrationPreviewSchema.parse({
       source: spaceDto, target: { ...spaceDto, id: 'commerce', slug: 'commerce', name: 'Commerce', isDefault: false },
-      resourceCounts: { sessions: 2, experts: 1, environments: 1, automations: 1, files: 0 },
+      resourceCounts: { sessions: 2, experts: 1, environments: 1, automations: 1, files: 0, webhooks: 1 },
       canMigrate: false, blockingReasons: ['The Default Space cannot be migrated.'],
     })),
   }

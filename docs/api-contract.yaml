@@ -3602,6 +3602,67 @@ paths:
         '500':
           $ref: '#/components/responses/RuntimeInternalError'
 
+  /organizations/{organizationId}/spaces/{spaceId}/migrations:
+    parameters:
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
+    get:
+      tags: [Spaces]
+      operationId: listSpaceMigrations
+      x-cosmos-implementation-status: implemented
+      summary: List Space migration jobs involving this Space
+      responses:
+        '200':
+          description: Space migration jobs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeSpaceMigrationListResponse'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+    post:
+      tags: [Spaces]
+      operationId: executeSpaceMigration
+      x-cosmos-implementation-status: implemented
+      summary: Execute a Space resource migration slice
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeCreateSpaceMigrationRequest'
+      responses:
+        '200':
+          description: Migration replayed for a previously used Idempotency-Key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeSpaceMigration'
+        '201':
+          description: Migration executed (completed or failed job record)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeSpaceMigration'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+
   /webhook-deliveries/{webhookId}:
     parameters:
       - name: webhookId
@@ -6307,13 +6368,14 @@ components:
       additionalProperties: false
     RuntimeSpaceResourceCounts:
       type: object
-      required: [sessions, experts, environments, automations, files]
+      required: [sessions, experts, environments, automations, files, webhooks]
       properties:
         sessions: { type: integer, minimum: 0 }
         experts: { type: integer, minimum: 0 }
         environments: { type: integer, minimum: 0 }
         automations: { type: integer, minimum: 0 }
         files: { type: integer, minimum: 0 }
+        webhooks: { type: integer, minimum: 0 }
       additionalProperties: false
     RuntimeSpaceMigrationPreview:
       type: object
@@ -6753,6 +6815,66 @@ components:
             - type: 'null'
         replayed:
           type: boolean
+      additionalProperties: false
+    RuntimeSpaceMigration:
+      type: object
+      required: [organizationId, id, sourceSpaceId, targetSpaceId, resourceType, status, resourceTotal, resourceMigrated, errorMessage, requestedBy, version, createdAt, updatedAt]
+      properties:
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        id:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        sourceSpaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        targetSpaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        resourceType:
+          type: string
+          enum: [webhooks]
+        status:
+          type: string
+          enum: [pending, executing, completed, failed]
+        resourceTotal:
+          type: integer
+          minimum: 0
+        resourceMigrated:
+          type: integer
+          minimum: 0
+        errorMessage:
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 2000
+            - type: 'null'
+        requestedBy:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        updatedAt:
+          $ref: '#/components/schemas/Timestamp'
+      additionalProperties: false
+    RuntimeSpaceMigrationListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/RuntimeSpaceMigration'
+      additionalProperties: false
+    RuntimeCreateSpaceMigrationRequest:
+      type: object
+      required: [targetSpaceId, resourceType]
+      properties:
+        targetSpaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        resourceType:
+          type: string
+          enum: [webhooks]
       additionalProperties: false
     RuntimeWebhookDeliveryReceipt:
       type: object

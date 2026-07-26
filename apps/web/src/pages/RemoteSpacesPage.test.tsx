@@ -27,7 +27,7 @@ const platform: SpaceDto = {
 const commerce: SpaceDto = { ...platform, id: 'space-commerce', name: 'Commerce', slug: 'commerce', description: 'Commerce work.', isDefault: false }
 const preview: SpaceMigrationPreview = {
   source: platform, target: commerce,
-  resourceCounts: { sessions: 4, experts: 2, environments: 1, automations: 1, files: 3 },
+  resourceCounts: { sessions: 4, experts: 2, environments: 1, automations: 1, files: 3, webhooks: 2 },
   canMigrate: false, blockingReasons: ['The Default Space cannot be migrated.'],
 }
 const props = {

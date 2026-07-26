@@ -32,7 +32,7 @@ describe('Space contracts', () => {
     expect(SpaceMigrationPreviewSchema.parse({
       source: space,
       target: { ...space, id: 'space-commerce', slug: 'commerce', name: 'Commerce', isDefault: false },
-      resourceCounts: { sessions: 2, experts: 1, environments: 1, automations: 0, files: 3 },
+      resourceCounts: { sessions: 2, experts: 1, environments: 1, automations: 0, files: 3, webhooks: 1 },
       canMigrate: false,
       blockingReasons: ['The Default Space cannot be migrated.'],
     })).toMatchObject({ canMigrate: false, resourceCounts: { sessions: 2 } })

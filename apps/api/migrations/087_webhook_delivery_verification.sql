@@ -10,7 +10,7 @@ CREATE FUNCTION cosmos_resolve_webhook_delivery(
   delivery_webhook_id text,
   presented_secret text
 ) RETURNS TABLE (organization_id text, space_id text, created_by text)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $$
 DECLARE
   candidate record;
   parts text[];
@@ -50,7 +50,7 @@ CREATE FUNCTION cosmos_record_webhook_delivery(
   delivery_space_id text,
   delivery_webhook_id text
 ) RETURNS void
-LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE sql SECURITY DEFINER SET search_path FROM CURRENT AS $$
   UPDATE cosmos_webhooks
   SET event_count = event_count + 1
   WHERE organization_id = delivery_organization_id

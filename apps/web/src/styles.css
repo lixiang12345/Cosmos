@@ -23825,3 +23825,41 @@ code.prototype-detail-value {
     grid-template-columns: 1fr;
   }
 }
+
+/* Space migration execution (first slice: webhooks) */
+.remote-space-migration__execute {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+  margin: 12px 0;
+}
+
+.remote-space-migration__execute small {
+  font-size: 12px;
+  color: var(--proto-dim, #a0a0aa);
+}
+
+.remote-space-jobs {
+  display: flex;
+  flex-direction: column;
+}
+
+.remote-space-job {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--proto-border, #e0e0e5);
+  font-size: 13px;
+}
+
+.remote-space-job:last-child {
+  border-bottom: none;
+}
+
+.remote-space-job__error {
+  color: #dc2626;
+  font-size: 12.5px;
+}

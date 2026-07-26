@@ -57,6 +57,9 @@ import {
   SpaceDtoSchema,
   SpaceListResponseSchema,
   SpaceMigrationPreviewSchema,
+  SpaceMigrationDtoSchema,
+  SpaceMigrationListResponseSchema,
+  CreateSpaceMigrationRequestSchema,
   SpaceMutationResponseSchema,
   ShareGrantDtoSchema,
   SessionMessagePageSchema,
@@ -1597,6 +1600,64 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       )
       if (!preview) return sendResourceNotFound(reply, request)
       return SpaceMigrationPreviewSchema.parse(preview)
+    },
+  )
+
+  app.get<{ Params: SpaceParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/migrations',
+    async (request, reply) => {
+      const authorization = await authorizeSpace(request, reply, request.params)
+      if (!authorization) return
+      const items = await spaceRepository.listMigrations(
+        authorization.organizationId, authorization.spaceId, authorization.actor.id,
+      )
+      return SpaceMigrationListResponseSchema.parse({ items })
+    },
+  )
+
+  app.post<{ Params: SpaceParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/migrations',
+    async (request, reply) => {
+      const authorization = await authorizeSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageExperts(authorization.access)) return denySpaceMutation(request, reply)
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
+          fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      const parsed = CreateSpaceMigrationRequestSchema.safeParse(request.body)
+      if (!parsed.success) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED', message: 'The Space migration request is invalid.', retryable: false,
+          fieldErrors: validationFieldErrors(parsed.error.issues),
+        })
+      }
+      try {
+        const result = await spaceRepository.executeMigration({
+          organizationId: authorization.organizationId,
+          spaceId: authorization.spaceId,
+          actorId: authorization.actor.id,
+          requestId: request.id,
+          idempotencyKey,
+          request: parsed.data,
+        })
+        if (!result) return sendResourceNotFound(reply, request)
+        const migration = SpaceMigrationDtoSchema.parse(result.migration)
+        reply.header('Idempotency-Replayed', String(result.replayed))
+        reply.header('ETag', resourceEtag(migration))
+        return reply.code(result.replayed ? 200 : 201).send(migration)
+      } catch (error) {
+        if (error instanceof SpaceValidationError) {
+          return sendApiError(reply, 400, request, {
+            code: 'VALIDATION_FAILED', message: error.message, retryable: false,
+            fieldErrors: { [error.field ?? 'targetSpaceId']: [error.message] },
+          })
+        }
+        throw error
+      }
     },
   )
 

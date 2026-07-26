@@ -27,7 +27,7 @@ GRANT UPDATE (dispatch_attempts, next_dispatch_at)
 -- instances never double-claim.
 CREATE FUNCTION cosmos_claim_automation_dispatch_retries(batch_limit integer)
 RETURNS TABLE (organization_id text, space_id text, event_id text, received_by text)
-LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE sql SECURITY DEFINER SET search_path FROM CURRENT AS $$
   UPDATE cosmos_automation_events events
   SET status = 'dispatching', next_dispatch_at = NULL
   FROM (

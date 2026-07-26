@@ -1,4 +1,6 @@
 import type {
+  CreateSpaceMigrationRequest,
+  SpaceMigrationDto,
   CreateSpaceRequest,
   SpaceDto,
   SpaceMigrationPreview,
@@ -31,6 +33,10 @@ export interface SpaceRepository {
     targetSpaceId: string,
     actorId: string,
   ): Promise<SpaceMigrationPreview | null>
+  executeMigration(
+    record: SpaceScope & { spaceId: string; idempotencyKey: string; request: CreateSpaceMigrationRequest },
+  ): Promise<{ migration: SpaceMigrationDto; replayed: boolean } | null>
+  listMigrations(organizationId: string, spaceId: string, actorId: string): Promise<SpaceMigrationDto[]>
 }
 
 export class SpaceVersionConflictError extends Error {
@@ -70,4 +76,12 @@ export class EmptySpaceRepository implements SpaceRepository {
   updateSpace(): Promise<null> { return Promise.resolve(null) }
   setDefaultSpace(): Promise<null> { return Promise.resolve(null) }
   previewMigration(): Promise<null> { return Promise.resolve(null) }
+
+  async executeMigration(): Promise<null> {
+    return null
+  }
+
+  async listMigrations(): Promise<[]> {
+    return []
+  }
 }

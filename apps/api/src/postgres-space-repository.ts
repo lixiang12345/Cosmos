@@ -4,9 +4,13 @@ import {
   SpaceMigrationPreviewSchema,
   SpaceMutationResponseSchema,
   type SpaceDto,
+  SpaceMigrationDtoSchema,
+  type SpaceMigrationDto,
+  type CreateSpaceMigrationRequest,
+  type SpaceMigrationPreview,
 } from '@cosmos/contracts'
 import type { Pool, PoolClient } from 'pg'
-import { queryWithApiDatabaseContext, withApiDatabaseContext } from './postgres-runtime-database.js'
+import { queryWithApiDatabaseContext, setLocalApiDatabaseContext, withApiDatabaseContext } from './postgres-runtime-database.js'
 import {
   SpaceIdempotencyConflictError,
   SpacePermissionError,
@@ -84,6 +88,45 @@ export type PostgresSpaceRepositoryOptions = {
   createId?: () => string
   now?: () => Date
   idempotencyTtlMs?: number
+}
+
+
+type MigrationRow = {
+  organization_id: string
+  id: string
+  source_space_id: string
+  target_space_id: string
+  resource_type: string
+  status: string
+  resource_total: number
+  resource_migrated: number
+  error_message: string | null
+  requested_by: string
+  version: number
+  created_at: Date
+  updated_at: Date
+}
+
+function mapMigration(row: MigrationRow): SpaceMigrationDto {
+  return SpaceMigrationDtoSchema.parse({
+    organizationId: row.organization_id,
+    id: row.id,
+    sourceSpaceId: row.source_space_id,
+    targetSpaceId: row.target_space_id,
+    resourceType: row.resource_type,
+    status: row.status,
+    resourceTotal: row.resource_total,
+    resourceMigrated: row.resource_migrated,
+    errorMessage: row.error_message,
+    requestedBy: row.requested_by,
+    version: row.version,
+    createdAt: row.created_at.toISOString(),
+    updatedAt: row.updated_at.toISOString(),
+  })
+}
+
+function hashIdempotencyKey(idempotencyKey: string) {
+  return createHash('sha256').update(idempotencyKey).digest('hex')
 }
 
 export class PostgresSpaceRepository implements SpaceRepository {
@@ -341,13 +384,14 @@ export class PostgresSpaceRepository implements SpaceRepository {
       if (!sourceResult.rows[0] || !targetResult.rows[0]) return null
       const source = mapSpace(sourceResult.rows[0])
       const target = mapSpace(targetResult.rows[0])
-      const counts = await client.query<{ sessions: string; experts: string; environments: string; automations: string; files: string }>(`
+      const counts = await client.query<{ sessions: string; experts: string; environments: string; automations: string; files: string; webhooks: string }>(`
         SELECT
           (SELECT count(*) FROM cosmos_sessions WHERE organization_id=$1 AND space_id=$2)::text AS sessions,
           (SELECT count(*) FROM cosmos_experts WHERE organization_id=$1 AND space_id=$2)::text AS experts,
           (SELECT count(*) FROM cosmos_environments WHERE organization_id=$1 AND space_id=$2)::text AS environments,
           (SELECT count(*) FROM cosmos_expert_triggers WHERE organization_id=$1 AND space_id=$2)::text AS automations,
-          (SELECT count(*) FROM cosmos_files WHERE organization_id=$1 AND space_id=$2)::text AS files
+          (SELECT count(*) FROM cosmos_files WHERE organization_id=$1 AND space_id=$2)::text AS files,
+          (SELECT count(*) FROM cosmos_webhooks WHERE organization_id=$1 AND space_id=$2 AND status='active')::text AS webhooks
       `, [organizationId, spaceId])
       const blockingReasons = [
         ...(source.isDefault ? ['The Default Space cannot be migrated or deleted. Select another Default Space first.'] : []),
@@ -360,10 +404,119 @@ export class PostgresSpaceRepository implements SpaceRepository {
         resourceCounts: {
           sessions: Number(row.sessions), experts: Number(row.experts),
           environments: Number(row.environments), automations: Number(row.automations), files: Number(row.files),
+          webhooks: Number(row.webhooks),
         },
         canMigrate: blockingReasons.length === 0,
         blockingReasons,
       })
+    })
+  }
+  async executeMigration(
+    record: SpaceScope & { spaceId: string; idempotencyKey: string; request: CreateSpaceMigrationRequest },
+  ) {
+    const { organizationId, spaceId, actorId, idempotencyKey, request } = record
+    const idempotencyKeyHash = hashIdempotencyKey(idempotencyKey)
+    return withApiDatabaseContext(this.pool, { organizationId, spaceId, actorId }, async (client) => {
+      const replayed = await client.query<MigrationRow>(`
+        SELECT * FROM cosmos_space_migrations
+        WHERE organization_id = $1 AND idempotency_key_hash = $2
+      `, [organizationId, idempotencyKeyHash])
+      if (replayed.rows[0]) {
+        return { migration: mapMigration(replayed.rows[0]), replayed: true }
+      }
+
+      const preview = await this.previewInTransaction(client, organizationId, spaceId, request.targetSpaceId)
+      if (!preview) return null
+      if (!preview.canMigrate) {
+        throw new SpaceValidationError(preview.blockingReasons[0] ?? 'The Space migration is blocked.', 'targetSpaceId')
+      }
+
+      // Fencing: one executor per (org, source, target, resource) at a time.
+      await client.query(
+        'SELECT pg_advisory_xact_lock(hashtext($1))',
+        [`space-migration:${organizationId}:${spaceId}:${request.targetSpaceId}:${request.resourceType}`],
+      )
+
+      const migrationId = this.createId()
+      const inserted = await client.query<MigrationRow>(`
+        INSERT INTO cosmos_space_migrations (
+          organization_id, id, source_space_id, target_space_id, resource_type,
+          status, requested_by, idempotency_key_hash
+        ) VALUES ($1, $2, $3, $4, $5, 'executing', $6, $7)
+        RETURNING *
+      `, [organizationId, migrationId, spaceId, request.targetSpaceId, request.resourceType, actorId, idempotencyKeyHash])
+
+      try {
+        const executed = await client.query<{ migrated: number }>(
+          'SELECT cosmos_execute_webhook_space_migration($1, $2, $3) AS migrated',
+          [organizationId, spaceId, request.targetSpaceId],
+        )
+        const migrated = executed.rows[0]?.migrated ?? 0
+        const completed = await client.query<MigrationRow>(`
+          UPDATE cosmos_space_migrations
+          SET status = 'completed', resource_total = $3, resource_migrated = $3
+          WHERE organization_id = $1 AND id = $2
+          RETURNING *
+        `, [organizationId, migrationId, migrated])
+        return { migration: mapMigration(completed.rows[0]!), replayed: false }
+      } catch (error) {
+        // The resource rewrite rolled back with this transaction; record the
+        // failed attempt in a fresh transaction so the audit survives.
+        await client.query('ROLLBACK')
+        await client.query('BEGIN')
+        await setLocalApiDatabaseContext(client, { organizationId, spaceId, actorId })
+        const failed = await client.query<MigrationRow>(`
+          INSERT INTO cosmos_space_migrations (
+            organization_id, id, source_space_id, target_space_id, resource_type,
+            status, error_message, requested_by, idempotency_key_hash
+          ) VALUES ($1, $2, $3, $4, $5, 'failed', $6, $7, $8)
+          RETURNING *
+        `, [
+          organizationId, inserted.rows[0]!.id, spaceId, request.targetSpaceId, request.resourceType,
+          error instanceof Error ? error.message.slice(0, 2_000) : 'The Space migration failed.',
+          actorId, idempotencyKeyHash,
+        ])
+        return { migration: mapMigration(failed.rows[0]!), replayed: false }
+      }
+    })
+  }
+
+  async listMigrations(organizationId: string, spaceId: string, actorId: string) {
+    return withApiDatabaseContext(this.pool, { organizationId, spaceId, actorId }, async (client) => {
+      const result = await client.query<MigrationRow>(`
+        SELECT * FROM cosmos_space_migrations
+        WHERE organization_id = $1 AND (source_space_id = $2 OR target_space_id = $2)
+        ORDER BY created_at DESC
+        LIMIT 100
+      `, [organizationId, spaceId])
+      return result.rows.map(mapMigration)
+    })
+  }
+
+  private async previewInTransaction(
+    client: PoolClient,
+    organizationId: string,
+    spaceId: string,
+    targetSpaceId: string,
+  ): Promise<SpaceMigrationPreview | null> {
+    if (spaceId === targetSpaceId) throw new SpaceValidationError('Migration target must be a different Space.', 'targetSpaceId')
+    const [sourceResult, targetResult] = [
+      await this.selectOne(client, organizationId, spaceId),
+      await this.selectOne(client, organizationId, targetSpaceId),
+    ]
+    if (!sourceResult.rows[0] || !targetResult.rows[0]) return null
+    const source = mapSpace(sourceResult.rows[0])
+    const target = mapSpace(targetResult.rows[0])
+    const blockingReasons = [
+      ...(source.isDefault ? ['The Default Space cannot be migrated or deleted. Select another Default Space first.'] : []),
+      ...(source.status !== 'active' ? ['Only an active source Space can enter migration.'] : []),
+      ...(target.status !== 'active' ? ['The migration target must be active.'] : []),
+    ]
+    return SpaceMigrationPreviewSchema.parse({
+      source, target,
+      resourceCounts: { sessions: 0, experts: 0, environments: 0, automations: 0, files: 0, webhooks: 0 },
+      canMigrate: blockingReasons.length === 0,
+      blockingReasons,
     })
   }
 }

@@ -91,6 +91,7 @@ const migrationVersions = [
   '086_integration_types_gitlab_datadog.sql',
   '087_webhook_delivery_verification.sql',
   '088_automation_dispatch_retry.sql',
+  '089_space_migration_execution.sql',
 ]
 
 function poolWithVersions(versions: string[]) {

@@ -69,6 +69,7 @@ export const SpaceResourceCountsSchema = z.object({
   environments: z.number().int().nonnegative(),
   automations: z.number().int().nonnegative(),
   files: z.number().int().nonnegative(),
+  webhooks: z.number().int().nonnegative(),
 }).strict()
 export type SpaceResourceCounts = z.infer<typeof SpaceResourceCountsSchema>
 
@@ -80,3 +81,41 @@ export const SpaceMigrationPreviewSchema = z.object({
   blockingReasons: z.array(z.string().trim().min(1).max(500)).max(20),
 }).strict()
 export type SpaceMigrationPreview = z.infer<typeof SpaceMigrationPreviewSchema>
+
+export const SpaceMigrationResourceTypeSchema = z.enum(['webhooks'])
+export type SpaceMigrationResourceType = z.infer<typeof SpaceMigrationResourceTypeSchema>
+
+export const SpaceMigrationStatusSchema = z.enum(['pending', 'executing', 'completed', 'failed'])
+export type SpaceMigrationStatus = z.infer<typeof SpaceMigrationStatusSchema>
+
+export const SpaceMigrationDtoSchema = z.object({
+  organizationId: IdentifierSchema,
+  id: IdentifierSchema,
+  sourceSpaceId: IdentifierSchema,
+  targetSpaceId: IdentifierSchema,
+  resourceType: SpaceMigrationResourceTypeSchema,
+  status: SpaceMigrationStatusSchema,
+  resourceTotal: z.number().int().nonnegative(),
+  resourceMigrated: z.number().int().nonnegative(),
+  errorMessage: z.string().min(1).max(2_000).nullable(),
+  requestedBy: IdentifierSchema,
+  version: z.number().int().positive(),
+  createdAt: TimestampSchema,
+  updatedAt: TimestampSchema,
+}).strict().superRefine((migration, context) => {
+  if ((migration.status === 'failed') !== (migration.errorMessage !== null)) {
+    context.addIssue({ code: 'custom', path: ['errorMessage'], message: 'Only failed migrations carry an error message.' })
+  }
+})
+export type SpaceMigrationDto = z.infer<typeof SpaceMigrationDtoSchema>
+
+export const CreateSpaceMigrationRequestSchema = z.object({
+  targetSpaceId: IdentifierSchema,
+  resourceType: SpaceMigrationResourceTypeSchema,
+}).strict()
+export type CreateSpaceMigrationRequest = z.infer<typeof CreateSpaceMigrationRequestSchema>
+
+export const SpaceMigrationListResponseSchema = z.object({
+  items: z.array(SpaceMigrationDtoSchema).max(100),
+}).strict()
+export type SpaceMigrationListResponse = z.infer<typeof SpaceMigrationListResponseSchema>
