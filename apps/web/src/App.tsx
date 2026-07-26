@@ -49,6 +49,7 @@ import {
   resumeSession,
   retrySessionTurn,
   listSessionArtifacts,
+  listSpaceArtifacts,
   listSessionShares,
   createSessionArtifact,
   deleteSessionArtifact,
@@ -1170,6 +1171,13 @@ function CosmosApp() {
     () => ({ accessToken, requestIdentity, onUnauthorized: handleUnauthorized }),
     [accessToken, handleUnauthorized, requestIdentity],
   )
+  const searchArtifacts = useCallback(async (query: string, signal: AbortSignal) => {
+    if (demoMode) return []
+    const response = await listSpaceArtifacts(organizationId, activeSpace.id, catalogAuth, signal, { limit: 100 })
+    return response.items.filter((artifact) => artifact.label.toLowerCase().includes(query)
+      || artifact.url.toLowerCase().includes(query)
+      || artifact.type.includes(query))
+  }, [activeSpace.id, catalogAuth, demoMode, organizationId])
   const catalog = useCatalog({
     organizationId,
     spaceId: activeSpace.id,
@@ -2446,7 +2454,7 @@ function CosmosApp() {
         />
       ) : null}
 
-      <CommandPalette open={commandOpen} runs={scopedRuns} prototypeNavigation={demoMode} sessionCreationEnabled={sessionCreationEnabled} onClose={() => setCommandOpen(false)} onNewTask={() => openNewTask()} />
+      <CommandPalette open={commandOpen} runs={scopedRuns} prototypeNavigation={demoMode} sessionCreationEnabled={sessionCreationEnabled} onClose={() => setCommandOpen(false)} onNewTask={() => openNewTask()} searchArtifacts={searchArtifacts} />
 
       {toast ? (
         <div className="toast" role="status">

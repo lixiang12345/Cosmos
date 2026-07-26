@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import type { ArtifactDto } from '@cosmos/contracts'
 import { usePreferences } from '../preferences'
 import type { Run } from '../types'
 import { IconButton } from './ui'
@@ -32,6 +33,7 @@ type CommandPaletteProps = {
   sessionCreationEnabled?: boolean
   onClose: () => void
   onNewTask: () => void
+  searchArtifacts?: (query: string, signal: AbortSignal) => Promise<ArtifactDto[]>
 }
 
 type Command = {
@@ -50,6 +52,7 @@ export function CommandPalette({
   sessionCreationEnabled = true,
   onClose,
   onNewTask,
+  searchArtifacts,
 }: CommandPaletteProps) {
   const { locale } = usePreferences()
   const navigate = useNavigate()
@@ -61,6 +64,7 @@ export function CommandPalette({
   const copy = locale === 'zh'
     ? { title: '搜索 Cosmos', placeholder: '查找页面、会话或运行命令…', navigation: '导航与命令', sessions: '会话', empty: '没有匹配结果', newSession: '新建会话', manual: '手动创建', open: '打开' }
     : { title: 'Search Cosmos', placeholder: 'Find a page, session, or command…', navigation: 'Navigation and commands', sessions: 'Sessions', empty: 'No matching results', newSession: 'New session', manual: 'Create manually', open: 'Open' }
+  const artifactsTitle = locale === 'zh' ? '产出物' : 'Artifacts'
 
   const closePalette = useCallback(() => {
     setQuery('')
@@ -95,6 +99,37 @@ export function CommandPalette({
     { id: 'settings', label: locale === 'zh' ? '设置' : 'Settings', detail: locale === 'zh' ? '个人与组织' : 'Personal and organization', icon: Settings, keywords: 'settings preferences 设置', action: () => go('/settings') },
   ], [closePalette, copy.manual, copy.newSession, go, locale, onNewTask, prototypeNavigation, sessionCreationEnabled])
 
+  const [artifactResults, setArtifactResults] = useState<ArtifactDto[]>([])
+  useEffect(() => {
+    if (!open || !searchArtifacts) return
+    const normalized = query.trim().toLocaleLowerCase()
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => {
+      if (normalized.length < 2) {
+        setArtifactResults([])
+        return
+      }
+      searchArtifacts(normalized, controller.signal).then((items) => {
+        if (!controller.signal.aborted) setArtifactResults(items)
+      }, () => {
+        /* Artifact search is best-effort inside the palette. */
+      })
+    }, 250)
+    return () => {
+      window.clearTimeout(timer)
+      controller.abort()
+    }
+  }, [open, query, searchArtifacts])
+
+  const artifactCommands = useMemo<Command[]>(() => artifactResults.slice(0, 8).map((artifact) => ({
+    id: `artifact-${artifact.id}`,
+    label: artifact.label,
+    detail: `${artifact.type.replace('_', ' ')} · ${artifact.url}`,
+    icon: FolderGit2,
+    keywords: `${artifact.label} ${artifact.url} ${artifact.type}`,
+    action: () => go(`/sessions/${artifact.sessionId}`),
+  })), [artifactResults, go])
+
   const sessionCommands = useMemo<Command[]>(() => runs.slice(0, 12).map((run) => ({
     id: run.id,
     label: run.title,
@@ -108,7 +143,8 @@ export function CommandPalette({
   const matches = (command: Command) => !normalizedQuery || `${command.label} ${command.detail} ${command.keywords}`.toLocaleLowerCase().includes(normalizedQuery)
   const filteredNavigation = navigationCommands.filter(matches)
   const filteredSessions = sessionCommands.filter(matches)
-  const commands = useMemo(() => [...filteredNavigation, ...filteredSessions], [filteredNavigation, filteredSessions])
+  const filteredArtifacts = normalizedQuery.length >= 2 ? artifactCommands : []
+  const commands = useMemo(() => [...filteredNavigation, ...filteredSessions, ...filteredArtifacts], [filteredArtifacts, filteredNavigation, filteredSessions])
   const safeActiveIndex = Math.min(activeIndex, Math.max(0, commands.length - 1))
 
   useEffect(() => {
@@ -195,7 +231,7 @@ export function CommandPalette({
           <IconButton icon={X} label={locale === 'zh' ? '关闭' : 'Close'} size="sm" onClick={closePalette} />
         </header>
         <div className="command-palette__results">
-          {commands.length ? <>{renderGroup(copy.navigation, filteredNavigation)}{renderGroup(copy.sessions, filteredSessions)}</> : (
+          {commands.length ? <>{renderGroup(copy.navigation, filteredNavigation)}{renderGroup(copy.sessions, filteredSessions)}{renderGroup(artifactsTitle, filteredArtifacts)}</> : (
             <div className="command-palette__empty"><Search aria-hidden="true" /><span>{copy.empty}</span></div>
           )}
         </div>
