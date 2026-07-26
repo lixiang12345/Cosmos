@@ -404,24 +404,41 @@ describe('Cosmos prototype', () => {
     expect(screen.queryByRole('link', { name: '首页' })).not.toBeInTheDocument()
   })
 
-  it('exposes every server-backed surface in the production sidebar', async () => {
+  it('matches the prototype navigation information architecture', async () => {
     renderAuthenticatedApp('/context')
 
     expect(await screen.findByRole('heading', { level: 1, name: '代码上下文' })).toBeInTheDocument()
     const navigation = screen.getByRole('navigation', { name: '主导航' })
     expect(within(navigation).getByRole('link', { name: '专家' })).toHaveAttribute('href', '/experts')
     expect(within(navigation).getByRole('link', { name: '环境' })).toHaveAttribute('href', '/environments')
-    expect(within(navigation).getByRole('link', { name: '守护进程' })).toHaveAttribute('href', '/daemons')
     expect(within(navigation).getByRole('link', { name: '集成' })).toHaveAttribute('href', '/integrations')
     expect(within(navigation).getByRole('link', { name: 'MCP 注册表' })).toHaveAttribute('href', '/mcp')
     expect(within(navigation).getByRole('link', { name: 'Webhooks' })).toHaveAttribute('href', '/webhooks')
     expect(within(navigation).getByRole('link', { name: '密钥' })).toHaveAttribute('href', '/secrets')
-    expect(within(navigation).getByRole('link', { name: '仓库' })).toHaveAttribute('href', '/repositories')
-    expect(within(navigation).getByRole('link', { name: '空间' })).toHaveAttribute('href', '/spaces')
-    expect(within(navigation).getByRole('link', { name: '设置' })).toHaveAttribute('href', '/settings')
     expect(within(navigation).getByRole('link', { name: '自动化' })).toHaveAttribute('href', '/automations')
     expect(within(navigation).getByRole('link', { name: '组织' })).toHaveAttribute('href', '/files/organization')
     expect(within(navigation).getByRole('link', { name: '个人' })).toHaveAttribute('href', '/files/user')
+    expect(within(navigation).queryByRole('link', { name: '守护进程' })).not.toBeInTheDocument()
+    expect(within(navigation).queryByRole('link', { name: '仓库' })).not.toBeInTheDocument()
+  })
+
+  it('removes the collapsed Sidebar from keyboard and accessibility navigation and restores focus', async () => {
+    const user = userEvent.setup()
+    renderApp('/home')
+
+    await screen.findByRole('heading', { level: 1, name: '选择 Expert，开始一个会话' })
+    await user.click(screen.getByRole('button', { name: '收起导航' }))
+
+    const sidebar = document.querySelector('.prototype-sidebar')
+    expect(sidebar).toHaveAttribute('aria-hidden', 'true')
+    expect(sidebar).toHaveAttribute('inert')
+    expect(screen.queryByRole('navigation', { name: '主导航' })).not.toBeInTheDocument()
+    const showSidebar = screen.getByRole('button', { name: '显示导航' })
+    expect(showSidebar).toHaveFocus()
+
+    await user.click(showSidebar)
+    expect(screen.getByRole('navigation', { name: '主导航' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '收起导航' })).toHaveFocus()
   })
 
   it('supports the Cosmos global navigation shortcuts', async () => {
@@ -433,6 +450,25 @@ describe('Cosmos prototype', () => {
 
     fireEvent.keyDown(window, { key: 'e', ctrlKey: true, shiftKey: true })
     expect(await screen.findByRole('heading', { level: 1, name: '个人文件' })).toBeInTheDocument()
+  })
+
+  it('traps Command Palette focus and restores the Home trigger on Escape', async () => {
+    const user = userEvent.setup()
+    renderApp('/home')
+
+    await screen.findByRole('heading', { level: 1, name: '选择 Expert，开始一个会话' })
+    const trigger = screen.getByRole('button', { name: '搜索 Cosmos' })
+    await user.click(trigger)
+
+    const dialog = screen.getByRole('dialog', { name: '搜索 Cosmos' })
+    const input = within(dialog).getByRole('textbox', { name: '搜索 Cosmos' })
+    expect(input).toHaveFocus()
+    fireEvent.keyDown(input, { key: 'Tab', shiftKey: true })
+    expect(dialog).toContainElement(document.activeElement as HTMLElement)
+
+    await user.keyboard('{Escape}')
+    expect(dialog).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
   })
 
   it('switches between run evidence views', async () => {
@@ -468,7 +504,7 @@ describe('Cosmos prototype', () => {
     const prompt = '修复优惠券并发核销。确保同一张优惠券只能成功核销一次，并补充并发测试。参考 https://github.com/acme/commerce/issues/42'
     renderApp('/runs')
 
-    await user.click(screen.getAllByRole('button', { name: '新建会话' })[0])
+    fireEvent.keyDown(window, { key: 'o', ctrlKey: true, shiftKey: true })
     await user.type(screen.getByLabelText('会话任务'), prompt)
     expect(screen.getByText('GitHub · acme/commerce/issues/42')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '开始会话' }))
@@ -1295,7 +1331,7 @@ describe('Cosmos prototype', () => {
 
     expect(await screen.findByRole('heading', { name: '选择 Expert，保存会话草稿' })).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('正在加载可用 Expert 与运行环境')
-    expect(screen.queryByRole('textbox', { name: '会话任务' })).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '会话任务' })).toBeDisabled()
     expect(createSession).not.toHaveBeenCalled()
   })
 
@@ -1304,7 +1340,7 @@ describe('Cosmos prototype', () => {
     renderAuthenticatedApp('/home')
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Capability service unavailable.')
-    expect(screen.queryByRole('textbox', { name: '会话任务' })).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '会话任务' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
     expect(createSession).not.toHaveBeenCalled()
   })
@@ -1534,17 +1570,17 @@ describe('Cosmos prototype', () => {
   it.each([
     ['organization viewer', { organizationRole: 'viewer' as const }],
     ['space viewer', { spaceRole: 'viewer' as const }],
-  ])('hides every production Session creation entry for a %s', async (_name, roles) => {
+  ])('disables every production Session creation entry for a %s', async (_name, roles) => {
     const user = userEvent.setup()
-    renderAuthenticatedApp('/experts', {}, roles)
+    const view = renderAuthenticatedApp('/experts', {}, roles)
 
     expect(await screen.findByText('Production Expert')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '新建会话' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '新建会话' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '新建会话' })).toBeDisabled()
 
-    await user.click(screen.getByRole('link', { name: 'Cosmos' }))
+    view.unmount()
+    renderAuthenticatedApp('/home', {}, roles)
     expect(await screen.findByRole('heading', { name: '选择 Expert，保存会话草稿' })).toBeInTheDocument()
-    expect(screen.queryByRole('textbox', { name: '会话任务' })).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '会话任务' })).toBeDisabled()
     expect(screen.getByRole('note')).toHaveTextContent('只有查看权限')
 
     await user.keyboard('{Control>}k{/Control}')
@@ -1562,12 +1598,11 @@ describe('Cosmos prototype', () => {
     renderAuthenticatedApp('/home')
 
     expect(await screen.findByRole('heading', { name: '选择 Expert，保存会话草稿' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '添加附件' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '增强提示词' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '添加附件' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '增强提示词' })).toBeDisabled()
   })
 
   it('keeps production Home in a loading state until both Session Catalog resources are ready', async () => {
-    const user = userEvent.setup()
     const expertsRequest = deferred<Awaited<ReturnType<typeof listExperts>>>()
     const environmentsRequest = deferred<Awaited<ReturnType<typeof listEnvironments>>>()
     vi.mocked(listExperts).mockReturnValueOnce(expertsRequest.promise)
@@ -1577,9 +1612,9 @@ describe('Cosmos prototype', () => {
 
     expect(await screen.findByText('正在加载可用 Expert 与运行环境…')).toBeInTheDocument()
     expect(screen.queryByText('当前 Space 没有可用 Expert')).not.toBeInTheDocument()
-    expect(screen.queryByRole('textbox', { name: '会话任务' })).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '会话任务' })).toBeDisabled()
 
-    await user.click(screen.getByRole('button', { name: '新建会话' }))
+    fireEvent.keyDown(window, { key: 'o', ctrlKey: true, shiftKey: true })
     const dialog = screen.getByRole('dialog')
     expect(within(dialog).getByText('正在加载可用 Expert 与运行环境…')).toBeInTheDocument()
     expect(within(dialog).queryByText('当前 Space 没有可用 Expert')).not.toBeInTheDocument()
@@ -1630,7 +1665,7 @@ describe('Cosmos prototype', () => {
     vi.mocked(createSession).mockRejectedValueOnce(new Error('服务暂时不可用，请稍后重试。'))
     renderApp('/runs')
 
-    await user.click(screen.getAllByRole('button', { name: '新建会话' })[0])
+    fireEvent.keyDown(window, { key: 'o', ctrlKey: true, shiftKey: true })
     const task = screen.getByLabelText('会话任务')
     await user.type(task, '保留这段会话任务')
     await user.click(screen.getByRole('button', { name: '开始会话' }))

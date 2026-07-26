@@ -76,28 +76,32 @@
 
 来源：[证据矩阵 Sidebar](./cosmos-evidence-matrix.md#32-sidebar)。
 
-1. 品牌（点击 Home，不显示额外 Home 菜单项）— **Inferred**。
-2. Space picker — **Official**。
-3. New Session — **Official**。
-4. Sessions — **Official**。
-5. Pinned Sessions（文件夹/折叠为 P2）— **Official**。
-6. Recent Sessions — **Official**。
-7. Files：Organization、User — **Official**。
-8. Automations：Overview、Event Log、Run History — **Official**。
-9. Experts、Environments 是核心资源入口；Settings 下的 Capabilities / Integrations、Personal / Linked Accounts 与 Webhooks 层级有官方文档证据。不存在足够证据支持一个包含所有项目的 Configuration 侧栏组；生产导航只开放已有生产 API 的入口。
-10. Governance/Approvals 与偏好 — **Cosmos extension**，视觉上单独分组。
+当前 `cosmos-prototype/index.html` 是 App Shell 的像素级来源。可见顺序固定为：
+
+1. Cosmos Logo + Space picker。
+2. New Session（进入 `/home`）。
+3. Sessions。
+4. Files：Organization、User。
+5. Configuration：Foundation（Experts、Environments）与 Capabilities（Integrations、MCP Registry、Webhooks、Secrets）。
+6. Automations：Automations、Event Log、Run History。
+7. Favorites。
+8. Recent Sessions。
+9. 当前账户。
+
+Daemons、Repositories、Spaces、Settings、Context 等 Cosmos 扩展路由继续保留真实页面与直接 URL，但不插入当前原型未定义的 Sidebar 项；后续只有在原型增加对应入口后才同步可见 IA。
 
 ### 4.2 布局要求
 
 | ID | 要求 |
 | --- | --- |
-| FE-SH01 | 桌面侧栏宽 240px，折叠 56px；主区 `minmax(0, 1fr)`，不得横向挤出视口 |
+| FE-SH01 | 侧栏固定 220px，折叠为 0；主区 `minmax(0, 1fr)`，文档宽度不得超过视口 |
 | FE-SH02 | 侧栏 grid/flex 行必须与可见区块数量一致；New Session 不得占用可伸缩导航行 |
-| FE-SH03 | Pinned/Recent 位于配置导航之前且独立滚动策略明确；账户区固定底部 |
-| FE-SH04 | <=820px 侧栏为 modal drawer，带 scrim、focus trap、Escape 关闭和关闭后焦点恢复 |
+| FE-SH03 | Favorites/Recent 位于全部导航之后；Recent 独立滚动，账户区固定底部 |
+| FE-SH04 | 当前原型在 390px 仍保留 220px Sidebar 和裁剪后的主区；生产实现必须复现且保持 document 无水平溢出，直到原型明确新的移动 Drawer 行为 |
 | FE-SH05 | 触屏不应用粘滞 hover；hover 视觉仅放在 `@media (hover: hover) and (pointer: fine)` |
-| FE-SH06 | 折叠后使用图标 + tooltip；tooltip 不可遮挡主操作且键盘聚焦可读 |
+| FE-SH06 | 折叠后 Sidebar 完全隐藏，36px Topbar 出现原型 Sidebar SVG 按钮用于恢复 |
 | FE-SH07 | 路由 active 只对应一个主导航项；Overlay 打开不改变底层 route active 状态 |
+| FE-SH08 | Home Topbar 固定 36px；Logo、导航、搜索、主题、快捷键、Expert、Environment 与 composer 图标使用原型 SVG path / bundled assets，不用近似图标替代 |
 
 ## 5. 组件边界
 
@@ -136,13 +140,13 @@ AppShell
 | ID | 需求 |
 | --- | --- |
 | FE-H01 | Home 第一视口必须出现当前 Space、Expert picker、launch guidance、prompt composer 和启动按钮 |
-| FE-H02 | 最近 Session 放在 launcher 之后；健康/审批/自动化摘要若保留，必须为次要 Cosmos 区域 |
-| FE-H03 | Sidebar、Home、Experts、Files“请求修改”和 Cmd+K 调用同一 `openSessionLauncher({ expertId?, prompt?, context? })` |
+| FE-H02 | 当前原型不在 Home 主区渲染 Recent Sessions；Favorites/Recent 只在 Sidebar 显示 |
+| FE-H03 | Sidebar New Session 进入 Home；Cmd+Shift+O 仍可打开共享 Session launcher，二者必须复用同一真实创建契约 |
 | FE-H04 | prompt 必填；标题由首条 prompt 生成；用户后续可重命名 |
 | FE-H05 | Expert 改变时只读摘要同步更新，Environment/Repository 不出现可误覆盖的默认字段 |
-| FE-H06 | 附件支持按钮、拖放和粘贴；显示名称、类型、大小、上传状态、移除操作和限制文案 |
+| FE-H06 | 原型附件按钮保持可见；生产 API 未支持附件上传时必须 disabled/capability-gated，不能伪造上传成功 |
 | FE-H07 | Enter 发送、Shift+Enter 换行只在 IME composition 结束后生效；中文输入法不得误提交 |
-| FE-H08 | Enhance 显示可审阅结果，用户确认后替换/追加；不能直接静默修改 prompt |
+| FE-H08 | Enhance 只在本地修改尚未发送的 prompt；结果保留在输入框中供用户继续审阅，绝不触发服务端写入 |
 | FE-H09 | 启动按钮防重复点击；pending 时可见，成功只导航一次，失败保留全部输入 |
 
 ### 6.2 Sessions

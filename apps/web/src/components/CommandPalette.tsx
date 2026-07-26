@@ -55,7 +55,9 @@ export function CommandPalette({
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
+  const dialogRef = useRef<HTMLElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const triggerRef = useRef<HTMLElement | null>(null)
   const copy = locale === 'zh'
     ? { title: '搜索 Cosmos', placeholder: '查找页面、会话或运行命令…', navigation: '导航与命令', sessions: '会话', empty: '没有匹配结果', newSession: '新建会话', manual: '手动创建', open: '打开' }
     : { title: 'Search Cosmos', placeholder: 'Find a page, session, or command…', navigation: 'Navigation and commands', sessions: 'Sessions', empty: 'No matching results', newSession: 'New session', manual: 'Create manually', open: 'Open' }
@@ -111,7 +113,13 @@ export function CommandPalette({
 
   useEffect(() => {
     if (!open) return
-    window.setTimeout(() => inputRef.current?.focus(), 0)
+    triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const focusTimer = window.setTimeout(() => inputRef.current?.focus(), 0)
+    return () => {
+      window.clearTimeout(focusTimer)
+      triggerRef.current?.focus()
+      triggerRef.current = null
+    }
   }, [open])
 
   useEffect(() => {
@@ -165,7 +173,22 @@ export function CommandPalette({
     <div className="command-palette-backdrop" role="presentation" onMouseDown={(event) => {
       if (event.target === event.currentTarget) closePalette()
     }}>
-      <section className="command-palette" role="dialog" aria-modal="true" aria-label={copy.title}>
+      <section ref={dialogRef} className="command-palette" role="dialog" aria-modal="true" aria-label={copy.title} onKeyDown={(event) => {
+        if (event.key !== 'Tab') return
+        const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), input:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
+        ))
+        if (!focusable.length) return
+        const first = focusable[0]
+        const last = focusable[focusable.length - 1]
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault()
+          last.focus()
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault()
+          first.focus()
+        }
+      }}>
         <header>
           <Search aria-hidden="true" />
           <input ref={inputRef} value={query} onChange={(event) => { setQuery(event.target.value); setActiveIndex(0) }} placeholder={copy.placeholder} aria-label={copy.title} />

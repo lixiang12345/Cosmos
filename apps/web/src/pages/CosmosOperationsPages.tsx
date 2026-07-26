@@ -4,7 +4,6 @@ import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
-  Bot,
   Building2,
   CalendarClock,
   Check,
@@ -15,7 +14,6 @@ import {
   CirclePlay,
   Clock3,
   Copy,
-  DatabaseZap,
   Download,
   ExternalLink,
   FileClock,
@@ -23,29 +21,34 @@ import {
   Folder,
   FolderOpen,
   GitPullRequest,
-  LockKeyhole,
-  LoaderCircle,
   Menu,
   MessageSquareText,
-  Paperclip,
   Pencil,
   Plus,
-  RefreshCw,
   Search,
-  Save,
-  Send,
   ShieldCheck,
-  Sparkles,
   User,
-  WandSparkles,
   Webhook,
   Workflow,
   X,
   type LucideIcon,
 } from 'lucide-react'
-import { useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { GlobalControls } from '../components/GlobalControls'
+import {
+  PrototypeChevronDownLargeIcon,
+  PrototypeEnvironmentIcon,
+  PrototypeHexIcon,
+  PrototypeKeyboardIcon,
+  PrototypeMoonIcon,
+  PrototypeScrollDownIcon,
+  PrototypeSearchIcon,
+  PrototypeSidebarIcon,
+  PrototypeSunIcon,
+  PrototypeTopbarSearchIcon,
+  PrototypeToolsIcon,
+} from '../components/PrototypeIcons'
 import {
   useControlPlane,
   type Automation,
@@ -184,6 +187,8 @@ export type CosmosPageBaseProps = {
 
 export type CosmosHomePageProps = CosmosPageBaseProps & {
   experts: NewTaskExpertOption[]
+  displayName?: string
+  navigationCollapsed?: boolean
   catalogStatus?: SessionCatalogStatus
   catalogError?: string
   prototypeTools?: boolean
@@ -191,6 +196,7 @@ export type CosmosHomePageProps = CosmosPageBaseProps & {
   executionEnabled?: boolean
   contextEnabled?: boolean
   contextPreflight?: (repository: string, task: string) => Promise<ContextPackResponse>
+  onOpenCommand?: () => void
   onRetryCatalog?: () => void
   onCreateSession?: (draft: {
     expertId: string
@@ -203,10 +209,10 @@ export type CosmosHomePageProps = CosmosPageBaseProps & {
 }
 
 export function CosmosHomePage({
-  runs = [],
+  displayName,
+  navigationCollapsed = false,
   onOpenNavigation,
   onNewTask,
-  onOpenSession,
   experts,
   catalogStatus,
   catalogError,
@@ -215,12 +221,19 @@ export function CosmosHomePage({
   executionEnabled = true,
   contextEnabled = false,
   contextPreflight,
+  onOpenCommand,
   onRetryCatalog,
   onCreateSession,
 }: CosmosHomePageProps) {
-  const { locale } = usePreferences()
-  const navigate = useNavigate()
+  const { locale, theme, toggleTheme } = usePreferences()
   const [selectedExpertId, setSelectedExpertId] = useState(experts[0]?.id ?? '')
+  const [expertOpened, setExpertOpened] = useState(false)
+  const [expertTab, setExpertTab] = useState<'all' | 'mine' | 'recent' | 'popular'>('all')
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [expertQuery, setExpertQuery] = useState('')
+  const [starredExpertIds, setStarredExpertIds] = useState<Set<string>>(() => new Set())
+  const [starredOnly, setStarredOnly] = useState(false)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [prompt, setPrompt] = useState('')
   const [visibility, setVisibility] = useState<'private' | 'space'>('private')
   const [attachments, setAttachments] = useState<string[]>([])
@@ -237,9 +250,70 @@ export function CosmosHomePage({
     mode: 'run' | 'draft'
   }>()
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const showSidebarTriggerRef = useRef<HTMLButtonElement>(null)
+  const shortcutsTriggerRef = useRef<HTMLButtonElement>(null)
+  const shortcutsCloseRef = useRef<HTMLButtonElement>(null)
+  const shortcutsDialogRef = useRef<HTMLElement>(null)
   const selectedExpert = experts.find((expert) => expert.id === selectedExpertId) ?? experts[0]
-  const recentRuns = runs.filter((run) => !run.archived).slice(0, 5)
   const resolvedCatalogStatus = catalogStatus ?? (experts.length ? 'ready' : 'empty')
+  const rawFirstName = displayName?.trim().split(/\s+/)[0]
+  const firstName = rawFirstName && !rawFirstName.includes('-') ? rawFirstName : 'Alex'
+  const toolCount = selectedExpert?.tools === '—'
+    ? 0
+    : selectedExpert?.tools.split('·').map((tool) => tool.trim()).filter(Boolean).length ?? 0
+  const filteredExperts = useMemo(() => {
+    let items = experts.slice()
+    if (expertTab === 'mine') {
+      items = items.filter((expert) => /(^|\s)(my|mine)(\s|$)|我的/i.test(expert.group))
+    } else if (expertTab === 'recent') {
+      items = items.slice(0, 6)
+    } else if (expertTab === 'popular') {
+      items.sort((left, right) => Number(Boolean(right.builtIn)) - Number(Boolean(left.builtIn)) || left.name.localeCompare(right.name))
+    }
+    if (starredOnly) items = items.filter((expert) => starredExpertIds.has(expert.id))
+    const query = expertQuery.trim().toLocaleLowerCase()
+    if (query) items = items.filter((expert) => `${expert.name} ${expert.description}`.toLocaleLowerCase().includes(query))
+    return items
+  }, [expertQuery, expertTab, experts, starredExpertIds, starredOnly])
+
+  const closeShortcuts = useCallback(() => {
+    setShortcutsOpen(false)
+    shortcutsTriggerRef.current?.focus()
+  }, [])
+
+  useEffect(() => {
+    if (navigationCollapsed) showSidebarTriggerRef.current?.focus()
+  }, [navigationCollapsed])
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      const modifier = event.metaKey || event.ctrlKey
+      if (modifier && event.key === '/') {
+        event.preventDefault()
+        setShortcutsOpen(true)
+        return
+      }
+      if (event.key === 'Escape' && shortcutsOpen) closeShortcuts()
+      if (event.key === 'Tab' && shortcutsOpen) {
+        const focusable = Array.from(shortcutsDialogRef.current?.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])',
+        ) ?? [])
+        if (!focusable.length) return
+        const first = focusable[0]
+        const last = focusable[focusable.length - 1]
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault()
+          last.focus()
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault()
+          first.focus()
+        }
+      }
+    }
+    window.addEventListener('keydown', handleShortcut)
+    if (shortcutsOpen) shortcutsCloseRef.current?.focus()
+    return () => window.removeEventListener('keydown', handleShortcut)
+  }, [closeShortcuts, shortcutsOpen])
 
   const createFromDraft = async (
     draft: NonNullable<typeof pendingDraft>,
@@ -296,114 +370,174 @@ export function CosmosHomePage({
     await createFromDraft(draft)
   }
 
-  const openSession = (runId: string) => {
-    if (onOpenSession) onOpenSession(runId)
-    else navigate(`/sessions/${runId}`)
+  const toggleStarred = (expertId: string) => {
+    setStarredExpertIds((current) => {
+      const next = new Set(current)
+      if (next.has(expertId)) next.delete(expertId)
+      else next.add(expertId)
+      return next
+    })
   }
 
+  const enhancePrompt = () => {
+    if (!prompt.trim()) return
+    setPrompt((value) => `${value.trim()}\n\n${localize(locale, '请确认目标、约束、风险和可验证的完成标准。', 'Confirm the goal, constraints, risks, and verifiable completion criteria.')}`)
+  }
+
+  const composer = (
+    <form className="composer-shell prototype-composer-shell" onSubmit={submitSession}>
+      <div className="composer prototype-composer">
+        <textarea
+          value={prompt}
+          onChange={(event) => { setPrompt(event.target.value); setPendingDraft(undefined); setContextPack(undefined); setContextState('idle') }}
+          onKeyDown={(event) => {
+            if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 'e') {
+              event.preventDefault()
+              enhancePrompt()
+              return
+            }
+            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault()
+              event.currentTarget.form?.requestSubmit()
+            }
+          }}
+          placeholder={selectedExpert?.launchGuidance || "Describe what you'd like to work on"}
+          rows={3}
+          aria-label={localize(locale, '会话任务', 'Session task')}
+          disabled={!sessionCreationEnabled || resolvedCatalogStatus !== 'ready'}
+        />
+        {prototypeTools && attachments.length ? (
+          <div className="prototype-composer-attachments">
+            {attachments.map((name) => (
+              <span key={name}>{name}<button type="button" aria-label={`${localize(locale, '移除附件', 'Remove attachment')}: ${name}`} onClick={() => setAttachments((items) => items.filter((item) => item !== name))}>×</button></span>
+            ))}
+          </div>
+        ) : null}
+        {submitError ? <p className="prototype-composer-error" role="alert">{submitError}</p> : null}
+        <div className="composer-bar">
+          <input ref={fileInputRef} type="file" hidden aria-hidden="true" tabIndex={-1} multiple accept="image/*,.txt,.md,.json,.log,.pdf" onChange={(event) => {
+            const names = Array.from(event.target.files ?? []).slice(0, 10).map((file) => file.name)
+            setAttachments((items) => [...new Set([...items, ...names])].slice(0, 10))
+            event.target.value = ''
+          }} />
+          <button type="button" className="c-plus" title={prototypeTools ? 'Attach' : localize(locale, '生产 API 暂不支持附件', 'Attachments are not available through the production API')} aria-label={localize(locale, '添加附件', 'Attach files')} disabled={!prototypeTools} onClick={() => fileInputRef.current?.click()}>+</button>
+          <button type="button" className="c-toolcount" title={`${toolCount} tools / integrations`} aria-label={`${toolCount} tools / integrations`} aria-disabled="true">
+            <span className="tools-stack" aria-hidden="true">
+              <span className="tools-stack-ico"><PrototypeToolsIcon /></span>
+              <span className="tools-stack-ico"><PrototypeHexIcon /></span>
+              <span className="tools-stack-ico"><PrototypeEnvironmentIcon /></span>
+            </span>
+            <span className="c-toolcount-n">{toolCount}</span>
+          </button>
+          <button type="button" className="c-model" title={localize(locale, '模型由 Expert 配置', 'Model is configured by the Expert')} aria-disabled="true">
+            <span className="prism-stack" aria-hidden="true"><span className="prism-dot dot-claude">C</span><span className="prism-dot dot-gemini">G</span></span>
+            <span className="c-model-name">Prism</span>
+            <span className="c-tools-chev"><PrototypeChevronDownLargeIcon /></span>
+          </button>
+          <button type="button" className="c-sparkle" title="Enhance (⌘E)" aria-label={localize(locale, '增强提示词', 'Enhance prompt')} disabled={!prompt.trim()} onClick={enhancePrompt}>✦</button>
+          <button type="submit" className={`c-send${prompt.trim() ? ' ready' : ''}`} title={executionEnabled ? 'Send' : 'Save draft'} aria-label={executionEnabled ? localize(locale, '开始会话', 'Start session') : localize(locale, '保存草稿', 'Save draft')} aria-busy={submitting || contextState === 'loading'} disabled={!prompt.trim() || !selectedExpert || submitting || contextState === 'loading' || !sessionCreationEnabled}>↑</button>
+        </div>
+      </div>
+      <div className="composer-meta">
+        <button type="button" className="c-env" title={localize(locale, '运行环境由 Expert 配置', 'Environment is configured by the Expert')} aria-disabled="true">
+          <span className="c-env-ico"><PrototypeEnvironmentIcon /></span>
+          <span className="c-env-name">{selectedExpert?.environment || localize(locale, '运行环境', 'Environment')}</span>
+          <span className="c-tools-chev"><PrototypeChevronDownLargeIcon /></span>
+        </button>
+        <div className="c-privacy">{localize(locale, '私有', 'Private')}
+          <button type="button" role="switch" aria-checked={visibility === 'private'} className={`toggle${visibility === 'private' ? '' : ' off'}`} aria-label={localize(locale, '私有会话', 'Private session')} onClick={() => setVisibility((value) => value === 'private' ? 'space' : 'private')}>
+            <span className="toggle-knob" />
+          </button>
+        </div>
+      </div>
+    </form>
+  )
+
   return (
-    <main className="cosmos-home">
-      <header className="cosmos-home__topbar">
-        <CosmosIconButton icon={Menu} label={localize(locale, '打开导航', 'Open navigation')} onClick={onOpenNavigation ?? (() => undefined)} />
-        <GlobalControls />
+    <main className="cosmos-home prototype-home">
+      <header className="prototype-topbar">
+        <div className="prototype-topbar-left">
+          {navigationCollapsed ? <button ref={showSidebarTriggerRef} type="button" className="icon-btn" aria-label={localize(locale, '显示导航', 'Show sidebar')} title="Show sidebar (⌘.)" onClick={onOpenNavigation}><PrototypeSidebarIcon aria-hidden="true" /></button> : null}
+          <span className="prototype-crumb">{localize(locale, '首页 · 新建会话', 'Home · New Session')}</span>
+        </div>
+        <div className="prototype-topbar-right">
+          <button type="button" className="pill-btn" disabled title={localize(locale, '设计文档未在生产控制面发布', 'Design documentation is not published in the production console')}>Philosophy</button>
+          <button type="button" className="pill-btn" disabled title={localize(locale, '展示模式仅存在于原型', 'Showcase mode is prototype-only')}>Showcase</button>
+          <button type="button" className="pill-btn" aria-label={localize(locale, '搜索 Cosmos', 'Search Cosmos')} title="Command palette (⌘K)" onClick={onOpenCommand}><PrototypeTopbarSearchIcon aria-hidden="true" />Search <kbd>⌘K</kbd></button>
+          <button type="button" className="icon-btn" aria-label={theme === 'dark' ? localize(locale, '切换到浅色模式', 'Switch to light mode') : localize(locale, '切换到深色模式', 'Switch to dark mode')} title="Theme" onClick={toggleTheme}>{theme === 'dark' ? <PrototypeSunIcon aria-hidden="true" /> : <PrototypeMoonIcon aria-hidden="true" />}</button>
+          <button ref={shortcutsTriggerRef} type="button" className="icon-btn" aria-label={localize(locale, '键盘快捷键', 'Keyboard shortcuts')} title="Shortcuts (⌘/)" onClick={() => setShortcutsOpen(true)}><PrototypeKeyboardIcon aria-hidden="true" /></button>
+        </div>
       </header>
-      <div className="cosmos-home__content">
-        <section className="home-launcher" aria-labelledby="home-launcher-title">
-          <header>
-            <span className="home-launcher__mark"><Sparkles aria-hidden="true" /></span>
-            <p>{localize(locale, 'Cosmos Agent OS', 'Cosmos Agent OS')}</p>
-            <h1 id="home-launcher-title">{executionEnabled
-              ? localize(locale, '选择 Expert，开始一个会话', 'Choose an Expert and start a session')
-              : localize(locale, '选择 Expert，保存会话草稿', 'Choose an Expert and save a Session draft')}</h1>
-            <span>{localize(locale, 'Expert 已封装模型、能力和运行环境；你只需要描述想完成的工作。', 'The Expert already packages its model, capabilities, and environment. Just describe the work.')}</span>
-          </header>
-
-          {resolvedCatalogStatus === 'ready' ? (
-            <div className="home-expert-grid" role="radiogroup" aria-label={localize(locale, '选择 Expert', 'Choose an Expert')}>
-              {experts.slice(0, 6).map((expert) => (
-                <button type="button" role="radio" aria-checked={expert.id === selectedExpert?.id} className={`home-expert-card${expert.id === selectedExpert?.id ? ' home-expert-card--selected' : ''}`} key={expert.id} onClick={() => { setSelectedExpertId(expert.id); setPendingDraft(undefined); setContextPack(undefined); setContextState('idle') }}>
-                  <span>{expert.builtIn ? <Sparkles aria-hidden="true" /> : <Bot aria-hidden="true" />}</span>
-                  <strong>{expert.name}</strong>
-                  <small>{expert.description}</small>
-                  <em>{expert.environment}</em>
-                  {expert.id === selectedExpert?.id ? <Check aria-hidden="true" /> : null}
-                </button>
-              ))}
-            </div>
-          ) : resolvedCatalogStatus === 'loading' ? (
-            <div className="remote-catalog-state" role="status" aria-live="polite">
-              <LoaderCircle className="cosmos-spin" aria-hidden="true" />
-              <p>{localize(locale, '正在加载可用 Expert 与运行环境…', 'Loading available Experts and Environments…')}</p>
-            </div>
-          ) : resolvedCatalogStatus === 'error' ? (
-            <div className="remote-catalog-state remote-catalog-state--error" role="alert">
-              <AlertTriangle aria-hidden="true" />
-              <div>
-                <strong>{localize(locale, '无法加载会话目录', 'Unable to load the session catalog')}</strong>
-                {catalogError ? <p>{catalogError}</p> : null}
+      <div className="prototype-home-viewport">
+        {expertOpened && selectedExpert ? (
+          <section className="home-selected" aria-labelledby="home-launcher-title">
+            <h1 id="home-launcher-title" className="greeting" aria-label={executionEnabled ? localize(locale, '选择 Expert，开始一个会话', 'Choose an Expert and start a session') : localize(locale, '选择 Expert，保存会话草稿', 'Choose an Expert and save a Session draft')}>{localize(locale, `${firstName}，想做点什么？`, `What's on your mind, ${firstName}?`)}</h1>
+            <button type="button" className="home-back" onClick={() => setExpertOpened(false)}>← {localize(locale, '全部 Experts', 'All Experts')}</button>
+            <div className="home-expert-chip">
+              <span className="card-icon"><PrototypeHexIcon aria-hidden="true" /></span>
+              <div className="home-expert-chip-body">
+                <div className="home-expert-chip-name">{selectedExpert.name}</div>
+                <div className="home-expert-chip-desc">{selectedExpert.description}</div>
+                <div className="home-expert-chip-meta"><span className="prototype-badge">{selectedExpert.group}</span></div>
               </div>
-              {onRetryCatalog ? (
-                <button type="button" className="cosmos-button cosmos-button--secondary" onClick={onRetryCatalog}>
-                  <RefreshCw aria-hidden="true" />{localize(locale, '重试', 'Retry')}
-                </button>
-              ) : null}
             </div>
-          ) : (
-            <div className="remote-catalog-empty" role="status">
-              <Bot aria-hidden="true" />
-              <strong>{localize(locale, '当前 Space 没有可用 Expert', 'No Experts are available in this Space')}</strong>
-              <p>{localize(locale, '请先发布一个绑定了就绪环境的 Expert。', 'Publish an Expert bound to a ready Environment first.')}</p>
+            <div className="home-expert-blurb"><p>{selectedExpert.launchGuidance}</p><p>{selectedExpert.tools} · {selectedExpert.approval}</p></div>
+            <div className="composer-wrap">{composer}</div>
+            {!sessionCreationEnabled ? <p className="prototype-permission-note" role="note">{localize(locale, '你在当前 Space 中只有查看权限。', 'You have view-only access in this Space.')}</p> : null}
+          </section>
+        ) : (
+          <section className="home-shell" aria-labelledby="home-launcher-title">
+            <div className="home-body">
+              <div className="home-center">
+                <h1 id="home-launcher-title" className="greeting" aria-label={executionEnabled ? localize(locale, '选择 Expert，开始一个会话', 'Choose an Expert and start a session') : localize(locale, '选择 Expert，保存会话草稿', 'Choose an Expert and save a Session draft')}>{localize(locale, `${firstName}，想做点什么？`, `What's on your mind, ${firstName}?`)}</h1>
+                <div className="tabs home-tabs" role="tablist" aria-label={localize(locale, 'Expert 筛选', 'Expert filters')}>
+                  {([
+                    ['all', localize(locale, '全部 Experts', 'All Experts')], ['mine', localize(locale, '我的', 'Mine')], ['recent', localize(locale, '最近', 'Recent')], ['popular', localize(locale, '热门', 'Popular')],
+                  ] as const).map(([id, label]) => <button type="button" role="tab" aria-selected={expertTab === id} className={`tab${expertTab === id ? ' active' : ''}`} key={id} onClick={() => setExpertTab(id)}>{label}</button>)}
+                </div>
+                <div className={`search-wrap${searchOpen ? ' open' : ''}`}>
+                  <label className="search-inner"><PrototypeSearchIcon aria-hidden="true" /><span className="cosmos-visually-hidden">{localize(locale, '搜索 Expert', 'Search Experts')}</span><input value={expertQuery} onChange={(event) => setExpertQuery(event.target.value)} placeholder={localize(locale, '搜索 Experts…', 'Search experts…')} /></label>
+                </div>
+                <div className="home-grid-row">
+                  <div className="home-grid-scroll">
+                    {resolvedCatalogStatus === 'ready' ? (
+                      <div className="grid" role="radiogroup" aria-label={localize(locale, '选择 Expert', 'Choose an Expert')}>
+                        {filteredExperts.length ? filteredExperts.map((expert) => {
+                          const starred = starredExpertIds.has(expert.id)
+                          return (
+                            <div role="radio" aria-label={expert.name} aria-checked={false} tabIndex={0} className="card" key={expert.id} onClick={() => { setSelectedExpertId(expert.id); setExpertOpened(true); setPendingDraft(undefined); setContextPack(undefined); setContextState('idle') }} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setSelectedExpertId(expert.id); setExpertOpened(true) } }}>
+                              <span className="card-header">
+                                <span className="card-title-row"><span className="card-icon"><PrototypeHexIcon aria-hidden="true" /></span><span className="card-name">{expert.name}</span></span>
+                                <button type="button" className={`card-star${starred ? ' on' : ''}`} aria-label={`${starred ? localize(locale, '取消收藏', 'Unstar') : localize(locale, '收藏', 'Star')} ${expert.name}`} onClick={(event) => { event.stopPropagation(); toggleStarred(expert.id) }}>{starred ? '★' : '☆'}</button>
+                              </span>
+                              <span className="card-desc">{expert.description}</span>
+                            </div>
+                          )
+                        }) : <div className="prototype-home-state" role="status"><strong>{localize(locale, '没有匹配的 Expert', 'No experts match')}</strong><span>{localize(locale, '尝试其他标签，或清除搜索与收藏筛选。', 'Try another tab or clear search / star filter.')}</span></div>}
+                      </div>
+                    ) : resolvedCatalogStatus === 'loading' ? (
+                      <div className="prototype-home-state" role="status" aria-live="polite"><span className="prototype-spinner" aria-hidden="true" /><strong>{localize(locale, '正在加载可用 Expert 与运行环境…', 'Loading available Experts and Environments…')}</strong></div>
+                    ) : resolvedCatalogStatus === 'error' ? (
+                      <div className="prototype-home-state prototype-home-state--error" role="alert"><strong>{localize(locale, '无法加载会话目录', 'Unable to load the session catalog')}</strong>{catalogError ? <span>{catalogError}</span> : null}{onRetryCatalog ? <button type="button" className="tab" aria-label={localize(locale, '重试', 'Retry')} onClick={onRetryCatalog}>{localize(locale, '重试', 'Retry')}</button> : null}</div>
+                    ) : (
+                      <div className="prototype-home-state" role="status"><strong>{localize(locale, '当前 Space 没有可用 Expert', 'No Experts are available in this Space')}</strong><span>{localize(locale, '请先发布一个绑定了就绪环境的 Expert。', 'Publish an Expert bound to a ready Environment first.')}</span></div>
+                    )}
+                  </div>
+                  <aside className="home-rail" aria-label="Expert filters">
+                    <button type="button" className={`home-rail-btn${searchOpen ? ' on' : ''}`} title="Search experts" aria-label={localize(locale, '搜索 Expert', 'Search Experts')} aria-pressed={searchOpen} onClick={() => setSearchOpen((value) => !value)}><PrototypeSearchIcon aria-hidden="true" /></button>
+                    <button type="button" className={`home-rail-btn${starredOnly ? ' on' : ''}`} title="Starred only" aria-label={localize(locale, '仅收藏', 'Starred only')} aria-pressed={starredOnly} onClick={() => setStarredOnly((value) => !value)}>★</button>
+                    <div className="home-vscroll" aria-hidden="true"><div className="home-vscroll-track"><div className="home-vscroll-thumb" /></div><span className="home-scroll-down"><PrototypeScrollDownIcon /></span></div>
+                  </aside>
+                </div>
+              </div>
             </div>
-          )}
-
-          {resolvedCatalogStatus === 'ready' && sessionCreationEnabled ? <form className="home-session-composer" onSubmit={submitSession}>
-            <textarea value={prompt} onChange={(event) => { setPrompt(event.target.value); setPendingDraft(undefined); setContextPack(undefined); setContextState('idle') }} placeholder={selectedExpert?.launchGuidance || localize(locale, '描述你想完成的工作…', 'Describe the work you want done…')} rows={3} aria-label={localize(locale, '会话任务', 'Session task')} />
-            {prototypeTools && attachments.length ? (
-              <div className="home-session-composer__attachments">
-                {attachments.map((name) => (
-                  <span key={name}><Paperclip aria-hidden="true" />{name}<button type="button" aria-label={`${localize(locale, '移除附件', 'Remove attachment')}: ${name}`} onClick={() => setAttachments((items) => items.filter((item) => item !== name))}><X aria-hidden="true" /></button></span>
-                ))}
-              </div>
-            ) : null}
-            {submitError ? <p className="cosmos-field-error" role="alert">{submitError}</p> : null}
-            <footer>
-              <div className="home-session-composer__tools">
-                {prototypeTools ? <>
-                  <input ref={fileInputRef} className="cosmos-visually-hidden" type="file" hidden aria-hidden="true" tabIndex={-1} multiple accept="image/*,.txt,.md,.json,.log,.pdf" onChange={(event) => {
-                    const names = Array.from(event.target.files ?? []).slice(0, 10).map((file) => file.name)
-                    setAttachments((items) => [...new Set([...items, ...names])].slice(0, 10))
-                    event.target.value = ''
-                  }} />
-                  <CosmosIconButton icon={Paperclip} label={localize(locale, '添加附件', 'Attach files')} onClick={() => fileInputRef.current?.click()} />
-                  <button type="button" className="cosmos-icon-button" aria-label={localize(locale, '增强提示词', 'Enhance prompt')} title={localize(locale, '增强提示词', 'Enhance prompt')} disabled={!prompt.trim()} onClick={() => setPrompt((value) => `${value.trim()}\n\n${localize(locale, '请确认目标、约束、风险和可验证的完成标准。', 'Confirm the goal, constraints, risks, and verifiable completion criteria.')}`)}><WandSparkles aria-hidden="true" /></button>
-                </> : null}
-                <label className="home-session-composer__visibility">
-                  {visibility === 'private' ? <LockKeyhole aria-hidden="true" /> : <User aria-hidden="true" />}
-                  <span className="cosmos-visually-hidden">{localize(locale, '可见范围', 'Visibility')}</span>
-                  <select value={visibility} onChange={(event) => setVisibility(event.target.value as 'private' | 'space')}>
-                    <option value="private">{localize(locale, '仅自己', 'Private')}</option>
-                    <option value="space">{localize(locale, '当前 Space', 'Current Space')}</option>
-                  </select>
-                  <ChevronDown aria-hidden="true" />
-                </label>
-                <span><ShieldCheck aria-hidden="true" />{selectedExpert?.tools}</span>
-              </div>
-              <button type="submit" className="cosmos-button cosmos-button--primary" disabled={!prompt.trim() || !selectedExpert || submitting || contextState === 'loading'} aria-busy={submitting || contextState === 'loading'}>
-                {submitting || contextState === 'loading'
-                  ? <LoaderCircle className="new-task-submit-spinner" aria-hidden="true" />
-                  : executionEnabled ? <Send aria-hidden="true" /> : <Save aria-hidden="true" />}
-                {contextState === 'loading'
-                  ? localize(locale, '正在预检上下文…', 'Checking context…')
-                  : submitting
-                  ? (executionEnabled ? localize(locale, '正在启动…', 'Starting…') : localize(locale, '正在保存…', 'Saving…'))
-                  : (executionEnabled ? localize(locale, '开始会话', 'Start session') : localize(locale, '保存草稿', 'Save draft'))}
-              </button>
-            </footer>
-          </form> : resolvedCatalogStatus === 'ready' ? <p className="cosmos-empty-state" role="note">{localize(locale, '你在当前 Space 中只有查看权限。', 'You have view-only access in this Space.')}</p> : null}
+            <div className="home-dock"><div className="composer-wrap">{composer}</div>{!sessionCreationEnabled ? <p className="prototype-permission-note" role="note">{localize(locale, '你在当前 Space 中只有查看权限。', 'You have view-only access in this Space.')}</p> : null}</div>
+          </section>
+        )}
 
           {pendingDraft && contextState !== 'loading' ? (
-            <section className={`home-context-confirmation${contextState === 'error' ? ' home-context-confirmation--error' : ''}`} aria-live="polite" aria-label={localize(locale, '上下文预检', 'Context preflight')}>
-              <span className="home-context-confirmation__icon">{contextState === 'error' ? <AlertTriangle aria-hidden="true" /> : <DatabaseZap aria-hidden="true" />}</span>
+            <section className={`home-context-confirmation prototype-context-confirmation${contextState === 'error' ? ' home-context-confirmation--error' : ''}`} aria-live="polite" aria-label={localize(locale, '上下文预检', 'Context preflight')}>
+              <span className="home-context-confirmation__icon"><PrototypeHexIcon aria-hidden="true" /></span>
               <div className="home-context-confirmation__body">
                 <small>{localize(locale, 'ContextEngine 预检', 'ContextEngine preflight')}</small>
                 <strong>{contextState === 'error'
@@ -420,34 +554,21 @@ export function CosmosHomePage({
                 </>}
               </div>
               <div className="home-context-confirmation__actions">
-                {contextState === 'ready' ? <button type="button" className="cosmos-button cosmos-button--primary" disabled={submitting} onClick={() => { void createFromDraft(pendingDraft, contextPack) }}><ShieldCheck aria-hidden="true" />{localize(locale, '附加并启动', 'Attach and start')}</button> : null}
+                {contextState === 'ready' ? <button type="button" className="cosmos-button cosmos-button--primary" disabled={submitting} onClick={() => { void createFromDraft(pendingDraft, contextPack) }}>{localize(locale, '附加并启动', 'Attach and start')}</button> : null}
                 <button type="button" className="cosmos-button cosmos-button--secondary" disabled={submitting} onClick={() => { void createFromDraft(pendingDraft, null) }}>{localize(locale, '不附加，继续', 'Continue without it')}</button>
                 <button type="button" className="cosmos-button cosmos-button--ghost" disabled={submitting} onClick={() => { setPendingDraft(undefined); setContextPack(undefined); setContextState('idle'); setContextError('') }}>{localize(locale, '取消', 'Cancel')}</button>
               </div>
             </section>
           ) : null}
-        </section>
-
-        <section className="home-recent" aria-labelledby="cosmos-recent-title">
-          <div className="cosmos-section-heading">
-            <div><p>{localize(locale, '会话', 'Sessions')}</p><h2 id="cosmos-recent-title">{localize(locale, '最近会话', 'Recent sessions')}</h2></div>
-            <button type="button" className="cosmos-button cosmos-button--ghost" onClick={() => navigate('/sessions')}>{localize(locale, '查看全部', 'View all')}<ChevronRight aria-hidden="true" /></button>
-          </div>
-          {recentRuns.length ? (
-            <div className="cosmos-session-list">
-              {recentRuns.map((run) => (
-                <article className="cosmos-session-row" key={run.id}>
-                  <span className="cosmos-session-row__icon"><Bot aria-hidden="true" /></span>
-                  <div><h3>{run.title}</h3><p>{run.expert} · {run.repo}</p></div>
-                  <CosmosStatus status={run.status}>{getStatusLabel(locale, run.status)}</CosmosStatus>
-                  <time>{run.updatedAt}</time>
-                  <CosmosIconButton icon={ExternalLink} label={localize(locale, '打开会话', 'Open session')} onClick={() => openSession(run.id)} />
-                </article>
-              ))}
-            </div>
-          ) : <p className="cosmos-empty-state">{localize(locale, '还没有会话。选择一个 Expert 开始。', 'No sessions yet. Choose an Expert to begin.')}</p>}
-        </section>
       </div>
+      {shortcutsOpen ? (
+        <div className="prototype-shortcuts-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeShortcuts() }}>
+          <section ref={shortcutsDialogRef} className="prototype-shortcuts" role="dialog" aria-modal="true" aria-labelledby="prototype-shortcuts-title">
+            <header><h2 id="prototype-shortcuts-title">Keyboard shortcuts</h2><button ref={shortcutsCloseRef} type="button" className="icon-btn" aria-label={localize(locale, '关闭', 'Close')} onClick={closeShortcuts}>×</button></header>
+            <div><span>Open command palette</span><kbd>⌘K</kbd><span>New session</span><kbd>⌘⇧O</kbd><span>Toggle left sidebar</span><kbd>⌘.</kbd><span>Enhance prompt</span><kbd>⌘E</kbd></div>
+          </section>
+        </div>
+      ) : null}
     </main>
   )
 }

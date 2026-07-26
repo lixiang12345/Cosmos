@@ -1,0 +1,102 @@
+import type { ReactNode, SVGProps } from 'react'
+
+type IconProps = SVGProps<SVGSVGElement>
+
+function StrokeIcon({ children, size = 15, viewBox = '0 0 16 16', ...props }: IconProps & {
+  children: ReactNode
+  size?: number
+  viewBox?: string
+}) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox={viewBox}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      {children}
+    </svg>
+  )
+}
+
+export function PrototypeSidebarIcon(props: IconProps) {
+  return <StrokeIcon {...props}><rect x="2.5" y="2.5" width="11" height="11" rx="1.5" /><path d="M6.5 2.5v11" /></StrokeIcon>
+}
+
+export function PrototypeChevronDownIcon(props: IconProps) {
+  return <StrokeIcon size={10} viewBox="0 0 10 10" {...props}><path d="M2 3.5l3 3 3-3" /></StrokeIcon>
+}
+
+export function PrototypeChevronRightIcon(props: IconProps) {
+  return <StrokeIcon size={12} {...props}><path d="M6 4l4 4-4 4" /></StrokeIcon>
+}
+
+export function PrototypeChevronDownLargeIcon(props: IconProps) {
+  return <StrokeIcon size={12} {...props}><path d="M4 6l4 4 4-4" /></StrokeIcon>
+}
+
+export function PrototypePlusIcon(props: IconProps) {
+  return <StrokeIcon {...props}><path d="M8 3.2v9.6M3.2 8h9.6" /></StrokeIcon>
+}
+
+export function PrototypeSessionsIcon(props: IconProps) {
+  return <StrokeIcon {...props}><path d="M3.5 3.5h9a1 1 0 011 1v5.5a1 1 0 01-1 1H7.2L4.5 13.2V11H3.5a1 1 0 01-1-1V4.5a1 1 0 011-1z" /></StrokeIcon>
+}
+
+export function PrototypeFolderIcon(props: IconProps) {
+  return <StrokeIcon {...props}><path d="M2.5 4h3.2l1.3 1.3H13.5v7.2a1 1 0 01-1 1h-9a1 1 0 01-1-1V4z" /></StrokeIcon>
+}
+
+export function PrototypeConfigurationIcon(props: IconProps) {
+  return <StrokeIcon {...props}><path d="M3 4.5h10M3 8h10M3 11.5h10" /><path d="M6 3.5v2M10 7v2M7.5 10.5v2" /></StrokeIcon>
+}
+
+export function PrototypeAutomationIcon(props: IconProps) {
+  return <StrokeIcon {...props}><path d="M5.2 10.5c-1.4 0-2.5-1.1-2.5-2.5S3.8 5.5 5.2 5.5c1.1 0 1.9.5 2.8 1.5L8 8l-.05.05C7.1 9.9 6.3 10.5 5.2 10.5zM10.8 5.5c1.4 0 2.5 1.1 2.5 2.5s-1.1 2.5-2.5 2.5c-1.1 0-1.9-.5-2.8-1.5L8 8l.05-.05C8.9 6.1 9.7 5.5 10.8 5.5z" /></StrokeIcon>
+}
+
+export function PrototypeHexIcon(props: IconProps) {
+  return <StrokeIcon {...props}><path d="M8 1.75l5.4 3.1v6.3L8 14.25 2.6 11.15v-6.3L8 1.75z" /></StrokeIcon>
+}
+
+export function PrototypeSearchIcon(props: IconProps) {
+  return <StrokeIcon {...props}><circle cx="7" cy="7" r="4" /><path d="M10.5 10.5L13.2 13.2" /></StrokeIcon>
+}
+
+export function PrototypeTopbarSearchIcon(props: IconProps) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" {...props}>
+      <circle cx="6.5" cy="6.5" r="4.5" />
+      <path d="M11 11l3 3" />
+    </svg>
+  )
+}
+
+export function PrototypeEnvironmentIcon(props: IconProps) {
+  return <StrokeIcon size={14} {...props}><rect x="2.5" y="4.5" width="11" height="8" rx="1.5" /><path d="M5.2 4.5V3.4a1 1 0 011-1h3.6a1 1 0 011 1v1.1" /></StrokeIcon>
+}
+
+export function PrototypeToolsIcon(props: IconProps) {
+  return <StrokeIcon {...props}><path d="M5.2 10.8a2.4 2.4 0 01-2.4-2.4V7.2a3.2 3.2 0 015.4-2.3 3.2 3.2 0 015 2.3v1.2a2.4 2.4 0 01-2.4 2.4" /><path d="M5.2 10.8v1.4a1.4 1.4 0 001.4 1.4h2.8a1.4 1.4 0 001.4-1.4v-1.4" /></StrokeIcon>
+}
+
+export function PrototypeMoonIcon(props: IconProps) {
+  return <StrokeIcon {...props}><path d="M11.5 9.2A4.5 4.5 0 118 2.8 3.5 3.5 0 0011.5 9.2z" /></StrokeIcon>
+}
+
+export function PrototypeSunIcon(props: IconProps) {
+  return <StrokeIcon {...props}><circle cx="8" cy="8" r="2.8" /><path d="M8 2v1.5M8 12.5V14M2 8h1.5M12.5 8H14M3.8 3.8l1.1 1.1M11.1 11.1l1.1 1.1M3.8 12.2l1.1-1.1M11.1 4.9l1.1-1.1" /></StrokeIcon>
+}
+
+export function PrototypeKeyboardIcon(props: IconProps) {
+  return <StrokeIcon {...props}><rect x="2" y="4" width="12" height="8" rx="1.5" /><path d="M4.5 7h.01M7 7h.01M9.5 7h.01M12 7h.01M5.5 9.5h5" /></StrokeIcon>
+}
+
+export function PrototypeScrollDownIcon(props: IconProps) {
+  return <StrokeIcon size={10} viewBox="0 0 12 12" strokeWidth={1.4} {...props}><path d="M3 4.5L6 7.5 9 4.5" /></StrokeIcon>
+}

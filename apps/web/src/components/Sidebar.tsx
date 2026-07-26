@@ -1,125 +1,69 @@
-import {
-  Boxes,
-  ChevronDown,
-  ChevronRight,
-  CloudCog,
-  FileText,
-  FolderGit2,
-  Globe2,
-  History,
-  KeyRound,
-  LayoutGrid,
-  LogOut,
-  MessageCircle,
-  Network,
-  Orbit,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Pin,
-  Plug,
-  Plus,
-  ServerCog,
-  Settings2,
-  SlidersHorizontal,
-  Sparkles,
-  Webhook,
-  Workflow,
-  X,
-} from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth/context'
 import { useControlPlane } from '../features/control-plane'
 import { usePreferences } from '../preferences'
 import type { Run } from '../types'
 import { useActiveWorkspace } from '../workspace'
-import { GlobalControls } from './GlobalControls'
-import { IconButton, StatusBadge } from './ui'
+import {
+  PrototypeAutomationIcon,
+  PrototypeChevronDownIcon,
+  PrototypeChevronRightIcon,
+  PrototypeConfigurationIcon,
+  PrototypeFolderIcon,
+  PrototypePlusIcon,
+  PrototypeSessionsIcon,
+  PrototypeSidebarIcon,
+} from './PrototypeIcons'
 
 type SidebarProps = {
   runs: Run[]
   open: boolean
   collapsed: boolean
   onClose: () => void
-  onNewTask: () => void
   sessionCreationEnabled?: boolean
   onToggleCollapsed: () => void
 }
 
-type NavItem = {
+type SidebarRoute = {
   to: string
-  label: { zh: string; en: string }
-  icon?: typeof Sparkles
+  en: string
+  zh: string
 }
 
-type NavSection = {
-  label: { zh: string; en: string }
-  items: NavItem[]
-}
-
-const coreResourceItems: NavItem[] = [
-  { to: '/experts', label: { zh: '专家', en: 'Experts' }, icon: Sparkles },
-  { to: '/environments', label: { zh: '环境', en: 'Environments' }, icon: CloudCog },
+const files: SidebarRoute[] = [
+  { to: '/files/organization', en: 'Organization', zh: '组织' },
+  { to: '/files/user', en: 'User', zh: '个人' },
 ]
 
-// Configuration follows the live Cosmos product IA: Foundation (Experts,
-// Environments) and Capabilities (Integrations, MCP, Webhooks, Secrets). The
-// Cosmos-specific control surfaces that the prototype does not enumerate stay
-// grouped under Workspace so their pages remain reachable without masquerading
-// as part of the documented Configuration set.
-const configurationSections: NavSection[] = [
-  {
-    label: { zh: '基础', en: 'Foundation' },
-    items: [
-      ...coreResourceItems,
-      { to: '/daemons', label: { zh: '守护进程', en: 'Daemons' }, icon: ServerCog },
-    ],
-  },
-  {
-    label: { zh: '能力', en: 'Capabilities' },
-    items: [
-      { to: '/integrations', label: { zh: '集成', en: 'Integrations' }, icon: Plug },
-      { to: '/mcp', label: { zh: 'MCP 注册表', en: 'MCP Registry' }, icon: Boxes },
-      { to: '/webhooks', label: { zh: 'Webhooks', en: 'Webhooks' }, icon: Webhook },
-      { to: '/secrets', label: { zh: '密钥', en: 'Secrets' }, icon: KeyRound },
-    ],
-  },
-  {
-    label: { zh: '工作区', en: 'Workspace' },
-    items: [
-      { to: '/repositories', label: { zh: '仓库', en: 'Repositories' }, icon: FolderGit2 },
-      { to: '/spaces', label: { zh: '空间', en: 'Spaces' }, icon: Globe2 },
-      { to: '/settings', label: { zh: '设置', en: 'Settings' }, icon: Settings2 },
-    ],
-  },
+const foundation: SidebarRoute[] = [
+  { to: '/experts', en: 'Experts', zh: '专家' },
+  { to: '/environments', en: 'Environments', zh: '环境' },
 ]
 
-const automationItems: NavItem[] = [
-  { to: '/automations', label: { zh: '自动化', en: 'Automations' }, icon: Workflow },
-  { to: '/automations/events', label: { zh: '事件日志', en: 'Event Log' }, icon: LayoutGrid },
-  { to: '/automations/history', label: { zh: '运行历史', en: 'Run History' }, icon: History },
+const capabilities: SidebarRoute[] = [
+  { to: '/integrations', en: 'Integrations', zh: '集成' },
+  { to: '/mcp', en: 'MCP Registry', zh: 'MCP 注册表' },
+  { to: '/webhooks', en: 'Webhooks', zh: 'Webhooks' },
+  { to: '/secrets', en: 'Secrets', zh: '密钥' },
 ]
 
-const fileItems: NavItem[] = [
-  { to: '/files/organization', label: { zh: '组织', en: 'Organization' } },
-  { to: '/files/user', label: { zh: '个人', en: 'User' } },
+const automations: SidebarRoute[] = [
+  { to: '/automations', en: 'Automations', zh: '自动化' },
+  { to: '/automations/events', en: 'Event Log', zh: '事件日志' },
+  { to: '/automations/history', en: 'Run History', zh: '运行历史' },
 ]
 
-function SidebarLink({ item, nested = false, badge, onNavigate }: { item: NavItem; nested?: boolean; badge?: number; onNavigate: () => void }) {
+function SidebarSubLink({ route, onNavigate }: { route: SidebarRoute; onNavigate: () => void }) {
   const { locale } = usePreferences()
-  const label = item.label[locale]
-  const Icon = item.icon
   return (
     <NavLink
-      to={item.to}
-      className={({ isActive }) => `sidebar-link${nested ? ' sidebar-link--nested' : ''}${isActive ? ' sidebar-link--active' : ''}`}
-      aria-label={label}
-      data-tooltip={label}
+      to={route.to}
+      className={({ isActive }) => `sb-sub${isActive ? ' active' : ''}`}
+      aria-label={route[locale]}
       onClick={onNavigate}
     >
-      {Icon ? <Icon aria-hidden="true" /> : null}
-      <span>{label}</span>
-      {badge ? <span className="sidebar-link__badge">{badge}</span> : null}
+      {route[locale]}
     </NavLink>
   )
 }
@@ -129,172 +73,161 @@ export function Sidebar({
   open,
   collapsed,
   onClose,
-  onNewTask,
   sessionCreationEnabled = true,
   onToggleCollapsed,
 }: SidebarProps) {
   const auth = useAuth()
-  const { locale, t } = usePreferences()
+  const { locale, t, toggleLocale } = usePreferences()
   const { activeSpace, actions, state } = useControlPlane()
   const workspace = useActiveWorkspace()
   const location = useLocation()
   const [spaceSwitcherOpen, setSpaceSwitcherOpen] = useState(false)
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const [filesOpen, setFilesOpen] = useState(true)
-  const [automationsOpen, setAutomationsOpen] = useState(true)
   const [configurationOpen, setConfigurationOpen] = useState(true)
+  const [automationsOpen, setAutomationsOpen] = useState(true)
+  const sidebarToggleRef = useRef<HTMLButtonElement>(null)
+  const wasCollapsedRef = useRef(collapsed)
   const pinnedRuns = runs.filter((run) => run.favorite && !run.archived).slice(0, 3)
-  const recentRuns = runs.filter((run) => !run.archived && !run.favorite).slice(0, 6)
-  const copy = locale === 'zh'
-    ? { files: '文件', automations: '自动化', configuration: '配置', pinned: '置顶', recent: '最近会话', expand: '展开导航', collapse: '收起导航', role: '已认证组织成员', signOut: '退出登录' }
-    : { files: 'Files', automations: 'Automations', configuration: 'Configuration', pinned: 'Pinned', recent: 'Recent Sessions', expand: 'Expand navigation', collapse: 'Collapse navigation', role: 'Authenticated organization member', signOut: 'Sign out' }
+  const recentRuns = runs.filter((run) => !run.archived).slice(0, 6)
   const displayName = auth.displayName ?? auth.actorId ?? 'Cosmos user'
-  const avatar = Array.from(displayName.trim())[0]?.toLocaleUpperCase() ?? 'R'
-  const toggleNavigationGroup = (setOpen: (update: (value: boolean) => boolean) => void) => {
-    const compactDesktopRail = collapsed
-      && typeof window !== 'undefined'
-      && window.matchMedia('(min-width: 821px)').matches
-    if (compactDesktopRail) {
-      setOpen(() => true)
-      onToggleCollapsed()
-      return
+  const avatar = Array.from(displayName.trim())[0]?.toLocaleUpperCase() ?? 'U'
+  const role = locale === 'zh' ? '已认证组织成员' : 'Authenticated organization member'
+
+  useEffect(() => {
+    if (!spaceSwitcherOpen && !accountMenuOpen) return
+    const closeMenus = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setSpaceSwitcherOpen(false)
+      setAccountMenuOpen(false)
     }
-    setOpen((value) => !value)
+    window.addEventListener('keydown', closeMenus)
+    return () => window.removeEventListener('keydown', closeMenus)
+  }, [accountMenuOpen, spaceSwitcherOpen])
+
+  useEffect(() => {
+    if (wasCollapsedRef.current && !collapsed) sidebarToggleRef.current?.focus()
+    wasCollapsedRef.current = collapsed
+  }, [collapsed])
+
+  const switchSpace = (organizationId: string, spaceId: string) => {
+    if (workspace.organization.id === organizationId && state.spaces.some((item) => item.id === spaceId)) {
+      actions.switchSpace(spaceId)
+    } else {
+      workspace.selectSpace(organizationId, spaceId)
+    }
+    setSpaceSwitcherOpen(false)
   }
 
   return (
     <>
       <button type="button" className={`sidebar-scrim${open ? ' sidebar-scrim--visible' : ''}`} aria-label={t('common.close')} onClick={onClose} />
-      <aside className={`sidebar sidebar--cosmos${open ? ' sidebar--open' : ''}${collapsed ? ' sidebar--collapsed' : ''}`}>
-        <div className="sidebar__brand">
-          <NavLink to="/home" className="brand" onClick={onClose} aria-label="Cosmos">
-            <span className="brand__mark"><Orbit aria-hidden="true" /></span>
-            <span className="brand__copy"><strong>Cosmos</strong><small>Agent OS</small></span>
-          </NavLink>
-          <IconButton icon={X} label={t('common.close')} className="sidebar__mobile-close" onClick={onClose} />
-        </div>
-
-        <div className="sidebar__space-switcher">
-          <button type="button" className="space-switcher-btn" aria-expanded={spaceSwitcherOpen} onClick={() => setSpaceSwitcherOpen((value) => !value)}>
-            <Globe2 aria-hidden="true" />
-            <span>{activeSpace.name}</span>
-            <ChevronDown aria-hidden="true" />
+      <aside aria-hidden={collapsed || undefined} inert={collapsed ? true : undefined} className={`sidebar prototype-sidebar${open ? ' sidebar--open' : ''}${collapsed ? ' sidebar--collapsed' : ''}`}>
+        <div className="sb-header" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setSpaceSwitcherOpen(false) }}>
+          <button type="button" className="logo" aria-label={locale === 'zh' ? '切换空间' : 'Switch Space'} aria-expanded={spaceSwitcherOpen} onClick={() => setSpaceSwitcherOpen((value) => !value)}>
+            <img className="logo-icon" src="/assets/cosmos-logo.svg" width="18" height="16" alt="" />
+            <span>Cosmos</span>
+            <PrototypeChevronDownIcon className="chev" aria-hidden="true" />
+          </button>
+          <button ref={sidebarToggleRef} type="button" className="icon-btn" title={locale === 'zh' ? '收起导航' : 'Toggle sidebar'} aria-label={locale === 'zh' ? '收起导航' : 'Toggle sidebar'} onClick={onToggleCollapsed}>
+            <PrototypeSidebarIcon aria-hidden="true" />
           </button>
           {spaceSwitcherOpen ? (
-            <ul className="space-switcher-menu">
-              {workspace.me.organizations.flatMap((organization) => organization.spaces.length ? [
-                <li key={organization.id} className="space-switcher-menu__organization">
+            <ul className="prototype-space-menu">
+              {workspace.me.organizations.map((organization) => (
+                <li key={organization.id}>
                   <p>{organization.name}</p>
-                  <ul>
-                    {organization.spaces.map((space) => {
-                      const current = workspace.organization.id === organization.id && activeSpace.id === space.id
-                      return (
-                        <li key={`${organization.id}:${space.id}`}>
-                          <button
-                            type="button"
-                            aria-current={current}
-                            onClick={() => {
-                              if (workspace.organization.id === organization.id && state.spaces.some((item) => item.id === space.id)) {
-                                actions.switchSpace(space.id)
-                              } else {
-                                workspace.selectSpace(organization.id, space.id)
-                              }
-                              setSpaceSwitcherOpen(false)
-                            }}
-                          >
-                            {space.name}
-                          </button>
-                        </li>
-                      )
-                    })}
-                  </ul>
-                </li>,
-              ] : [])}
+                  {organization.spaces.map((space) => {
+                    const current = workspace.organization.id === organization.id && activeSpace.id === space.id
+                    return (
+                      <button type="button" key={space.id} aria-current={current} onClick={() => switchSpace(organization.id, space.id)}>
+                        {space.name}
+                      </button>
+                    )
+                  })}
+                </li>
+              ))}
             </ul>
           ) : null}
         </div>
 
-        {sessionCreationEnabled ? <div className="sidebar__quick-actions sidebar__quick-actions--cosmos">
-          <button type="button" className="sidebar-new-session" onClick={onNewTask} aria-label={t('sessions.new')} data-tooltip={t('sessions.new')}>
-            <Plus aria-hidden="true" />
-            <span>{t('sessions.new')}</span>
+        {sessionCreationEnabled ? (
+          <NavLink to="/home" className={({ isActive }) => `sb-new${isActive ? ' active' : ''}`} aria-label={locale === 'zh' ? '新建会话' : 'New session'} onClick={onClose}>
+            <PrototypePlusIcon aria-hidden="true" />
+            {locale === 'zh' ? '新建会话' : 'New session'}
+          </NavLink>
+        ) : (
+          <button type="button" className="sb-new" aria-label={locale === 'zh' ? '新建会话' : 'New session'} disabled title={locale === 'zh' ? '当前 Space 只有查看权限' : 'View-only access in this Space'}>
+            <PrototypePlusIcon aria-hidden="true" />
+            {locale === 'zh' ? '新建会话' : 'New session'}
           </button>
-        </div> : null}
+        )}
 
-        {/* Navigation order follows the live Cosmos product IA:
-            Sessions -> Files -> Configuration -> Automations, with pinned and
-            recent Sessions anchored at the foot of the rail. */}
-        <nav className="sidebar__nav sidebar__nav--cosmos" aria-label={t('nav.mainLabel')}>
-          <SidebarLink item={{ to: '/sessions', label: { zh: '会话', en: 'Sessions' }, icon: MessageCircle }} onNavigate={onClose} />
-          <SidebarLink item={{ to: '/context', label: { zh: '上下文', en: 'Context' }, icon: Network }} onNavigate={onClose} />
+        <nav className="sb-nav" aria-label={t('nav.mainLabel')}>
+          <NavLink to="/sessions" className={({ isActive }) => `sb-item${isActive ? ' active' : ''}`} aria-label={locale === 'zh' ? '会话' : 'Sessions'} onClick={onClose}>
+            <PrototypeSessionsIcon aria-hidden="true" />
+            {locale === 'zh' ? '会话' : 'Sessions'}
+          </NavLink>
 
-          <div className="sidebar__configuration sidebar__files">
-            <button type="button" className="sidebar-configuration-toggle" aria-label={copy.files} data-tooltip={copy.files} aria-expanded={filesOpen} onClick={() => toggleNavigationGroup(setFilesOpen)}>
-              <FileText aria-hidden="true" />
-              <span>{copy.files}</span>
-              {filesOpen ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
-            </button>
-            {filesOpen ? (
-              <div className="sidebar-configuration-list">
-                {fileItems.map((item) => <SidebarLink key={item.to} item={item} nested onNavigate={onClose} />)}
-              </div>
-            ) : null}
+          <button type="button" className={`sb-group${filesOpen ? '' : ' collapsed'}`} aria-label={locale === 'zh' ? '文件' : 'Files'} aria-expanded={filesOpen} onClick={() => setFilesOpen((value) => !value)}>
+            <span className="sb-group-left"><PrototypeFolderIcon aria-hidden="true" />{locale === 'zh' ? '文件' : 'Files'}</span>
+            <PrototypeChevronRightIcon className="chev" aria-hidden="true" />
+          </button>
+          <div className={`sb-collapse${filesOpen ? ' open' : ''}`}>
+            {files.map((route) => <SidebarSubLink key={route.to} route={route} onNavigate={onClose} />)}
           </div>
 
-          <div className="sidebar__configuration">
-            <button type="button" className="sidebar-configuration-toggle" aria-label={copy.configuration} data-tooltip={copy.configuration} aria-expanded={configurationOpen} onClick={() => toggleNavigationGroup(setConfigurationOpen)}>
-              <SlidersHorizontal aria-hidden="true" />
-              <span>{copy.configuration}</span>
-              {configurationOpen ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
-            </button>
-            {configurationOpen ? (
-              <div className="sidebar-configuration-list">
-                {configurationSections.map((section) => (
-                  <div key={section.label.en} className="sidebar-configuration-section">
-                    <p className="sidebar-configuration-section__label">{section.label[locale]}</p>
-                    {section.items.map((item) => <SidebarLink key={item.to} item={item} nested onNavigate={onClose} />)}
-                  </div>
-                ))}
-              </div>
-            ) : null}
+          <button type="button" className={`sb-group${configurationOpen ? '' : ' collapsed'}`} aria-label={locale === 'zh' ? '配置' : 'Configuration'} aria-expanded={configurationOpen} onClick={() => setConfigurationOpen((value) => !value)}>
+            <span className="sb-group-left"><PrototypeConfigurationIcon aria-hidden="true" />{locale === 'zh' ? '配置' : 'Configuration'}</span>
+            <PrototypeChevronRightIcon className="chev" aria-hidden="true" />
+          </button>
+          <div className={`sb-collapse${configurationOpen ? ' open' : ''}`}>
+            <div className="sb-sec">{locale === 'zh' ? '基础' : 'Foundation'}</div>
+            {foundation.map((route) => <SidebarSubLink key={route.to} route={route} onNavigate={onClose} />)}
+            <div className="sb-sec">{locale === 'zh' ? '能力' : 'Capabilities'}</div>
+            {capabilities.map((route) => <SidebarSubLink key={route.to} route={route} onNavigate={onClose} />)}
           </div>
 
-          <div className="sidebar__configuration sidebar__automations">
-            <button type="button" className="sidebar-configuration-toggle" aria-label={copy.automations} data-tooltip={copy.automations} aria-expanded={automationsOpen} onClick={() => toggleNavigationGroup(setAutomationsOpen)}>
-              <Workflow aria-hidden="true" />
-              <span>{copy.automations}</span>
-              {automationsOpen ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
-            </button>
-            {automationsOpen ? (
-              <div className="sidebar-configuration-list">
-                {automationItems.map((item) => <SidebarLink key={item.to} item={item} nested onNavigate={onClose} />)}
-              </div>
-            ) : null}
+          <button type="button" className={`sb-group${automationsOpen ? '' : ' collapsed'}`} aria-label={locale === 'zh' ? '自动化' : 'Automations'} aria-expanded={automationsOpen} onClick={() => setAutomationsOpen((value) => !value)}>
+            <span className="sb-group-left"><PrototypeAutomationIcon aria-hidden="true" />{locale === 'zh' ? '自动化' : 'Automations'}</span>
+            <PrototypeChevronRightIcon className="chev" aria-hidden="true" />
+          </button>
+          <div className={`sb-collapse${automationsOpen ? ' open' : ''}`}>
+            {automations.map((route) => <SidebarSubLink key={route.to} route={route} onNavigate={onClose} />)}
           </div>
-
-          {pinnedRuns.length ? <div className="sidebar__group sidebar__favorites">
-            <div className="sidebar__group-heading"><p className="sidebar__group-label">{copy.pinned}</p><Pin aria-hidden="true" /></div>
-            {pinnedRuns.map((run) => {
-              const active = location.pathname === `/sessions/${run.id}`
-              return <NavLink key={run.id} to={`/sessions/${run.id}`} className={`recent-run${active ? ' recent-run--active' : ''}`} onClick={onClose}><span className="recent-run__title">{run.title}</span><StatusBadge status={run.status} /></NavLink>
-            })}
-          </div> : null}
-
-          <div className="sidebar__group sidebar__recent">
-            <div className="sidebar__group-heading"><p className="sidebar__group-label">{copy.recent}</p><History aria-hidden="true" /></div>
-            {recentRuns.map((run) => {
-              const active = location.pathname === `/sessions/${run.id}`
-              return <NavLink key={run.id} to={`/sessions/${run.id}`} className={`recent-run${active ? ' recent-run--active' : ''}`} onClick={onClose}><span className="recent-run__title">{run.title}</span><StatusBadge status={run.status} /></NavLink>
-            })}
-          </div>
-
         </nav>
 
-        <div className="sidebar-mobile-preferences"><GlobalControls /></div>
-        <div className="sidebar__account">
-          <span className="account-avatar">{avatar}</span>
-          <span><strong>{displayName}</strong><small>{copy.role}</small></span>
-          {auth.mode === 'oidc' ? <IconButton icon={LogOut} label={copy.signOut} size="sm" onClick={() => { void auth.signOut() }} /> : null}
-          <IconButton icon={collapsed ? PanelLeftOpen : PanelLeftClose} label={collapsed ? copy.expand : copy.collapse} size="sm" onClick={onToggleCollapsed} />
+        <div className="sb-section-label">{locale === 'zh' ? '收藏' : 'Favorites'}</div>
+        <div className="sb-fav-drop" title="Pinned sessions appear here">
+          {pinnedRuns.length ? pinnedRuns.map((run) => (
+            <NavLink key={run.id} to={`/sessions/${run.id}`} className="sb-fav-item" onClick={onClose}>★ {run.title}</NavLink>
+          )) : <span className="sb-fav-hint">{locale === 'zh' ? '拖入会话以收藏' : 'Drag sessions here to pin'}</span>}
+        </div>
+
+        <div className="sb-section-label row-between"><span>{locale === 'zh' ? '最近会话' : 'Recent Sessions'}</span></div>
+        <div className="sb-recents">
+          {recentRuns.map((run) => {
+            const active = location.pathname === `/sessions/${run.id}`
+            return (
+              <NavLink key={run.id} to={`/sessions/${run.id}`} className={`sb-recent${run.favorite ? ' pinned' : ''}${active ? ' active' : ''}`} onClick={onClose}>
+                {run.title}
+              </NavLink>
+            )
+          })}
+        </div>
+
+        <div className="sb-user-wrap" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setAccountMenuOpen(false) }}>
+          <button type="button" className="sb-user" aria-label={displayName} aria-expanded={accountMenuOpen} onClick={() => setAccountMenuOpen((value) => !value)}>
+            <span className="avatar">{avatar}</span>
+            <span className="user-info"><span className="user-name">{displayName}</span><span className="user-email">{role}</span></span>
+          </button>
+          {accountMenuOpen ? (
+            <div className="prototype-user-menu">
+              <span>{activeSpace.name}</span>
+              <button type="button" onClick={() => { toggleLocale(); setAccountMenuOpen(false) }}>{locale === 'zh' ? 'Switch to English' : '切换到中文'}</button>
+              {auth.mode === 'oidc' ? <button type="button" onClick={() => { void auth.signOut() }}>{locale === 'zh' ? '退出登录' : 'Sign out'}</button> : null}
+            </div>
+          ) : null}
         </div>
       </aside>
     </>

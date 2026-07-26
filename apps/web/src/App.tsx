@@ -984,7 +984,7 @@ function RemoteExpertEditorRoute({
 }
 
 function CosmosApp() {
-  const { accessToken, credentialVersion, demoMode, handleUnauthorized } = useAuth()
+  const { accessToken, actorId, credentialVersion, demoMode, displayName, handleUnauthorized } = useAuth()
   const workspace = useActiveWorkspace()
   const { refresh: refreshWorkspace } = useWorkspace()
   const { organization } = workspace
@@ -1868,7 +1868,13 @@ function CosmosApp() {
     setToast(locale === 'zh' ? '会话已删除' : 'Session deleted')
   }
 
-  const openNavigation = () => setNavigationOpen(true)
+  const openNavigation = () => {
+    setSidebarCollapsed(false)
+    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(min-width: 821px)').matches) {
+      return
+    }
+    setNavigationOpen(true)
+  }
   const openSession = (runId: string) => navigate(`/sessions/${runId}`)
   const pageProps = { runs: scopedRuns, onOpenNavigation: openNavigation, onNewTask: openNewTask }
 
@@ -1929,7 +1935,6 @@ function CosmosApp() {
         open={navigationOpen}
         collapsed={sidebarCollapsed}
         onClose={() => setNavigationOpen(false)}
-        onNewTask={() => openNewTask()}
         sessionCreationEnabled={sessionCreationEnabled}
         onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
       />
@@ -1937,7 +1942,7 @@ function CosmosApp() {
       <Suspense fallback={<RouteFallback />}>
         <Routes>
         <Route path="/" element={<Navigate to="/home" replace />} />
-        <Route path="/home" element={<CosmosHomePage {...pageProps} experts={sessionExpertOptions} catalogStatus={sessionCatalogStatus} catalogError={sessionCatalogError} prototypeTools={demoMode} sessionCreationEnabled={sessionCreationEnabled} executionEnabled={demoMode || productionExecutionEnabled} contextEnabled={!demoMode && contextEnabled} contextPreflight={preflightContext} onRetryCatalog={retrySessionCatalog} onOpenSession={openSession} onCreateSession={createHomeSession} />} />
+        <Route path="/home" element={<CosmosHomePage {...pageProps} displayName={displayName ?? actorId} navigationCollapsed={sidebarCollapsed} experts={sessionExpertOptions} catalogStatus={sessionCatalogStatus} catalogError={sessionCatalogError} prototypeTools={demoMode} sessionCreationEnabled={sessionCreationEnabled} executionEnabled={demoMode || productionExecutionEnabled} contextEnabled={!demoMode && contextEnabled} contextPreflight={preflightContext} onOpenCommand={() => setCommandOpen(true)} onRetryCatalog={retrySessionCatalog} onOpenSession={openSession} onCreateSession={createHomeSession} />} />
         <Route path="/context" element={<ContextWorkspacePage repositories={sessionRepositories} demoMode={demoMode} contextEnabled={contextEnabled} onOpenNavigation={openNavigation} onNewTask={openNewTask} />} />
         <Route path="/sessions" element={
           <SessionsPage
