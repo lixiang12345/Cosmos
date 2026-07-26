@@ -2224,7 +2224,7 @@ function CosmosApp() {
               onOpenNavigation={openNavigation}
             navigationCollapsed={sidebarCollapsed}
               onOpenCommand={() => setCommandOpen(true)}
-              />} />
+              canManage={expertManagementEnabled} />} />
         <Route path="/integrations" element={demoMode
           ? <IntegrationsControlPage onOpenNavigation={openNavigation} />
           : <RemoteIntegrationsPage

@@ -536,6 +536,7 @@ describe('remote Catalog pages', () => {
     render(withPreferences(<RemoteEnvironmentsPage {...environmentPageProps({ canManage: true, onRetry })} />))
 
     await user.click(screen.getByRole('button', { name: '创建环境' }))
+    await user.click(screen.getByRole('menuitem', { name: /Cloud 沙箱/ }))
     expect(screen.getByLabelText('名称')).toHaveFocus()
     await user.type(screen.getByLabelText('名称'), 'Release runtime')
     await user.type(screen.getByLabelText('镜像'), 'ghcr.io/cosmos/runtime:stable')
@@ -570,6 +571,7 @@ describe('remote Catalog pages', () => {
     ))
 
     await user.click(screen.getByRole('button', { name: '创建环境' }))
+    await user.click(screen.getByRole('menuitem', { name: /Cloud 沙箱/ }))
     expect(screen.getByLabelText('名称')).toHaveFocus()
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('heading', { name: '创建运行环境' })).not.toBeInTheDocument()
@@ -592,6 +594,7 @@ describe('remote Catalog pages', () => {
     ))
 
     await user.click(screen.getByRole('button', { name: '创建环境' }))
+    await user.click(screen.getByRole('menuitem', { name: /Cloud 沙箱/ }))
     await user.type(screen.getByLabelText('名称'), 'Release runtime')
     await user.type(screen.getByLabelText('镜像'), 'ghcr.io/cosmos/runtime:stable')
     await user.type(screen.getByLabelText('仓库 ID'), 'repository-release')
@@ -623,6 +626,7 @@ describe('remote Catalog pages', () => {
     ))
 
     await user.click(screen.getByRole('button', { name: '创建环境' }))
+    await user.click(screen.getByRole('menuitem', { name: /Cloud 沙箱/ }))
     await user.click(screen.getByRole('button', { name: '添加 变量引用' }))
     const secretSelect = screen.getByLabelText('Secret reference') as HTMLSelectElement
     const optionValues = Array.from(secretSelect.options).map((option) => option.value)
@@ -641,6 +645,7 @@ describe('remote Catalog pages', () => {
     ))
 
     await user.click(screen.getByRole('button', { name: '创建环境' }))
+    await user.click(screen.getByRole('menuitem', { name: /Cloud 沙箱/ }))
     expect(screen.getByText('当前 Space 没有可用的 active Secret。')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '添加 变量引用' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '保存并配置' })).toBeEnabled()
@@ -653,6 +658,7 @@ describe('remote Catalog pages', () => {
     const view = render(withPreferences(<RemoteEnvironmentsPage {...props} />))
 
     await user.click(screen.getByRole('button', { name: '创建环境' }))
+    await user.click(screen.getByRole('menuitem', { name: /Cloud 沙箱/ }))
     expect(screen.getByRole('status')).toHaveTextContent('正在加载 Secret')
     expect(screen.getByRole('button', { name: '添加 变量引用' })).toBeDisabled()
 
@@ -698,6 +704,7 @@ describe('remote Catalog pages', () => {
     ))
 
     await user.click(screen.getByRole('button', { name: '创建环境' }))
+    await user.click(screen.getByRole('menuitem', { name: /Cloud 沙箱/ }))
     await user.type(screen.getByLabelText('名称'), 'Release runtime')
     await user.type(screen.getByLabelText('镜像'), 'ghcr.io/cosmos/runtime:stable')
     await user.type(screen.getByLabelText('仓库 ID'), 'repository-release')

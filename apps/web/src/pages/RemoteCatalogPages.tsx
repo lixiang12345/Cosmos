@@ -71,7 +71,9 @@ import {
   createWebhook,
   archiveWebhook,
   createMcpServer,
+  updateMcpServer,
   archiveMcpServer,
+  archiveRepository,
   createDaemon,
   updateDaemon,
   archiveDaemon,
@@ -160,7 +162,7 @@ export type RemoteEnvironmentsPageProps = RemoteCatalogListState<EnvironmentSumm
 
 export type RemoteRepositoriesPageProps = RemoteCatalogListState<RepositoryDto>
   & RemoteCatalogRequestProps
-  & { onOpenNavigation?: () => void; navigationCollapsed?: boolean; onOpenCommand?: () => void }
+  & { onOpenNavigation?: () => void; navigationCollapsed?: boolean; onOpenCommand?: () => void; canManage?: boolean }
 
 export type RemoteSecretsPageProps = RemoteCatalogListState<SecretDto>
   & RemoteCatalogRequestProps
@@ -334,6 +336,8 @@ export function RemoteExpertsPage({
   const [scope, setScope] = useState<'mine' | 'all'>('all')
   const [query, setQuery] = useState('')
   const [menuId, setMenuId] = useState<string>()
+  const [filterOpen, setFilterOpen] = useState(false)
+  const [filters, setFilters] = useState({ shared: false, pinned: false, hasAutomations: false })
   const [checkedIds, setCheckedIds] = useState<ReadonlySet<string>>(new Set())
   const [pinnedIds, setPinnedIds] = useState<ReadonlySet<string>>(readExpertPins)
   const [automations, setAutomations] = useState<AutomationDto[]>([])
@@ -378,11 +382,14 @@ export function RemoteExpertsPage({
     const normalized = query.trim().toLowerCase()
     return items
       .filter((expert) => (scope === 'mine' ? expert.visibility === 'private' : true))
+      .filter((expert) => !filters.shared || expert.visibility === 'space')
+      .filter((expert) => !filters.pinned || pinnedIds.has(expert.id))
+      .filter((expert) => !filters.hasAutomations || (automationsByExpert.get(expert.id) ?? []).length > 0)
       .filter((expert) => !normalized
         || expert.name.toLowerCase().includes(normalized)
         || expert.description.toLowerCase().includes(normalized))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-  }, [items, query, scope])
+  }, [automationsByExpert, filters, items, pinnedIds, query, scope])
 
   const allChecked = rows.length > 0 && rows.every((expert) => checkedIds.has(expert.id))
   const toggleAllChecked = () => {
@@ -425,6 +432,14 @@ export function RemoteExpertsPage({
           <div className="prototype-segmented" aria-label={text(locale, 'Expert 范围', 'Expert scope')}>
             <button type="button" className={scope === 'mine' ? 'active' : ''} aria-pressed={scope === 'mine'} onClick={() => setScope('mine')}>{text(locale, '我的', 'Mine')}</button>
             <button type="button" className={scope === 'all' ? 'active' : ''} aria-pressed={scope === 'all'} onClick={() => setScope('all')}>{text(locale, '全部', 'All')}</button>
+          </div>
+          <div className="prototype-expert-filter">
+            <button type="button" className="prototype-ghost-button" aria-expanded={filterOpen} onClick={() => setFilterOpen((open) => !open)}>☰ {text(locale, '筛选', 'Filter')} ▾</button>
+            {filterOpen ? <div className="prototype-expert-filter-menu" role="menu">
+              <label><input type="checkbox" checked={filters.shared} onChange={(event) => setFilters({ ...filters, shared: event.target.checked })} />{text(locale, '共享的', 'Shared')}</label>
+              <label><input type="checkbox" checked={filters.pinned} onChange={(event) => setFilters({ ...filters, pinned: event.target.checked })} />{text(locale, '已固定', 'Starred')}</label>
+              <label><input type="checkbox" checked={filters.hasAutomations} onChange={(event) => setFilters({ ...filters, hasAutomations: event.target.checked })} />{text(locale, '有 Automations', 'Has automations')}</label>
+            </div> : null}
           </div>
           <label className="prototype-automation-search"><PrototypeSearchIcon aria-hidden="true" /><span className="sr-only">{text(locale, '搜索 Expert', 'Search experts')}</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={text(locale, '搜索 Expert…', 'Search experts…')} /></label>
         </div>
@@ -1109,6 +1124,9 @@ export function RemoteEnvironmentsPage({
   const [checkedIds, setCheckedIds] = useState<ReadonlySet<string>>(new Set())
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingExisting, setEditingExisting] = useState(false)
+  const [createMenuOpen, setCreateMenuOpen] = useState(false)
+  const [createType, setCreateType] = useState<'cloud' | 'daemon'>('cloud')
+  const createTriggerRef = useRef<HTMLButtonElement | null>(null)
   const [busy, setBusy] = useState<'retry' | 'disable' | 'archive'>()
   const [mutationError, setMutationError] = useState<Error>()
   const editorReturnFocusRef = useRef<HTMLElement | null>(null)
@@ -1161,11 +1179,16 @@ export function RemoteEnvironmentsPage({
     detail.retry()
     onRetry()
   }, [detail, onRetry])
+  const openCreateMenu = () => setCreateMenuOpen((open) => !open)
   const openEditor = (editing: boolean) => {
+    setCreateMenuOpen(false)
     const activeElement = document.activeElement
-    editorReturnFocusRef.current = activeElement && 'focus' in activeElement
-      ? activeElement as HTMLElement
-      : null
+    const fromCreateMenu = activeElement instanceof HTMLElement && activeElement.closest('.prototype-expert-filter-menu') !== null
+    editorReturnFocusRef.current = fromCreateMenu
+      ? createTriggerRef.current
+      : activeElement && 'focus' in activeElement
+        ? activeElement as HTMLElement
+        : null
     setEditingExisting(editing)
     setEditorOpen(true)
   }
@@ -1238,7 +1261,13 @@ export function RemoteEnvironmentsPage({
               'Environment 是带有预装工具、依赖和仓库的可复用运行环境快照，每个会话都在其中运行。Daemon pool 将本地运行的 daemon 分组，会话可以指向特定 daemon。',
               'An environment is a reusable VM snapshot with pre-installed tools, packages, and repositories. Each session runs inside one. Daemon pools group locally-running daemons so sessions can target a specific daemon.')}</p>
           </div>
-          {canManage ? <button type="button" className="prototype-primary-button" onClick={() => openEditor(false)}>{text(locale, '创建环境', 'Create an environment')}</button> : null}
+          {canManage ? <div className="prototype-expert-filter">
+            <button ref={createTriggerRef} type="button" className="prototype-primary-button" aria-label={text(locale, '创建环境', 'Create an environment')} aria-expanded={createMenuOpen} onClick={openCreateMenu}>{text(locale, '创建环境', 'Create an environment')} ▾</button>
+            {createMenuOpen ? <div className="prototype-expert-filter-menu" role="menu">
+              <button type="button" role="menuitem" className="prototype-environment-create-option" onClick={() => { setCreateType('cloud'); openEditor(false) }}><PrototypeCloudIcon aria-hidden="true" /><span><strong>{text(locale, 'Cloud 沙箱', 'Cloud sandbox')}</strong><small>{text(locale, '托管 VM 快照', 'Managed VM snapshot')}</small></span></button>
+              <button type="button" role="menuitem" className="prototype-environment-create-option" onClick={() => { setCreateType('daemon'); openEditor(false) }}><PrototypeDaemonIcon aria-hidden="true" /><span><strong>{text(locale, 'Daemon pool', 'Daemon pool')}</strong><small>{text(locale, '自托管本地进程', 'Self-hosted local daemons')}</small></span></button>
+            </div> : null}
+          </div> : null}
         </div>
 
         <button type="button" className="prototype-advisor-banner" disabled={!onOpenAdvisor && !onOpenCommand} onClick={onOpenAdvisor ?? onOpenCommand}>
@@ -1302,6 +1331,8 @@ export function RemoteEnvironmentsPage({
 
         {state === 'ready' && (items.length > 0 || editorOpen) ? <section className="prototype-environment-detail-panel" aria-label={text(locale, '运行环境详情', 'Environment detail')}>
           {editorOpen ? <EnvironmentEditor
+            key={editingExisting ? environment?.id ?? 'edit' : `create-${createType}`}
+            initialType={editingExisting ? undefined : createType}
             environment={editingExisting ? environment : undefined}
             organizationId={organizationId}
             spaceId={spaceId}
@@ -1349,10 +1380,10 @@ type EnvironmentEditorState = {
   daemonPoolId: string
 }
 
-function editorState(environment?: EnvironmentDetailDto): EnvironmentEditorState {
+function editorState(environment?: EnvironmentDetailDto, initialType?: 'cloud' | 'daemon'): EnvironmentEditorState {
   const revision = environment?.latestRevision
   return {
-    type: environment?.type ?? 'cloud',
+    type: environment?.type ?? initialType ?? 'cloud',
     name: environment?.name ?? '',
     description: environment?.description ?? '',
     visibility: environment?.visibility ?? 'space',
@@ -1378,8 +1409,10 @@ function EnvironmentEditor({
   onRetrySecrets,
   onCancel,
   onSaved,
+  initialType,
 }: {
   environment?: EnvironmentDetailDto
+  initialType?: 'cloud' | 'daemon'
   organizationId: string
   spaceId: string
   auth: CosmosApiAuthContext
@@ -1391,7 +1424,7 @@ function EnvironmentEditor({
   onSaved: (environment: EnvironmentDetailDto) => void
 }) {
   const { locale } = usePreferences()
-  const [state, setState] = useState(() => editorState(environment))
+  const [state, setState] = useState(() => editorState(environment, initialType))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<Error>()
   const nameInputRef = useRef<HTMLInputElement>(null)
@@ -1646,10 +1679,33 @@ export function RemoteRepositoriesPage({
   onOpenNavigation,
   navigationCollapsed,
   onOpenCommand,
+  canManage,
 }: RemoteRepositoriesPageProps) {
   const { locale } = usePreferences()
   const state = listState(loading, ready, error)
-  void organizationId; void spaceId; void auth; void credentialVersion
+  const [confirmArchiveId, setConfirmArchiveId] = useState<string>()
+  const [mutating, setMutating] = useState(false)
+  const [mutationError, setMutationError] = useState<Error | null>(null)
+  const requestAuth = useMemo<CosmosApiAuthContext>(() => ({
+    accessToken: auth.accessToken,
+    requestIdentity: auth.requestIdentity,
+    onUnauthorized: auth.onUnauthorized,
+  }), [auth.accessToken, auth.onUnauthorized, auth.requestIdentity])
+  void credentialVersion
+
+  const archiveRow = useCallback(async (item: RepositoryDto) => {
+    setMutating(true)
+    setMutationError(null)
+    try {
+      await archiveRepository(organizationId, spaceId, item.id, item.version, requestAuth)
+      setConfirmArchiveId(undefined)
+      onRetry()
+    } catch (cause) {
+      setMutationError(cause instanceof Error ? cause : new Error(String(cause)))
+    } finally {
+      setMutating(false)
+    }
+  }, [onRetry, organizationId, requestAuth, spaceId])
 
   const providerLabel = (provider: RepositoryDto['provider']) => provider === 'github' ? 'GitHub' : provider === 'gitlab' ? 'GitLab' : text(locale, '未知', 'Unknown')
 
@@ -1677,11 +1733,12 @@ export function RemoteRepositoriesPage({
               <th>{text(locale, '默认分支', 'Default branch')}</th>
               <th className="col-status">{text(locale, '状态', 'Status')}</th>
               <th>{text(locale, '更新时间', 'Updated')}</th>
+              {canManage ? <th className="col-menu"><span className="sr-only">{text(locale, '操作', 'Actions')}</span></th> : null}
             </tr></thead>
             <tbody>
-              {state === 'loading' ? <tr><td colSpan={5} className="prototype-automation-state"><LoaderCircle className="spin" aria-hidden="true" />{text(locale, '加载中…', 'Loading…')}</td></tr> : null}
-              {state === 'error' ? <tr><td colSpan={5} className="prototype-automation-state prototype-automation-state--error"><span role="alert">{text(locale, '无法加载仓库。', 'Unable to load Repositories.')}{error ? ` ${error.message}` : ''}</span><button type="button" onClick={onRetry}><RefreshCw aria-hidden="true" />{text(locale, '重试', 'Retry')}</button></td></tr> : null}
-              {state === 'ready' && !items.length ? <tr><td colSpan={5} className="prototype-automation-state">{text(locale, '暂无仓库。通过 Integrations 连接 GitHub 或 GitLab 后，仓库会显示在这里。', 'No repositories yet. Connect GitHub or GitLab from Integrations and repositories will appear here.')}</td></tr> : null}
+              {state === 'loading' ? <tr><td colSpan={canManage ? 6 : 5} className="prototype-automation-state"><LoaderCircle className="spin" aria-hidden="true" />{text(locale, '加载中…', 'Loading…')}</td></tr> : null}
+              {state === 'error' ? <tr><td colSpan={canManage ? 6 : 5} className="prototype-automation-state prototype-automation-state--error"><span role="alert">{text(locale, '无法加载仓库。', 'Unable to load Repositories.')}{error ? ` ${error.message}` : ''}</span><button type="button" onClick={onRetry}><RefreshCw aria-hidden="true" />{text(locale, '重试', 'Retry')}</button></td></tr> : null}
+              {state === 'ready' && !items.length ? <tr><td colSpan={canManage ? 6 : 5} className="prototype-automation-state">{text(locale, '暂无仓库。通过 Integrations 连接 GitHub 或 GitLab 后，仓库会显示在这里。', 'No repositories yet. Connect GitHub or GitLab from Integrations and repositories will appear here.')}</td></tr> : null}
               {state === 'ready' ? items.map((item) => <tr key={item.id}>
                 <td><div className="prototype-expert-name-cell">
                   <span className="prototype-automation-expert-icon">{item.provider === 'github' ? <PrototypeGitHubIcon aria-hidden="true" /> : <PrototypeHexIcon aria-hidden="true" />}</span>
@@ -1694,11 +1751,17 @@ export function RemoteRepositoriesPage({
                 <td><span className="prototype-environment-repo-pill">{item.defaultBranch}</span></td>
                 <td className="col-status"><span className={`prototype-environment-status${item.connectionStatus === 'connected' ? ' prototype-environment-status--ready' : item.connectionStatus === 'action_required' ? ' prototype-environment-status--failed' : ''}`}>{item.connectionStatus === 'connected' ? text(locale, '已连接', 'connected') : item.connectionStatus === 'action_required' ? text(locale, '需处理', 'action required') : text(locale, '已归档', 'archived')}</span></td>
                 <td className="muted">{formatDate(item.updatedAt, locale)}</td>
+                {canManage ? <td className="col-menu">
+                  {item.connectionStatus !== 'archived' ? (confirmArchiveId === item.id
+                    ? <div className="prototype-automation-confirm"><span>{text(locale, '确认归档？', 'Archive?')}</span><button type="button" disabled={mutating} onClick={() => setConfirmArchiveId(undefined)}>{text(locale, '取消', 'Cancel')}</button><button type="button" className="danger" disabled={mutating} onClick={() => void archiveRow(item)}>{text(locale, '确认', 'Confirm')}</button></div>
+                    : <button type="button" className="icon-btn prototype-automation-remove" aria-label={text(locale, `归档 ${item.fullName}`, `Archive ${item.fullName}`)} disabled={mutating} onClick={() => setConfirmArchiveId(item.id)}>×</button>) : null}
+                </td> : null}
               </tr>) : null}
             </tbody>
           </table>
         </div>
 
+        {mutationError ? <p className="prototype-automation-error" role="alert">{mutationError.message}</p> : null}
         {state === 'ready' ? <div className="prototype-automation-footer"><span>{items.length} {items.length === 1 ? 'repository' : 'repositories'}</span><div /></div> : null}
       </div>
     </div>
@@ -1967,6 +2030,11 @@ export function RemoteWebhooksPage({
           {canManage ? <button type="button" className="prototype-primary-button" onClick={() => setFormOpen(true)}>{text(locale, '创建 Webhook', 'Create webhook')}</button> : null}
         </div>
 
+        <div className="prototype-webhook-callout">
+          <strong>{text(locale, 'URL 形态：', 'URL form:')}</strong>
+          <code>POST {'{'}webhook.url{'}'} · Authorization: Bearer &lt;signing secret&gt;</code>
+        </div>
+
         {revealedSecret ? <div className="prototype-webhook-callout" role="status">
           <strong>{text(locale, '立即复制——签名密钥只显示一次', 'Copy now — the signing secret is shown once')}</strong>
           <code>{revealedSecret}</code>
@@ -1993,7 +2061,8 @@ export function RemoteWebhooksPage({
               </div>
               <code className="prototype-webhook-url">{item.url}</code>
               <div className="prototype-webhook-card-actions">
-                <button type="button" className="prototype-ghost-button" onClick={() => { navigator.clipboard?.writeText(item.url); setCopied(true); window.setTimeout(() => setCopied(false), 2000) }}>{text(locale, '复制 URL', 'Copy URL')}</button>
+                <button type="button" className="prototype-ghost-button" onClick={() => { navigator.clipboard?.writeText(item.url); setCopied(true); window.setTimeout(() => setCopied(false), 2000) }}>{copied ? text(locale, '已复制', 'Copied') : text(locale, '复制 URL', 'Copy URL')}</button>
+                <button type="button" className="prototype-ghost-button" onClick={() => { navigator.clipboard?.writeText(`curl -X POST '${item.url}' -H 'Authorization: Bearer <signing-secret>' -H 'Content-Type: application/json' -d '{"event":"ping"}'`); setCopied(true); window.setTimeout(() => setCopied(false), 2000) }}>{text(locale, '复制 curl 测试', 'Copy curl test')}</button>
                 {canManage && !archived ? (confirmArchiveId === item.id
                   ? <div className="prototype-automation-confirm"><span>{text(locale, '确认归档？', 'Archive?')}</span><button type="button" disabled={mutating} onClick={() => setConfirmArchiveId(undefined)}>{text(locale, '取消', 'Cancel')}</button><button type="button" className="danger" disabled={mutating} onClick={() => void archiveRow(item)}>{text(locale, '确认', 'Confirm')}</button></div>
                   : <button type="button" className="prototype-ghost-button" disabled={mutating} onClick={() => setConfirmArchiveId(item.id)}>{text(locale, '归档', 'Archive')}</button>) : null}
@@ -2054,6 +2123,7 @@ export function RemoteMcpServersPage({
 }: RemoteMcpServersPageProps) {
   const { locale } = usePreferences()
   const [formOpen, setFormOpen] = useState(false)
+  const [editing, setEditing] = useState<McpServerDto>()
   const [draft, setDraft] = useState<McpDraft>(initialMcpDraft)
   const [mutating, setMutating] = useState(false)
   const [mutationError, setMutationError] = useState<Error | null>(null)
@@ -2066,7 +2136,14 @@ export function RemoteMcpServersPage({
   }), [auth.accessToken, auth.onUnauthorized, auth.requestIdentity])
   void credentialVersion
 
-  const closeForm = useCallback(() => { setDraft(initialMcpDraft); setMutationError(null); setFormOpen(false) }, [])
+  const closeForm = useCallback(() => { setDraft(initialMcpDraft); setMutationError(null); setFormOpen(false); setEditing(undefined) }, [])
+
+  const openEdit = useCallback((item: McpServerDto) => {
+    setEditing(item)
+    setDraft({ name: item.name, transport: item.transport, endpoint: item.endpoint ?? '', command: item.command ?? '' })
+    setMutationError(null)
+    setFormOpen(true)
+  }, [])
 
   const submitServer = useCallback(async () => {
     const name = draft.name.trim()
@@ -2081,12 +2158,18 @@ export function RemoteMcpServersPage({
     setMutating(true)
     setMutationError(null)
     try {
-      await createMcpServer(organizationId, spaceId, {
-        name,
-        transport: draft.transport,
-        endpoint: isStdio ? undefined : target,
-        command: isStdio ? target : undefined,
-      }, crypto.randomUUID(), requestAuth)
+      if (editing) {
+        await updateMcpServer(organizationId, spaceId, editing.id, editing.version, isStdio
+          ? { command: target }
+          : { endpoint: target }, crypto.randomUUID(), requestAuth)
+      } else {
+        await createMcpServer(organizationId, spaceId, {
+          name,
+          transport: draft.transport,
+          endpoint: isStdio ? undefined : target,
+          command: isStdio ? target : undefined,
+        }, crypto.randomUUID(), requestAuth)
+      }
       closeForm()
       onRetry()
     } catch (cause) {
@@ -2094,7 +2177,7 @@ export function RemoteMcpServersPage({
     } finally {
       setMutating(false)
     }
-  }, [closeForm, draft, locale, onRetry, organizationId, requestAuth, spaceId])
+  }, [closeForm, draft, editing, locale, onRetry, organizationId, requestAuth, spaceId])
 
   const archiveRow = useCallback(async (item: McpServerDto) => {
     setMutating(true)
@@ -2147,9 +2230,12 @@ export function RemoteMcpServersPage({
                 <td className="muted"><code className="prototype-mcp-endpoint">{item.transport === 'stdio' ? item.command : item.endpoint}</code></td>
                 <td className="muted">{item.toolCount}</td>
                 <td><span className={`prototype-environment-status${item.connectionStatus === 'connected' ? ' prototype-environment-status--ready' : item.connectionStatus === 'action_required' ? ' prototype-environment-status--failed' : ''}`}>{item.connectionStatus === 'connected' ? text(locale, '已连接', 'connected') : item.connectionStatus === 'action_required' ? text(locale, '需处理', 'action required') : text(locale, '已归档', 'archived')}</span></td>
-                {canManage ? <td className="col-menu">
+                {canManage ? <td className="col-menu" style={{ whiteSpace: 'nowrap' }}>
                   {confirmArchiveId === item.id ? <div className="prototype-automation-confirm"><span>{text(locale, '确认移除？', 'Remove?')}</span><button type="button" disabled={mutating} onClick={() => setConfirmArchiveId(undefined)}>{text(locale, '取消', 'Cancel')}</button><button type="button" className="danger" disabled={mutating} onClick={() => void archiveRow(item)}>{text(locale, '确认', 'Confirm')}</button></div>
-                    : <button type="button" className="icon-btn prototype-automation-remove" aria-label={text(locale, `移除 ${item.name}`, `Remove ${item.name}`)} disabled={mutating || item.connectionStatus === 'archived'} onClick={() => setConfirmArchiveId(item.id)}>×</button>}
+                    : <>
+                      <button type="button" className="prototype-ghost-button" disabled={mutating || item.connectionStatus === 'archived'} onClick={() => openEdit(item)}>{text(locale, '编辑', 'Edit')}</button>
+                      <button type="button" className="icon-btn prototype-automation-remove" aria-label={text(locale, `移除 ${item.name}`, `Remove ${item.name}`)} disabled={mutating || item.connectionStatus === 'archived'} onClick={() => setConfirmArchiveId(item.id)}>×</button>
+                    </>}
                 </td> : null}
               </tr>) : null}
             </tbody>
@@ -2163,12 +2249,12 @@ export function RemoteMcpServersPage({
 
     {formOpen ? <div className="prototype-drawer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !mutating) closeForm() }}>
       <form className="prototype-automation-drawer" role="dialog" aria-modal="true" aria-label={text(locale, '新增 MCP Server', 'Add MCP server')} onKeyDown={(event) => { if (event.key === 'Escape' && !mutating) closeForm() }} onSubmit={(event) => { event.preventDefault(); void submitServer() }}>
-        <header className="prototype-drawer-header"><h2>{text(locale, '新增 MCP Server', 'Add MCP server')}</h2><button type="button" className="icon-btn" aria-label={text(locale, '关闭', 'Close')} disabled={mutating} onClick={closeForm}>×</button></header>
+        <header className="prototype-drawer-header"><h2>{editing ? text(locale, '编辑 MCP Server', 'Edit MCP server') : text(locale, '新增 MCP Server', 'Add MCP server')}</h2><button type="button" className="icon-btn" aria-label={text(locale, '关闭', 'Close')} disabled={mutating} onClick={closeForm}>×</button></header>
         <div className="prototype-drawer-body">
           <label className="prototype-field-label" htmlFor="mcp-name">{text(locale, '名称', 'Name')}</label>
-          <input id="mcp-name" className="prototype-field" autoFocus required value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Internal Docs MCP" />
+          <input id="mcp-name" className="prototype-field" autoFocus={!editing} required disabled={Boolean(editing)} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Internal Docs MCP" />
           <label className="prototype-field-label" htmlFor="mcp-transport">Transport</label>
-          <select id="mcp-transport" className="prototype-field-select" value={draft.transport} onChange={(event) => setDraft({ ...draft, transport: event.target.value as McpServerDto['transport'] })}>
+          <select id="mcp-transport" className="prototype-field-select" disabled={Boolean(editing)} value={draft.transport} onChange={(event) => setDraft({ ...draft, transport: event.target.value as McpServerDto['transport'] })}>
             <option value="http">HTTP</option>
             <option value="sse">SSE</option>
             <option value="stdio">stdio</option>
@@ -2184,7 +2270,7 @@ export function RemoteMcpServersPage({
         </div>
         <footer className="prototype-drawer-footer">
           <button type="button" className="prototype-ghost-button" disabled={mutating} onClick={closeForm}>{text(locale, '取消', 'Cancel')}</button>
-          <button type="submit" className="prototype-primary-button" disabled={mutating}>{mutating ? text(locale, '新增中…', 'Adding…') : text(locale, '新增 Server', 'Add server')}</button>
+          <button type="submit" className="prototype-primary-button" disabled={mutating}>{mutating ? text(locale, '保存中…', 'Saving…') : editing ? text(locale, '保存修改', 'Save changes') : text(locale, '新增 Server', 'Add server')}</button>
         </footer>
       </form>
     </div> : null}
@@ -2468,6 +2554,21 @@ export function RemoteIntegrationsPage({
     }
   }, [onRetry, organizationId, requestAuth, spaceId])
 
+  const disconnect = useCallback(async (integration: IntegrationDto) => {
+    setWorkingId(integration.id)
+    setMutationError(null)
+    try {
+      await updateIntegration(organizationId, spaceId, integration.id, integration.version, {
+        connectionStatus: 'disconnected',
+      }, crypto.randomUUID(), requestAuth)
+      onRetry()
+    } catch (cause) {
+      setMutationError(cause instanceof Error ? cause : new Error(String(cause)))
+    } finally {
+      setWorkingId(undefined)
+    }
+  }, [onRetry, organizationId, requestAuth, spaceId])
+
   const archiveSelected = useCallback(async (integration: IntegrationDto) => {
     setWorkingId(integration.id)
     setMutationError(null)
@@ -2525,7 +2626,11 @@ export function RemoteIntegrationsPage({
                 </div>
               </div>
               {canManage ? <div className="prototype-integ-card-actions">
-                <button type="button" className={needsRepair ? 'prototype-primary-button' : 'prototype-ghost-button'} disabled={working} onClick={() => reconnect(integration)}>{working ? text(locale, '处理中…', 'Working…') : needsRepair ? text(locale, '修复连接', 'Repair') : text(locale, '标记已连接', 'Mark connected')}</button>
+                {needsRepair
+                  ? <button type="button" className="prototype-primary-button" disabled={working} onClick={() => reconnect(integration)}>{working ? text(locale, '处理中…', 'Working…') : text(locale, '修复连接', 'Repair')}</button>
+                  : integration.connectionStatus === 'connected'
+                    ? <button type="button" role="switch" aria-checked="true" aria-label={text(locale, `断开 ${integration.name}`, `Disconnect ${integration.name}`)} className="prototype-automation-toggle" disabled={working} onClick={() => void disconnect(integration)}><span /></button>
+                    : <button type="button" className="prototype-ghost-button" disabled={working} onClick={() => reconnect(integration)}>{working ? text(locale, '连接中…', 'Connecting…') : text(locale, '连接 ↗', 'Connect ↗')}</button>}
                 <button type="button" className="icon-btn prototype-automation-remove" aria-label={text(locale, `归档 ${integration.name}`, `Archive ${integration.name}`)} disabled={working} onClick={() => void archiveSelected(integration)}>×</button>
               </div> : null}
             </div>

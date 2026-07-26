@@ -26,6 +26,7 @@ import {
   FileVersionListResponseSchema,
   MeResponseSchema,
   RepositoryDtoSchema,
+  RepositoryMutationResponseSchema,
   RepositoryListResponseSchema,
   RuntimeCapabilitiesSchema,
   RetryTurnResponseSchema,
@@ -106,6 +107,7 @@ import {
   type SessionWorkerListResponse,
   type CreateSpaceRequestInput,
   type RepositoryDto,
+  type RepositoryMutationResponse,
   type RepositoryListResponse,
   type SecretDto,
   type SecretListResponse,
@@ -119,6 +121,7 @@ import {
   type McpServerListResponse,
   type McpServerMutationResponse,
   type CreateMcpServerRequest,
+  type UpdateMcpServerRequest,
   type DaemonDto,
   type DaemonListResponse,
   type DaemonMutationResponse,
@@ -1559,6 +1562,19 @@ export function getRepository(
   })
 }
 
+export function archiveRepository(
+  organizationId: string,
+  spaceId: string,
+  repositoryId: string,
+  version: number,
+  auth?: CosmosApiAuthContext,
+): Promise<RepositoryMutationResponse | null> {
+  return request(`${repositoriesPath(organizationId, spaceId)}/${encodeURIComponent(repositoryId)}`, {
+    method: 'DELETE',
+    headers: { Accept: 'application/json', 'If-Match': `"${version}"` },
+  }, RepositoryMutationResponseSchema.nullable(), auth)
+}
+
 export function listSecrets(
   organizationId: string,
   spaceId: string,
@@ -1748,6 +1764,27 @@ export function createMcpServer(
     assertControlPlaneScope(response.server, organizationId, spaceId, 'McpServer')
     return response
   })
+}
+
+export function updateMcpServer(
+  organizationId: string,
+  spaceId: string,
+  mcpServerId: string,
+  version: number,
+  input: UpdateMcpServerRequest,
+  idempotencyKey: string,
+  auth?: CosmosApiAuthContext,
+): Promise<McpServerMutationResponse | null> {
+  return request(`${mcpServersPath(organizationId, spaceId)}/${encodeURIComponent(mcpServerId)}`, {
+    method: 'PATCH',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': `"${version}"`,
+    },
+    body: JSON.stringify(input),
+  }, McpServerMutationResponseSchema.nullable(), auth)
 }
 
 export function archiveMcpServer(

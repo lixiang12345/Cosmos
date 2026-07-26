@@ -23211,6 +23211,80 @@ code.prototype-detail-value {
   flex-shrink: 0;
 }
 
+.prototype-expert-filter {
+  position: relative;
+  margin-left: auto;
+}
+
+.prototype-expert-filter + .prototype-automation-search {
+  margin-left: 8px;
+}
+
+.prototype-expert-filter-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 190px;
+  padding: 6px;
+  border: 1px solid var(--proto-border-soft, #d0d0d8);
+  border-radius: 10px;
+  background: var(--proto-bg, #fff);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+.prototype-expert-filter-menu label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--proto-text, #1a1a1a);
+  cursor: pointer;
+}
+
+.prototype-expert-filter-menu label:hover {
+  background: var(--proto-surface-hover, #e8e8ec);
+}
+
+.prototype-expert-filter-menu input {
+  accent-color: var(--proto-text, #1a1a1a);
+}
+
+.prototype-environment-create-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  color: var(--proto-muted, #6e6e7a);
+}
+
+.prototype-environment-create-option:hover {
+  background: var(--proto-surface-hover, #e8e8ec);
+}
+
+.prototype-environment-create-option strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--proto-text, #1a1a1a);
+}
+
+.prototype-environment-create-option small {
+  font-size: 12px;
+  color: var(--proto-dim, #a0a0aa);
+}
+
 /* Prototype reskin of the Environment editor and detail while their structure
    (and the Secret-reference validation markup the tests target) stays intact. */
 .prototype-environment-detail-panel .remote-environment-editor > header,
