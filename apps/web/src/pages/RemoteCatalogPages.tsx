@@ -2561,19 +2561,23 @@ export function RemoteDaemonsPage({
 
 const integrationIcons: Record<IntegrationDto['type'], typeof GitBranch> = {
   github: GitBranch,
+  gitlab: GitBranch,
   slack: PlugZap,
   jira: CheckCircle2,
   pagerduty: AlertTriangle,
   linear: Activity,
+  datadog: Activity,
   custom: Wrench,
 }
 
 const integrationTypeLabels: Record<IntegrationDto['type'], string> = {
   github: 'GitHub',
+  gitlab: 'GitLab',
   slack: 'Slack',
   jira: 'Jira',
   pagerduty: 'PagerDuty',
   linear: 'Linear',
+  datadog: 'Datadog',
   custom: 'Custom',
 }
 

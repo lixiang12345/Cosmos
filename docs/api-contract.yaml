@@ -7056,7 +7056,7 @@ components:
           $ref: '#/components/schemas/RuntimeIdentifier'
         type:
           type: string
-          enum: [github, slack, jira, pagerduty, linear, custom]
+          enum: [github, gitlab, slack, jira, pagerduty, linear, datadog, custom]
         name:
           type: string
           minLength: 1
@@ -7135,7 +7135,7 @@ components:
       properties:
         type:
           type: string
-          enum: [github, slack, jira, pagerduty, linear, custom]
+          enum: [github, gitlab, slack, jira, pagerduty, linear, datadog, custom]
         name:
           type: string
           minLength: 1

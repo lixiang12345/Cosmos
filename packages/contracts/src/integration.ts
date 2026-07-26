@@ -3,7 +3,7 @@ import { z } from 'zod'
 const IdentifierSchema = z.string().trim().min(1).max(128)
 const TimestampSchema = z.string().datetime({ offset: true })
 
-export const IntegrationTypeSchema = z.enum(['github', 'slack', 'jira', 'pagerduty', 'linear', 'custom'])
+export const IntegrationTypeSchema = z.enum(['github', 'gitlab', 'slack', 'jira', 'pagerduty', 'linear', 'datadog', 'custom'])
 export type IntegrationType = z.infer<typeof IntegrationTypeSchema>
 
 export const IntegrationConnectionStatusSchema = z.enum(['connected', 'action_required', 'disconnected', 'archived'])

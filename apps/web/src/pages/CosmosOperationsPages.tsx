@@ -560,7 +560,7 @@ export function CosmosHomePage({
         <div className="prototype-shortcuts-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeShortcuts() }}>
           <section ref={shortcutsDialogRef} className="prototype-shortcuts" role="dialog" aria-modal="true" aria-labelledby="prototype-shortcuts-title">
             <header><h2 id="prototype-shortcuts-title">Keyboard shortcuts</h2><button ref={shortcutsCloseRef} type="button" className="icon-btn" aria-label={localize(locale, '关闭', 'Close')} onClick={closeShortcuts}>×</button></header>
-            <div><span>Open command palette</span><kbd>⌘K</kbd><span>New session</span><kbd>⌘⇧O</kbd><span>Toggle left sidebar</span><kbd>⌘.</kbd><span>Enhance prompt</span><kbd>⌘E</kbd></div>
+            <div><span>Open command palette</span><kbd>⌘K</kbd><span>New session</span><kbd>⌘⇧O</kbd><span>Go to sessions</span><kbd>⌘⇧L</kbd><span>Go to files</span><kbd>⌘⇧E</kbd><span>Toggle left sidebar</span><kbd>⌘.</kbd><span>Keyboard shortcuts</span><kbd>⌘/</kbd></div>
           </section>
         </div>
       ) : null}
