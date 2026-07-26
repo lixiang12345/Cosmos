@@ -22,7 +22,6 @@ import {
 import {
   Activity,
   AlertTriangle,
-  ArrowLeft,
   Bot,
   Box,
   CheckCircle2,
@@ -44,7 +43,6 @@ import {
   LoaderCircle,
   LockKeyhole,
   Menu,
-  FilePlus2,
   ListRestart,
   Pencil,
   Plus,
@@ -145,6 +143,8 @@ export type RemoteExpertDetailPageProps = RemoteCatalogRequestProps & {
   sessionCreationEnabled?: boolean
   canManage?: boolean
   onEdit?: () => void
+  navigationCollapsed?: boolean
+  onOpenCommand?: () => void
 }
 
 export type RemoteExpertEditorPageProps = RemoteCatalogRequestProps & {
@@ -593,8 +593,11 @@ export function RemoteExpertDetailPage({
   sessionCreationEnabled = true,
   canManage = false,
   onEdit,
+  navigationCollapsed,
+  onOpenCommand,
 }: RemoteExpertDetailPageProps) {
   const { locale } = usePreferences()
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false)
   const requestAuth = useMemo<CosmosApiAuthContext>(() => ({
     accessToken: auth.accessToken,
     requestIdentity: auth.requestIdentity,
@@ -616,69 +619,97 @@ export function RemoteExpertDetailPage({
   const revision = expert?.publishedRevision
   const startable = expert ? canStartExpert(expert) : false
 
-  return (
-    <main className="cosmos-page remote-catalog-page">
-      <PageHeader
-        icon={Bot}
-        title={expert?.name ?? text(locale, '专家详情', 'Expert detail')}
-        description={expert ? expert.id : text(locale, '服务端 Expert 配置', 'Server-managed Expert configuration')}
-        onOpenNavigation={onOpenNavigation}
-        actions={<>
-          {canManage && onEdit ? <button type="button" className="cosmos-button cosmos-button--secondary" onClick={onEdit}>
-            <Pencil aria-hidden="true" />{text(locale, '编辑', 'Edit')}
-          </button> : null}
-          {startable && sessionCreationEnabled ? (
-            <button type="button" className="cosmos-button cosmos-button--primary" onClick={() => onStartSession(expertId)}>
-              <FilePlus2 aria-hidden="true" />{text(locale, '新建会话', 'New Session')}
-            </button>
-          ) : null}
-        </>}
-      />
-      <div className="cosmos-page__scroll">
-        <button type="button" className="remote-catalog-back" onClick={onBack}>
-          <ArrowLeft aria-hidden="true" />{text(locale, '返回专家库', 'Back to Experts')}
-        </button>
-        {detail.status === 'loading' ? <LoadState status="loading" resource={text(locale, '专家详情', 'Expert detail')} onRetry={detail.retry} /> : null}
-        {detail.status === 'not_found' ? <LoadState status="not_found" resource={text(locale, '专家', 'Expert')} error={detail.error} onRetry={detail.retry} /> : null}
-        {detail.status === 'error' ? <LoadState status="error" resource={text(locale, '专家详情', 'Expert detail')} error={detail.error} onRetry={detail.retry} /> : null}
-        {expert ? (
-          <section className="cosmos-panel remote-detail-panel">
-            <header className="remote-detail-panel__identity">
-              <span className="cosmos-resource-row__icon"><Bot aria-hidden="true" /></span>
-              <div><h2>{expert.name}</h2><p>{expert.description || text(locale, '暂无说明', 'No description')}</p></div>
-              <StatusLabel status={expert.status} />
-            </header>
-            <dl className="remote-detail-specs">
-              <div><dt>{text(locale, '资源版本', 'Resource version')}</dt><dd>v{expert.version}</dd></div>
-              <div><dt>{text(locale, '发布版本', 'Published revision')}</dt><dd>{revision ? `v${revision.revision}` : '—'}</dd></div>
-              <div><dt>{text(locale, '可见范围', 'Visibility')}</dt><dd>{expert.visibility === 'space' ? 'Space' : text(locale, '仅创建者', 'Creator only')}</dd></div>
-              <div><dt>{text(locale, '更新时间', 'Updated')}</dt><dd>{formatDate(expert.updatedAt, locale)}</dd></div>
-            </dl>
-            {revision ? (
-              <>
-                <section className="remote-detail-section">
-                  <header><ServerCog aria-hidden="true" /><h3>{text(locale, '运行配置', 'Runtime')}</h3></header>
-                  <dl className="remote-detail-list">
-                    <div><dt>{text(locale, '模型', 'Model')}</dt><dd>{revision.model}</dd></div>
-                    <div><dt>Environment</dt><dd><code>{revision.environmentId}</code></dd></div>
-                    <div><dt>Environment revision</dt><dd><code>{revision.environmentRevisionId}</code></dd></div>
-                    <div><dt>{text(locale, '仓库覆盖', 'Repository override')}</dt><dd>{revision.allowRepositoryOverride ? text(locale, '允许', 'Allowed') : text(locale, '锁定', 'Locked')}</dd></div>
-                    <div><dt>{text(locale, '基础分支覆盖', 'Base branch override')}</dt><dd>{revision.allowBaseBranchOverride ? text(locale, '允许', 'Allowed') : text(locale, '锁定', 'Locked')}</dd></div>
-                  </dl>
-                </section>
-                <section className="remote-detail-section">
-                  <header><ShieldCheck aria-hidden="true" /><h3>{text(locale, '指令', 'Instructions')}</h3></header>
-                  <pre>{revision.instructions || text(locale, '未配置指令', 'No instructions configured')}</pre>
-                </section>
-              </>
-            ) : (
-              <div className="remote-detail-unavailable"><CircleOff aria-hidden="true" />{text(locale, '当前 Expert 没有可用的已发布版本。', 'This Expert has no available published revision.')}</div>
-            )}
-          </section>
-        ) : null}
+  const description = expert?.description ?? ''
+  const longDescription = description.length > 120
+
+  return <main className="prototype-automation-page">
+    <PrototypePageTopbar
+      crumb={expert ? `Experts · ${expert.name}` : 'Experts'}
+      navigationCollapsed={navigationCollapsed}
+      onOpenNavigation={onOpenNavigation}
+      onOpenCommand={onOpenCommand}
+    />
+    <div className="prototype-automation-viewport">
+      <div className="prototype-automation-content prototype-expert-detail">
+        <button type="button" className="prototype-expert-back" onClick={onBack}>← {text(locale, '全部 Experts', 'All Experts')}</button>
+
+        {detail.status === 'loading' ? <div className="prototype-automation-state" role="status"><LoaderCircle className="spin" aria-hidden="true" />{text(locale, '正在加载专家详情…', 'Loading Expert detail…')}</div> : null}
+        {detail.status === 'not_found' ? <div className="prototype-automation-state prototype-automation-state--error"><span role="alert">{text(locale, '未找到专家。', 'Expert not found.')}</span><button type="button" onClick={detail.retry}><RefreshCw aria-hidden="true" />{text(locale, '重试', 'Retry')}</button></div> : null}
+        {detail.status === 'error' ? <div className="prototype-automation-state prototype-automation-state--error"><span role="alert">{text(locale, '无法加载专家详情。', 'Unable to load Expert detail.')}{detail.error ? ` ${detail.error.message}` : ''}</span><button type="button" onClick={detail.retry}><RefreshCw aria-hidden="true" />{text(locale, '重试', 'Retry')}</button></div> : null}
+
+        {expert ? <>
+          <div className="prototype-expert-detail-head">
+            <div className="prototype-expert-detail-head-main">
+              <div className="prototype-expert-name-line">
+                <span className="prototype-expert-tag">{expert.visibility === 'space' ? 'Team' : text(locale, '私有', 'Private')}</span>
+                {expert.status !== 'published' ? <span className="prototype-expert-tag">{expert.status}</span> : null}
+              </div>
+              <h1 className="prototype-expert-detail-title">{expert.name}</h1>
+              <p className="prototype-expert-detail-desc">
+                {longDescription && !descriptionExpanded ? `${description.slice(0, 120)}…` : description || text(locale, '暂无说明', 'No description')}
+                {longDescription ? <button type="button" className="prototype-expert-text-button" onClick={() => setDescriptionExpanded((value) => !value)}>{descriptionExpanded ? text(locale, '收起', 'Show less') : text(locale, '展开', 'Show more')}</button> : null}
+              </p>
+              <p className="prototype-expert-detail-meta">{text(locale, `更新于 ${formatDate(expert.updatedAt, locale)} · v${expert.version}`, `Updated ${formatDate(expert.updatedAt, locale)} · v${expert.version}`)}</p>
+            </div>
+            <div className="prototype-expert-detail-actions">
+              {canManage && onEdit ? <button type="button" className="prototype-ghost-button" onClick={onEdit}>{text(locale, '编辑', 'Edit')}</button> : null}
+              {startable && sessionCreationEnabled ? <button type="button" className="prototype-primary-button" onClick={() => onStartSession(expertId)}>{text(locale, '新建会话', 'New Session')}</button> : null}
+            </div>
+          </div>
+
+          {revision ? <>
+            <div className="prototype-expert-section">
+              <div className="prototype-expert-section-intro">
+                <h2>System</h2>
+                <p>{text(locale, 'Agent 如何思考、在哪里运行、由哪个模型驱动。', 'How the agent thinks, where it runs, and which model powers it.')}</p>
+              </div>
+              <div className="prototype-expert-section-fields">
+                <div className="prototype-expert-field-pair">
+                  <div>
+                    <span className="prototype-field-label">Environment</span>
+                    <p className="prototype-expert-detail-value"><code>{revision.environmentId}</code></p>
+                    <p className="prototype-expert-hint">{text(locale, '版本', 'Revision')} <code>{revision.environmentRevisionId}</code></p>
+                  </div>
+                  <div>
+                    <span className="prototype-field-label">{text(locale, '模型', 'Model')}</span>
+                    <p className="prototype-expert-detail-value">{revision.model}</p>
+                  </div>
+                </div>
+                <span className="prototype-field-label">{text(locale, '系统提示词', 'System Prompt')}</span>
+                <pre className="prototype-expert-detail-prompt">{revision.instructions || text(locale, '未配置指令', 'No instructions configured')}</pre>
+              </div>
+            </div>
+
+            <div className="prototype-expert-section">
+              <div className="prototype-expert-section-intro">
+                <h2>{text(locale, '能力', 'Capabilities')}</h2>
+                <p>{text(locale, '会话中 Agent 可使用的能力。', 'Capabilities the agent can reach during a session.')}</p>
+              </div>
+              <div className="prototype-expert-section-fields">
+                <div className="prototype-expert-chip-box">
+                  {revision.capabilities.length ? revision.capabilities.map((capability) => <span className="prototype-expert-chip" key={capability}>
+                    <span className="prototype-expert-chip-icon"><PrototypeHexIcon aria-hidden="true" /></span>{capability}
+                  </span>) : <span className="prototype-expert-chip-empty">{text(locale, '未开放任何能力', 'No capabilities granted')}</span>}
+                </div>
+                <div className="prototype-expert-policy-row">
+                  <span><strong>{text(locale, '仓库覆盖', 'Repository override')}</strong></span>
+                  <span className="prototype-expert-tag">{revision.allowRepositoryOverride ? text(locale, '允许', 'Allowed') : text(locale, '锁定', 'Locked')}</span>
+                </div>
+                <div className="prototype-expert-policy-row">
+                  <span><strong>{text(locale, '基础分支覆盖', 'Base branch override')}</strong></span>
+                  <span className="prototype-expert-tag">{revision.allowBaseBranchOverride ? text(locale, '允许', 'Allowed') : text(locale, '锁定', 'Locked')}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="prototype-expert-detail-footer">
+              {startable && sessionCreationEnabled ? <button type="button" className="prototype-ghost-button" onClick={() => onStartSession(expertId)}>{text(locale, '发起会话', 'Start session')}</button> : null}
+            </div>
+          </> : <div className="prototype-automation-state">{text(locale, '当前 Expert 没有可用的已发布版本。', 'This Expert has no available published revision.')}</div>}
+        </> : null}
       </div>
-    </main>
-  )
+    </div>
+  </main>
 }
 
 type ExpertEditorForm = {

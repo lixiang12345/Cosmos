@@ -483,9 +483,9 @@ describe('remote Catalog pages', () => {
       .mockResolvedValueOnce(draftExpertDetail)
     render(withPreferences(<RemoteExpertDetailPage {...expertDetailProps()} />))
 
-    expect(await screen.findByText('未找到专家')).toBeInTheDocument()
+    expect(await screen.findByText('未找到专家。')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '重试' }))
-    expect(await screen.findByRole('heading', { level: 2, name: draftExpertDetail.name })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: draftExpertDetail.name })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '新建会话' })).not.toBeInTheDocument()
     expect(getExpert).toHaveBeenCalledTimes(2)
   })

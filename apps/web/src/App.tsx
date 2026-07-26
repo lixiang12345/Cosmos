@@ -913,6 +913,8 @@ function RemoteExpertRoute({
   sessionCreationEnabled,
   canManage,
   onEdit,
+  navigationCollapsed,
+  onOpenCommand,
 }: {
   organizationId: string
   spaceId: string
@@ -926,6 +928,8 @@ function RemoteExpertRoute({
   sessionCreationEnabled: boolean
   canManage: boolean
   onEdit: (expertId: string) => void
+  navigationCollapsed?: boolean
+  onOpenCommand?: () => void
 }) {
   const { expertId } = useParams()
   const auth = useMemo(
@@ -946,6 +950,8 @@ function RemoteExpertRoute({
       sessionCreationEnabled={sessionCreationEnabled}
       canManage={canManage}
       onEdit={() => onEdit(expertId)}
+      navigationCollapsed={navigationCollapsed}
+      onOpenCommand={onOpenCommand}
     />
   )
 }
@@ -2152,7 +2158,7 @@ function CosmosApp() {
         } />
         <Route path="/experts/:expertId" element={demoMode
           ? <ExpertEditorRoute store={scopedExpertStore} onStoreChange={mergeScopedExpertStore} onOpenNavigation={openNavigation} onBack={() => navigate('/experts')} onStartSession={openNewTask} onNotify={setToast} />
-          : <RemoteExpertRoute organizationId={organizationId} spaceId={activeSpace.id} accessToken={accessToken} credentialVersion={credentialVersion} requestIdentity={requestIdentity} handleUnauthorized={handleUnauthorized} onOpenNavigation={openNavigation} onBack={() => navigate('/experts')} onStartSession={openNewTask} sessionCreationEnabled={sessionCreationEnabled} canManage={expertManagementEnabled} onEdit={(expertId) => navigate(`/experts/${expertId}/edit`)} />} />
+          : <RemoteExpertRoute organizationId={organizationId} spaceId={activeSpace.id} accessToken={accessToken} credentialVersion={credentialVersion} requestIdentity={requestIdentity} handleUnauthorized={handleUnauthorized} onOpenNavigation={openNavigation} onBack={() => navigate('/experts')} onStartSession={openNewTask} sessionCreationEnabled={sessionCreationEnabled} canManage={expertManagementEnabled} onEdit={(expertId) => navigate(`/experts/${expertId}/edit`)} navigationCollapsed={sidebarCollapsed} onOpenCommand={() => setCommandOpen(true)} />} />
         <Route path="/experts/new" element={demoMode
           ? <Navigate to="/experts" replace />
           : expertManagementEnabled ? <RemoteExpertEditorRoute organizationId={organizationId} spaceId={activeSpace.id} accessToken={accessToken} credentialVersion={credentialVersion} requestIdentity={requestIdentity} handleUnauthorized={handleUnauthorized} environments={catalog.environments.items} onOpenNavigation={openNavigation} onBack={() => navigate('/experts')} onCreated={(expertId) => navigate(`/experts/${expertId}/edit`, { replace: true })} onArchived={() => navigate('/experts', { replace: true })} onCatalogChange={catalog.experts.retry} navigationCollapsed={sidebarCollapsed} onOpenCommand={() => setCommandOpen(true)} onOpenAdvisor={() => navigate('/home')} /> : <Navigate to="/experts" replace />} />
