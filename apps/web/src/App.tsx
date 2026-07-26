@@ -303,6 +303,8 @@ function SessionRoute({
   demoMode,
   locale,
   onOpenNavigation,
+  navigationCollapsed,
+  onOpenCommand,
   onSessionObserved,
   onSessionConcealed,
   onDecision,
@@ -323,6 +325,8 @@ function SessionRoute({
   demoMode: boolean
   locale: 'zh' | 'en'
   onOpenNavigation: () => void
+  navigationCollapsed: boolean
+  onOpenCommand: () => void
   onSessionObserved: (session: SessionDto) => void
   onSessionConcealed: (sessionId: string) => void
   onDecision: (runId: string, decision: 'approved' | 'changes') => void
@@ -691,6 +695,9 @@ function SessionRoute({
         key={resolvedRun.id}
         run={resolvedRun}
         onOpenNavigation={onOpenNavigation}
+        navigationCollapsed={navigationCollapsed}
+        onOpenCommand={onOpenCommand}
+        onBack={() => navigate('/sessions')}
         onDecision={onDecision}
         onRetry={onRetry}
         onPause={onPause}
@@ -740,6 +747,8 @@ function SessionRoute({
         onOpenFiles={() => navigate(`/sessions/${resolvedSession.id}/files`)}
         onOpenWorkers={() => navigate(`/sessions/${resolvedSession.id}/workers`)}
         onOpenNavigation={onOpenNavigation}
+        navigationCollapsed={navigationCollapsed}
+        onOpenCommand={onOpenCommand}
         onBack={() => navigate('/sessions')}
         advisorPlans={advisorPlans.plans}
         advisorPlansStatus={advisorPlans.status}
@@ -1947,17 +1956,20 @@ function CosmosApp() {
         <Route path="/sessions" element={
           <SessionsPage
             runs={scopedRuns}
+            spaceName={activeSpace.name}
             loadState={sessionsState}
             loadError={sessionsError}
             managementEnabled={demoMode || sessionCreationEnabled}
             favoritesEnabled={demoMode}
             deletionEnabled={demoMode}
             sessionCreationEnabled={sessionCreationEnabled}
+            navigationCollapsed={sidebarCollapsed}
             hasMore={!demoMode && sessionsRequest?.key === sessionsRequestKey && Boolean(sessionsRequest.nextCursor)}
             loadingMore={!demoMode && sessionsRequest?.key === sessionsRequestKey && sessionsRequest.loadingMore}
             onLoadMore={loadMoreSessions}
             onRetry={() => setSessionsRetryVersion((version) => version + 1)}
             onOpenNavigation={openNavigation}
+            onOpenCommand={() => setCommandOpen(true)}
             onNewTask={openNewTask}
             onOpenSession={openSession}
             onRename={renameSession}
@@ -1981,6 +1993,8 @@ function CosmosApp() {
             demoMode={demoMode}
             locale={locale}
             onOpenNavigation={openNavigation}
+            navigationCollapsed={sidebarCollapsed}
+            onOpenCommand={() => setCommandOpen(true)}
             onSessionObserved={observeRemoteSession}
             onSessionConcealed={concealRemoteSession}
             onDecision={decide}

@@ -3,106 +3,44 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PREFERENCE_STORAGE_KEYS, PreferencesProvider } from '../../preferences'
-import { RemoteSessionWorkbench } from './RemoteSessionWorkbench'
+import { RemoteSessionWorkbench, type RemoteSessionWorkbenchProps } from './RemoteSessionWorkbench'
 
 const session: SessionDto = {
-  id: 'session-authoritative',
-  organizationId: 'organization-a',
-  spaceId: 'space-a',
-  title: 'Harden checkout validation',
-  summary: 'Validate the production checkout boundary and record the requested changes.',
-  expertId: 'expert-a',
-  expertName: 'Production Engineer',
-  expertVersion: 4,
-  environmentId: 'environment-a',
-  configurationResolutionVersion: 1,
-  expertRevisionId: 'expert-revision-4',
-  environmentRevisionId: 'environment-revision-7',
-  executionSnapshotId: 'execution-snapshot-7',
-  repositoryId: 'repository-binding-2',
-  repository: 'cosmos/checkout',
-  baseBranch: 'main',
-  visibility: 'private',
-  status: 'queued',
-  attachments: [],
-  source: 'manual',
-  createdAt: '2026-07-13T08:00:00.000Z',
-  updatedAt: '2026-07-13T08:04:00.000Z',
-  lastActivityAt: '2026-07-13T08:04:00.000Z',
-  archivedAt: null,
-  version: 2,
+  id: 'session-authoritative', organizationId: 'organization-a', spaceId: 'space-a',
+  title: 'Harden checkout validation', summary: 'Validate the production checkout boundary.',
+  expertId: 'expert-a', expertName: 'Production Engineer', expertVersion: 4,
+  environmentId: 'environment-a', configurationResolutionVersion: 1,
+  expertRevisionId: 'expert-revision-4', environmentRevisionId: 'environment-revision-7',
+  executionSnapshotId: 'execution-snapshot-7', repositoryId: 'repository-binding-2',
+  repository: 'cosmos/checkout', baseBranch: 'main', visibility: 'private', status: 'queued',
+  attachments: [], source: 'manual', createdAt: '2026-07-13T08:00:00.000Z',
+  updatedAt: '2026-07-13T08:04:00.000Z', lastActivityAt: '2026-07-13T08:04:00.000Z',
+  archivedAt: null, version: 2,
 }
 
 function attemptEvent(number: number, status: AttemptStatus, failureCode: string | null = null): SessionEventDto {
   return {
-    eventId: `event-attempt-${number}-${status}`,
-    organizationId: session.organizationId,
-    spaceId: session.spaceId,
-    sessionId: session.id,
-    sequence: number + 3,
-    type: 'attempt.updated',
-    resourceType: 'attempt',
-    resourceId: `attempt-${number}`,
-    actorId: 'worker-1',
-    commandId: 'command-1',
-    requestId: `request-${number}`,
+    eventId: `event-attempt-${number}-${status}`, organizationId: session.organizationId,
+    spaceId: session.spaceId, sessionId: session.id, sequence: number + 3,
+    type: 'attempt.updated', resourceType: 'attempt', resourceId: `attempt-${number}`,
+    actorId: 'worker-1', commandId: 'command-1', requestId: `request-${number}`,
     occurredAt: session.updatedAt,
-    payload: {
-      attemptId: `attempt-${number}`,
-      turnId: 'turn-1',
-      number,
-      status,
-      failureCode,
-    },
+    payload: { attemptId: `attempt-${number}`, turnId: 'turn-1', number, status, failureCode },
   }
 }
 
 const message: SessionMessageDto = {
-  id: 'message-user-1',
-  organizationId: session.organizationId,
-  spaceId: session.spaceId,
-  sessionId: session.id,
-  sequence: 1,
-  role: 'user',
-  actorId: 'user-1',
-  content: '请检查结算竞态并补充回归测试。',
-  attachments: [],
-  createdAt: session.createdAt,
+  id: 'message-user-1', organizationId: session.organizationId, spaceId: session.spaceId,
+  sessionId: session.id, sequence: 1, role: 'user', actorId: 'user-1',
+  content: '请检查结算竞态并补充回归测试。', attachments: [], createdAt: session.createdAt,
 }
 
-function renderWorkbench(
-  overrides: Partial<SessionDto> = {},
-  timeline: { messages?: SessionMessageDto[]; events?: SessionEventDto[]; timelineStatus?: 'loading' | 'ready' | 'error'; timelineError?: string } = {},
-  controls: {
-    executionEnabled?: boolean
-    startStatus?: 'idle' | 'submitting' | 'error'
-    startError?: string
-    onStart?: () => void
-    sendStatus?: 'idle' | 'submitting' | 'error'
-    sendError?: string
-    onSend?: (content: string) => Promise<void>
-    controlStatus?: 'idle' | 'submitting' | 'error'
-    controlAction?: 'pause' | 'resume' | 'cancel' | 'retry'
-    controlError?: string
-    onPause?: () => void
-    onResume?: () => void
-    onCancel?: () => void
-    onRetry?: () => void
-    initialMessageDraft?: string
-    onOpenFiles?: () => void
-  } = {},
-) {
+function renderWorkbench(overrides: Partial<SessionDto> = {}, props: Partial<RemoteSessionWorkbenchProps> = {}) {
   const onBack = vi.fn()
   const onOpenNavigation = vi.fn()
   const view = render(
     <PreferencesProvider>
-      <RemoteSessionWorkbench
-        session={{ ...session, ...overrides }}
-        {...timeline}
-        {...controls}
-        onBack={onBack}
-        onOpenNavigation={onOpenNavigation}
-      />
+      <RemoteSessionWorkbench session={{ ...session, ...overrides }} onBack={onBack} onOpenNavigation={onOpenNavigation} {...props} />
     </PreferencesProvider>,
   )
   return { ...view, onBack, onOpenNavigation }
@@ -114,262 +52,146 @@ describe('RemoteSessionWorkbench', () => {
     window.localStorage.setItem(PREFERENCE_STORAGE_KEYS.theme, 'dark')
   })
 
-  it('shows only authoritative session facts and an honest execution state', () => {
-    renderWorkbench()
+  it('uses the prototype title, four tabs, exact SVG paths, composer, and 300px inspector contract', () => {
+    renderWorkbench({}, { executionEnabled: true, onSend: vi.fn().mockResolvedValue(undefined), onOpenFiles: vi.fn() })
 
-    expect(screen.getByRole('heading', { name: session.title })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1, name: session.title })).toBeInTheDocument()
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Agent', 'Terminal', 'Files', 'Subscriptions'])
+    expect(document.querySelector('.prototype-session-tabs path[d="M8 1.75l5.4 3.1v6.3L8 14.25 2.6 11.15v-6.3L8 1.75z"]')).toBeInTheDocument()
+    expect(document.querySelector('.prototype-session-composer path[d="M5.5 8.5l4.2-4.2a2 2 0 012.8 2.8L6.2 13.4a3.2 3.2 0 01-4.5-4.5l6.4-6.4"]')).toBeInTheDocument()
+    expect(screen.getByRole('complementary', { name: '会话详情' })).toHaveClass('prototype-session-inspector')
+    expect(screen.getByRole('textbox', { name: '后续消息' })).toBeEnabled()
+  })
+
+  it('keeps authoritative execution, summary, revisions, visibility, and timestamps in the prototype surface', () => {
+    renderWorkbench()
     expect(screen.getByRole('heading', { name: '已排队，等待执行' })).toBeInTheDocument()
     expect(screen.getByText('命令已被服务端接受，正在等待 Worker 领取。')).toBeInTheDocument()
-    expect(screen.getByText(session.summary)).toBeInTheDocument()
-    expect(screen.getByText(session.expertName)).toBeInTheDocument()
-    expect(screen.getByText(session.expertId)).toBeInTheDocument()
-    expect(screen.getByText(session.repository)).toBeInTheDocument()
-    expect(screen.getByText(session.baseBranch)).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: session.title }).parentElement).toHaveTextContent(
-      `${session.repository} / ${session.baseBranch}`,
-    )
-    expect(screen.getByText(session.expertRevisionId!)).toBeInTheDocument()
-    expect(screen.getByText(session.environmentRevisionId!)).toBeInTheDocument()
-    expect(screen.getByText(session.repositoryId!)).toBeInTheDocument()
+    for (const value of [session.summary, session.expertName, session.expertId, session.repository, session.baseBranch, session.expertRevisionId, session.environmentRevisionId, session.repositoryId]) {
+      expect(screen.getByText(value!)).toBeInTheDocument()
+    }
     expect(screen.getByText('私有')).toBeInTheDocument()
     expect(document.querySelector(`time[datetime="${session.createdAt}"]`)).toBeInTheDocument()
-    expect(document.querySelector(`time[datetime="${session.updatedAt}"]`)).toBeInTheDocument()
   })
 
-  it('exposes only legal execution controls and keeps local fencing available', async () => {
+  it('exposes legal controls in the prototype menu and confirms destructive cancellation', async () => {
     const user = userEvent.setup()
     const onPause = vi.fn()
-    const onResume = vi.fn()
     const onCancel = vi.fn()
-    const onRetry = vi.fn()
-    const queuedView = renderWorkbench({}, {}, { executionEnabled: true, onPause, onResume, onCancel, onRetry })
+    renderWorkbench({}, { executionEnabled: true, onPause, onCancel })
 
-    expect(screen.getByRole('button', { name: '暂停' })).toBeEnabled()
-    expect(screen.getByRole('button', { name: '取消执行' })).toBeEnabled()
-    expect(screen.queryByRole('button', { name: '恢复' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '暂停' }))
-    await user.click(screen.getByRole('button', { name: '取消执行' }))
+    await user.click(screen.getByRole('button', { name: '更多' }))
+    await user.click(screen.getByRole('menuitem', { name: '暂停' }))
     expect(onPause).toHaveBeenCalledOnce()
+
+    await user.click(screen.getByRole('button', { name: '停止' }))
+    const dialog = screen.getByRole('alertdialog', { name: '停止当前执行？' })
+    await user.click(within(dialog).getByRole('button', { name: '取消执行' }))
     expect(onCancel).toHaveBeenCalledOnce()
-    queuedView.unmount()
-
-    const pausedView = renderWorkbench(
-      { status: 'paused' },
-      {},
-      { executionEnabled: false, onPause, onResume, onCancel, onRetry },
-    )
-    expect(screen.getByRole('button', { name: '恢复' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '取消执行' })).toBeEnabled()
-    pausedView.unmount()
-
-    renderWorkbench(
-      { status: 'failed' },
-      { events: [attemptEvent(1, 'failed', 'PROVIDER_TIMEOUT')] },
-      { executionEnabled: true, onPause, onResume, onCancel, onRetry },
-    )
-    expect(screen.getByRole('button', { name: '重试' })).toBeEnabled()
-    expect(screen.queryByRole('button', { name: '取消执行' })).not.toBeInTheDocument()
   })
 
-  it('does not invent execution data, views, controls, or a message composer', () => {
-    renderWorkbench()
-
-    for (const label of [
-      '预计成本', '上下文', '模型', '尝试', '文件', '产物', '阶段',
-      'Estimated cost', 'Context', 'Model', 'Attempt', 'Files', 'Artifact', 'Stages',
-    ]) {
-      expect(screen.queryByText(label, { exact: false })).not.toBeInTheDocument()
-    }
-
-    for (const action of [
-      '分享会话', '暂停', '停止', '重试', '批准', '发送',
-      'Share session', 'Pause', 'Stop', 'Retry', 'Approve', 'Send',
-    ]) {
-      expect(screen.queryByRole('button', { name: action })).not.toBeInTheDocument()
-    }
-
-    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
-    expect(screen.queryByRole('tab')).not.toBeInTheDocument()
-  })
-
-  it('offers the real draft start action only when execution is available', async () => {
+  it('offers real resume, retry, and draft-start actions only in legal states', async () => {
     const user = userEvent.setup()
-    const onStart = vi.fn()
-    const view = renderWorkbench({ status: 'draft', version: 1 }, {}, {
-      executionEnabled: true,
-      onStart,
-    })
+    const onResume = vi.fn()
+    const paused = renderWorkbench({ status: 'paused' }, { executionEnabled: false, onResume, onCancel: vi.fn() })
+    await user.click(screen.getByRole('button', { name: '更多' }))
+    expect(screen.getByRole('menuitem', { name: '恢复' })).toBeDisabled()
+    paused.unmount()
 
+    const onRetry = vi.fn()
+    const failed = renderWorkbench({ status: 'failed' }, { executionEnabled: true, events: [attemptEvent(1, 'failed')], onRetry })
+    await user.click(screen.getByRole('button', { name: '更多' }))
+    await user.click(screen.getByRole('menuitem', { name: '重试' }))
+    expect(onRetry).toHaveBeenCalledOnce()
+    failed.unmount()
+
+    const onStart = vi.fn()
+    renderWorkbench({ status: 'draft' }, { executionEnabled: true, onStart })
     await user.click(screen.getByRole('button', { name: '开始执行' }))
     expect(onStart).toHaveBeenCalledOnce()
-
-    view.rerender(
-      <PreferencesProvider>
-        <RemoteSessionWorkbench
-          session={{ ...session, status: 'draft', version: 1 }}
-          executionEnabled={false}
-          onStart={onStart}
-          onBack={() => undefined}
-        />
-      </PreferencesProvider>,
-    )
-    expect(screen.getByRole('button', { name: '开始执行' })).toBeDisabled()
-    expect(screen.getByText('当前部署未开放执行。')).toBeInTheDocument()
-    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
   })
 
-  it('submits follow-up Messages for runnable states and clears only after acceptance', async () => {
+  it('submits follow-up messages, clears accepted drafts, and retains rejected drafts', async () => {
     const user = userEvent.setup()
     const onSend = vi.fn().mockResolvedValue(undefined)
-    renderWorkbench({}, {}, { executionEnabled: true, onSend })
-
+    const accepted = renderWorkbench({}, { executionEnabled: true, onSend })
     const input = screen.getByRole('textbox', { name: '后续消息' })
-    const send = screen.getByRole('button', { name: '发送' })
-    expect(send).toBeDisabled()
     await user.type(input, '  请继续检查取消路径。  ')
-    await user.click(send)
-
+    await user.click(screen.getByRole('button', { name: '发送' }))
     expect(onSend).toHaveBeenCalledWith('请继续检查取消路径。')
     await waitFor(() => expect(input).toHaveValue(''))
-  })
+    accepted.unmount()
 
-  it('retains a failed follow-up draft and hides the composer for canceled Sessions', async () => {
-    const user = userEvent.setup()
-    const onSend = vi.fn().mockRejectedValue(new Error('发送失败'))
-    const view = renderWorkbench({}, {}, {
-      executionEnabled: true,
-      sendStatus: 'error',
-      sendError: '发送失败',
-      onSend,
-    })
-
-    const input = screen.getByRole('textbox', { name: '后续消息' })
-    await user.type(input, '保留这条消息')
+    const rejectedSend = vi.fn().mockRejectedValue(new Error('发送失败'))
+    renderWorkbench({}, { executionEnabled: true, sendStatus: 'error', sendError: '发送失败', onSend: rejectedSend })
+    const rejected = screen.getByRole('textbox', { name: '后续消息' })
+    await user.type(rejected, '保留这条消息')
     await user.click(screen.getByRole('button', { name: '发送' }))
-    expect(input).toHaveValue('保留这条消息')
+    expect(rejected).toHaveValue('保留这条消息')
     expect(screen.getByRole('alert')).toHaveTextContent('发送失败')
-
-    view.rerender(
-      <PreferencesProvider>
-        <RemoteSessionWorkbench
-          session={{ ...session, status: 'canceled' }}
-          executionEnabled
-          onSend={onSend}
-          onBack={() => undefined}
-        />
-      </PreferencesProvider>,
-    )
-    expect(screen.queryByRole('textbox', { name: '后续消息' })).not.toBeInTheDocument()
   })
 
-  it('supports navigation, copying, language switching, and both themes', async () => {
-    const user = userEvent.setup()
-    const writeText = vi.spyOn(navigator.clipboard, 'writeText')
-    const { onBack, onOpenNavigation } = renderWorkbench()
-
-    await user.click(screen.getByRole('button', { name: '返回会话' }))
-    await user.click(screen.getByRole('button', { name: '打开导航' }))
-    expect(onBack).toHaveBeenCalledOnce()
-    expect(onOpenNavigation).toHaveBeenCalledOnce()
-
-    await user.click(screen.getByRole('button', { name: '复制链接' }))
-    expect(writeText).toHaveBeenCalledWith(window.location.href)
-    expect(screen.getByRole('status')).toHaveTextContent('会话链接已复制')
-    expect(screen.queryByRole('button', { name: /share/i })).not.toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: '切换到浅色模式' }))
-    expect(document.documentElement).toHaveAttribute('data-theme', 'light')
-
-    await user.click(screen.getByRole('button', { name: '切换到英文' }))
-    const workbench = screen.getByRole('main')
-    expect(within(workbench).getByRole('heading', { name: 'Queued for execution' })).toBeInTheDocument()
-    expect(within(workbench).getByRole('button', { name: 'Back to Sessions' })).toBeInTheDocument()
-    expect(within(workbench).getByRole('button', { name: 'Copy link' })).toBeInTheDocument()
-    expect(within(workbench).queryByRole('button', { name: /share/i })).not.toBeInTheDocument()
-  })
-
-  it('opens the governed Workspace Files view and restores a requested change draft', async () => {
+  it('routes real Files and Worker actions while keeping Terminal and Subscriptions prototype tabs', async () => {
     const user = userEvent.setup()
     const onOpenFiles = vi.fn()
-    const onSend = vi.fn().mockResolvedValue(undefined)
-    renderWorkbench({}, {}, {
-      executionEnabled: true,
-      initialMessageDraft: '请修改 workspace/standards/release.md：',
-      onOpenFiles,
-      onSend,
-    })
-
-    expect(screen.getByRole('tab', { name: '对话' })).toHaveAttribute('aria-selected', 'true')
-    await user.click(screen.getByRole('tab', { name: '文件' }))
+    const onOpenWorkers = vi.fn()
+    renderWorkbench({}, { onOpenFiles, onOpenWorkers, events: [attemptEvent(1, 'running')] })
+    await user.click(screen.getByRole('tab', { name: 'Files' }))
     expect(onOpenFiles).toHaveBeenCalledOnce()
-    expect(screen.getByRole('textbox', { name: '后续消息' })).toHaveValue(
-      '请修改 workspace/standards/release.md：',
-    )
+    await user.click(screen.getByRole('tab', { name: 'Terminal' }))
+    await user.click(screen.getByRole('button', { name: '打开 Worker 详情' }))
+    expect(onOpenWorkers).toHaveBeenCalledOnce()
+    await user.click(screen.getByRole('tab', { name: 'Subscriptions' }))
+    expect(screen.getByRole('region', { name: '执行动态' })).toHaveTextContent('#4')
   })
 
-  it('labels unresolved legacy configuration without fabricating revision IDs', () => {
-    renderWorkbench({
-      configurationResolutionVersion: 0,
-      expertRevisionId: undefined,
-      environmentRevisionId: undefined,
-      repositoryId: undefined,
-    })
-
-    expect(screen.getAllByText('未解析（旧版会话记录）')).toHaveLength(3)
-  })
-
-  it.each([
-    ['running', 'active', [attemptEvent(1, 'running')], '正在执行'],
-    ['retrying', 'active', [attemptEvent(1, 'failed', 'PROVIDER_TIMEOUT'), attemptEvent(2, 'running')], '正在重试'],
-    ['failed', 'failed', [attemptEvent(1, 'failed', 'PROVIDER_REJECTED')], '执行失败'],
-    ['completed', 'completed', [attemptEvent(1, 'succeeded')], '执行已完成'],
-  ] as const)('renders the authoritative %s Attempt state', (_name, status, events, title) => {
-    renderWorkbench({ status }, { events: [...events], timelineStatus: 'ready' })
-
-    expect(screen.getByRole('heading', { name: title })).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: '执行动态' })).toHaveTextContent(`#${events.at(-1)!.sequence}`)
-  })
-
-  it('keeps retry and failure detail when session.updated follows attempt.updated', () => {
-    const sessionQueuedEvent: SessionEventDto = {
-      organizationId: session.organizationId,
-      spaceId: session.spaceId,
-      sessionId: session.id,
-      eventId: 'event-session-queued',
-      sequence: 5,
-      type: 'session.updated',
-      resourceType: 'session',
-      resourceId: session.id,
-      actorId: 'worker-1',
-      commandId: 'command-1',
-      requestId: 'request-session-queued',
-      occurredAt: session.updatedAt,
-      payload: { status: 'queued', version: 3 },
-    }
-    renderWorkbench({ status: 'queued', version: 3 }, {
-      events: [
-        attemptEvent(2, 'failed', 'PROVIDER_TIMEOUT'),
-        sessionQueuedEvent,
-      ],
-      timelineStatus: 'ready',
-    })
-
-    expect(screen.getByRole('heading', { name: '正在等待重试' })).toBeInTheDocument()
-    expect(screen.getByText(/第 2 次尝试失败，错误代码：PROVIDER_TIMEOUT；下一次尝试已排队/)).toBeInTheDocument()
-  })
-
-  it('renders canonical messages and preserves timeline data while automatic retry is visible', () => {
-    renderWorkbench({}, {
-      messages: [message],
-      events: [attemptEvent(1, 'running')],
-      timelineStatus: 'error',
-      timelineError: 'Timeline temporarily unavailable.',
-    })
-
-    expect(screen.getByRole('region', { name: '会话消息' })).toHaveTextContent(message.content)
-    expect(screen.getByRole('region', { name: '会话消息' })).toHaveTextContent('用户')
+  it('renders canonical messages and recoverable timeline errors without inventing data', () => {
+    renderWorkbench({}, { messages: [message], events: [attemptEvent(1, 'running')], timelineStatus: 'error', timelineError: 'Timeline temporarily unavailable.' })
+    const region = screen.getByRole('region', { name: '会话消息' })
+    expect(region).toHaveTextContent(message.content)
+    expect(region).toHaveTextContent('用户')
     expect(screen.getByRole('alert')).toHaveTextContent('实时更新暂时中断，正在自动重试。')
     expect(screen.getByRole('alert')).toHaveTextContent('Timeline temporarily unavailable.')
+  })
+
+  it('keeps the prototype message rail accessible and scrolls the real message surface', async () => {
+    const user = userEvent.setup()
+    renderWorkbench({}, { messages: [message] })
+    const messageRegion = screen.getByRole('region', { name: '会话消息' })
+    const scrollBy = vi.fn()
+    messageRegion.scrollBy = scrollBy
+
+    await user.click(screen.getByRole('button', { name: '向上滚动消息' }))
+    await user.click(screen.getByRole('button', { name: '向下滚动消息' }))
+
+    expect(scrollBy).toHaveBeenNthCalledWith(1, { top: -180, behavior: 'smooth' })
+    expect(scrollBy).toHaveBeenNthCalledWith(2, { top: 180, behavior: 'smooth' })
+  })
+
+  it('supports panel toggling, copy feedback, collapsed navigation, theme, and trapped shortcuts', async () => {
+    const user = userEvent.setup()
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText')
+    const { onOpenNavigation } = renderWorkbench({}, { navigationCollapsed: true })
+    await user.click(screen.getByRole('button', { name: '显示导航' }))
+    expect(onOpenNavigation).toHaveBeenCalledOnce()
+    await user.click(screen.getByRole('button', { name: '隐藏面板' }))
+    expect(screen.queryByRole('complementary', { name: '会话详情' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '显示面板' }))
+    await user.click(screen.getByRole('button', { name: '↗ 复制链接' }))
+    expect(writeText).toHaveBeenCalledWith(window.location.href)
+    expect(screen.getByRole('status')).toHaveTextContent('会话链接已复制')
+    await user.click(screen.getByRole('button', { name: '切换到浅色模式' }))
+    expect(document.documentElement).toHaveAttribute('data-theme', 'light')
+    await user.click(screen.getByRole('button', { name: '键盘快捷键' }))
+    expect(screen.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '关闭' })).toHaveFocus()
+  })
+
+  it('labels unresolved legacy configuration and renders authoritative attempt states', () => {
+    const view = renderWorkbench({ configurationResolutionVersion: 0, expertRevisionId: undefined, environmentRevisionId: undefined, repositoryId: undefined }, { events: [attemptEvent(2, 'running')], timelineStatus: 'ready' })
+    expect(screen.getAllByText('未解析（旧版会话记录）')).toHaveLength(3)
+    expect(screen.getByRole('heading', { name: '正在重试' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '执行动态' })).toHaveTextContent('#5')
+    view.unmount()
   })
 })

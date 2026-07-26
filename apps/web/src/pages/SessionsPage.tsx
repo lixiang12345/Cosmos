@@ -1,58 +1,25 @@
-import {
-  AlertTriangle,
-  Archive,
-  ArchiveRestore,
-  Bot,
-  ChevronDown,
-  Clock3,
-  Filter,
-  FolderGit2,
-  GitPullRequest,
-  Inbox,
-  Menu,
-  MessageSquareText,
-  MoreHorizontal,
-  PencilLine,
-  Plus,
-  RadioTower,
-  RefreshCw,
-  Search,
-  ShieldAlert,
-  SquareTerminal,
-  Star,
-  TicketCheck,
-  Trash2,
-  Webhook,
-  X,
-  type LucideIcon,
-} from 'lucide-react'
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type FormEvent,
-  type KeyboardEvent,
-  type MouseEvent,
-} from 'react'
-import { GlobalControls } from '../components/GlobalControls'
-import { IconButton } from '../components/ui'
-import { usePreferences, type Locale, type TranslationKey } from '../preferences'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type MouseEvent } from 'react'
+import { PrototypePlusCompactIcon } from '../components/PrototypeIcons'
+import { PrototypePageTopbar } from '../components/PrototypePageTopbar'
+import { usePreferences, type Locale } from '../preferences'
 import type { Run, RunStatus } from '../types'
 
 type SessionsPageProps = {
   runs: Run[]
+  spaceName?: string
   loadState?: 'loading' | 'ready' | 'error'
   loadError?: string
   managementEnabled?: boolean
   favoritesEnabled?: boolean
   deletionEnabled?: boolean
   sessionCreationEnabled?: boolean
+  navigationCollapsed?: boolean
   hasMore?: boolean
   loadingMore?: boolean
   onLoadMore?: () => void
   onRetry?: () => void
   onOpenNavigation: () => void
+  onOpenCommand?: () => void
   onNewTask: (expert?: string) => void
   onOpenSession: (id: string) => void
   onRename: (id: string, title: string) => boolean | Promise<boolean>
@@ -61,186 +28,66 @@ type SessionsPageProps = {
   onDelete: (id: string) => void
 }
 
-type SessionView = 'active' | 'favorites' | 'archived'
-type StatusFilter = 'all' | RunStatus
-type TimeFilter = 'all' | 'hour' | 'day' | 'week'
+type SessionFilter = 'all' | 'running' | 'pinned' | 'private' | 'tunnel' | 'unread'
 
-type SourceInfo = {
-  name: string
-  detail: string
+const filters: Array<{ id: SessionFilter; en: string; zh: string }> = [
+  { id: 'all', en: 'All', zh: '全部' },
+  { id: 'running', en: 'Running', zh: '运行中' },
+  { id: 'pinned', en: 'Pinned', zh: '已置顶' },
+  { id: 'private', en: 'Private', zh: '私有' },
+  { id: 'tunnel', en: 'Tunnels', zh: '隧道' },
+  { id: 'unread', en: 'Unread', zh: '未读' },
+]
+
+function localize(locale: Locale, zh: string, en: string) {
+  return locale === 'zh' ? zh : en
 }
 
-type IndexedSession = {
-  run: Run
-  originalIndex: number
-  source: SourceInfo
-  prReferences: string[]
-  searchText: string
-}
-
-type FilterOption = {
-  value: string
-  label: string
-}
-
-const statusOptions: RunStatus[] = ['draft', 'queued', 'running', 'paused', 'waiting', 'completed', 'failed', 'canceled']
-
-const statusPriority: Record<RunStatus, number> = {
-  draft: 5,
-  waiting: 0,
-  failed: 1,
-  running: 2,
-  paused: 3,
-  queued: 4,
-  completed: 6,
-  canceled: 7,
-}
-
-const statusCopyKeys: Record<RunStatus, TranslationKey> = {
-  draft: 'sessions.status.draft',
-  queued: 'sessions.status.queued',
-  running: 'sessions.status.running',
-  paused: 'status.paused',
-  waiting: 'sessions.status.waiting',
-  completed: 'sessions.status.completed',
-  failed: 'sessions.status.failed',
-  canceled: 'status.canceled',
-}
-
-const viewCopyKeys: Record<SessionView, TranslationKey> = {
-  active: 'sessions.active',
-  favorites: 'sessions.favorites',
-  archived: 'sessions.archived',
-}
-
-function getSource(trigger: string): SourceInfo {
-  const [name, ...detailParts] = trigger.split('/')
-  return {
-    name: name.trim() || trigger,
-    detail: detailParts.join('/').trim(),
+function statusView(status: RunStatus, locale: Locale) {
+  const labels: Record<RunStatus, [string, string]> = {
+    draft: ['草稿', 'draft'],
+    queued: ['排队中', 'queued'],
+    running: ['运行中', 'running'],
+    paused: ['已暂停', 'paused'],
+    waiting: ['等待中', 'waiting'],
+    completed: ['已完成', 'done'],
+    failed: ['失败', 'failed'],
+    canceled: ['已取消', 'canceled'],
   }
+  const [zh, en] = labels[status]
+  return { className: status === 'completed' ? 'done' : status, label: localize(locale, zh, en) }
 }
 
-function getSourceIcon(sourceName: string): LucideIcon {
-  const source = sourceName.toLocaleLowerCase()
-  if (source.includes('github') || source.includes('gitlab') || source.includes('gitee')) return GitPullRequest
-  if (source.includes('jira')) return TicketCheck
-  if (source.includes('飞书') || source.includes('feishu') || source.includes('slack')) return MessageSquareText
-  if (source.includes('控制台') || source.includes('console') || source.includes('cli')) return SquareTerminal
-  if (source.includes('webhook')) return Webhook
-  return RadioTower
-}
-
-function getSourceLabel(sourceName: string, locale: Locale) {
-  if (locale === 'en' && sourceName.includes('飞书')) return 'Feishu'
-  if (locale === 'en' && sourceName.includes('控制台')) return 'Console'
-  return sourceName
-}
-
-function getPrReferences(run: Run) {
-  const references = new Set<string>()
-  const candidates = [
-    ...run.steps.flatMap((step) => [step.label, step.detail]),
-    ...run.events.flatMap((event) => [event.title, event.body, event.meta]),
-  ]
-
-  for (const candidate of candidates) {
-    if (!candidate) continue
-    for (const match of candidate.matchAll(/(?:\bPR|pull request)\s*#?\s*(\d+)/gi)) {
-      references.add(`PR #${match[1]}`)
-    }
-  }
-
-  return [...references]
-}
-
-function getAgeMinutes(updatedAt: string) {
-  const value = updatedAt.trim().toLocaleLowerCase()
-  const timestamp = Date.parse(updatedAt)
-  if (Number.isFinite(timestamp)) return Math.max(0, (Date.now() - timestamp) / 60_000)
-  if (value.includes('刚刚') || value.includes('just now')) return 0
-  if (value.includes('今天') || value.includes('today')) return 12 * 60
-  if (value.includes('昨天') || value.includes('yesterday')) return 24 * 60
-
-  const patterns: Array<[RegExp, number]> = [
-    [/(\d+)\s*分钟/, 1],
-    [/(\d+)\s*(?:minutes?|mins?|m)\b/i, 1],
-    [/(\d+)\s*小时/, 60],
-    [/(\d+)\s*(?:hours?|hrs?|h)\b/i, 60],
-    [/(\d+)\s*天/, 24 * 60],
-    [/(\d+)\s*(?:days?|d)\b/i, 24 * 60],
-    [/(\d+)\s*周/, 7 * 24 * 60],
-    [/(\d+)\s*(?:weeks?|w)\b/i, 7 * 24 * 60],
-  ]
-
-  for (const [pattern, multiplier] of patterns) {
-    const match = value.match(pattern)
-    if (match) return Number(match[1]) * multiplier
-  }
-
-  return Number.POSITIVE_INFINITY
-}
-
-function matchesTimeFilter(updatedAt: string, filter: TimeFilter) {
-  if (filter === 'all') return true
-  const age = getAgeMinutes(updatedAt)
-  if (filter === 'hour') return age <= 60
-  if (filter === 'day') return age <= 24 * 60
-  return age <= 7 * 24 * 60
-}
-
-function formatUpdatedAt(updatedAt: string, locale: Locale) {
+function relativeUpdatedAt(updatedAt: string, locale: Locale) {
   const timestamp = Date.parse(updatedAt)
   if (!Number.isFinite(timestamp)) return updatedAt
-  return new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(timestamp)
-}
-
-function unique(values: string[]) {
-  return [...new Set(values)].sort((first, second) => first.localeCompare(second))
-}
-
-function FilterSelect({
-  icon: Icon,
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  icon: LucideIcon
-  label: string
-  value: string
-  options: FilterOption[]
-  onChange: (value: string) => void
-}) {
-  return (
-    <label className="session-status-filter session-filter-select">
-      <Icon aria-hidden="true" />
-      <select value={value} onChange={(event) => onChange(event.target.value)} aria-label={label}>
-        {options.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
-      </select>
-      <ChevronDown aria-hidden="true" />
-    </label>
-  )
+  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000))
+  if (seconds < 60) return localize(locale, '刚刚', 'Just now')
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return localize(locale, `${minutes} 分钟前`, `${minutes}m ago`)
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return localize(locale, `${hours} 小时前`, `${hours}h ago`)
+  const days = Math.floor(hours / 24)
+  if (days < 7) return localize(locale, `${days} 天前`, `${days}d ago`)
+  return new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-US', { month: 'short', day: 'numeric' }).format(timestamp)
 }
 
 export function SessionsPage({
   runs,
+  spaceName = 'Engineering',
   loadState = 'ready',
   loadError = '',
   managementEnabled = true,
   favoritesEnabled = true,
   deletionEnabled = true,
   sessionCreationEnabled = true,
+  navigationCollapsed = false,
   hasMore = false,
   loadingMore = false,
   onLoadMore,
   onRetry,
   onOpenNavigation,
+  onOpenCommand,
   onNewTask,
   onOpenSession,
   onRename,
@@ -248,141 +95,95 @@ export function SessionsPage({
   onToggleArchive,
   onDelete,
 }: SessionsPageProps) {
-  const { locale, t } = usePreferences()
-  const [view, setView] = useState<SessionView>('active')
+  const { locale } = usePreferences()
   const [query, setQuery] = useState('')
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
-  const [expertFilter, setExpertFilter] = useState('all')
-  const [repositoryFilter, setRepositoryFilter] = useState('all')
-  const [sourceFilter, setSourceFilter] = useState('all')
-  const [timeFilter, setTimeFilter] = useState<TimeFilter>('all')
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
-  const [filterOpen, setFilterOpen] = useState(false)
+  const [filter, setFilter] = useState<SessionFilter>('all')
   const [menuRunId, setMenuRunId] = useState<string>()
   const [renameTarget, setRenameTarget] = useState<Run>()
   const [renameValue, setRenameValue] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<Run>()
   const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set())
-  const filterRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
-  const selectAllRef = useRef<HTMLInputElement>(null)
+  const menuTriggerRef = useRef<HTMLButtonElement>(null)
+  const dialogRef = useRef<HTMLElement>(null)
+  const renameInputRef = useRef<HTMLInputElement>(null)
+  const deleteCancelRef = useRef<HTMLButtonElement>(null)
+  const restoreMenuFocus = () => window.requestAnimationFrame(() => menuTriggerRef.current?.focus())
 
-  const indexedSessions = useMemo<IndexedSession[]>(() => runs.map((run, originalIndex) => {
-    const source = getSource(run.trigger)
-    const prReferences = getPrReferences(run)
-    const searchText = [
-      run.title,
-      run.repo,
-      run.expert,
-      run.branch,
-      run.trigger,
-      ...run.steps.flatMap((step) => [step.label, step.detail]),
-      ...prReferences,
-    ].join('\n').toLocaleLowerCase()
-
-    return { run, originalIndex, source, prReferences, searchText }
-  }), [runs])
-
-  const viewCounts = useMemo(() => ({
-    active: runs.filter((run) => !run.archived).length,
-    favorites: runs.filter((run) => run.favorite && !run.archived).length,
-    archived: runs.filter((run) => run.archived).length,
-  }), [runs])
-
-  const filterOptions = useMemo(() => ({
-    experts: unique(runs.map((run) => run.expert)),
-    repositories: unique(runs.map((run) => run.repo)),
-    sources: unique(indexedSessions.map((session) => session.source.name)),
-  }), [indexedSessions, runs])
-
-  const visibleSessions = useMemo(() => {
+  const visibleRuns = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase()
-    return indexedSessions
-      .filter(({ run, source, searchText }) => {
-        const matchesView = !managementEnabled
-          ? true
-          : view === 'active'
-          ? !run.archived
-          : view === 'favorites'
-            ? Boolean(run.favorite && !run.archived)
-            : Boolean(run.archived)
-        const matchesStatus = statusFilter === 'all' || run.status === statusFilter
-        const matchesExpert = expertFilter === 'all' || run.expert === expertFilter
-        const matchesRepository = repositoryFilter === 'all' || run.repo === repositoryFilter
-        const matchesSource = sourceFilter === 'all' || source.name === sourceFilter
-        const matchesTime = matchesTimeFilter(run.updatedAt, timeFilter)
-        const matchesQuery = !normalizedQuery || searchText.includes(normalizedQuery)
-        return matchesView && matchesStatus && matchesExpert && matchesRepository
-          && matchesSource && matchesTime && matchesQuery
-      })
-      .sort((first, second) => {
-        const priorityDifference = statusPriority[first.run.status] - statusPriority[second.run.status]
-        return priorityDifference || first.originalIndex - second.originalIndex
-      })
-  }, [expertFilter, indexedSessions, managementEnabled, query, repositoryFilter, sourceFilter, statusFilter, timeFilter, view])
-
-  const visibleIds = useMemo(() => new Set(visibleSessions.map(({ run }) => run.id)), [visibleSessions])
-  const visibleSelectedIds = useMemo(
-    () => new Set([...selectedIds].filter((id) => visibleIds.has(id))),
-    [selectedIds, visibleIds],
-  )
-  const allVisibleSelected = visibleSessions.length > 0
-    && visibleSessions.every(({ run }) => visibleSelectedIds.has(run.id))
-  const someVisibleSelected = visibleSelectedIds.size > 0
-  const selectedArchivableIds = useMemo(() => [...visibleSelectedIds].filter((id) => {
-    const run = runs.find((item) => item.id === id)
-    return run && !run.archived
-  }), [runs, visibleSelectedIds])
-
-  const hasActiveFilters = Boolean(query.trim())
-    || statusFilter !== 'all'
-    || expertFilter !== 'all'
-    || repositoryFilter !== 'all'
-    || sourceFilter !== 'all'
-    || timeFilter !== 'all'
-  const activeFilterCount = [statusFilter, expertFilter, repositoryFilter, sourceFilter, timeFilter]
-    .filter((filter) => filter !== 'all').length
-
-  useEffect(() => {
-    if (selectAllRef.current) {
-      selectAllRef.current.indeterminate = someVisibleSelected && !allVisibleSelected
-    }
-  }, [allVisibleSelected, someVisibleSelected])
-
-  useEffect(() => {
-    if (!filterOpen) return
-    const closeFilter = (event: PointerEvent) => {
-      if (!filterRef.current?.contains(event.target as Node)) setFilterOpen(false)
-    }
-    document.addEventListener('pointerdown', closeFilter)
-    return () => document.removeEventListener('pointerdown', closeFilter)
-  }, [filterOpen])
+    return runs.filter((run) => {
+      const matchesQuery = !normalizedQuery || `${run.title} ${run.expert}`.toLocaleLowerCase().includes(normalizedQuery)
+      if (!matchesQuery) return false
+      if (filter === 'running') return run.status === 'running'
+      if (filter === 'pinned') return Boolean(run.favorite)
+      if (filter === 'private') return run.visibility === 'private'
+      if (filter === 'tunnel') return /(^|\W)tunnel(\W|$)/i.test(run.trigger)
+      if (filter === 'unread') return false
+      return true
+    })
+  }, [filter, query, runs])
 
   useEffect(() => {
     if (!menuRunId) return
-    const closeMenu = (event: PointerEvent) => {
+    menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
+    const close = (event: PointerEvent) => {
       if (!menuRef.current?.contains(event.target as Node)) setMenuRunId(undefined)
     }
-    document.addEventListener('pointerdown', closeMenu)
-    return () => document.removeEventListener('pointerdown', closeMenu)
+    document.addEventListener('pointerdown', close)
+    return () => document.removeEventListener('pointerdown', close)
   }, [menuRunId])
 
   useEffect(() => {
-    const closeOverlay = (event: globalThis.KeyboardEvent) => {
+    if (renameTarget) renameInputRef.current?.focus()
+    else if (deleteTarget) deleteCancelRef.current?.focus()
+  }, [deleteTarget, renameTarget])
+
+  useEffect(() => {
+    const close = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Tab' && (renameTarget || deleteTarget)) {
+        const focusable = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])',
+        ) ?? [])
+        const first = focusable[0]
+        const last = focusable.at(-1)
+        if (first && last && event.shiftKey && document.activeElement === first) {
+          event.preventDefault()
+          last.focus()
+        } else if (first && last && !event.shiftKey && document.activeElement === last) {
+          event.preventDefault()
+          first.focus()
+        }
+        return
+      }
       if (event.key !== 'Escape') return
-      setFilterOpen(false)
+      const hadOverlay = Boolean(menuRunId || renameTarget || deleteTarget)
       setMenuRunId(undefined)
       setRenameTarget(undefined)
       setDeleteTarget(undefined)
+      if (hadOverlay) window.requestAnimationFrame(() => menuTriggerRef.current?.focus())
     }
-    document.addEventListener('keydown', closeOverlay)
-    return () => document.removeEventListener('keydown', closeOverlay)
-  }, [])
+    document.addEventListener('keydown', close)
+    return () => document.removeEventListener('keydown', close)
+  }, [deleteTarget, menuRunId, renameTarget])
 
-  const openRename = (run: Run) => {
+  const handleRowKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, runId: string) => {
+    if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return
+    event.preventDefault()
+    onOpenSession(runId)
+  }
+
+  const stopRowClick = (event: MouseEvent<HTMLElement>) => event.stopPropagation()
+
+  const toggleArchive = async (run: Run) => {
     setMenuRunId(undefined)
-    setRenameValue(run.title)
-    setRenameTarget(run)
+    setPendingIds((current) => new Set(current).add(run.id))
+    await onToggleArchive(run.id)
+    setPendingIds((current) => {
+      const next = new Set(current)
+      next.delete(run.id)
+      return next
+    })
   }
 
   const submitRename = async (event: FormEvent<HTMLFormElement>) => {
@@ -393,520 +194,159 @@ export function SessionsPage({
       setRenameTarget(undefined)
       return
     }
-    const targetId = renameTarget.id
-    setPendingIds((current) => new Set(current).add(targetId))
-    const completed = await onRename(targetId, title)
+    setPendingIds((current) => new Set(current).add(renameTarget.id))
+    const completed = await onRename(renameTarget.id, title)
     setPendingIds((current) => {
       const next = new Set(current)
-      next.delete(targetId)
-      return next
-    })
-    if (completed) setRenameTarget(undefined)
-  }
-
-  const confirmDelete = () => {
-    if (!deleteTarget) return
-    onDelete(deleteTarget.id)
-    setSelectedIds((current) => {
-      const next = new Set(current)
-      next.delete(deleteTarget.id)
-      return next
-    })
-    setDeleteTarget(undefined)
-  }
-
-  const stopRowClick = (event: MouseEvent<HTMLElement>) => event.stopPropagation()
-
-  const handleRowKeyDown = (event: KeyboardEvent<HTMLDivElement>, runId: string) => {
-    if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return
-    event.preventDefault()
-    onOpenSession(runId)
-  }
-
-  const toggleSelection = (runId: string) => {
-    setSelectedIds((current) => {
-      const next = new Set(current)
-      if (next.has(runId)) next.delete(runId)
-      else next.add(runId)
-      return next
-    })
-  }
-
-  const toggleSelectAll = () => {
-    setSelectedIds((current) => {
-      const next = new Set(current)
-      if (allVisibleSelected) visibleSessions.forEach(({ run }) => next.delete(run.id))
-      else visibleSessions.forEach(({ run }) => next.add(run.id))
-      return next
-    })
-  }
-
-  const toggleArchive = async (run: Run) => {
-    setMenuRunId(undefined)
-    setPendingIds((current) => new Set(current).add(run.id))
-    const completed = await onToggleArchive(run.id)
-    setPendingIds((current) => {
-      const next = new Set(current)
-      next.delete(run.id)
+      next.delete(renameTarget.id)
       return next
     })
     if (completed) {
-      setSelectedIds((current) => {
-        const next = new Set(current)
-        next.delete(run.id)
-        return next
-      })
+      setRenameTarget(undefined)
+      restoreMenuFocus()
     }
   }
 
-  const bulkArchive = async () => {
-    setPendingIds((current) => new Set([...current, ...selectedArchivableIds]))
-    const results = await Promise.all(selectedArchivableIds.map(async (id) => ({
-      id,
-      completed: await onToggleArchive(id),
-    })))
-    setPendingIds((current) => {
-      const next = new Set(current)
-      for (const { id } of results) next.delete(id)
-      return next
-    })
-    setSelectedIds((current) => {
-      const next = new Set(current)
-      for (const { id, completed } of results) if (completed) next.delete(id)
-      return next
-    })
-  }
-
-  const clearFilters = () => {
-    setQuery('')
-    setStatusFilter('all')
-    setExpertFilter('all')
-    setRepositoryFilter('all')
-    setSourceFilter('all')
-    setTimeFilter('all')
-    setFilterOpen(false)
-  }
-
-  const emptyMessage = hasActiveFilters
-    ? t('sessions.noResults')
-    : view === 'active'
-      ? t('sessions.emptyActive')
-      : view === 'favorites'
-        ? t('sessions.emptyFavorites')
-        : t('sessions.emptyArchived')
-  const availableViews: SessionView[] = managementEnabled
-    ? (favoritesEnabled ? ['active', 'favorites', 'archived'] : ['active', 'archived'])
-    : ['active']
-
   return (
-    <main className="module-page sessions-page">
-      <header className="module-header">
-        <div className="module-header__copy">
-          <IconButton icon={Menu} label={t('workbench.openNavigation')} className="mobile-menu" onClick={onOpenNavigation} />
-          <div>
-            <h1>{t('sessions.title')}</h1>
-            <p>{managementEnabled
-              ? t('sessions.description')
-              : (locale === 'zh' ? '查询当前 Space 中的服务端会话记录' : 'View server Session records in the current Space')}</p>
+    <main className="prototype-sessions-page">
+      <PrototypePageTopbar
+        crumb={localize(locale, '会话', 'Sessions')}
+        navigationCollapsed={navigationCollapsed}
+        onOpenNavigation={onOpenNavigation}
+        onOpenCommand={onOpenCommand}
+      />
+      <div className="prototype-sessions-viewport">
+        <section className="prototype-sessions-content" aria-labelledby="prototype-sessions-title">
+          <div className="prototype-sessions-header">
+            <div>
+              <h1 id="prototype-sessions-title">{localize(locale, '会话', 'Sessions')}</h1>
+              <p>{localize(
+                locale,
+                `${spaceName} 中的交互式和自动化会话。对话将无限期保存；环境在闲置后会暂停（文档）。`,
+                `Interactive and automation sessions in ${spaceName}. Conversations are saved indefinitely; environments pause after inactivity (docs).`,
+              )}</p>
+            </div>
+            {sessionCreationEnabled ? (
+              <button type="button" className="prototype-primary-button" onClick={() => onNewTask()}>
+                <PrototypePlusCompactIcon aria-hidden="true" />
+                {localize(locale, '新建会话', 'New session')}
+              </button>
+            ) : null}
           </div>
-        </div>
-        <div className="module-header__actions">
-          <GlobalControls />
-          {sessionCreationEnabled ? <button type="button" className="button button--primary" onClick={() => onNewTask()}>
-            <Plus aria-hidden="true" />
-            {t('sessions.new')}
-          </button> : null}
-        </div>
-      </header>
 
-      <div className="module-scroll">
-        <section className="data-section sessions-section" aria-label={t('sessions.title')}>
-          <div className="sessions-control-row">
-            <div className="template-filters sessions-tabs" role="tablist" aria-label={t('sessions.title')}>
-              {availableViews.map((item) => (
+          <div className="prototype-sessions-toolbar">
+            <input
+              className="prototype-sessions-filter"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              aria-label={localize(locale, '筛选会话', 'Filter sessions')}
+              placeholder={localize(locale, '筛选会话…', 'Filter sessions…')}
+            />
+            <div className="prototype-segmented" aria-label={localize(locale, '会话筛选', 'Session filters')}>
+              {filters.map((item) => (
                 <button
+                  key={item.id}
                   type="button"
-                  role="tab"
-                  aria-selected={view === item}
-                  className={view === item ? 'template-filter template-filter--active' : 'template-filter'}
-                  key={item}
-                  onClick={() => {
-                    setView(item)
-                    setFilterOpen(false)
-                    setMenuRunId(undefined)
-                  }}
+                  className={filter === item.id ? 'active' : undefined}
+                  aria-pressed={filter === item.id}
+                  onClick={() => setFilter(item.id)}
                 >
-                  {t(viewCopyKeys[item])} <span>{viewCounts[item]}</span>
+                  {locale === 'zh' ? item.zh : item.en}
                 </button>
               ))}
             </div>
-
-            <div className="table-tools sessions-control-row__tools">
-              <label className="search-field sessions-search">
-                <Search aria-hidden="true" />
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  aria-label={t('sessions.searchPlaceholder')}
-                  placeholder={t('sessions.searchPlaceholder')}
-                />
-              </label>
-
-              <div className="session-filter-bar" aria-label={t('common.filter')}>
-            <div className="session-filter-popover-shell" ref={filterRef}>
-              <button
-                type="button"
-                className={`button button--ghost button--compact session-filter-trigger${activeFilterCount ? ' session-filter-trigger--active' : ''}`}
-                aria-haspopup="dialog"
-                aria-expanded={filterOpen}
-                onClick={() => {
-                  setFilterOpen((open) => !open)
-                  setMenuRunId(undefined)
-                }}
-              >
-                <Filter aria-hidden="true" />
-                {t('common.filter')}
-                {activeFilterCount ? <span>{activeFilterCount}</span> : null}
-              </button>
-              {filterOpen ? (
-                <div className="session-filter-popover" role="dialog" aria-label={t('common.filter')}>
-                  <FilterSelect
-                    icon={Filter}
-                    label={t('sessions.status')}
-                    value={statusFilter}
-                    onChange={(value) => setStatusFilter(value as StatusFilter)}
-                    options={[
-                      { value: 'all', label: t('sessions.allStatuses') },
-                      ...statusOptions.map((status) => ({ value: status, label: t(statusCopyKeys[status]) })),
-                    ]}
-                  />
-                  <FilterSelect
-                    icon={Bot}
-                    label={t('sessions.expert')}
-                    value={expertFilter}
-                    onChange={setExpertFilter}
-                    options={[
-                      { value: 'all', label: t('sessions.allExperts') },
-                      ...filterOptions.experts.map((expert) => ({ value: expert, label: expert })),
-                    ]}
-                  />
-                  <FilterSelect
-                    icon={FolderGit2}
-                    label={t('newTask.repository')}
-                    value={repositoryFilter}
-                    onChange={setRepositoryFilter}
-                    options={[
-                      { value: 'all', label: t('sessions.allRepositories') },
-                      ...filterOptions.repositories.map((repository) => ({ value: repository, label: repository })),
-                    ]}
-                  />
-                  <FilterSelect
-                    icon={RadioTower}
-                    label={t('sessions.source')}
-                    value={sourceFilter}
-                    onChange={setSourceFilter}
-                    options={[
-                      { value: 'all', label: t('sessions.allSources') },
-                      ...filterOptions.sources.map((source) => ({ value: source, label: getSourceLabel(source, locale) })),
-                    ]}
-                  />
-                  <FilterSelect
-                    icon={Clock3}
-                    label={t('sessions.updated')}
-                    value={timeFilter}
-                    onChange={(value) => setTimeFilter(value as TimeFilter)}
-                    options={[
-                      { value: 'all', label: t('sessions.allTimes') },
-                      { value: 'hour', label: t('sessions.lastHour') },
-                      { value: 'day', label: t('sessions.lastDay') },
-                      { value: 'week', label: t('sessions.lastWeek') },
-                    ]}
-                  />
-                  <button type="button" className="button button--ghost button--compact session-filter-clear" onClick={clearFilters} disabled={!activeFilterCount}>
-                    <X aria-hidden="true" />{t('common.clear')}
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          </div>
-            </div>
           </div>
 
-          {loadState === 'loading' ? (
-            <div className="sessions-load-state" role="status">
-              <span className="auth-spinner" aria-hidden="true" />
-              <p>{locale === 'zh' ? '正在加载会话...' : 'Loading Sessions...'}</p>
-            </div>
-          ) : loadState === 'error' ? (
-            <div className="sessions-load-state sessions-load-state--error" role="alert">
-              <AlertTriangle aria-hidden="true" />
-              <div>
-                <strong>{locale === 'zh' ? '无法加载会话' : 'Unable to load Sessions'}</strong>
-                <p>{loadError}</p>
-              </div>
-              {onRetry ? (
-                <button type="button" className="button button--ghost button--compact" onClick={onRetry}>
-                  <RefreshCw aria-hidden="true" />{locale === 'zh' ? '重试' : 'Retry'}
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-
-          {managementEnabled && loadState === 'ready' && visibleSelectedIds.size > 0 ? (
-            <div className="session-bulk-bar" role="toolbar" aria-label={t('sessions.bulkArchive')}>
-              <strong>{visibleSelectedIds.size} {t('sessions.selected')}</strong>
-              <div>
-                <button
-                  type="button"
-                  className="button button--ghost button--compact"
-                  onClick={bulkArchive}
-                  disabled={selectedArchivableIds.length === 0 || selectedArchivableIds.some((id) => pendingIds.has(id))}
-                >
-                  <Archive aria-hidden="true" />{t('sessions.bulkArchive')} ({selectedArchivableIds.length})
-                </button>
-                <IconButton icon={X} label={t('sessions.clearSelection')} size="sm" onClick={() => setSelectedIds(new Set())} />
-              </div>
-            </div>
-          ) : null}
-
-          {loadState === 'ready' ? <div className="data-table session-table session-table--managed" role="table" aria-label={t('sessions.title')}>
-            <div className="data-table__row data-table__head" role="row">
-              <span role="columnheader" className="session-task-heading">
-                {managementEnabled ? (
-                  <input
-                    ref={selectAllRef}
-                    type="checkbox"
-                    className="session-select-checkbox session-select-checkbox--all"
-                    checked={allVisibleSelected}
-                    disabled={visibleSessions.length === 0}
-                    aria-label={t('sessions.selectAll')}
-                    onChange={toggleSelectAll}
-                  />
-                ) : null}
-                {t('sessions.task')}
-              </span>
-              <span role="columnheader">{t('sessions.status')}</span>
-              <span role="columnheader">{t('sessions.expert')}</span>
-              <span role="columnheader">{t('sessions.sourceArtifacts')}</span>
-              <span role="columnheader">{t('sessions.updated')}</span>
-              <span role="columnheader" aria-label={t('sessions.menuLabel')} />
-            </div>
-
-            {visibleSessions.map(({ run, source, prReferences }) => {
-              const SourceIcon = getSourceIcon(source.name)
-              const needsApproval = run.status === 'waiting'
-                || run.steps.some((step) => step.id === 'approval' && step.status === 'active')
-              const attention = ['running', 'waiting', 'failed'].includes(run.status)
-              const completedSteps = run.steps.filter((step) => step.status === 'completed').length
-              const currentStep = run.steps.find((step) => step.status === 'active')
-                ?? run.steps.find((step) => step.status === 'failed')
-                ?? run.steps.find((step) => step.status === 'pending')
-                ?? run.steps.at(-1)
-
-              return (
-                <div
-                  className={`data-table__row session-table__row${attention ? ' session-table__row--attention' : ''}`}
-                  role="row"
-                  tabIndex={0}
-                  key={run.id}
-                  onClick={() => onOpenSession(run.id)}
-                  onKeyDown={(event) => handleRowKeyDown(event, run.id)}
-                  aria-label={`${t('sessions.open')}: ${run.title}`}
-                >
-                  <span className="session-task-cell" role="cell">
-                    {managementEnabled ? (
-                      <input
-                        type="checkbox"
-                        className="session-select-checkbox"
-                        checked={selectedIds.has(run.id)}
-                        disabled={pendingIds.has(run.id)}
-                        aria-label={`${t('sessions.selectSession')}: ${run.title}`}
-                        onClick={(event) => event.stopPropagation()}
-                        onChange={() => toggleSelection(run.id)}
-                      />
-                    ) : null}
-                    <span className="table-primary">
-                      <strong>{run.title}</strong>
-                      <small>{run.repo} · {run.branch}</small>
-                    </span>
-                  </span>
-                  <span role="cell" className="session-status-cell" data-label={t('sessions.status')}>
-                    <span className={`status-badge status-badge--${run.status}`}>
-                      <span className="status-badge__dot" aria-hidden="true" />
-                      {t(statusCopyKeys[run.status])}
-                    </span>
-                    {managementEnabled && run.steps.length > 0 ? <small className="session-status-progress">
-                      {completedSteps}/{run.steps.length} · {currentStep?.detail ?? '—'}
-                    </small> : null}
-                  </span>
-                  <span role="cell" className="session-expert-cell" data-label={t('sessions.expert')}>{run.expert}</span>
-                  <span role="cell" className="session-context-cell session-updated-cell" data-label={t('sessions.sourceArtifacts')}>
-                    <span className="session-source-cell">
-                      <SourceIcon aria-hidden="true" />
-                      <span>
-                        <strong>{getSourceLabel(source.name, locale)}</strong>
-                        {source.detail ? <small>{source.detail}</small> : null}
-                      </span>
-                    </span>
-                    <span className="session-signal-list">
-                      {prReferences.slice(0, 1).map((reference) => (
-                        <span className="state-label session-signal session-signal--pr" key={reference}>
-                          <GitPullRequest aria-hidden="true" />{reference}
-                        </span>
-                      ))}
-                      {prReferences.length > 1 ? <small>+{prReferences.length - 1}</small> : null}
-                      {needsApproval ? (
-                        <span className="state-label state-label--warning session-signal">
-                          <ShieldAlert aria-hidden="true" />{t('sessions.approvalNeeded')}
-                        </span>
-                      ) : null}
-                      {prReferences.length === 0 && !needsApproval ? <span className="session-signal-empty">—</span> : null}
-                    </span>
-                  </span>
-                  <time
-                    role="cell"
-                    className="session-updated-cell"
-                    data-label={t('sessions.updated')}
-                    dateTime={Number.isFinite(Date.parse(run.updatedAt)) ? run.updatedAt : undefined}
+          <table className="prototype-sessions-table" aria-label={localize(locale, '会话', 'Sessions')}>
+            <thead><tr>
+              <th>{localize(locale, '标题', 'Title')}</th>
+              <th>{localize(locale, '专家', 'Expert')}</th>
+              <th>{localize(locale, '状态', 'Status')}</th>
+              <th>{localize(locale, '可见性', 'Visibility')}</th>
+              <th>{localize(locale, '更新时间', 'Updated')}</th>
+            </tr></thead>
+            <tbody>
+              {loadState === 'loading' ? (
+                <tr><td colSpan={5} className="prototype-sessions-state" role="status">{localize(locale, '正在加载会话…', 'Loading sessions…')}</td></tr>
+              ) : loadState === 'error' ? (
+                <tr><td colSpan={5} className="prototype-sessions-state prototype-sessions-state--error" role="alert">
+                  <span>{loadError || localize(locale, '无法加载会话。', 'Unable to load sessions.')}</span>
+                  {onRetry ? <button type="button" onClick={onRetry}>{localize(locale, '重试', 'Retry')}</button> : null}
+                </td></tr>
+              ) : visibleRuns.length ? visibleRuns.map((run) => {
+                const status = statusView(run.status, locale)
+                return (
+                  <tr
+                    key={run.id}
+                    tabIndex={0}
+                    draggable
+                    onClick={() => onOpenSession(run.id)}
+                    onKeyDown={(event) => handleRowKeyDown(event, run.id)}
+                    onDragStart={(event) => event.dataTransfer.setData('text/session', run.id)}
+                    aria-label={`${localize(locale, '打开会话', 'Open session')}: ${run.title}`}
                   >
-                    {formatUpdatedAt(run.updatedAt, locale)}
-                  </time>
-                  {managementEnabled ? <span className="session-row__actions" role="cell" onClick={stopRowClick}>
-                    {favoritesEnabled ? <button
-                      type="button"
-                      className={`icon-button icon-button--sm${run.favorite ? ' session-favorite--active' : ''}`}
-                      aria-label={t(run.favorite ? 'sessions.unfavorite' : 'sessions.favorite')}
-                      data-tooltip={t(run.favorite ? 'sessions.unfavorite' : 'sessions.favorite')}
-                      aria-pressed={Boolean(run.favorite)}
-                      onClick={() => onToggleFavorite(run.id)}
-                    >
-                      <Star aria-hidden="true" fill={run.favorite ? 'currentColor' : 'none'} />
-                    </button> : null}
-                    <div className="session-menu-shell" ref={menuRunId === run.id ? menuRef : undefined}>
-                      <IconButton
-                        icon={MoreHorizontal}
-                        label={`${run.title} · ${t('sessions.more')}`}
-                        size="sm"
-                        aria-haspopup="menu"
-                        aria-expanded={menuRunId === run.id}
-                        onClick={() => {
-                          setFilterOpen(false)
-                          setMenuRunId((current) => current === run.id ? undefined : run.id)
-                        }}
-                      />
-                      {menuRunId === run.id ? (
-                        <div className="session-menu" role="menu" aria-label={t('sessions.menuLabel')}>
-                          <button type="button" role="menuitem" disabled={pendingIds.has(run.id)} onClick={() => openRename(run)}>
-                            <PencilLine aria-hidden="true" />{t('sessions.rename')}
-                          </button>
-                          <button type="button" role="menuitem" disabled={pendingIds.has(run.id)} onClick={() => toggleArchive(run)}>
-                            {run.archived ? <ArchiveRestore aria-hidden="true" /> : <Archive aria-hidden="true" />}
-                            {t(run.archived ? 'sessions.restore' : 'sessions.archive')}
-                          </button>
-                          {deletionEnabled ? <button type="button" role="menuitem" className="session-menu__danger" onClick={() => {
-                            setDeleteTarget(run)
-                            setMenuRunId(undefined)
-                          }}>
-                            <Trash2 aria-hidden="true" />{t('sessions.delete')}
-                          </button> : null}
-                        </div>
+                    <td className="prototype-session-title-cell">
+                      {run.favorite ? '★ ' : ''}{run.title}
+                      {managementEnabled ? (
+                        <span className="prototype-session-row-actions" onClick={stopRowClick}>
+                          <button
+                            type="button"
+                            className="prototype-session-row-menu"
+                            aria-label={`${run.title} · ${localize(locale, '会话操作', 'Session actions')}`}
+                            aria-haspopup="menu"
+                            aria-expanded={menuRunId === run.id}
+                            onClick={(event) => {
+                              menuTriggerRef.current = event.currentTarget
+                              setMenuRunId((current) => current === run.id ? undefined : run.id)
+                            }}
+                          >⋯</button>
+                          {menuRunId === run.id ? (
+                            <div ref={menuRef} className="prototype-session-menu" role="menu">
+                              <button type="button" role="menuitem" onClick={() => { setRenameValue(run.title); setRenameTarget(run); setMenuRunId(undefined) }}>{localize(locale, '重命名', 'Rename')}</button>
+                              {favoritesEnabled ? <button type="button" role="menuitem" onClick={() => { onToggleFavorite(run.id); setMenuRunId(undefined) }}>{run.favorite ? localize(locale, '取消置顶', 'Unpin') : localize(locale, '置顶', 'Pin')}</button> : null}
+                              <button type="button" role="menuitem" disabled={pendingIds.has(run.id)} onClick={() => { void toggleArchive(run) }}>{run.archived ? localize(locale, '恢复', 'Restore') : localize(locale, '归档', 'Archive')}</button>
+                              {deletionEnabled ? <button type="button" role="menuitem" className="danger" onClick={() => { setDeleteTarget(run); setMenuRunId(undefined) }}>{localize(locale, '删除', 'Delete')}</button> : null}
+                            </div>
+                          ) : null}
+                        </span>
                       ) : null}
-                    </div>
-                  </span> : <span role="cell" />}
-                </div>
-              )
-            })}
-
-            {visibleSessions.length === 0 ? (
-              <div className="session-empty">
-                <Inbox aria-hidden="true" />
-                <p>{emptyMessage}</p>
-                {hasActiveFilters ? (
-                  <button type="button" className="button button--ghost button--compact" onClick={clearFilters}>
-                    <X aria-hidden="true" />{t('sessions.clearSearch')}
-                  </button>
-                ) : view === 'active' && sessionCreationEnabled ? (
-                  <button type="button" className="button button--primary button--compact" onClick={() => onNewTask()}>
-                    <Plus aria-hidden="true" />{t('sessions.new')}
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
-          </div> : null}
-          {loadState === 'ready' && hasMore && onLoadMore ? (
-            <div className="session-load-more">
-              <button type="button" className="button button--ghost" onClick={onLoadMore} disabled={loadingMore}>
-                {loadingMore ? <span className="auth-spinner" aria-hidden="true" /> : <RefreshCw aria-hidden="true" />}
-                {t(loadingMore ? 'common.loadingMore' : 'common.loadMore')}
-              </button>
-            </div>
-          ) : null}
+                    </td>
+                    <td className="muted">{run.expert || '—'}</td>
+                    <td><span className={`prototype-session-status ${status.className}`}>{status.label}</span></td>
+                    <td className="muted">{run.visibility === 'private' ? localize(locale, '🔒 私有', '🔒 Private') : localize(locale, '共享', 'Shared')}</td>
+                    <td className="muted"><time dateTime={Number.isFinite(Date.parse(run.updatedAt)) ? run.updatedAt : undefined}>{relativeUpdatedAt(run.updatedAt, locale)}</time></td>
+                  </tr>
+                )
+              }) : (
+                <tr><td colSpan={5} className="prototype-sessions-state">{query || filter !== 'all' ? localize(locale, '没有匹配的会话。', 'No matching sessions.') : localize(locale, '暂无会话。', 'No sessions yet.')}</td></tr>
+              )}
+            </tbody>
+          </table>
+          <div className="prototype-sessions-footer">
+            <span>{visibleRuns.length} {localize(locale, '个会话', visibleRuns.length === 1 ? 'session' : 'sessions')}</span>
+            {hasMore && onLoadMore ? <button type="button" disabled={loadingMore} onClick={onLoadMore}>{loadingMore ? localize(locale, '加载中…', 'Loading…') : localize(locale, '加载更多', 'Load more')}</button> : null}
+          </div>
         </section>
       </div>
 
-      {managementEnabled && renameTarget ? (
-        <div className="dialog-backdrop" onMouseDown={(event) => {
-          if (event.target === event.currentTarget) setRenameTarget(undefined)
-        }}>
-          <form className="dialog session-dialog" role="dialog" aria-modal="true" aria-labelledby="rename-session-title" onSubmit={submitRename}>
-            <header className="dialog__header">
-              <div>
-                <p className="dialog__eyebrow">{t('sessions.entity')}</p>
-                <h2 id="rename-session-title">{t('sessions.renameTitle')}</h2>
-              </div>
-              <IconButton icon={X} label={t('sessions.cancel')} onClick={() => setRenameTarget(undefined)} />
-            </header>
-            <div className="dialog__body">
-              <p className="session-dialog__description">{t('sessions.renameDescription')}</p>
-              <label className="field">
-                <span>{t('sessions.sessionName')}</span>
-                <input autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} maxLength={120} />
-              </label>
-            </div>
-            <footer className="dialog__footer">
-              <span />
-              <div className="dialog__actions">
-                <button type="button" className="button button--ghost" onClick={() => setRenameTarget(undefined)}>{t('sessions.cancel')}</button>
-                <button type="submit" className="button button--primary" disabled={!renameValue.trim() || pendingIds.has(renameTarget.id)}>
-                  {pendingIds.has(renameTarget.id) ? <span className="auth-spinner" aria-hidden="true" /> : null}
-                  {t('sessions.save')}
-                </button>
-              </div>
-            </footer>
-          </form>
+      {renameTarget ? (
+        <div className="prototype-session-dialog-backdrop" role="presentation">
+          <section ref={dialogRef} className="prototype-session-dialog" role="dialog" aria-modal="true" aria-labelledby="prototype-session-rename-title">
+            <h2 id="prototype-session-rename-title">{localize(locale, '重命名会话', 'Rename session')}</h2>
+            <form onSubmit={(event) => { void submitRename(event) }}>
+              <input ref={renameInputRef} value={renameValue} maxLength={240} onChange={(event) => setRenameValue(event.target.value)} aria-label={localize(locale, '会话名称', 'Session name')} />
+              <div><button type="button" onClick={() => { setRenameTarget(undefined); restoreMenuFocus() }}>{localize(locale, '取消', 'Cancel')}</button><button type="submit" className="primary" disabled={!renameValue.trim() || pendingIds.has(renameTarget.id)}>{localize(locale, '保存', 'Save')}</button></div>
+            </form>
+          </section>
         </div>
       ) : null}
 
-      {managementEnabled && deletionEnabled && deleteTarget ? (
-        <div className="dialog-backdrop" onMouseDown={(event) => {
-          if (event.target === event.currentTarget) setDeleteTarget(undefined)
-        }}>
-          <section className="dialog session-dialog session-delete-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-session-title" aria-describedby="delete-session-description">
-            <header className="dialog__header">
-              <div>
-                <p className="dialog__eyebrow">{t('sessions.entity')}</p>
-                <h2 id="delete-session-title">{t('sessions.deleteTitle')}</h2>
-              </div>
-              <IconButton icon={X} label={t('sessions.cancel')} onClick={() => setDeleteTarget(undefined)} />
-            </header>
-            <div className="dialog__body">
-              <div className="session-delete-dialog__warning">
-                <AlertTriangle aria-hidden="true" />
-                <div>
-                  <strong>{deleteTarget.title}</strong>
-                  <p id="delete-session-description">{t('sessions.deleteDescription')}</p>
-                </div>
-              </div>
-            </div>
-            <footer className="dialog__footer">
-              <span />
-              <div className="dialog__actions">
-                <button type="button" className="button button--ghost" onClick={() => setDeleteTarget(undefined)}>{t('sessions.cancel')}</button>
-                <button type="button" className="button button--warning session-delete-button" onClick={confirmDelete}>
-                  <Trash2 aria-hidden="true" />{t('sessions.deleteConfirm')}
-                </button>
-              </div>
-            </footer>
+      {deleteTarget ? (
+        <div className="prototype-session-dialog-backdrop" role="presentation">
+          <section ref={dialogRef} className="prototype-session-dialog" role="alertdialog" aria-modal="true" aria-labelledby="prototype-session-delete-title" aria-describedby="prototype-session-delete-description">
+            <h2 id="prototype-session-delete-title">{localize(locale, '删除会话？', 'Delete session?')}</h2>
+            <p id="prototype-session-delete-description">{localize(locale, '此操作不可撤销。', 'This action cannot be undone.')}</p>
+            <div><button ref={deleteCancelRef} type="button" onClick={() => { setDeleteTarget(undefined); restoreMenuFocus() }}>{localize(locale, '取消', 'Cancel')}</button><button type="button" className="danger" onClick={() => { onDelete(deleteTarget.id); setDeleteTarget(undefined); restoreMenuFocus() }}>{localize(locale, '删除', 'Delete')}</button></div>
           </section>
         </div>
       ) : null}

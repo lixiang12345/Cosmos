@@ -476,27 +476,22 @@ describe('Cosmos prototype', () => {
     renderApp()
 
     expect(await screen.findByRole('heading', { level: 1, name: '升级支付服务重试策略' })).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: /变更/ }))
-
-    expect(screen.getByRole('button', { name: /src\/retry\/retry-policy\.ts/ })).toBeInTheDocument()
-    expect(screen.getByLabelText('代码差异')).toBeInTheDocument()
-
     const sessionViews = screen.getByRole('navigation', { name: '会话视图' })
-    await user.click(within(sessionViews).getByRole('button', { name: /文件/ }))
-    expect(screen.getByRole('tab', { name: /工作区/ })).toHaveAttribute('aria-selected', 'true')
-    await user.click(screen.getByRole('tab', { name: /组织/ }))
-    expect(screen.getByRole('button', { name: /standards\/engineering\.md/ })).toBeInTheDocument()
+    expect(within(sessionViews).getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Agent', 'Terminal', 'Files', 'Subscriptions'])
+    await user.click(within(sessionViews).getByRole('tab', { name: 'Files' }))
+    expect(screen.getByRole('region', { name: 'Files' })).toHaveTextContent('src/retry/retry-policy.ts')
+    await user.click(within(sessionViews).getByRole('tab', { name: 'Terminal' }))
+    expect(screen.getByRole('region', { name: 'Terminal' })).toHaveTextContent('pnpm test payment-retry --runInBand')
   })
 
   it('records an approval decision and continues the run', async () => {
     const user = userEvent.setup()
     renderApp()
 
-    await user.click(await screen.findByRole('button', { name: /审批/ }))
-    await user.click(screen.getByRole('button', { name: '批准并继续' }))
+    await user.click(await screen.findByRole('button', { name: '批准并继续' }))
 
-    expect(screen.getByText('决策已记录，正在创建 PR')).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('审批已记录')
+    expect(await screen.findByText('风险与验证证据已确认，已生成 PR #482。')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('审批已记录，Pull Request 已生成')
   })
 
   it('creates a new run from the task dialog', async () => {
@@ -602,12 +597,10 @@ describe('Cosmos prototype', () => {
     expect(screen.queryByText('gpt-5.6-sol')).not.toBeInTheDocument()
     expect(screen.queryByText('38.2k')).not.toBeInTheDocument()
     expect(screen.queryByText('￥4.82')).not.toBeInTheDocument()
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['对话', '文件', 'Workers'])
-    expect(screen.queryByRole('tab', { name: /产物|Changes|终端|审批/ })).not.toBeInTheDocument()
-    for (const action of ['停止', '重试', '批准']) {
-      expect(screen.queryByRole('button', { name: action })).not.toBeInTheDocument()
-    }
-    expect(screen.getByRole('button', { name: '暂停' })).toBeEnabled()
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Agent', 'Terminal', 'Files', 'Subscriptions'])
+    expect(screen.getByRole('button', { name: '停止' })).toBeEnabled()
+    await userEvent.setup().click(screen.getByRole('button', { name: '更多' }))
+    expect(screen.getByRole('menuitem', { name: '暂停' })).toBeEnabled()
     expect(screen.getByRole('textbox', { name: '后续消息' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
     expect(screen.getByText('当前部署未开放执行。')).toBeInTheDocument()
@@ -634,15 +627,17 @@ describe('Cosmos prototype', () => {
     renderAuthenticatedApp(`/sessions/${detail.id}`)
 
     await screen.findByRole('heading', { name: detail.title })
-    await user.click(screen.getByRole('tab', { name: '文件' }))
+    await user.click(screen.getByRole('tab', { name: 'Files' }))
     expect(await screen.findByRole('heading', { name: '会话工作区文件' })).toBeInTheDocument()
-    expect(listFiles).toHaveBeenCalledWith(
-      detail.organizationId,
-      detail.spaceId,
-      { scope: 'workspace', sessionId: detail.id, search: undefined, limit: 100 },
-      expect.objectContaining({ accessToken: 'production-access-token' }),
-      expect.any(AbortSignal),
-    )
+    await waitFor(() => {
+      expect(listFiles).toHaveBeenCalledWith(
+        detail.organizationId,
+        detail.spaceId,
+        { scope: 'workspace', sessionId: detail.id, search: undefined, limit: 100 },
+        expect.objectContaining({ accessToken: 'production-access-token' }),
+        expect.any(AbortSignal),
+      )
+    })
 
     await user.click(screen.getByRole('button', { name: '返回会话' }))
     expect(await screen.findByRole('heading', { name: detail.title })).toBeInTheDocument()
@@ -659,7 +654,8 @@ describe('Cosmos prototype', () => {
     renderAuthenticatedApp(`/sessions/${detail.id}`)
 
     await screen.findByRole('heading', { name: detail.title })
-    await user.click(screen.getByRole('tab', { name: 'Workers' }))
+    await user.click(screen.getByRole('tab', { name: 'Terminal' }))
+    await user.click(screen.getByRole('button', { name: '打开 Worker 详情' }))
     expect(await screen.findByRole('heading', { name: 'Worker 树' })).toBeInTheDocument()
     expect(listSessionWorkers).toHaveBeenCalledWith(
       detail.organizationId,
@@ -708,21 +704,25 @@ describe('Cosmos prototype', () => {
     vi.mocked(cancelSession).mockResolvedValueOnce(canceled)
 
     renderAuthenticatedApp('/sessions/session-controls')
-    await user.click(await screen.findByRole('button', { name: '暂停' }))
+    await screen.findByRole('heading', { name: '已排队，等待执行' })
+    await user.click(screen.getByRole('button', { name: '更多' }))
+    await user.click(screen.getByRole('menuitem', { name: '暂停' }))
     expect(await screen.findByRole('heading', { name: '执行已暂停' })).toBeInTheDocument()
     expect(pauseSession).toHaveBeenCalledWith(
       'organization-production', 'space-production', queued.id, 2, expect.any(String),
       expect.objectContaining({ accessToken: 'production-access-token' }),
     )
 
-    await user.click(screen.getByRole('button', { name: '恢复' }))
+    await user.click(screen.getByRole('button', { name: '更多' }))
+    await user.click(screen.getByRole('menuitem', { name: '恢复' }))
     expect(await screen.findByRole('heading', { name: '已排队，等待执行' })).toBeInTheDocument()
     expect(resumeSession).toHaveBeenCalledWith(
       'organization-production', 'space-production', queued.id, 3, expect.any(String),
       expect.objectContaining({ accessToken: 'production-access-token' }),
     )
 
-    await user.click(screen.getByRole('button', { name: '取消执行' }))
+    await user.click(screen.getByRole('button', { name: '停止' }))
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '取消执行' }))
     expect(await screen.findByRole('heading', { name: '执行已取消' })).toBeInTheDocument()
     expect(cancelSession).toHaveBeenCalledWith(
       'organization-production', 'space-production', queued.id, 4, expect.any(String), undefined,
@@ -795,7 +795,9 @@ describe('Cosmos prototype', () => {
     vi.mocked(retrySessionTurn).mockResolvedValueOnce(retried)
 
     renderAuthenticatedApp('/sessions/session-manual-retry')
-    await user.click(await screen.findByRole('button', { name: '重试' }))
+    await screen.findByRole('heading', { name: '执行失败' })
+    await user.click(screen.getByRole('button', { name: '更多' }))
+    await user.click(screen.getByRole('menuitem', { name: '重试' }))
     expect(await screen.findByRole('heading', { name: '正在等待重试' })).toBeInTheDocument()
     expect(retrySessionTurn).toHaveBeenCalledWith(
       'organization-production', 'space-production', failed.id, turnId, 5, expect.any(String),
@@ -1041,7 +1043,7 @@ describe('Cosmos prototype', () => {
     await act(async () => {
       tokenBList.resolve({ items: [], page: { nextCursor: null, hasMore: false, projectionUpdatedAt: null } })
     })
-    expect(within(await screen.findByRole('table', { name: '会话' })).getByText('暂无活跃会话')).toBeInTheDocument()
+    expect(within(await screen.findByRole('table', { name: '会话' })).getByText('暂无会话。')).toBeInTheDocument()
   })
 
   it('ignores demo Session storage for an authenticated production identity', async () => {
@@ -1054,7 +1056,7 @@ describe('Cosmos prototype', () => {
 
     const table = await screen.findByRole('table', { name: '会话' })
     expect(within(table).queryByText('升级支付服务重试策略')).not.toBeInTheDocument()
-    expect(within(table).getByText('暂无活跃会话')).toBeInTheDocument()
+    expect(within(table).getByText('暂无会话。')).toBeInTheDocument()
     expect(listSessions).toHaveBeenCalledWith(
       'organization-production',
       'space-production',
@@ -1065,8 +1067,8 @@ describe('Cosmos prototype', () => {
       { archived: 'all', limit: 50 },
     )
     expect(JSON.parse(window.localStorage.getItem('cosmos.demo.sessions') ?? '[]')).toHaveLength(initialRuns.length)
-    expect(screen.queryByRole('tab', { name: /收藏/ })).not.toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: /已归档/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '已置顶' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '私有' })).toBeInTheDocument()
   })
 
   it('shows only authoritative production Session mutation controls', async () => {
@@ -1136,8 +1138,9 @@ describe('Cosmos prototype', () => {
       expect.any(String),
       expect.objectContaining({ accessToken: 'production-access-token' }),
     ))
-    await user.click(screen.getByRole('tab', { name: /已归档/ }))
     expect((await screen.findAllByText('权威重命名')).length).toBeGreaterThan(0)
+    await user.click(within(table).getByRole('button', { name: /权威重命名.*会话操作/ }))
+    expect(screen.getByRole('menuitem', { name: '恢复' })).toBeInTheDocument()
   })
 
   it('loads the next production Session page without replacing the first page', async () => {
@@ -1181,7 +1184,7 @@ describe('Cosmos prototype', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Session projection unavailable.')
     await user.click(screen.getByRole('button', { name: '重试' }))
-    expect(within(await screen.findByRole('table', { name: '会话' })).getByText('暂无活跃会话')).toBeInTheDocument()
+    expect(within(await screen.findByRole('table', { name: '会话' })).getByText('暂无会话。')).toBeInTheDocument()
     expect(listSessions).toHaveBeenCalledTimes(2)
   })
 
@@ -1371,7 +1374,7 @@ describe('Cosmos prototype', () => {
 
     await waitFor(() => expect(listSessionMessages).toHaveBeenCalled())
     expect(listSessionEvents).toHaveBeenCalled()
-    expect(await screen.findByText('能力降级会话')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: '能力降级会话' })).toBeInTheDocument()
   })
 
   it('aborts stale capability discovery when the access token rotates', async () => {
@@ -1422,7 +1425,7 @@ describe('Cosmos prototype', () => {
 
     expect(await screen.findByRole('heading', { name: '正在重试' })).toBeInTheDocument()
     expect(screen.getByRole('region', { name: '会话消息' })).toHaveTextContent('检查订单服务。')
-    expect(screen.getByRole('region', { name: '执行动态' })).toHaveTextContent('第2 次尝试 · 正在执行')
+    expect(screen.getByRole('region', { name: '执行动态' })).toHaveTextContent('#4 尝试 2 · running')
   })
 
   it('applies a canonical session.updated event to detail and the Session list', async () => {
@@ -1448,7 +1451,7 @@ describe('Cosmos prototype', () => {
     renderAuthenticatedApp('/sessions/session-status-event')
 
     expect(await screen.findByRole('heading', { name: '执行已完成' })).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '返回会话' }))
+    await user.click(screen.getByRole('button', { name: '← 返回' }))
     const table = await screen.findByRole('table', { name: '会话' })
     expect(within(table).getByText('状态事件驱动会话')).toBeInTheDocument()
     expect(within(table).getByText('已完成')).toBeInTheDocument()
@@ -1818,7 +1821,7 @@ describe('Cosmos prototype', () => {
     })
   })
 
-  it('switches theme and application language', async () => {
+  it('switches theme and opens the prototype keyboard reference', async () => {
     const user = userEvent.setup()
     renderApp('/sessions')
     await screen.findByRole('table', { name: '会话' })
@@ -1829,10 +1832,9 @@ describe('Cosmos prototype', () => {
     expect(document.querySelector('meta[name="theme-color"]')).toHaveAttribute('content', '#ffffff')
     expect(window.localStorage.getItem(PREFERENCE_STORAGE_KEYS.theme)).toBe('light')
 
-    await user.click(within(sessionsPage).getByRole('button', { name: '切换到英文' }))
-    expect(screen.getByRole('heading', { level: 1, name: 'Sessions' })).toBeInTheDocument()
-    expect(within(sessionsPage).getByRole('button', { name: 'Switch to Chinese' })).toBeInTheDocument()
-    expect(window.localStorage.getItem(PREFERENCE_STORAGE_KEYS.locale)).toBe('en')
+    await user.click(within(sessionsPage).getByRole('button', { name: '键盘快捷键' }))
+    expect(screen.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument()
+    expect(within(screen.getByRole('dialog', { name: 'Keyboard shortcuts' })).getByRole('button', { name: '关闭' })).toHaveFocus()
   })
 
   it('renames and archives a managed session', async () => {
@@ -1850,14 +1852,14 @@ describe('Cosmos prototype', () => {
 
     await user.click(screen.getByRole('button', { name: '库存并发测试修复 · 会话操作' }))
     await user.click(screen.getByRole('menuitem', { name: '归档' }))
-    expect(screen.queryByText('库存并发测试修复')).not.toBeInTheDocument()
+    expect(screen.getByText('库存并发测试修复')).toBeInTheDocument()
     const storedSessions = JSON.parse(window.localStorage.getItem('cosmos.demo.sessions') ?? '[]') as Array<{ title: string; archived?: boolean }>
     expect(storedSessions.find((session) => session.title === '库存并发测试修复')).toMatchObject({ archived: true })
-    await user.click(screen.getByRole('tab', { name: /已归档/ }))
-    expect(screen.getByText('库存并发测试修复')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '库存并发测试修复 · 会话操作' }))
+    expect(screen.getByRole('menuitem', { name: '恢复' })).toBeInTheDocument()
   })
 
-  it('prioritizes sessions that need attention', async () => {
+  it('preserves the prototype session ordering', async () => {
     const completedSession = { ...initialRuns.find((run) => run.id === 'run-481')!, archived: false }
     const sessions = [completedSession, ...initialRuns.filter((run) => run.id !== 'run-481')]
     window.localStorage.setItem('cosmos.demo.sessions', JSON.stringify(sessions))
@@ -1865,43 +1867,36 @@ describe('Cosmos prototype', () => {
     renderApp('/sessions')
 
     const rows = within(await screen.findByRole('table', { name: '会话' })).getAllByRole('row').slice(1)
-    expect(rows[0]).toHaveTextContent('升级支付服务重试策略')
-    expect(rows[1]).toHaveTextContent('补齐库存预占链路测试')
-    expect(rows[2]).toHaveTextContent('审查身份服务依赖升级')
-    expect(rows[3]).toHaveTextContent('修复账单导出时区偏差')
+    expect(rows[0]).toHaveTextContent('修复账单导出时区偏差')
+    expect(rows[1]).toHaveTextContent('升级支付服务重试策略')
+    expect(rows[2]).toHaveTextContent('补齐库存预占链路测试')
+    expect(rows[3]).toHaveTextContent('审查身份服务依赖升级')
   })
 
-  it('finds sessions by PR details and source filters', async () => {
+  it('filters sessions with the prototype search and segments', async () => {
     const user = userEvent.setup()
     renderApp('/sessions')
     await screen.findByRole('table', { name: '会话' })
 
-    await user.click(screen.getByRole('tab', { name: /已归档/ }))
-    const search = screen.getByLabelText('搜索标题、仓库、分支、触发器、步骤或 PR')
-    await user.type(search, 'PR #913')
+    const search = screen.getByLabelText('筛选会话')
+    await user.type(search, '账单')
     expect(within(screen.getByRole('table', { name: '会话' })).getByText('修复账单导出时区偏差')).toBeInTheDocument()
-
     await user.clear(search)
-    await user.click(screen.getByRole('button', { name: '筛选' }))
-    const filterDialog = screen.getByRole('dialog', { name: '筛选' })
-    await user.selectOptions(within(filterDialog).getByLabelText('来源'), 'Jira')
-    expect(within(screen.getByRole('table', { name: '会话' })).getByText('修复账单导出时区偏差')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '运行中' }))
+    expect(within(screen.getByRole('table', { name: '会话' })).getByRole('row', { name: /审查身份服务依赖升级/ })).toBeInTheDocument()
+    expect(within(screen.getByRole('table', { name: '会话' })).queryByText('修复账单导出时区偏差')).not.toBeInTheDocument()
   })
 
-  it('archives multiple selected sessions in one action', async () => {
+  it('archives sessions through the prototype hover menu', async () => {
     const user = userEvent.setup()
     renderApp('/sessions')
     await screen.findByRole('table', { name: '会话' })
 
-    await user.click(screen.getByRole('checkbox', { name: '选择会话: 补齐库存预占链路测试' }))
-    await user.click(screen.getByRole('checkbox', { name: '选择会话: 审查身份服务依赖升级' }))
-    await user.click(screen.getByRole('button', { name: '批量归档 (2)' }))
-
-    expect(screen.queryByText('补齐库存预占链路测试')).not.toBeInTheDocument()
-    expect(screen.queryByText('审查身份服务依赖升级')).not.toBeInTheDocument()
-    await user.click(screen.getByRole('tab', { name: /已归档/ }))
+    await user.click(screen.getByRole('button', { name: '补齐库存预占链路测试 · 会话操作' }))
+    await user.click(screen.getByRole('menuitem', { name: '归档' }))
     expect(screen.getByText('补齐库存预占链路测试')).toBeInTheDocument()
-    expect(screen.getByText('审查身份服务依赖升级')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '补齐库存预占链路测试 · 会话操作' }))
+    expect(screen.getByRole('menuitem', { name: '恢复' })).toBeInTheDocument()
   })
 
   it('materializes a matched inbound event as an automation Session', async () => {
@@ -1935,7 +1930,9 @@ describe('Cosmos prototype', () => {
     const user = userEvent.setup()
     renderApp('/runs/run-479')
 
-    await user.click(await screen.findByRole('button', { name: '重试步骤' }))
+    await screen.findByRole('heading', { level: 1, name: '补齐库存预占链路测试' })
+    await user.click(screen.getByRole('button', { name: '更多', expanded: false }))
+    await user.click(screen.getByRole('menuitem', { name: '重试' }))
 
     expect(screen.getByRole('status')).toHaveTextContent('已创建新的 Attempt，重试成功')
     await waitFor(() => {

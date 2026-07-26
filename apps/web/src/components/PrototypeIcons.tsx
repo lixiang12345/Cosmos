@@ -100,3 +100,37 @@ export function PrototypeKeyboardIcon(props: IconProps) {
 export function PrototypeScrollDownIcon(props: IconProps) {
   return <StrokeIcon size={10} viewBox="0 0 12 12" strokeWidth={1.4} {...props}><path d="M3 4.5L6 7.5 9 4.5" /></StrokeIcon>
 }
+
+export function PrototypeAgentIcon(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <path d="M8 1.75l5.4 3.1v6.3L8 14.25 2.6 11.15v-6.3L8 1.75z" />
+      <circle cx="6.5" cy="7.2" r=".65" fill="currentColor" stroke="none" />
+      <circle cx="9.5" cy="7.2" r=".65" fill="currentColor" stroke="none" />
+    </StrokeIcon>
+  )
+}
+
+export function PrototypeTerminalIcon(props: IconProps) {
+  return <StrokeIcon {...props}><rect x="2.5" y="3" width="11" height="10" rx="1.5" /><path d="M5 6.5l2 1.5L5 9.5M8.5 9.5H11" /></StrokeIcon>
+}
+
+export function PrototypeSubscriptionsIcon(props: IconProps) {
+  return <StrokeIcon {...props}><path d="M3.5 4.5h9M3.5 8h9M3.5 11.5h6" /><circle cx="12" cy="11.5" r="1.2" /></StrokeIcon>
+}
+
+export function PrototypeCopyIcon(props: IconProps) {
+  return <StrokeIcon {...props}><rect x="5.5" y="5.5" width="7" height="7" rx="1" /><path d="M3.5 10.5V3.5a1 1 0 011-1h7" /></StrokeIcon>
+}
+
+export function PrototypePanelRightIcon(props: IconProps) {
+  return <StrokeIcon {...props}><rect x="2.5" y="2.5" width="11" height="11" rx="1.5" /><path d="M9.5 2.5v11" /></StrokeIcon>
+}
+
+export function PrototypePaperclipIcon(props: IconProps) {
+  return <StrokeIcon size={16} {...props}><path d="M5.5 8.5l4.2-4.2a2 2 0 012.8 2.8L6.2 13.4a3.2 3.2 0 01-4.5-4.5l6.4-6.4" /></StrokeIcon>
+}
+
+export function PrototypePlusCompactIcon(props: IconProps) {
+  return <StrokeIcon {...props}><path d="M8 3.5v9M3.5 8h9" /></StrokeIcon>
+}
