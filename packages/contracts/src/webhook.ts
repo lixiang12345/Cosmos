@@ -53,3 +53,9 @@ export const WebhookMutationResponseSchema = z.object({
   replayed: z.boolean(),
 })
 export type WebhookMutationResponse = z.infer<typeof WebhookMutationResponseSchema>
+
+export const WebhookDeliveryReceiptSchema = z.object({
+  eventId: z.string().trim().min(1).max(128),
+  duplicate: z.boolean(),
+}).strict()
+export type WebhookDeliveryReceipt = z.infer<typeof WebhookDeliveryReceiptSchema>

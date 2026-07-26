@@ -89,6 +89,7 @@ const migrationVersions = [
   '084_skill_catalog.sql',
   '085_expert_skills_worker_access.sql',
   '086_integration_types_gitlab_datadog.sql',
+  '087_webhook_delivery_verification.sql',
 ]
 
 function poolWithVersions(versions: string[]) {

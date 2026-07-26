@@ -391,12 +391,14 @@ export {
 
 export {
   CreateWebhookRequestSchema,
+  WebhookDeliveryReceiptSchema,
   WebhookDtoSchema,
   WebhookListResponseSchema,
   WebhookMutationResponseSchema,
   WebhookScopeSchema,
   WebhookStatusSchema,
   type CreateWebhookRequest,
+  type WebhookDeliveryReceipt,
   type WebhookDto,
   type WebhookListResponse,
   type WebhookMutationResponse,

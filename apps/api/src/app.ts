@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import cors from '@fastify/cors'
 import helmet from '@fastify/helmet'
 import { timingSafeEqual } from 'node:crypto'
@@ -80,6 +81,7 @@ import {
   CreateWebhookRequestSchema,
   WebhookDtoSchema,
   WebhookListResponseSchema,
+  WebhookDeliveryReceiptSchema,
   WebhookMutationResponseSchema,
   CreateMcpServerRequestSchema,
   UpdateMcpServerRequestSchema,
@@ -136,6 +138,7 @@ import {
   AutomationVersionConflictError,
   EmptyAutomationRepository,
   type AutomationRepository,
+  type AutomationEventMatchResult,
 } from './automation-repository.js'
 import {
   EmptySpaceRepository,
@@ -856,6 +859,11 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     const path = request.raw.url?.split('?', 1)[0]
     const isPublicHealthRequest = (request.method === 'GET' || request.method === 'HEAD') && path === '/api/health'
     const isMetricsRequest = request.method === 'GET' && path === '/api/metrics'
+    // Webhook deliveries authenticate with the per-webhook signing secret in
+    // the route handler, not with a platform identity; IP rate limiting above
+    // still applies.
+    const isWebhookDelivery = request.method === 'POST'
+      && path !== undefined && path.startsWith('/api/v1/webhook-deliveries/')
     if (request.method === 'OPTIONS' || isPublicHealthRequest) return
     reply.header('Cache-Control', 'private, no-store')
     reply.header('Vary', 'Authorization')
@@ -873,7 +881,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         }, { audit: rate.firstDenied })
       }
     }
-    if (isMetricsRequest) return
+    if (isMetricsRequest || isWebhookDelivery) return
     actorsByRequest.set(request, await authenticate(request.headers.authorization))
   })
 
@@ -2945,6 +2953,157 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     },
   )
 
+  // ── Webhook Deliveries (public entry point) ────────────────────────────────
+
+  type WebhookDeliveryParams = { webhookId: string }
+
+  app.post<{ Params: WebhookDeliveryParams }>(
+    '/api/v1/webhook-deliveries/:webhookId',
+    async (request, reply) => {
+      const authorizationHeader = request.headers.authorization
+      const presentedSecret = typeof authorizationHeader === 'string' && authorizationHeader.startsWith('Bearer ')
+        ? authorizationHeader.slice('Bearer '.length).trim()
+        : ''
+      // A missing secret, an unknown webhook, and a wrong secret are
+      // indistinguishable on purpose so callers cannot enumerate webhook ids.
+      const identity = presentedSecret
+        ? await webhookRepository.resolveDelivery(request.params.webhookId, presentedSecret)
+        : null
+      if (!identity) {
+        return sendApiError(reply, 401, request, {
+          code: 'UNAUTHENTICATED',
+          message: 'The webhook delivery could not be authenticated.',
+          retryable: false,
+        })
+      }
+      const payload = request.body
+      if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED',
+          message: 'Webhook deliveries must carry a JSON object payload.',
+          retryable: false,
+          fieldErrors: { body: ['Send a JSON object.'] },
+        })
+      }
+      const eventTypeHeader = request.headers['x-event-type']
+      const eventType = typeof eventTypeHeader === 'string' && eventTypeHeader.trim()
+        ? eventTypeHeader.trim().slice(0, 256)
+        : 'delivery'
+      const deliveryIdHeader = request.headers['x-delivery-id']
+      const deliveryId = typeof deliveryIdHeader === 'string' && deliveryIdHeader.trim()
+        ? deliveryIdHeader.trim().slice(0, 256)
+        : createHash('sha256').update(JSON.stringify(payload)).digest('hex')
+      const parsed = ReceiveAutomationEventRequestSchema.safeParse({
+        source: 'webhook',
+        eventType,
+        externalId: `${request.params.webhookId}:${deliveryId}`,
+        headers: { webhookId: request.params.webhookId },
+        payload,
+      })
+      if (!parsed.success) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED',
+          message: 'The webhook delivery is invalid.',
+          retryable: false,
+          fieldErrors: validationFieldErrors(parsed.error.issues),
+        })
+      }
+      let receipt = await automationRepository.receiveEvent({
+        organizationId: identity.organizationId,
+        spaceId: identity.spaceId,
+        actorId: identity.createdBy,
+        requestId: request.id,
+        request: parsed.data,
+      })
+      if (!receipt.duplicate) {
+        await webhookRepository.recordDelivery(
+          identity.organizationId, identity.spaceId, request.params.webhookId,
+        )
+      }
+      receipt = await dispatchReceivedAutomationEvent(request, {
+        organizationId: identity.organizationId,
+        spaceId: identity.spaceId,
+        actorId: identity.createdBy,
+      }, receipt)
+      reply.header('Idempotency-Replayed', String(receipt.duplicate))
+      return reply.code(receipt.duplicate ? 200 : 202).send(
+        WebhookDeliveryReceiptSchema.parse({
+          eventId: receipt.event.id,
+          duplicate: receipt.duplicate,
+        }),
+      )
+    },
+  )
+
+  async function dispatchReceivedAutomationEvent(
+    request: FastifyRequest,
+    scope: { organizationId: string; spaceId: string; actorId: string },
+    receipt: AutomationEventMatchResult,
+  ): Promise<AutomationEventMatchResult> {
+    if (receipt.duplicate || !receipt.match) return receipt
+    try {
+      let executionAvailability: 'available' | 'disabled' | 'worker_unavailable' = 'available'
+      if (!executionEnabled) executionAvailability = 'disabled'
+      else if (!await executionAvailable(request)) executionAvailability = 'worker_unavailable'
+      const created = await sessionRepository.create({
+        organizationId: scope.organizationId,
+        spaceId: scope.spaceId,
+        actorId: receipt.match.automation.serviceAccountId,
+        actorKind: 'service_account',
+        actorAudience: receipt.match.serviceAccountAudience,
+        requestId: request.id,
+        idempotencyKey: `automation-event:${receipt.event.id}`,
+        source: 'automation',
+        automationAutoArchive: receipt.match.automation.autoArchive,
+        executionAvailability,
+        request: CreateSessionRequestSchema.parse({
+          expertId: receipt.match.automation.expertId,
+          title: `[${receipt.event.source}] ${receipt.event.eventType}`.slice(0, 240),
+          visibility: 'space',
+          start: true,
+          message: {
+            content: automationEventMessage({
+              source: receipt.event.source,
+              eventType: receipt.event.eventType,
+              externalId: receipt.event.externalId,
+              payload: receipt.event.payload,
+            }),
+            attachments: [],
+          },
+        }),
+      })
+      const event = await automationRepository.completeDispatch({
+        organizationId: scope.organizationId,
+        spaceId: scope.spaceId,
+        actorId: scope.actorId,
+        requestId: request.id,
+        eventId: receipt.event.id,
+        sessionId: created.session.id,
+      })
+      return event ? { ...receipt, event } : receipt
+    } catch (error) {
+      const expected = error instanceof ExecutionUnavailableError
+        || error instanceof EnvironmentNotReadyError
+        || error instanceof ExpertNotPublishedError
+        || error instanceof SessionConfigurationNotFoundError
+        || error instanceof SessionConfigurationValidationError
+        || error instanceof AuthorizationChangedError
+      if (!expected) request.log.error({ err: error, eventId: receipt.event.id }, 'Automation Event dispatch failed')
+      const event = await automationRepository.failDispatch({
+        organizationId: scope.organizationId,
+        spaceId: scope.spaceId,
+        actorId: scope.actorId,
+        requestId: request.id,
+        eventId: receipt.event.id,
+        code: expected ? 'automation_session_unavailable' : 'automation_dispatch_failed',
+        message: expected && error instanceof Error
+          ? error.message
+          : 'The Automation Event could not create a Session.',
+      })
+      return event ? { ...receipt, event } : receipt
+    }
+  }
+
   app.post<{ Params: SpaceParams }>(
     '/api/v1/organizations/:organizationId/spaces/:spaceId/automation-events',
     async (request, reply) => {
@@ -2965,69 +3124,11 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         requestId: request.id,
         request: parsed.data,
       })
-      if (!receipt.duplicate && receipt.match) {
-        try {
-          let executionAvailability: 'available' | 'disabled' | 'worker_unavailable' = 'available'
-          if (!executionEnabled) executionAvailability = 'disabled'
-          else if (!await executionAvailable(request)) executionAvailability = 'worker_unavailable'
-          const created = await sessionRepository.create({
-            organizationId: authorization.organizationId,
-            spaceId: authorization.spaceId,
-            actorId: receipt.match.automation.serviceAccountId,
-            actorKind: 'service_account',
-            actorAudience: receipt.match.serviceAccountAudience,
-            requestId: request.id,
-            idempotencyKey: `automation-event:${receipt.event.id}`,
-            source: 'automation',
-            automationAutoArchive: receipt.match.automation.autoArchive,
-            executionAvailability,
-            request: CreateSessionRequestSchema.parse({
-              expertId: receipt.match.automation.expertId,
-              title: `[${receipt.event.source}] ${receipt.event.eventType}`.slice(0, 240),
-              visibility: 'space',
-              start: true,
-              message: {
-                content: automationEventMessage({
-                  source: receipt.event.source,
-                  eventType: receipt.event.eventType,
-                  externalId: receipt.event.externalId,
-                  payload: receipt.event.payload,
-                }),
-                attachments: [],
-              },
-            }),
-          })
-          const event = await automationRepository.completeDispatch({
-            organizationId: authorization.organizationId,
-            spaceId: authorization.spaceId,
-            actorId: authorization.actor.id,
-            requestId: request.id,
-            eventId: receipt.event.id,
-            sessionId: created.session.id,
-          })
-          if (event) receipt = { ...receipt, event }
-        } catch (error) {
-          const expected = error instanceof ExecutionUnavailableError
-            || error instanceof EnvironmentNotReadyError
-            || error instanceof ExpertNotPublishedError
-            || error instanceof SessionConfigurationNotFoundError
-            || error instanceof SessionConfigurationValidationError
-            || error instanceof AuthorizationChangedError
-          if (!expected) request.log.error({ err: error, eventId: receipt.event.id }, 'Automation Event dispatch failed')
-          const event = await automationRepository.failDispatch({
-            organizationId: authorization.organizationId,
-            spaceId: authorization.spaceId,
-            actorId: authorization.actor.id,
-            requestId: request.id,
-            eventId: receipt.event.id,
-            code: expected ? 'automation_session_unavailable' : 'automation_dispatch_failed',
-            message: expected && error instanceof Error
-              ? error.message
-              : 'The Automation Event could not create a Session.',
-          })
-          if (event) receipt = { ...receipt, event }
-        }
-      }
+      receipt = await dispatchReceivedAutomationEvent(request, {
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        actorId: authorization.actor.id,
+      }, receipt)
       const response = AutomationEventReceiptSchema.parse({
         event: receipt.event,
         duplicate: receipt.duplicate,

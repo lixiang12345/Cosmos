@@ -86,6 +86,23 @@ function rowToDto(row: WebhookRow): WebhookDto {
 }
 
 export class PostgresWebhookRepository implements WebhookRepository {
+  async resolveDelivery(webhookId: string, presentedSecret: string) {
+    const result = await this.pool.query<{ organization_id: string; space_id: string; created_by: string }>(
+      'SELECT organization_id, space_id, created_by FROM cosmos_resolve_webhook_delivery($1, $2)',
+      [webhookId, presentedSecret],
+    )
+    const row = result.rows[0]
+    if (!row) return null
+    return { organizationId: row.organization_id, spaceId: row.space_id, createdBy: row.created_by }
+  }
+
+  async recordDelivery(organizationId: string, spaceId: string, webhookId: string) {
+    await this.pool.query(
+      'SELECT cosmos_record_webhook_delivery($1, $2, $3)',
+      [organizationId, spaceId, webhookId],
+    )
+  }
+
   constructor(private readonly pool: Pool) {}
 
   async listWebhooks(

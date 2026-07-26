@@ -3602,6 +3602,51 @@ paths:
         '500':
           $ref: '#/components/responses/RuntimeInternalError'
 
+  /webhook-deliveries/{webhookId}:
+    parameters:
+      - name: webhookId
+        in: path
+        required: true
+        description: Webhook identifier from the Webhooks catalog.
+        schema:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+    post:
+      tags: [Webhooks]
+      operationId: deliverWebhookEvent
+      x-cosmos-implementation-status: implemented
+      summary: Deliver an external event to a Webhook (public entry point)
+      description: >-
+        Authenticates with an Authorization Bearer signing-secret header.
+        Optional X-Event-Type and X-Delivery-Id headers set the event type and
+        idempotency identity; without X-Delivery-Id the payload hash
+        deduplicates redeliveries.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Duplicate delivery replayed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeWebhookDeliveryReceipt'
+        '202':
+          description: Delivery accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeWebhookDeliveryReceipt'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+
   /organizations/{organizationId}/spaces/{spaceId}/artifacts:
     parameters:
       - $ref: '#/components/parameters/RuntimeOrganizationId'
@@ -6707,6 +6752,15 @@ components:
               description: Write-once signing secret. Returned only on fresh creation, null on replay.
             - type: 'null'
         replayed:
+          type: boolean
+      additionalProperties: false
+    RuntimeWebhookDeliveryReceipt:
+      type: object
+      required: [eventId, duplicate]
+      properties:
+        eventId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        duplicate:
           type: boolean
       additionalProperties: false
     RuntimeSpaceArtifactListResponse:

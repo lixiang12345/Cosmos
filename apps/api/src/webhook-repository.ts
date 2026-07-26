@@ -17,7 +17,15 @@ export type WebhookMutationScope = WebhookScope & {
   idempotencyKey: string
 }
 
+export type WebhookDeliveryIdentity = {
+  organizationId: string
+  spaceId: string
+  createdBy: string
+}
+
 export interface WebhookRepository {
+  resolveDelivery(webhookId: string, presentedSecret: string): Promise<WebhookDeliveryIdentity | null>
+  recordDelivery(organizationId: string, spaceId: string, webhookId: string): Promise<void>
   listWebhooks(
     organizationId: string,
     spaceId: string,
@@ -68,6 +76,14 @@ export class EmptyWebhookRepository implements WebhookRepository {
 
   async createWebhook(): Promise<WebhookMutationResponse> {
     throw new Error('WebhookRepository not configured.')
+  }
+
+  async resolveDelivery(): Promise<null> {
+    return null
+  }
+
+  async recordDelivery(): Promise<void> {
+    /* no-op without a database */
   }
 
   async archiveWebhook() {
