@@ -2246,7 +2246,9 @@ function CosmosApp() {
               credentialVersion={credentialVersion}
               canManage={expertManagementEnabled}
               onOpenNavigation={openNavigation}
-            />} />
+            navigationCollapsed={sidebarCollapsed}
+              onOpenCommand={() => setCommandOpen(true)}
+              />} />
         <Route path="/webhooks" element={demoMode
           ? <WebhooksPage onOpenNavigation={openNavigation} />
           : <RemoteWebhooksPage
@@ -2261,7 +2263,9 @@ function CosmosApp() {
               credentialVersion={credentialVersion}
               canManage={expertManagementEnabled}
               onOpenNavigation={openNavigation}
-            />} />
+            navigationCollapsed={sidebarCollapsed}
+              onOpenCommand={() => setCommandOpen(true)}
+              />} />
         <Route path="/secrets" element={demoMode
           ? <SecretsPage onOpenNavigation={openNavigation} />
           : <RemoteSecretsPage
@@ -2276,6 +2280,8 @@ function CosmosApp() {
               credentialVersion={credentialVersion}
               canManage={expertManagementEnabled}
               onOpenNavigation={openNavigation}
+              navigationCollapsed={sidebarCollapsed}
+              onOpenCommand={() => setCommandOpen(true)}
             />} />
         <Route path="/spaces" element={demoMode ? <SpacesPage onOpenNavigation={openNavigation} /> : <RemoteSpacesPage key={workspace.space.id} organizationId={organizationId} accessibleSpaces={organization.spaces} activeSpaceId={workspace.space.id} auth={catalogAuth} credentialVersion={credentialVersion} canManage={expertManagementEnabled} onSelectSpace={(spaceId) => workspace.selectSpace(organizationId, spaceId)} onWorkspaceRefresh={refreshWorkspace} onOpenNavigation={openNavigation} />} />
         <Route path="/settings" element={demoMode

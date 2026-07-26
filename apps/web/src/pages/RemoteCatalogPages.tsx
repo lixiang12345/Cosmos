@@ -28,17 +28,12 @@ import {
   CircleOff,
   Clock3,
   Container,
-  Copy,
-  Database,
   FolderGit2,
   GitBranch,
   History,
   PlugZap,
   Wrench,
   KeyRound,
-  EyeOff,
-  Link2,
-  Webhook,
   LoaderCircle,
   LockKeyhole,
   Menu,
@@ -79,13 +74,10 @@ import {
   getEnvironment,
   getExpert,
   getRepository,
-  getSecret,
   createSecret,
   archiveSecret,
-  getWebhook,
   createWebhook,
   archiveWebhook,
-  getMcpServer,
   createMcpServer,
   archiveMcpServer,
   getDaemon,
@@ -181,15 +173,15 @@ export type RemoteRepositoriesPageProps = RemoteCatalogListState<RepositoryDto>
 
 export type RemoteSecretsPageProps = RemoteCatalogListState<SecretDto>
   & RemoteCatalogRequestProps
-  & { onOpenNavigation?: () => void; canManage?: boolean; onCatalogChange?: () => void }
+  & { onOpenNavigation?: () => void; canManage?: boolean; onCatalogChange?: () => void; navigationCollapsed?: boolean; onOpenCommand?: () => void }
 
 export type RemoteWebhooksPageProps = RemoteCatalogListState<WebhookDto>
   & RemoteCatalogRequestProps
-  & { onOpenNavigation?: () => void; canManage?: boolean; onCatalogChange?: () => void }
+  & { onOpenNavigation?: () => void; canManage?: boolean; onCatalogChange?: () => void; navigationCollapsed?: boolean; onOpenCommand?: () => void }
 
 export type RemoteMcpServersPageProps = RemoteCatalogListState<McpServerDto>
   & RemoteCatalogRequestProps
-  & { onOpenNavigation?: () => void; canManage?: boolean; onCatalogChange?: () => void }
+  & { onOpenNavigation?: () => void; canManage?: boolean; onCatalogChange?: () => void; navigationCollapsed?: boolean; onOpenCommand?: () => void }
 
 export type RemoteDaemonsPageProps = RemoteCatalogListState<DaemonDto>
   & RemoteCatalogRequestProps
@@ -1835,15 +1827,6 @@ export function RemoteRepositoriesPage({
   )
 }
 
-function SecretScopeLabel({ scope }: { scope: SecretDto['scope'] }) {
-  const { locale } = usePreferences()
-  const map: Record<SecretDto['scope'], { label: string; tone: string }> = {
-    private: { label: text(locale, '私有', 'Private'), tone: 'muted' },
-    shared: { label: text(locale, '共享', 'Shared'), tone: 'ok' },
-  }
-  const entry = map[scope]
-  return <span className={`cosmos-status-label cosmos-status-label--${entry.tone}`}>{entry.label}</span>
-}
 
 type SecretDraft = { name: string; scope: SecretDto['scope']; value: string; description: string; vmInstall: boolean }
 const initialSecretDraft: SecretDraft = { name: '', scope: 'private', value: '', description: '', vmInstall: true }
@@ -1860,34 +1843,22 @@ export function RemoteSecretsPage({
   credentialVersion,
   canManage,
   onOpenNavigation,
+  navigationCollapsed,
+  onOpenCommand,
 }: RemoteSecretsPageProps) {
   const { locale } = usePreferences()
-  const [selectedId, setSelectedId] = useState<string>()
   const [formOpen, setFormOpen] = useState(false)
   const [draft, setDraft] = useState<SecretDraft>(initialSecretDraft)
   const [mutating, setMutating] = useState(false)
   const [mutationError, setMutationError] = useState<Error | null>(null)
+  const [confirmArchiveId, setConfirmArchiveId] = useState<string>()
   const state = listState(loading, ready, error)
-  const selectedSummary = items.find((item) => item.id === selectedId) ?? items[0]
-  const selectedSecretId = state === 'ready' ? selectedSummary?.id : undefined
   const requestAuth = useMemo<CosmosApiAuthContext>(() => ({
     accessToken: auth.accessToken,
     requestIdentity: auth.requestIdentity,
     onUnauthorized: auth.onUnauthorized,
   }), [auth.accessToken, auth.onUnauthorized, auth.requestIdentity])
-  const identity = useMemo(() => selectedSecretId ? ({
-    organizationId,
-    spaceId,
-    secretId: selectedSecretId,
-    requestIdentity: requestAuth.requestIdentity,
-    credentialVersion,
-  }) : undefined, [credentialVersion, organizationId, requestAuth.requestIdentity, selectedSecretId, spaceId])
-  const load = useCallback((signal: AbortSignal) => {
-    if (!selectedSecretId) throw new Error('No Secret selected.')
-    return getSecret(organizationId, spaceId, selectedSecretId, requestAuth, signal)
-  }, [organizationId, requestAuth, selectedSecretId, spaceId])
-  const detail = useRemoteDetail(identity, load)
-  const secret = detail.status === 'ready' ? detail.item : selectedSummary
+  void credentialVersion
 
   const closeForm = useCallback(() => { setDraft(initialSecretDraft); setMutationError(null); setFormOpen(false) }, [])
 
@@ -1917,152 +1888,106 @@ export function RemoteSecretsPage({
     }
   }, [closeForm, draft, locale, onRetry, organizationId, requestAuth, spaceId])
 
-  const archiveSelected = useCallback(async () => {
-    if (!secret) return
+  const archiveRow = useCallback(async (item: SecretDto) => {
     setMutating(true)
     setMutationError(null)
     try {
-      await archiveSecret(organizationId, spaceId, secret.id, secret.version, requestAuth)
-      setSelectedId(undefined)
+      await archiveSecret(organizationId, spaceId, item.id, item.version, requestAuth)
+      setConfirmArchiveId(undefined)
       onRetry()
     } catch (cause) {
       setMutationError(cause instanceof Error ? cause : new Error(String(cause)))
     } finally {
       setMutating(false)
     }
-  }, [onRetry, organizationId, requestAuth, secret, spaceId])
+  }, [onRetry, organizationId, requestAuth, spaceId])
 
-  return (
-    <main className="cosmos-page remote-catalog-page">
-      <PageHeader
-        icon={KeyRound}
-        title={text(locale, '密钥', 'Secrets')}
-        description={text(locale, '写入一次即只写；在作用域内自动以大写下划线环境变量注入 Expert 环境。', 'Write-once then write-only; injected into Expert VMs as upper-snake-case env vars within scope.')}
-        onOpenNavigation={onOpenNavigation}
-        readOnly={!canManage}
-        actions={canManage ? (
-          <button type="button" className="cosmos-button cosmos-button--primary" onClick={() => setFormOpen(true)}>
-            <Plus aria-hidden="true" />{text(locale, '创建密钥', 'Create secret')}
-          </button>
-        ) : undefined}
-      />
-      <div className="cosmos-page__scroll">
-        {state === 'loading' ? <LoadState status="loading" resource={text(locale, '密钥', 'Secrets')} onRetry={onRetry} /> : null}
-        {state === 'error' ? <LoadState status="error" resource={text(locale, '密钥', 'Secrets')} error={error} onRetry={onRetry} /> : null}
-        {state === 'ready' && items.length === 0 ? (
-          <section className="cosmos-panel remote-catalog-empty"><KeyRound aria-hidden="true" /><strong>{text(locale, '还没有密钥', 'No Secrets')}</strong><p>{text(locale, '创建第一个只写凭证，作用域内的 Expert 会自动获得对应环境变量。', 'Create the first write-only credential; in-scope Experts receive the matching env var automatically.')}</p></section>
-        ) : null}
-        {state === 'ready' && items.length > 0 ? (
-          <section className="remote-environment-layout">
-            <aside className="cosmos-panel remote-environment-list" aria-label={text(locale, '密钥列表', 'Secret list')}>
-              <header className="cosmos-section-heading">
-                <div><span>Catalog</span><h2>{text(locale, `${items.length} 个密钥`, `${items.length} Secrets`)}</h2></div>
-                <IconButton icon={RefreshCw} label={text(locale, '刷新密钥列表', 'Refresh Secret list')} onClick={onRetry} />
-              </header>
-              {items.map((item) => (
-                <button
-                  type="button"
-                  className={`remote-environment-row${item.id === selectedSecretId ? ' remote-environment-row--selected' : ''}`}
-                  aria-pressed={item.id === selectedSecretId}
-                  key={item.id}
-                  onClick={() => setSelectedId(item.id)}
-                >
-                  <span className="cosmos-resource-row__icon"><KeyRound aria-hidden="true" /></span>
-                  <span><strong>{item.name}</strong><small>{item.description ?? text(locale, '无说明', 'No description')}</small></span>
-                  <SecretScopeLabel scope={item.scope} />
-                  <ChevronRight aria-hidden="true" />
-                </button>
-              ))}
-            </aside>
-            <section className="cosmos-panel remote-environment-detail" aria-label={text(locale, '密钥详情', 'Secret detail')}>
-              {secret ? (
-                <>
-                  <header className="cosmos-section-heading">
-                    <div><span>{text(locale, '密钥', 'Secret')}</span><h2>{secret.name}</h2></div>
-                    <SecretScopeLabel scope={secret.scope} />
-                  </header>
-                  <section className="remote-detail-section">
-                    <header><ShieldCheck aria-hidden="true" /><h3>{text(locale, '属性', 'Attributes')}</h3></header>
-                    <dl className="remote-detail-list">
-                      <div><dt>{text(locale, '密钥值', 'Secret value')}</dt><dd><EyeOff aria-hidden="true" />•••• {secret.lastFour ?? '••••'}</dd></div>
-                      <div><dt>{text(locale, '作用域', 'Scope')}</dt><dd>{secret.scope === 'shared' ? text(locale, '共享给组织成员', 'Shared with organization members') : text(locale, '仅本人会话可读', 'Readable only by your sessions')}</dd></div>
-                      <div><dt>{text(locale, '注入 VM', 'Inject into VMs')}</dt><dd>{secret.vmInstall ? text(locale, '自动', 'Auto') : text(locale, '关闭', 'Off')}</dd></div>
-                      <div><dt>{text(locale, '说明', 'Description')}</dt><dd>{secret.description ?? '—'}</dd></div>
-                    </dl>
-                  </section>
-                  {mutationError ? <InlineError error={mutationError} /> : null}
-                  <footer className="remote-detail-footer">
-                    <span><Clock3 aria-hidden="true" />{text(locale, '更新于', 'Updated')} {formatDate(secret.updatedAt, locale)}</span>
-                    {canManage ? (
-                      <button type="button" className="cosmos-button cosmos-button--danger" disabled={mutating} onClick={archiveSelected}>
-                        <Trash2 aria-hidden="true" />{text(locale, '归档密钥', 'Archive secret')}
-                      </button>
-                    ) : null}
-                  </footer>
-                </>
-              ) : (
-                <div className="remote-detail-unavailable"><CircleOff aria-hidden="true" />{detail.error?.message ?? text(locale, '无法加载密钥详情。', 'Unable to load the Secret detail.')}</div>
-              )}
-            </section>
-          </section>
-        ) : null}
-      </div>
-      {formOpen ? (
-        <div className="cosmos-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeForm() }}>
-          <section className="cosmos-modal" role="dialog" aria-modal="true" aria-label={text(locale, '创建密钥', 'Create secret')}>
-            <header><h2>{text(locale, '创建密钥', 'Create secret')}</h2><IconButton icon={X} label={text(locale, '关闭', 'Close')} onClick={closeForm} /></header>
-            <div className="cosmos-modal__body">
-              <div className="cosmos-form-grid">
-                <label className="cosmos-field cosmos-field--wide">
-                  <span>{text(locale, '名称（大写下划线）', 'Name (upper snake case)')}</span>
-                  <input autoFocus value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value.toUpperCase() })} placeholder="OPENAI_API_KEY" />
-                </label>
-                <label className="cosmos-field">
-                  <span>{text(locale, '作用域', 'Scope')}</span>
-                  <select value={draft.scope} onChange={(event) => setDraft({ ...draft, scope: event.target.value as SecretDto['scope'] })}>
-                    <option value="private">{text(locale, '私有', 'Private')}</option>
-                    <option value="shared">{text(locale, '共享', 'Shared')}</option>
-                  </select>
-                </label>
-                <label className="cosmos-field cosmos-inline-toggle">
-                  <input type="checkbox" checked={draft.vmInstall} onChange={(event) => setDraft({ ...draft, vmInstall: event.target.checked })} />
-                  <span>{text(locale, '自动注入 VM', 'Auto-inject into VMs')}</span>
-                </label>
-                <label className="cosmos-field cosmos-field--wide">
-                  <span>{text(locale, '密钥值', 'Secret value')}</span>
-                  <input type="password" autoComplete="new-password" value={draft.value} onChange={(event) => setDraft({ ...draft, value: event.target.value })} placeholder="••••••••••••" />
-                </label>
-                <label className="cosmos-field cosmos-field--wide">
-                  <span>{text(locale, '说明', 'Description')}</span>
-                  <textarea value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} />
-                </label>
-              </div>
-              <div className="cosmos-security-note cosmos-security-note--compact"><EyeOff aria-hidden="true" /><span><strong>{text(locale, '保存后不可查看', 'Not viewable after save')}</strong>{text(locale, '密钥值仅保留末四位用于识别，服务端以只写方式存储。', 'Only the last four characters are retained for identification; the value is stored write-only on the server.')}</span></div>
-              {mutationError ? <InlineError error={mutationError} /> : null}
-            </div>
-            <footer className="cosmos-modal__footer">
-              <button type="button" className="cosmos-button cosmos-button--ghost" onClick={closeForm}>{text(locale, '取消', 'Cancel')}</button>
-              <span />
-              <button type="button" className="cosmos-button cosmos-button--primary" disabled={mutating} onClick={submitSecret}>
-                <KeyRound aria-hidden="true" />{text(locale, '创建且不回显', 'Create without readback')}
-              </button>
-            </footer>
-          </section>
+  return <main className="prototype-automation-page">
+    <PrototypePageTopbar
+      crumb={text(locale, '配置 · Secrets', 'Configuration · Secrets')}
+      navigationCollapsed={navigationCollapsed}
+      onOpenNavigation={onOpenNavigation}
+      onOpenCommand={onOpenCommand}
+    />
+    <div className="prototype-automation-viewport">
+      <div className="prototype-automation-content prototype-expert-content">
+        <div className="prototype-automation-header">
+          <div>
+            <h1>Secrets</h1>
+            <p>{text(locale,
+              'Cosmos Secrets Manager。密钥值仅写入一次即只写——通过重建轮换。作用域内的密钥会以大写下划线环境变量自动注入每个 Expert VM（openai-api-key → $OPENAI_API_KEY）。',
+              'Cosmos Secrets Manager. Value pasted once, then write-only — rotate by recreating. In-scope secrets auto-export into each Expert VM as upper-snake-case env vars (openai-api-key → $OPENAI_API_KEY).')}</p>
+          </div>
+          {canManage ? <button type="button" className="prototype-primary-button" onClick={() => setFormOpen(true)}>{text(locale, '添加密钥', 'Add secret')}</button> : null}
         </div>
-      ) : null}
-    </main>
-  )
+
+        <div className="prototype-automation-table-wrap">
+          <table className="prototype-automation-table prototype-secret-table">
+            <thead><tr>
+              <th>{text(locale, '名称', 'Name')}</th>
+              <th>{text(locale, '值', 'Value')}</th>
+              <th>{text(locale, '作用域', 'Scope')}</th>
+              <th>{text(locale, '注入 VM', 'Install in VMs')}</th>
+              <th>{text(locale, '更新时间', 'Updated')}</th>
+              {canManage ? <th className="col-menu"><span className="sr-only">{text(locale, '操作', 'Actions')}</span></th> : null}
+            </tr></thead>
+            <tbody>
+              {state === 'loading' ? <tr><td colSpan={canManage ? 6 : 5} className="prototype-automation-state"><LoaderCircle className="spin" aria-hidden="true" />{text(locale, '加载中…', 'Loading…')}</td></tr> : null}
+              {state === 'error' ? <tr><td colSpan={canManage ? 6 : 5} className="prototype-automation-state prototype-automation-state--error"><span role="alert">{text(locale, '无法加载密钥。', 'Unable to load Secrets.')}{error ? ` ${error.message}` : ''}</span><button type="button" onClick={onRetry}><RefreshCw aria-hidden="true" />{text(locale, '重试', 'Retry')}</button></td></tr> : null}
+              {state === 'ready' && !items.length ? <tr><td colSpan={canManage ? 6 : 5} className="prototype-automation-state">{text(locale, '还没有密钥。创建第一个只写凭证，作用域内的 Expert 会自动获得对应环境变量。', 'No secrets yet. Create the first write-only credential; in-scope Experts receive the matching env var automatically.')}</td></tr> : null}
+              {state === 'ready' ? items.map((item) => <tr key={item.id}>
+                <td><code className="prototype-secret-name">{item.name}</code></td>
+                <td className="muted"><span className="prototype-secret-value">•••• {item.lastFour ?? ''}</span></td>
+                <td><span className="prototype-expert-tag">{item.scope === 'shared' ? text(locale, '共享', 'shared') : text(locale, '私有', 'private')}</span></td>
+                <td className="muted">{item.vmInstall ? text(locale, '自动', 'Auto') : text(locale, '关闭', 'Off')}</td>
+                <td className="muted">{formatDate(item.updatedAt, locale)}</td>
+                {canManage ? <td className="col-menu">
+                  {confirmArchiveId === item.id ? <div className="prototype-automation-confirm"><span>{text(locale, '确认归档？', 'Archive?')}</span><button type="button" disabled={mutating} onClick={() => setConfirmArchiveId(undefined)}>{text(locale, '取消', 'Cancel')}</button><button type="button" className="danger" disabled={mutating} onClick={() => void archiveRow(item)}>{text(locale, '确认', 'Confirm')}</button></div>
+                    : <button type="button" className="icon-btn prototype-automation-remove" aria-label={text(locale, `归档 ${item.name}`, `Archive ${item.name}`)} disabled={mutating} onClick={() => setConfirmArchiveId(item.id)}>×</button>}
+                </td> : null}
+              </tr>) : null}
+            </tbody>
+          </table>
+        </div>
+
+        {mutationError && !formOpen ? <p className="prototype-automation-error" role="alert">{mutationError.message}</p> : null}
+        <p className="prototype-secret-footnote">{text(locale,
+          '作用域：私有 — 仅你的会话可读 · 共享 — 组织全员可见。名称冲突时你的会话优先读取私有值。',
+          'Scope: Private — only your sessions can read it · Shared — visible to all members of your organization. On a name collision, your sessions read the Private one.')}</p>
+      </div>
+    </div>
+
+    {formOpen ? <div className="prototype-drawer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !mutating) closeForm() }}>
+      <form className="prototype-automation-drawer" role="dialog" aria-modal="true" aria-label={text(locale, '添加密钥', 'Add secret')} onKeyDown={(event) => { if (event.key === 'Escape' && !mutating) closeForm() }} onSubmit={(event) => { event.preventDefault(); void submitSecret() }}>
+        <header className="prototype-drawer-header"><h2>{text(locale, '添加密钥', 'Add secret')}</h2><button type="button" className="icon-btn" aria-label={text(locale, '关闭', 'Close')} disabled={mutating} onClick={closeForm}>×</button></header>
+        <div className="prototype-drawer-body">
+          <label className="prototype-field-label" htmlFor="secret-name">{text(locale, '名称（大写下划线）', 'Name (upper snake case)')}</label>
+          <input id="secret-name" className="prototype-field prototype-mono-field" autoFocus required value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value.toUpperCase() })} placeholder="OPENAI_API_KEY" />
+          <label className="prototype-field-label" htmlFor="secret-value">{text(locale, '密钥值', 'Secret value')}</label>
+          <input id="secret-value" className="prototype-field" type="password" autoComplete="new-password" required value={draft.value} onChange={(event) => setDraft({ ...draft, value: event.target.value })} placeholder="••••••••••••" />
+          <p className="prototype-field-help">{text(locale, '保存后不可查看——仅保留末四位用于识别，服务端以只写方式存储。', 'Not viewable after save — only the last four characters are retained; the value is stored write-only on the server.')}</p>
+          <label className="prototype-field-label" htmlFor="secret-scope">{text(locale, '作用域', 'Scope')}</label>
+          <select id="secret-scope" className="prototype-field-select" value={draft.scope} onChange={(event) => setDraft({ ...draft, scope: event.target.value as SecretDto['scope'] })}>
+            <option value="private">{text(locale, '私有 — 仅本人会话', 'Private — only your sessions')}</option>
+            <option value="shared">{text(locale, '共享 — 组织可见', 'Shared with organization')}</option>
+          </select>
+          <label className="prototype-field-label" htmlFor="secret-description">{text(locale, '说明', 'Description')}</label>
+          <textarea id="secret-description" className="prototype-field" rows={2} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} />
+          <div className="prototype-expert-policy-row">
+            <span><strong>{text(locale, '自动注入 VM', 'Auto-inject into VMs')}</strong><small>{text(locale, '作用域内 Expert VM 启动时注入对应环境变量。', 'Injected as an env var when in-scope Expert VMs boot.')}</small></span>
+            <input type="checkbox" role="switch" aria-label={text(locale, '自动注入 VM', 'Auto-inject into VMs')} checked={draft.vmInstall} onChange={(event) => setDraft({ ...draft, vmInstall: event.target.checked })} />
+          </div>
+          {mutationError ? <p className="prototype-automation-error" role="alert">{mutationError.message}</p> : null}
+        </div>
+        <footer className="prototype-drawer-footer">
+          <button type="button" className="prototype-ghost-button" disabled={mutating} onClick={closeForm}>{text(locale, '取消', 'Cancel')}</button>
+          <button type="submit" className="prototype-primary-button" disabled={mutating}>{mutating ? text(locale, '创建中…', 'Creating…') : text(locale, '创建且不回显', 'Create without readback')}</button>
+        </footer>
+      </form>
+    </div> : null}
+  </main>
 }
 
-function WebhookScopeLabel({ scope }: { scope: WebhookDto['scope'] }) {
-  const { locale } = usePreferences()
-  const map: Record<WebhookDto['scope'], { label: string; tone: string }> = {
-    shared: { label: text(locale, '共享', 'Shared'), tone: 'ok' },
-    personal: { label: text(locale, '个人', 'Personal'), tone: 'muted' },
-  }
-  const entry = map[scope]
-  return <span className={`cosmos-status-label cosmos-status-label--${entry.tone}`}>{entry.label}</span>
-}
 
 type WebhookDraft = { name: string; url: string; scope: WebhookDto['scope']; description: string }
 const initialWebhookDraft: WebhookDraft = { name: '', url: '', scope: 'shared', description: '' }
@@ -2079,36 +2004,24 @@ export function RemoteWebhooksPage({
   credentialVersion,
   canManage,
   onOpenNavigation,
+  navigationCollapsed,
+  onOpenCommand,
 }: RemoteWebhooksPageProps) {
   const { locale } = usePreferences()
-  const [selectedId, setSelectedId] = useState<string>()
   const [formOpen, setFormOpen] = useState(false)
   const [draft, setDraft] = useState<WebhookDraft>(initialWebhookDraft)
   const [mutating, setMutating] = useState(false)
   const [mutationError, setMutationError] = useState<Error | null>(null)
   const [revealedSecret, setRevealedSecret] = useState<string>()
   const [copied, setCopied] = useState(false)
+  const [confirmArchiveId, setConfirmArchiveId] = useState<string>()
   const state = listState(loading, ready, error)
-  const selectedSummary = items.find((item) => item.id === selectedId) ?? items[0]
-  const selectedWebhookId = state === 'ready' ? selectedSummary?.id : undefined
   const requestAuth = useMemo<CosmosApiAuthContext>(() => ({
     accessToken: auth.accessToken,
     requestIdentity: auth.requestIdentity,
     onUnauthorized: auth.onUnauthorized,
   }), [auth.accessToken, auth.onUnauthorized, auth.requestIdentity])
-  const identity = useMemo(() => selectedWebhookId ? ({
-    organizationId,
-    spaceId,
-    webhookId: selectedWebhookId,
-    requestIdentity: requestAuth.requestIdentity,
-    credentialVersion,
-  }) : undefined, [credentialVersion, organizationId, requestAuth.requestIdentity, selectedWebhookId, spaceId])
-  const load = useCallback((signal: AbortSignal) => {
-    if (!selectedWebhookId) throw new Error('No Webhook selected.')
-    return getWebhook(organizationId, spaceId, selectedWebhookId, requestAuth, signal)
-  }, [organizationId, requestAuth, selectedWebhookId, spaceId])
-  const detail = useRemoteDetail(identity, load)
-  const webhook = detail.status === 'ready' ? detail.item : selectedSummary
+  void credentialVersion
 
   const closeForm = useCallback(() => { setDraft(initialWebhookDraft); setMutationError(null); setFormOpen(false) }, [])
 
@@ -2138,20 +2051,19 @@ export function RemoteWebhooksPage({
     }
   }, [closeForm, draft, locale, onRetry, organizationId, requestAuth, spaceId])
 
-  const archiveSelected = useCallback(async () => {
-    if (!webhook) return
+  const archiveRow = useCallback(async (item: WebhookDto) => {
     setMutating(true)
     setMutationError(null)
     try {
-      await archiveWebhook(organizationId, spaceId, webhook.id, webhook.version, requestAuth)
-      setSelectedId(undefined)
+      await archiveWebhook(organizationId, spaceId, item.id, item.version, requestAuth)
+      setConfirmArchiveId(undefined)
       onRetry()
     } catch (cause) {
       setMutationError(cause instanceof Error ? cause : new Error(String(cause)))
     } finally {
       setMutating(false)
     }
-  }, [onRetry, organizationId, requestAuth, spaceId, webhook])
+  }, [onRetry, organizationId, requestAuth, spaceId])
 
   const copySecret = useCallback(() => {
     if (!revealedSecret) return
@@ -2160,148 +2072,89 @@ export function RemoteWebhooksPage({
     window.setTimeout(() => setCopied(false), 2000)
   }, [revealedSecret])
 
-  return (
-    <main className="cosmos-page remote-catalog-page">
-      <PageHeader
-        icon={Webhook}
-        title={text(locale, 'Webhooks', 'Webhooks')}
-        description={text(locale, '面向 Datadog、CircleCI 等的 HTTPS 端点，可在 Automations 中作为 Webhook 触发器接入。', 'Custom HTTPS endpoints for Datadog, CircleCI, etc. Wire them as a Webhook trigger from Automations.')}
-        onOpenNavigation={onOpenNavigation}
-        readOnly={!canManage}
-        actions={canManage ? (
-          <button type="button" className="cosmos-button cosmos-button--primary" onClick={() => setFormOpen(true)}>
-            <Plus aria-hidden="true" />{text(locale, '创建 Webhook', 'Create webhook')}
-          </button>
-        ) : undefined}
-      />
-      <div className="cosmos-page__scroll">
-        {revealedSecret ? (
-          <section className="cosmos-one-time-secret" role="status">
-            <KeyRound aria-hidden="true" />
-            <div>
-              <strong>{text(locale, '签名密钥仅显示一次', 'Signing secret shown once')}</strong>
-              <p>{text(locale, '关闭后无法再次查看。请立即复制并妥善保存，用于校验 Webhook 请求签名。', 'It cannot be viewed again after dismissal. Copy it now and store it safely to verify Webhook request signatures.')}</p>
-              <code>{revealedSecret}</code>
-            </div>
-            <div>
-              <IconButton icon={Copy} label={copied ? text(locale, '已复制', 'Copied') : text(locale, '复制密钥', 'Copy secret')} onClick={copySecret} />
-              <IconButton icon={EyeOff} label={text(locale, '隐藏且不再显示', 'Hide permanently')} onClick={() => setRevealedSecret(undefined)} />
-            </div>
-          </section>
-        ) : null}
-        {state === 'loading' ? <LoadState status="loading" resource={text(locale, 'Webhooks', 'Webhooks')} onRetry={onRetry} /> : null}
-        {state === 'error' ? <LoadState status="error" resource={text(locale, 'Webhooks', 'Webhooks')} error={error} onRetry={onRetry} /> : null}
-        {state === 'ready' && items.length === 0 ? (
-          <section className="cosmos-panel remote-catalog-empty"><Webhook aria-hidden="true" /><strong>{text(locale, '还没有 Webhook', 'No Webhooks')}</strong><p>{text(locale, '创建第一个 HTTPS 端点，之后可在 Automations 中作为触发器接入。', 'Create the first HTTPS endpoint, then wire it as a trigger from Automations.')}</p></section>
-        ) : null}
-        {state === 'ready' && items.length > 0 ? (
-          <section className="remote-environment-layout">
-            <aside className="cosmos-panel remote-environment-list" aria-label={text(locale, 'Webhook 列表', 'Webhook list')}>
-              <header className="cosmos-section-heading">
-                <div><span>Catalog</span><h2>{text(locale, `${items.length} 个 Webhook`, `${items.length} Webhooks`)}</h2></div>
-                <IconButton icon={RefreshCw} label={text(locale, '刷新 Webhook 列表', 'Refresh Webhook list')} onClick={onRetry} />
-              </header>
-              {items.map((item) => (
-                <button
-                  type="button"
-                  className={`remote-environment-row${item.id === selectedWebhookId ? ' remote-environment-row--selected' : ''}`}
-                  aria-pressed={item.id === selectedWebhookId}
-                  key={item.id}
-                  onClick={() => setSelectedId(item.id)}
-                >
-                  <span className="cosmos-resource-row__icon"><Webhook aria-hidden="true" /></span>
-                  <span><strong>{item.name}</strong><small>{item.url}</small></span>
-                  <WebhookScopeLabel scope={item.scope} />
-                  <ChevronRight aria-hidden="true" />
-                </button>
-              ))}
-            </aside>
-            <section className="cosmos-panel remote-environment-detail" aria-label={text(locale, 'Webhook 详情', 'Webhook detail')}>
-              {webhook ? (
-                <>
-                  <header className="cosmos-section-heading">
-                    <div><span>Webhook</span><h2>{webhook.name}</h2></div>
-                    <WebhookScopeLabel scope={webhook.scope} />
-                  </header>
-                  <section className="remote-detail-section">
-                    <header><Link2 aria-hidden="true" /><h3>{text(locale, '端点', 'Endpoint')}</h3></header>
-                    <dl className="remote-detail-list">
-                      <div><dt>{text(locale, '目标 URL', 'Target URL')}</dt><dd><code>{webhook.url}</code></dd></div>
-                      <div><dt>{text(locale, '签名密钥', 'Signing secret')}</dt><dd><EyeOff aria-hidden="true" />•••• {webhook.secretLastFour ?? '••••'}</dd></div>
-                      <div><dt>{text(locale, '事件数', 'Events delivered')}</dt><dd>{webhook.eventCount}</dd></div>
-                      <div><dt>{text(locale, '说明', 'Description')}</dt><dd>{webhook.description ?? '—'}</dd></div>
-                    </dl>
-                  </section>
-                  {mutationError ? <InlineError error={mutationError} /> : null}
-                  <footer className="remote-detail-footer">
-                    <span><Clock3 aria-hidden="true" />{text(locale, '更新于', 'Updated')} {formatDate(webhook.updatedAt, locale)}</span>
-                    {canManage ? (
-                      <button type="button" className="cosmos-button cosmos-button--danger" disabled={mutating} onClick={archiveSelected}>
-                        <Trash2 aria-hidden="true" />{text(locale, '归档 Webhook', 'Archive webhook')}
-                      </button>
-                    ) : null}
-                  </footer>
-                </>
-              ) : (
-                <div className="remote-detail-unavailable"><CircleOff aria-hidden="true" />{detail.error?.message ?? text(locale, '无法加载 Webhook 详情。', 'Unable to load the Webhook detail.')}</div>
-              )}
-            </section>
-          </section>
-        ) : null}
-      </div>
-      {formOpen ? (
-        <div className="cosmos-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeForm() }}>
-          <section className="cosmos-modal" role="dialog" aria-modal="true" aria-label={text(locale, '创建 Webhook', 'Create webhook')}>
-            <header><h2>{text(locale, '创建 Webhook', 'Create webhook')}</h2><IconButton icon={X} label={text(locale, '关闭', 'Close')} onClick={closeForm} /></header>
-            <div className="cosmos-modal__body">
-              <div className="cosmos-form-grid">
-                <label className="cosmos-field cosmos-field--wide">
-                  <span>{text(locale, '名称', 'Name')}</span>
-                  <input autoFocus value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="datadog-alerts" />
-                </label>
-                <label className="cosmos-field cosmos-field--wide">
-                  <span>{text(locale, '目标 URL（HTTPS）', 'Target URL (HTTPS)')}</span>
-                  <input type="url" value={draft.url} onChange={(event) => setDraft({ ...draft, url: event.target.value })} placeholder="https://example.com/hooks/cosmos" />
-                </label>
-                <label className="cosmos-field">
-                  <span>{text(locale, '作用域', 'Scope')}</span>
-                  <select value={draft.scope} onChange={(event) => setDraft({ ...draft, scope: event.target.value as WebhookDto['scope'] })}>
-                    <option value="shared">{text(locale, '共享', 'Shared')}</option>
-                    <option value="personal">{text(locale, '个人', 'Personal')}</option>
-                  </select>
-                </label>
-                <label className="cosmos-field cosmos-field--wide">
-                  <span>{text(locale, '说明', 'Description')}</span>
-                  <textarea value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} />
-                </label>
-              </div>
-              <div className="cosmos-security-note cosmos-security-note--compact"><KeyRound aria-hidden="true" /><span><strong>{text(locale, '签名密钥仅在创建时显示一次', 'Signing secret shown once at creation')}</strong>{text(locale, '创建后请立即复制密钥，服务端仅以只写方式保存，之后无法再次查看。', 'Copy the secret immediately after creation; the server stores it write-only and it cannot be viewed again.')}</span></div>
-              {mutationError ? <InlineError error={mutationError} /> : null}
-            </div>
-            <footer className="cosmos-modal__footer">
-              <button type="button" className="cosmos-button cosmos-button--ghost" onClick={closeForm}>{text(locale, '取消', 'Cancel')}</button>
-              <span />
-              <button type="button" className="cosmos-button cosmos-button--primary" disabled={mutating} onClick={submitWebhook}>
-                <Webhook aria-hidden="true" />{text(locale, '创建并显示密钥', 'Create and reveal secret')}
-              </button>
-            </footer>
-          </section>
+  return <main className="prototype-automation-page">
+    <PrototypePageTopbar
+      crumb={text(locale, '配置 · Webhooks', 'Configuration · Webhooks')}
+      navigationCollapsed={navigationCollapsed}
+      onOpenNavigation={onOpenNavigation}
+      onOpenCommand={onOpenCommand}
+    />
+    <div className="prototype-automation-viewport">
+      <div className="prototype-automation-content prototype-expert-content">
+        <div className="prototype-automation-header">
+          <div>
+            <h1>Webhooks</h1>
+            <p>{text(locale, '面向 Datadog、CircleCI 等的自定义 HTTPS 端点，在 Automations 中作为 Webhook 触发器接入（Capabilities / Webhooks）。', 'Custom HTTPS endpoints for Datadog, CircleCI, etc. Wire from Automations as a Webhook trigger. Under Capabilities / Webhooks.')}</p>
+          </div>
+          {canManage ? <button type="button" className="prototype-primary-button" onClick={() => setFormOpen(true)}>{text(locale, '创建 Webhook', 'Create webhook')}</button> : null}
         </div>
-      ) : null}
-    </main>
-  )
+
+        {revealedSecret ? <div className="prototype-webhook-callout" role="status">
+          <strong>{text(locale, '立即复制——签名密钥只显示一次', 'Copy now — the signing secret is shown once')}</strong>
+          <code>{revealedSecret}</code>
+          <span>
+            <button type="button" className="prototype-ghost-button" onClick={copySecret}>{copied ? text(locale, '已复制', 'Copied') : text(locale, '复制', 'Copy')}</button>
+            <button type="button" className="prototype-ghost-button" onClick={() => setRevealedSecret(undefined)}>{text(locale, '完成', 'Done')}</button>
+          </span>
+        </div> : null}
+
+        {state === 'loading' ? <div className="prototype-automation-state"><LoaderCircle className="spin" aria-hidden="true" />{text(locale, '加载中…', 'Loading…')}</div> : null}
+        {state === 'error' ? <div className="prototype-automation-state prototype-automation-state--error"><span role="alert">{text(locale, '无法加载 Webhooks。', 'Unable to load Webhooks.')}{error ? ` ${error.message}` : ''}</span><button type="button" onClick={onRetry}><RefreshCw aria-hidden="true" />{text(locale, '重试', 'Retry')}</button></div> : null}
+        {state === 'ready' && !items.length ? <div className="prototype-automation-state">{text(locale, '还没有 Webhook。创建第一个 HTTPS 端点，之后可在 Automations 中作为触发器接入。', 'No webhooks yet. Create the first HTTPS endpoint, then wire it as a trigger from Automations.')}</div> : null}
+
+        {state === 'ready' && items.length ? <div className="prototype-webhook-grid">
+          {items.map((item) => {
+            const archived = item.status === 'archived'
+            return <div className="prototype-webhook-card" key={item.id}>
+              <div className="prototype-webhook-card-head">
+                <div>
+                  <h3>{item.name}</h3>
+                  <small>{text(locale, 'Bearer Token', 'Bearer Token')} · {item.scope === 'shared' ? text(locale, '共享', 'shared') : text(locale, '个人', 'personal')}{archived ? ` · ${text(locale, '已归档', 'archived')}` : ''}{item.secretLastFour ? ` · ••••${item.secretLastFour}` : ''}</small>
+                </div>
+                <span className="prototype-expert-tag">{item.eventCount} {text(locale, '事件', 'events')}</span>
+              </div>
+              <code className="prototype-webhook-url">{item.url}</code>
+              <div className="prototype-webhook-card-actions">
+                <button type="button" className="prototype-ghost-button" onClick={() => { navigator.clipboard?.writeText(item.url); setCopied(true); window.setTimeout(() => setCopied(false), 2000) }}>{text(locale, '复制 URL', 'Copy URL')}</button>
+                {canManage && !archived ? (confirmArchiveId === item.id
+                  ? <div className="prototype-automation-confirm"><span>{text(locale, '确认归档？', 'Archive?')}</span><button type="button" disabled={mutating} onClick={() => setConfirmArchiveId(undefined)}>{text(locale, '取消', 'Cancel')}</button><button type="button" className="danger" disabled={mutating} onClick={() => void archiveRow(item)}>{text(locale, '确认', 'Confirm')}</button></div>
+                  : <button type="button" className="prototype-ghost-button" disabled={mutating} onClick={() => setConfirmArchiveId(item.id)}>{text(locale, '归档', 'Archive')}</button>) : null}
+              </div>
+            </div>
+          })}
+        </div> : null}
+
+        {mutationError && !formOpen ? <p className="prototype-automation-error" role="alert">{mutationError.message}</p> : null}
+      </div>
+    </div>
+
+    {formOpen ? <div className="prototype-drawer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !mutating) closeForm() }}>
+      <form className="prototype-automation-drawer" role="dialog" aria-modal="true" aria-label={text(locale, '创建 Webhook', 'Create webhook')} onKeyDown={(event) => { if (event.key === 'Escape' && !mutating) closeForm() }} onSubmit={(event) => { event.preventDefault(); void submitWebhook() }}>
+        <header className="prototype-drawer-header"><h2>{text(locale, '创建 Webhook', 'Create webhook')}</h2><button type="button" className="icon-btn" aria-label={text(locale, '关闭', 'Close')} disabled={mutating} onClick={closeForm}>×</button></header>
+        <div className="prototype-drawer-body">
+          <label className="prototype-field-label" htmlFor="webhook-name">{text(locale, '名称 / 描述', 'Description / name')}</label>
+          <input id="webhook-name" className="prototype-field" autoFocus required value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="datadog-alerts" />
+          <label className="prototype-field-label" htmlFor="webhook-url">{text(locale, '目标 URL（https）', 'Target URL (https)')}</label>
+          <input id="webhook-url" className="prototype-field prototype-mono-field" type="url" required value={draft.url} onChange={(event) => setDraft({ ...draft, url: event.target.value })} placeholder="https://hooks.example.com/cosmos" />
+          <label className="prototype-field-label" htmlFor="webhook-scope">{text(locale, '共享范围', 'Sharing scope')}</label>
+          <select id="webhook-scope" className="prototype-field-select" value={draft.scope} onChange={(event) => setDraft({ ...draft, scope: event.target.value as WebhookDto['scope'] })}>
+            <option value="shared">{text(locale, '共享给组织', 'Shared with organization')}</option>
+            <option value="personal">{text(locale, '个人', 'Personal')}</option>
+          </select>
+          <label className="prototype-field-label" htmlFor="webhook-description">{text(locale, '说明', 'Description')}</label>
+          <textarea id="webhook-description" className="prototype-field" rows={2} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} />
+          <p className="prototype-field-help">{text(locale, '创建后签名密钥只显示一次，仅保留末四位用于识别。', 'The signing secret is shown once after creation; only the last four characters are retained.')}</p>
+          {mutationError ? <p className="prototype-automation-error" role="alert">{mutationError.message}</p> : null}
+        </div>
+        <footer className="prototype-drawer-footer">
+          <button type="button" className="prototype-ghost-button" disabled={mutating} onClick={closeForm}>{text(locale, '取消', 'Cancel')}</button>
+          <button type="submit" className="prototype-primary-button" disabled={mutating}>{mutating ? text(locale, '创建中…', 'Creating…') : text(locale, '创建', 'Create')}</button>
+        </footer>
+      </form>
+    </div> : null}
+  </main>
 }
 
-function McpConnectionLabel({ status }: { status: McpServerDto['connectionStatus'] }) {
-  const { locale } = usePreferences()
-  const map: Record<McpServerDto['connectionStatus'], { label: string; tone: string }> = {
-    connected: { label: text(locale, '已连接', 'Connected'), tone: 'ok' },
-    action_required: { label: text(locale, '需处理', 'Action required'), tone: 'warn' },
-    archived: { label: text(locale, '已归档', 'Archived'), tone: 'muted' },
-  }
-  const entry = map[status]
-  return <span className={`cosmos-status-label cosmos-status-label--${entry.tone}`}>{entry.label}</span>
-}
 
 type McpDraft = { name: string; transport: McpServerDto['transport']; endpoint: string; command: string }
 const initialMcpDraft: McpDraft = { name: '', transport: 'http', endpoint: '', command: '' }
@@ -2318,34 +2171,22 @@ export function RemoteMcpServersPage({
   credentialVersion,
   canManage,
   onOpenNavigation,
+  navigationCollapsed,
+  onOpenCommand,
 }: RemoteMcpServersPageProps) {
   const { locale } = usePreferences()
-  const [selectedId, setSelectedId] = useState<string>()
   const [formOpen, setFormOpen] = useState(false)
   const [draft, setDraft] = useState<McpDraft>(initialMcpDraft)
   const [mutating, setMutating] = useState(false)
   const [mutationError, setMutationError] = useState<Error | null>(null)
+  const [confirmArchiveId, setConfirmArchiveId] = useState<string>()
   const state = listState(loading, ready, error)
-  const selectedSummary = items.find((item) => item.id === selectedId) ?? items[0]
-  const selectedMcpServerId = state === 'ready' ? selectedSummary?.id : undefined
   const requestAuth = useMemo<CosmosApiAuthContext>(() => ({
     accessToken: auth.accessToken,
     requestIdentity: auth.requestIdentity,
     onUnauthorized: auth.onUnauthorized,
   }), [auth.accessToken, auth.onUnauthorized, auth.requestIdentity])
-  const identity = useMemo(() => selectedMcpServerId ? ({
-    organizationId,
-    spaceId,
-    mcpServerId: selectedMcpServerId,
-    requestIdentity: requestAuth.requestIdentity,
-    credentialVersion,
-  }) : undefined, [credentialVersion, organizationId, requestAuth.requestIdentity, selectedMcpServerId, spaceId])
-  const load = useCallback((signal: AbortSignal) => {
-    if (!selectedMcpServerId) throw new Error('No MCP server selected.')
-    return getMcpServer(organizationId, spaceId, selectedMcpServerId, requestAuth, signal)
-  }, [organizationId, requestAuth, selectedMcpServerId, spaceId])
-  const detail = useRemoteDetail(identity, load)
-  const server = detail.status === 'ready' ? detail.item : selectedSummary
+  void credentialVersion
 
   const closeForm = useCallback(() => { setDraft(initialMcpDraft); setMutationError(null); setFormOpen(false) }, [])
 
@@ -2377,139 +2218,99 @@ export function RemoteMcpServersPage({
     }
   }, [closeForm, draft, locale, onRetry, organizationId, requestAuth, spaceId])
 
-  const archiveSelected = useCallback(async () => {
-    if (!server) return
+  const archiveRow = useCallback(async (item: McpServerDto) => {
     setMutating(true)
     setMutationError(null)
     try {
-      await archiveMcpServer(organizationId, spaceId, server.id, server.version, requestAuth)
-      setSelectedId(undefined)
+      await archiveMcpServer(organizationId, spaceId, item.id, item.version, requestAuth)
+      setConfirmArchiveId(undefined)
       onRetry()
     } catch (cause) {
       setMutationError(cause instanceof Error ? cause : new Error(String(cause)))
     } finally {
       setMutating(false)
     }
-  }, [onRetry, organizationId, requestAuth, spaceId, server])
+  }, [onRetry, organizationId, requestAuth, spaceId])
 
-  return (
-    <main className="cosmos-page remote-catalog-page">
-      <PageHeader
-        icon={Database}
-        title={text(locale, 'MCP Registry', 'MCP Registry')}
-        description={text(locale, '管理可供专家调用的 Model Context Protocol servers，然后在专家编辑器中固定。', 'Manage Model Context Protocol servers available to Experts, then pin them from the Expert editor.')}
-        onOpenNavigation={onOpenNavigation}
-        readOnly={!canManage}
-        actions={canManage ? (
-          <button type="button" className="cosmos-button cosmos-button--primary" onClick={() => setFormOpen(true)}>
-            <Plus aria-hidden="true" />{text(locale, '新增 Server', 'Add server')}
-          </button>
-        ) : undefined}
-      />
-      <div className="cosmos-page__scroll">
-        {state === 'loading' ? <LoadState status="loading" resource={text(locale, 'MCP servers', 'MCP servers')} onRetry={onRetry} /> : null}
-        {state === 'error' ? <LoadState status="error" resource={text(locale, 'MCP servers', 'MCP servers')} error={error} onRetry={onRetry} /> : null}
-        {state === 'ready' && items.length === 0 ? (
-          <section className="cosmos-panel remote-catalog-empty"><Database aria-hidden="true" /><strong>{text(locale, '注册表为空', 'Registry is empty')}</strong><p>{text(locale, '新增第一个 MCP server 作为专家的工具来源。', 'Add the first MCP server as an Expert tool source.')}</p></section>
-        ) : null}
-        {state === 'ready' && items.length > 0 ? (
-          <section className="remote-environment-layout">
-            <aside className="cosmos-panel remote-environment-list" aria-label={text(locale, 'MCP server 列表', 'MCP server list')}>
-              <header className="cosmos-section-heading">
-                <div><span>Registry</span><h2>{text(locale, `${items.length} 个 Server`, `${items.length} servers`)}</h2></div>
-                <IconButton icon={RefreshCw} label={text(locale, '刷新 MCP server 列表', 'Refresh MCP server list')} onClick={onRetry} />
-              </header>
-              {items.map((item) => (
-                <button
-                  type="button"
-                  className={`remote-environment-row${item.id === selectedMcpServerId ? ' remote-environment-row--selected' : ''}`}
-                  aria-pressed={item.id === selectedMcpServerId}
-                  key={item.id}
-                  onClick={() => setSelectedId(item.id)}
-                >
-                  <span className="cosmos-resource-row__icon"><Database aria-hidden="true" /></span>
-                  <span><strong>{item.name}</strong><small>{item.transport === 'stdio' ? item.command : item.endpoint}</small></span>
-                  <McpConnectionLabel status={item.connectionStatus} />
-                  <ChevronRight aria-hidden="true" />
-                </button>
-              ))}
-            </aside>
-            <section className="cosmos-panel remote-environment-detail" aria-label={text(locale, 'MCP server 详情', 'MCP server detail')}>
-              {server ? (
-                <>
-                  <header className="cosmos-section-heading">
-                    <div><span>MCP server</span><h2>{server.name}</h2></div>
-                    <McpConnectionLabel status={server.connectionStatus} />
-                  </header>
-                  <section className="remote-detail-section">
-                    <header><Link2 aria-hidden="true" /><h3>{text(locale, '连接', 'Connection')}</h3></header>
-                    <dl className="remote-detail-list">
-                      <div><dt>Transport</dt><dd>{server.transport}</dd></div>
-                      <div><dt>{server.transport === 'stdio' ? text(locale, '启动命令', 'Launch command') : 'Endpoint'}</dt><dd><code>{server.transport === 'stdio' ? server.command : server.endpoint}</code></dd></div>
-                      <div><dt>{text(locale, '工具数', 'Tools discovered')}</dt><dd>{server.toolCount}</dd></div>
-                    </dl>
-                  </section>
-                  {mutationError ? <InlineError error={mutationError} /> : null}
-                  <footer className="remote-detail-footer">
-                    <span><Clock3 aria-hidden="true" />{text(locale, '更新于', 'Updated')} {formatDate(server.updatedAt, locale)}</span>
-                    {canManage ? (
-                      <button type="button" className="cosmos-button cosmos-button--danger" disabled={mutating} onClick={archiveSelected}>
-                        <Trash2 aria-hidden="true" />{text(locale, '归档 Server', 'Archive server')}
-                      </button>
-                    ) : null}
-                  </footer>
-                </>
-              ) : (
-                <div className="remote-detail-unavailable"><CircleOff aria-hidden="true" />{detail.error?.message ?? text(locale, '无法加载 MCP server 详情。', 'Unable to load the MCP server detail.')}</div>
-              )}
-            </section>
-          </section>
-        ) : null}
-      </div>
-      {formOpen ? (
-        <div className="cosmos-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeForm() }}>
-          <section className="cosmos-modal" role="dialog" aria-modal="true" aria-label={text(locale, '新增 MCP Server', 'Add MCP server')}>
-            <header><h2>{text(locale, '新增 MCP Server', 'Add MCP server')}</h2><IconButton icon={X} label={text(locale, '关闭', 'Close')} onClick={closeForm} /></header>
-            <div className="cosmos-modal__body">
-              <div className="cosmos-form-grid">
-                <label className="cosmos-field cosmos-field--wide">
-                  <span>{text(locale, '名称', 'Name')}</span>
-                  <input autoFocus value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Internal Docs MCP" />
-                </label>
-                <label className="cosmos-field">
-                  <span>Transport</span>
-                  <select value={draft.transport} onChange={(event) => setDraft({ ...draft, transport: event.target.value as McpServerDto['transport'] })}>
-                    <option value="http">HTTP</option>
-                    <option value="sse">SSE</option>
-                    <option value="stdio">stdio</option>
-                  </select>
-                </label>
-                {draft.transport === 'stdio' ? (
-                  <label className="cosmos-field cosmos-field--wide">
-                    <span>{text(locale, '启动命令', 'Launch command')}</span>
-                    <input value={draft.command} onChange={(event) => setDraft({ ...draft, command: event.target.value })} placeholder="npx @company/mcp-server" />
-                  </label>
-                ) : (
-                  <label className="cosmos-field cosmos-field--wide">
-                    <span>Endpoint</span>
-                    <input type="url" value={draft.endpoint} onChange={(event) => setDraft({ ...draft, endpoint: event.target.value })} placeholder="https://mcp.example.com/api" />
-                  </label>
-                )}
-              </div>
-              {mutationError ? <InlineError error={mutationError} /> : null}
-            </div>
-            <footer className="cosmos-modal__footer">
-              <button type="button" className="cosmos-button cosmos-button--ghost" onClick={closeForm}>{text(locale, '取消', 'Cancel')}</button>
-              <span />
-              <button type="button" className="cosmos-button cosmos-button--primary" disabled={mutating} onClick={submitServer}>
-                <Database aria-hidden="true" />{text(locale, '新增 Server', 'Add server')}
-              </button>
-            </footer>
-          </section>
+  return <main className="prototype-automation-page">
+    <PrototypePageTopbar
+      crumb={text(locale, '配置 · MCP Registry', 'Configuration · MCP Registry')}
+      navigationCollapsed={navigationCollapsed}
+      onOpenNavigation={onOpenNavigation}
+      onOpenCommand={onOpenCommand}
+    />
+    <div className="prototype-automation-viewport">
+      <div className="prototype-automation-content prototype-expert-content">
+        <div className="prototype-automation-header">
+          <div>
+            <h1>MCP Registry</h1>
+            <p>{text(locale, '添加合作伙伴或自定义 MCP servers，为 Expert 扩展外部工具与服务（docs/config-mcp）。', 'Add partner or custom MCP servers to extend Experts with external tools and services (docs/config-mcp).')}</p>
+          </div>
+          {canManage ? <button type="button" className="prototype-primary-button" onClick={() => setFormOpen(true)}>{text(locale, '新增 Server', 'Add server')}</button> : null}
         </div>
-      ) : null}
-    </main>
-  )
+
+        <div className="prototype-automation-table-wrap">
+          <table className="prototype-automation-table prototype-mcp-table">
+            <thead><tr>
+              <th>{text(locale, '名称', 'Name')}</th>
+              <th>Transport</th>
+              <th>Endpoint</th>
+              <th>{text(locale, '工具数', 'Tools')}</th>
+              <th>{text(locale, '状态', 'Status')}</th>
+              {canManage ? <th className="col-menu"><span className="sr-only">{text(locale, '操作', 'Actions')}</span></th> : null}
+            </tr></thead>
+            <tbody>
+              {state === 'loading' ? <tr><td colSpan={canManage ? 6 : 5} className="prototype-automation-state"><LoaderCircle className="spin" aria-hidden="true" />{text(locale, '加载中…', 'Loading…')}</td></tr> : null}
+              {state === 'error' ? <tr><td colSpan={canManage ? 6 : 5} className="prototype-automation-state prototype-automation-state--error"><span role="alert">{text(locale, '无法加载 MCP servers。', 'Unable to load MCP servers.')}{error ? ` ${error.message}` : ''}</span><button type="button" onClick={onRetry}><RefreshCw aria-hidden="true" />{text(locale, '重试', 'Retry')}</button></td></tr> : null}
+              {state === 'ready' && !items.length ? <tr><td colSpan={canManage ? 6 : 5} className="prototype-automation-state">{text(locale, '注册表为空。新增第一个 MCP server 作为 Expert 的工具来源。', 'Registry is empty. Add the first MCP server as an Expert tool source.')}</td></tr> : null}
+              {state === 'ready' ? items.map((item) => <tr key={item.id}>
+                <td><strong className="prototype-mcp-name">{item.name}</strong></td>
+                <td className="muted">{item.transport}</td>
+                <td className="muted"><code className="prototype-mcp-endpoint">{item.transport === 'stdio' ? item.command : item.endpoint}</code></td>
+                <td className="muted">{item.toolCount}</td>
+                <td><span className={`prototype-environment-status${item.connectionStatus === 'connected' ? ' prototype-environment-status--ready' : item.connectionStatus === 'action_required' ? ' prototype-environment-status--failed' : ''}`}>{item.connectionStatus === 'connected' ? text(locale, '已连接', 'connected') : item.connectionStatus === 'action_required' ? text(locale, '需处理', 'action required') : text(locale, '已归档', 'archived')}</span></td>
+                {canManage ? <td className="col-menu">
+                  {confirmArchiveId === item.id ? <div className="prototype-automation-confirm"><span>{text(locale, '确认移除？', 'Remove?')}</span><button type="button" disabled={mutating} onClick={() => setConfirmArchiveId(undefined)}>{text(locale, '取消', 'Cancel')}</button><button type="button" className="danger" disabled={mutating} onClick={() => void archiveRow(item)}>{text(locale, '确认', 'Confirm')}</button></div>
+                    : <button type="button" className="icon-btn prototype-automation-remove" aria-label={text(locale, `移除 ${item.name}`, `Remove ${item.name}`)} disabled={mutating || item.connectionStatus === 'archived'} onClick={() => setConfirmArchiveId(item.id)}>×</button>}
+                </td> : null}
+              </tr>) : null}
+            </tbody>
+          </table>
+        </div>
+
+        {mutationError && !formOpen ? <p className="prototype-automation-error" role="alert">{mutationError.message}</p> : null}
+        {state === 'ready' ? <div className="prototype-automation-footer"><span>{items.length} {items.length === 1 ? text(locale, '个 server', 'server in registry') : text(locale, '个 server', 'servers in registry')}</span><div /></div> : null}
+      </div>
+    </div>
+
+    {formOpen ? <div className="prototype-drawer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !mutating) closeForm() }}>
+      <form className="prototype-automation-drawer" role="dialog" aria-modal="true" aria-label={text(locale, '新增 MCP Server', 'Add MCP server')} onKeyDown={(event) => { if (event.key === 'Escape' && !mutating) closeForm() }} onSubmit={(event) => { event.preventDefault(); void submitServer() }}>
+        <header className="prototype-drawer-header"><h2>{text(locale, '新增 MCP Server', 'Add MCP server')}</h2><button type="button" className="icon-btn" aria-label={text(locale, '关闭', 'Close')} disabled={mutating} onClick={closeForm}>×</button></header>
+        <div className="prototype-drawer-body">
+          <label className="prototype-field-label" htmlFor="mcp-name">{text(locale, '名称', 'Name')}</label>
+          <input id="mcp-name" className="prototype-field" autoFocus required value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Internal Docs MCP" />
+          <label className="prototype-field-label" htmlFor="mcp-transport">Transport</label>
+          <select id="mcp-transport" className="prototype-field-select" value={draft.transport} onChange={(event) => setDraft({ ...draft, transport: event.target.value as McpServerDto['transport'] })}>
+            <option value="http">HTTP</option>
+            <option value="sse">SSE</option>
+            <option value="stdio">stdio</option>
+          </select>
+          {draft.transport === 'stdio' ? <>
+            <label className="prototype-field-label" htmlFor="mcp-command">{text(locale, '启动命令', 'Launch command')}</label>
+            <input id="mcp-command" className="prototype-field prototype-mono-field" required value={draft.command} onChange={(event) => setDraft({ ...draft, command: event.target.value })} placeholder="npx @company/mcp-server" />
+          </> : <>
+            <label className="prototype-field-label" htmlFor="mcp-endpoint">Endpoint</label>
+            <input id="mcp-endpoint" className="prototype-field prototype-mono-field" type="url" required value={draft.endpoint} onChange={(event) => setDraft({ ...draft, endpoint: event.target.value })} placeholder="https://mcp.example.com/api" />
+          </>}
+          {mutationError ? <p className="prototype-automation-error" role="alert">{mutationError.message}</p> : null}
+        </div>
+        <footer className="prototype-drawer-footer">
+          <button type="button" className="prototype-ghost-button" disabled={mutating} onClick={closeForm}>{text(locale, '取消', 'Cancel')}</button>
+          <button type="submit" className="prototype-primary-button" disabled={mutating}>{mutating ? text(locale, '新增中…', 'Adding…') : text(locale, '新增 Server', 'Add server')}</button>
+        </footer>
+      </form>
+    </div> : null}
+  </main>
 }
 
 function DaemonStatusLabel({ status, enabled }: { status: DaemonDto['status']; enabled: boolean }) {
