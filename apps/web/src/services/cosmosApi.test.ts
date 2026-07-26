@@ -227,6 +227,7 @@ const expertDetail: ExpertDetailDto = {
     instructions: 'Inspect the repository, implement the change, and verify it.',
     capabilities: ['code-search', 'read-code', 'git'],
     launchGuidance: 'Describe the requested implementation and its verification evidence.',
+    skillIds: [],
   },
   draftRevisionId: null,
   draftRevision: null,

@@ -26,6 +26,7 @@ type CandidateRow = {
   queued_attempt_number: number | null
   model: string
   instructions: string
+  skill_instructions: string
   input_content: string
 }
 
@@ -168,6 +169,19 @@ export class PostgresExecutionRepository implements ExecutionRepository {
           queued_attempt.number AS queued_attempt_number,
           expert_revision.model,
           expert_revision.instructions,
+          COALESCE((
+            SELECT string_agg(skill.content, E'\n\n' ORDER BY skill.name)
+            FROM cosmos_skills skill
+            WHERE skill.organization_id = command_record.organization_id
+              AND skill.space_id = command_record.space_id
+              AND skill.status = 'active'
+              AND skill.source = 'inline'
+              AND skill.id IN (
+                SELECT jsonb_array_elements_text(
+                  COALESCE(expert_revision.configuration -> 'skillIds', '[]'::jsonb)
+                )
+              )
+          ), '') AS skill_instructions,
           input_message.content AS input_content
         FROM cosmos_commands command_record
         JOIN cosmos_sessions session_record
@@ -399,7 +413,9 @@ export class PostgresExecutionRepository implements ExecutionRepository {
         requestedBy: selected.requested_by,
         requestedByKind: selected.requested_by_kind,
         model: selected.model,
-        systemPrompt: selected.instructions,
+        systemPrompt: selected.skill_instructions
+          ? `${selected.instructions}\n\n## Skills\n\n${selected.skill_instructions}`
+          : selected.instructions,
         taskContext: selected.input_content,
       }
     })

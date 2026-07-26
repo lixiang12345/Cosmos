@@ -40,11 +40,17 @@ export const ExpertPublishedRevisionSummarySchema = z.object({
 
 export type ExpertPublishedRevisionSummary = z.infer<typeof ExpertPublishedRevisionSummarySchema>
 
+const SkillIdsSchema = z.array(z.string().trim().min(1).max(128)).max(32)
+  .refine((skillIds) => new Set(skillIds).size === skillIds.length, {
+    message: 'Expert skillIds must be unique',
+  })
+
 const expertRevisionFields = {
   ...expertRevisionExecutionFields,
   instructions: z.string().max(100_000),
   capabilities: CapabilitiesSchema,
   launchGuidance: z.string().max(10_000),
+  skillIds: SkillIdsSchema.default([]),
 }
 
 export const ExpertPublishedRevisionDtoSchema = z.object({
@@ -207,6 +213,7 @@ const expertMutableRevisionFields = {
   allowBaseBranchOverride: z.boolean(),
   capabilities: CapabilitiesSchema,
   launchGuidance: z.string().max(10_000),
+  skillIds: SkillIdsSchema.default([]),
 }
 
 export const CreateExpertRequestSchema = z.object({

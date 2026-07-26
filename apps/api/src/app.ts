@@ -1868,6 +1868,20 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     })
   }
 
+  async function findMissingSkillIds(
+    organizationId: string,
+    spaceId: string,
+    actorId: string,
+    skillIds: string[],
+  ): Promise<string[]> {
+    const missing: string[] = []
+    for (const skillId of skillIds) {
+      const skill = await skillRepository.getSkill(organizationId, spaceId, skillId, actorId)
+      if (!skill || skill.status !== 'active') missing.push(skillId)
+    }
+    return missing
+  }
+
   function denySkillMutation(request: FastifyRequest, reply: FastifyReply) {
     return sendApiError(reply, 403, request, {
       code: 'PERMISSION_DENIED',
@@ -2201,6 +2215,19 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
           fieldErrors: validationFieldErrors(parsed.error.issues),
         })
       }
+      if (parsed.data.skillIds.length > 0) {
+        const missingSkillIds = await findMissingSkillIds(
+          authorization.organizationId, authorization.spaceId, authorization.actor.id, parsed.data.skillIds,
+        )
+        if (missingSkillIds.length > 0) {
+          return sendApiError(reply, 400, request, {
+            code: 'VALIDATION_FAILED',
+            message: 'One or more referenced Skills do not exist or are archived.',
+            retryable: false,
+            fieldErrors: { skillIds: missingSkillIds.map((skillId) => `Skill ${skillId} is not an active Skill in this Space.`) },
+          })
+        }
+      }
       const result = await configurationCatalogRepository.createExpert({
         organizationId: authorization.organizationId,
         spaceId: authorization.spaceId,
@@ -2254,6 +2281,20 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
           retryable: false,
           fieldErrors: validationFieldErrors(parsed.error.issues),
         })
+      }
+      if (parsed.data.skillIds !== undefined && parsed.data.skillIds.length > 0) {
+        const updateSkillIds = parsed.data.skillIds
+        const missingSkillIds = await findMissingSkillIds(
+          authorization.organizationId, authorization.spaceId, authorization.actor.id, updateSkillIds,
+        )
+        if (missingSkillIds.length > 0) {
+          return sendApiError(reply, 400, request, {
+            code: 'VALIDATION_FAILED',
+            message: 'One or more referenced Skills do not exist or are archived.',
+            retryable: false,
+            fieldErrors: { skillIds: missingSkillIds.map((skillId) => `Skill ${skillId} is not an active Skill in this Space.`) },
+          })
+        }
       }
       const candidate = await configurationCatalogRepository.updateExpert({
         organizationId: authorization.organizationId,

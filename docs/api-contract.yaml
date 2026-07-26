@@ -4708,6 +4708,7 @@ components:
         - instructions
         - capabilities
         - launchGuidance
+        - skillIds
       properties:
         id:
           $ref: '#/components/schemas/RuntimeIdentifier'
@@ -4747,6 +4748,11 @@ components:
         launchGuidance:
           type: string
           maxLength: 10000
+        skillIds:
+          type: array
+          maxItems: 32
+          items:
+            $ref: '#/components/schemas/RuntimeIdentifier'
       additionalProperties: false
     RuntimeExpertPublishedRevision:
       allOf:
@@ -4915,6 +4921,7 @@ components:
         - allowBaseBranchOverride
         - capabilities
         - launchGuidance
+        - skillIds
       properties:
         name:
           type: string
@@ -4953,6 +4960,11 @@ components:
         launchGuidance:
           type: string
           maxLength: 10000
+        skillIds:
+          type: array
+          maxItems: 32
+          items:
+            $ref: '#/components/schemas/RuntimeIdentifier'
       additionalProperties: false
     RuntimeExpertPatch:
       minProperties: 1
@@ -4993,6 +5005,11 @@ components:
         launchGuidance:
           type: string
           maxLength: 10000
+        skillIds:
+          type: array
+          maxItems: 32
+          items:
+            $ref: '#/components/schemas/RuntimeIdentifier'
       additionalProperties: false
 
     RuntimeEnvironmentRepositoryBinding:

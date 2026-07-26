@@ -158,6 +158,7 @@ const productionExpertDetail: ExpertDetailDto = {
     instructions: 'Implement only the requested change and verify the result.',
     capabilities: ['code-search', 'read-code', 'git'],
     launchGuidance: 'Describe the requested production change and the expected verification.',
+    skillIds: [],
   },
   draftRevisionId: null,
   draftRevision: null,

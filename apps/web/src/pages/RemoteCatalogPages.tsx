@@ -140,6 +140,7 @@ export type RemoteExpertDetailPageProps = RemoteCatalogRequestProps & {
 export type RemoteExpertEditorPageProps = RemoteCatalogRequestProps & {
   expertId?: string
   environments: EnvironmentSummaryDto[]
+  skills?: SkillDto[]
   onOpenNavigation?: () => void
   onBack: () => void
   onCreated: (expertId: string) => void
@@ -646,6 +647,14 @@ export function RemoteExpertDetailPage({
                     <span className="prototype-expert-chip-icon"><PrototypeHexIcon aria-hidden="true" /></span>{capability}
                   </span>) : <span className="prototype-expert-chip-empty">{text(locale, '未开放任何能力', 'No capabilities granted')}</span>}
                 </div>
+                {revision.skillIds.length ? <>
+                  <span className="prototype-field-label" style={{ marginTop: 14, display: 'block' }}>Skills</span>
+                  <div className="prototype-expert-chip-box">
+                    {revision.skillIds.map((skillId) => <span className="prototype-expert-chip" key={skillId}>
+                      <span className="prototype-expert-chip-icon"><PrototypeHexIcon aria-hidden="true" /></span>{skillId}
+                    </span>)}
+                  </div>
+                </> : null}
                 <div className="prototype-expert-policy-row">
                   <span><strong>{text(locale, '仓库覆盖', 'Repository override')}</strong></span>
                   <span className="prototype-expert-tag">{revision.allowRepositoryOverride ? text(locale, '允许', 'Allowed') : text(locale, '锁定', 'Locked')}</span>
@@ -678,6 +687,7 @@ type ExpertEditorForm = {
   launchGuidance: string
   allowRepositoryOverride: boolean
   allowBaseBranchOverride: boolean
+  skillIds: string[]
 }
 
 const standardCapabilities = [
@@ -757,6 +767,7 @@ function formFromExpert(
     launchGuidance: revision?.launchGuidance ?? '',
     allowRepositoryOverride: revision?.allowRepositoryOverride ?? true,
     allowBaseBranchOverride: revision?.allowBaseBranchOverride ?? true,
+    skillIds: revision?.skillIds ?? [],
   }
 }
 
@@ -765,6 +776,7 @@ export function RemoteExpertEditorPage({
   spaceId,
   expertId,
   environments,
+  skills = [],
   auth,
   credentialVersion,
   onOpenNavigation,
@@ -780,6 +792,7 @@ export function RemoteExpertEditorPage({
   const descriptionRef = useRef<HTMLTextAreaElement>(null)
   const promptRef = useRef<HTMLTextAreaElement>(null)
   const [addCapabilityOpen, setAddCapabilityOpen] = useState(false)
+  const [addSkillOpen, setAddSkillOpen] = useState(false)
   const requestAuth = useMemo<CosmosApiAuthContext>(() => ({
     accessToken: auth.accessToken,
     requestIdentity: auth.requestIdentity,
@@ -865,6 +878,7 @@ export function RemoteExpertEditorPage({
       allowBaseBranchOverride: form.allowBaseBranchOverride,
       capabilities: form.capabilities,
       launchGuidance: form.launchGuidance,
+      skillIds: form.skillIds,
     }
     return expert
       ? updateExpert(organizationId, spaceId, expert.id, input, expert.version, requestAuth)
@@ -1052,7 +1066,7 @@ export function RemoteExpertEditorPage({
             <button type="button" className="prototype-expert-chip-x" aria-label={text(locale, `移除 ${capability}`, `Remove ${capability}`)} onClick={() => toggleCapability(capability)}>×</button>
           </span>)}
           {!form.capabilities.length ? <span className="prototype-expert-chip-empty">{text(locale, '未开放任何能力', 'No capabilities granted')}</span> : null}
-          {missingCapabilities.length ? <button type="button" className="prototype-expert-chip prototype-expert-chip-add" aria-expanded={addCapabilityOpen} onClick={() => setAddCapabilityOpen((open) => !open)}>+ {text(locale, '添加', 'Add')}</button> : null}
+          {missingCapabilities.length ? <button type="button" className="prototype-expert-chip prototype-expert-chip-add" aria-label={text(locale, '添加能力', 'Add capability')} aria-expanded={addCapabilityOpen} onClick={() => setAddCapabilityOpen((open) => !open)}>+ {text(locale, '添加', 'Add')}</button> : null}
         </div>
         {addCapabilityOpen && missingCapabilities.length ? <div className="prototype-expert-add-menu">
           {missingCapabilities.map((capability) => <button type="button" key={capability} onClick={() => { toggleCapability(capability); setAddCapabilityOpen(false) }}>
@@ -1068,6 +1082,32 @@ export function RemoteExpertEditorPage({
           <span><strong>{text(locale, '允许分支覆盖', 'Branch override')}</strong><small>{text(locale, '会话可改用其他基础分支。', 'Sessions may start from a different base branch.')}</small></span>
           <input type="checkbox" role="switch" aria-label={text(locale, '允许分支覆盖', 'Branch override')} checked={form.allowBaseBranchOverride} onChange={(event) => field('allowBaseBranchOverride', event.target.checked)} />
         </div>
+      </div>
+    </div>
+
+    <div className="prototype-expert-section">
+      <div className="prototype-expert-section-intro">
+        <h2>Skills</h2>
+        <p>{text(locale, '该 Expert 固定的知识包。发布时快照，Inline 技能内容会注入会话系统提示词。', 'Knowledge packages pinned to this expert. Snapshotted on publish; inline skill content is injected into the session system prompt.')}</p>
+      </div>
+      <div className="prototype-expert-section-fields">
+        <div className="prototype-expert-chip-box">
+          {form.skillIds.map((skillId) => {
+            const skill = skills.find((candidate) => candidate.id === skillId)
+            return <span className="prototype-expert-chip" key={skillId}>
+              <span className="prototype-expert-chip-icon"><PrototypeHexIcon aria-hidden="true" /></span>
+              {skill?.name ?? skillId}
+              <button type="button" className="prototype-expert-chip-x" aria-label={text(locale, `移除技能 ${skill?.name ?? skillId}`, `Remove skill ${skill?.name ?? skillId}`)} onClick={() => field('skillIds', form.skillIds.filter((id) => id !== skillId))}>×</button>
+            </span>
+          })}
+          {!form.skillIds.length ? <span className="prototype-expert-chip-empty">{text(locale, '未固定任何技能', 'No skills pinned')}</span> : null}
+          {skills.some((skill) => !form.skillIds.includes(skill.id)) ? <button type="button" className="prototype-expert-chip prototype-expert-chip-add" aria-label={text(locale, '添加技能', 'Add skill')} aria-expanded={addSkillOpen} onClick={() => setAddSkillOpen((open) => !open)}>+ {text(locale, '添加', 'Add')}</button> : null}
+        </div>
+        {addSkillOpen ? <div className="prototype-expert-add-menu">
+          {skills.filter((skill) => !form.skillIds.includes(skill.id)).map((skill) => <button type="button" key={skill.id} onClick={() => { field('skillIds', [...form.skillIds, skill.id]); setAddSkillOpen(false) }}>
+            <span className="prototype-expert-chip-icon"><PrototypeHexIcon aria-hidden="true" /></span>{skill.name}
+          </button>)}
+        </div> : null}
       </div>
     </div>
 

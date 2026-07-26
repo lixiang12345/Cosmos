@@ -164,6 +164,7 @@ const expertDetail: ExpertDetailDto = {
     instructions: 'Inspect the repository, implement the change, and verify it.',
     capabilities: ['code-search', 'git'],
     launchGuidance: 'Describe the change and acceptance criteria.',
+    skillIds: [],
     createdAt: '2026-07-13T08:00:00.000Z',
   },
   draftRevisionId: null,

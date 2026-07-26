@@ -44,6 +44,7 @@ const publishedRevision = {
   instructions: 'Inspect evidence, make a minimal fix, and verify it.',
   capabilities: ['code-search', 'read-code', 'git'],
   launchGuidance: 'Describe the incident, affected service, and available evidence.',
+  skillIds: [] as string[],
 } as const
 
 const expertDetail = {

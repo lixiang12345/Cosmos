@@ -87,6 +87,7 @@ const migrationVersions = [
   '082_integration_catalog.sql',
   '083_automation_trigger_sources.sql',
   '084_skill_catalog.sql',
+  '085_expert_skills_worker_access.sql',
 ]
 
 function poolWithVersions(versions: string[]) {

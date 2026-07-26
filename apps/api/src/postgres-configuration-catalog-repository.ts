@@ -112,6 +112,7 @@ type ExpertRow = PageRow & {
   revision_created_at: TimestampValue | null
   revision_instructions?: string | null
   revision_capabilities: unknown
+  revision_skill_ids: unknown
   revision_launch_guidance: string | null
   draft_revision_id?: string | null
   draft_revision_expert_id?: string | null
@@ -125,6 +126,7 @@ type ExpertRow = PageRow & {
   draft_revision_created_at?: TimestampValue | null
   draft_revision_instructions?: string | null
   draft_revision_capabilities?: unknown
+  draft_revision_skill_ids?: unknown
   draft_revision_launch_guidance?: string | null
 }
 
@@ -208,6 +210,7 @@ const expertSummaryColumns = `
   published_revision.created_at AS revision_created_at
   , published_revision.configuration -> 'capabilities' AS revision_capabilities
   , published_revision.configuration ->> 'launchGuidance' AS revision_launch_guidance
+  , published_revision.configuration -> 'skillIds' AS revision_skill_ids
 `
 
 const environmentSummaryColumns = `
@@ -266,7 +269,8 @@ const expertDetailDraftColumns = `
   draft_revision.created_at AS draft_revision_created_at,
   draft_revision.instructions AS draft_revision_instructions,
   draft_revision.configuration -> 'capabilities' AS draft_revision_capabilities,
-  draft_revision.configuration ->> 'launchGuidance' AS draft_revision_launch_guidance
+  draft_revision.configuration ->> 'launchGuidance' AS draft_revision_launch_guidance,
+  draft_revision.configuration -> 'skillIds' AS draft_revision_skill_ids
 `
 
 function canonicalJson(value: unknown): string {
@@ -282,8 +286,8 @@ function hash(value: string) {
   return createHash('sha256').update(value).digest('hex')
 }
 
-function revisionConfiguration(input: Pick<CreateExpertRequest, 'capabilities' | 'launchGuidance'>) {
-  return { capabilities: input.capabilities, launchGuidance: input.launchGuidance }
+function revisionConfiguration(input: Pick<CreateExpertRequest, 'capabilities' | 'launchGuidance' | 'skillIds'>) {
+  return { capabilities: input.capabilities, launchGuidance: input.launchGuidance, skillIds: input.skillIds }
 }
 
 function environmentRevisionConfiguration(input: {
@@ -584,6 +588,7 @@ function mapExpertDetail(row: ExpertRow): ExpertDetailDto {
         instructions: row.revision_instructions,
         capabilities: Array.isArray(row.revision_capabilities) ? row.revision_capabilities : [],
         launchGuidance: row.revision_launch_guidance ?? '',
+        skillIds: Array.isArray(row.revision_skill_ids) ? row.revision_skill_ids : [],
       })
   const draftRevision = row.draft_revision_id == null
     ? null
@@ -602,6 +607,7 @@ function mapExpertDetail(row: ExpertRow): ExpertDetailDto {
           ? row.draft_revision_capabilities
           : [],
         launchGuidance: row.draft_revision_launch_guidance ?? '',
+        skillIds: Array.isArray(row.draft_revision_skill_ids) ? row.draft_revision_skill_ids : [],
         createdAt: row.draft_revision_created_at == null
           ? null
           : timestamp(row.draft_revision_created_at),
@@ -1309,6 +1315,9 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
       }
       if (record.request.launchGuidance !== undefined) {
         configurationPatch.launchGuidance = record.request.launchGuidance
+      }
+      if (record.request.skillIds !== undefined) {
+        configurationPatch.skillIds = record.request.skillIds
       }
       await client.query(`
         UPDATE cosmos_expert_revisions

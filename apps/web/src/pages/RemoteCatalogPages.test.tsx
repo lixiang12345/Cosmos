@@ -91,6 +91,7 @@ const expertDetail: ExpertDetailDto = {
     instructions: 'Inspect the repository and provide verification evidence.',
     capabilities: ['code-search', 'read-code', 'git'],
     launchGuidance: 'Describe the change to review and the acceptance criteria.',
+    skillIds: [],
   },
   draftRevisionId: null,
   draftRevision: null,
@@ -122,6 +123,7 @@ const createdExpertDetail: ExpertDetailDto = {
     instructions: 'Prepare a verified release.',
     capabilities: ['code-search', 'read-code', 'git'],
     launchGuidance: '',
+    skillIds: [],
     createdAt: '2026-07-13T09:00:00.000Z',
   },
 }
@@ -243,6 +245,24 @@ function secret(overrides: Partial<SecretDto> = {}): SecretDto {
     archivedAt: null,
     ...overrides,
   }
+}
+
+const skillFixture = {
+  id: 'skill-review',
+  organizationId: 'organization-a',
+  spaceId: 'space-a',
+  name: 'pr-review-checklist',
+  description: 'Review checklist',
+  source: 'inline' as const,
+  content: '# Checklist',
+  url: null,
+  tags: ['review'],
+  status: 'active' as const,
+  version: 1,
+  createdBy: 'user-a',
+  createdAt: '2026-07-13T07:00:00.000Z',
+  updatedAt: '2026-07-13T08:00:00.000Z',
+  archivedAt: null,
 }
 
 const auth: CosmosApiAuthContext = {
@@ -372,6 +392,7 @@ describe('remote Catalog pages', () => {
         organizationId="organization-a"
         spaceId="space-a"
         environments={[environmentA]}
+        skills={[skillFixture]}
         auth={auth}
         credentialVersion={1}
         onBack={vi.fn()}
@@ -383,6 +404,8 @@ describe('remote Catalog pages', () => {
 
     await user.type(screen.getByRole('textbox', { name: '名称' }), 'Release Expert')
     await user.type(screen.getByRole('textbox', { name: '系统指令' }), 'Prepare a verified release.')
+    await user.click(screen.getByRole('button', { name: '添加技能' }))
+    await user.click(screen.getByRole('button', { name: /pr-review-checklist/ }))
     await user.click(screen.getByRole('button', { name: '发布' }))
 
     await waitFor(() => expect(createExpert).toHaveBeenCalledTimes(1))
@@ -394,6 +417,7 @@ describe('remote Catalog pages', () => {
         instructions: 'Prepare a verified release.',
         environmentId: environmentA.id,
         environmentRevisionId: environmentA.activeRevisionId,
+        skillIds: ['skill-review'],
       }),
       expect.any(String),
       expect.objectContaining({ accessToken: 'token-a' }),
