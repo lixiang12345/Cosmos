@@ -228,6 +228,7 @@ const expertDetail: ExpertDetailDto = {
     capabilities: ['code-search', 'read-code', 'git'],
     launchGuidance: 'Describe the requested implementation and its verification evidence.',
     skillIds: [],
+    workerExpertIds: [],
   },
   draftRevisionId: null,
   draftRevision: null,

@@ -4752,6 +4752,7 @@ components:
         - capabilities
         - launchGuidance
         - skillIds
+        - workerExpertIds
       properties:
         id:
           $ref: '#/components/schemas/RuntimeIdentifier'
@@ -4794,6 +4795,11 @@ components:
         skillIds:
           type: array
           maxItems: 32
+          items:
+            $ref: '#/components/schemas/RuntimeIdentifier'
+        workerExpertIds:
+          type: array
+          maxItems: 16
           items:
             $ref: '#/components/schemas/RuntimeIdentifier'
       additionalProperties: false
@@ -4965,6 +4971,7 @@ components:
         - capabilities
         - launchGuidance
         - skillIds
+        - workerExpertIds
       properties:
         name:
           type: string
@@ -5006,6 +5013,11 @@ components:
         skillIds:
           type: array
           maxItems: 32
+          items:
+            $ref: '#/components/schemas/RuntimeIdentifier'
+        workerExpertIds:
+          type: array
+          maxItems: 16
           items:
             $ref: '#/components/schemas/RuntimeIdentifier'
       additionalProperties: false
@@ -5051,6 +5063,11 @@ components:
         skillIds:
           type: array
           maxItems: 32
+          items:
+            $ref: '#/components/schemas/RuntimeIdentifier'
+        workerExpertIds:
+          type: array
+          maxItems: 16
           items:
             $ref: '#/components/schemas/RuntimeIdentifier'
       additionalProperties: false

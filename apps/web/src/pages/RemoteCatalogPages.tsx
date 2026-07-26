@@ -142,6 +142,7 @@ export type RemoteExpertEditorPageProps = RemoteCatalogRequestProps & {
   expertId?: string
   environments: EnvironmentSummaryDto[]
   skills?: SkillDto[]
+  publishedExperts?: ExpertSummaryDto[]
   template?: ExpertTemplate
   onOpenNavigation?: () => void
   onBack: () => void
@@ -702,6 +703,7 @@ type ExpertEditorForm = {
   allowRepositoryOverride: boolean
   allowBaseBranchOverride: boolean
   skillIds: string[]
+  workerExpertIds: string[]
 }
 
 const standardCapabilities = [
@@ -784,6 +786,7 @@ function formFromExpert(
     allowRepositoryOverride: revision?.allowRepositoryOverride ?? true,
     allowBaseBranchOverride: revision?.allowBaseBranchOverride ?? true,
     skillIds: revision?.skillIds ?? [],
+    workerExpertIds: revision?.workerExpertIds ?? [],
   }
 }
 
@@ -793,6 +796,7 @@ export function RemoteExpertEditorPage({
   expertId,
   environments,
   skills = [],
+  publishedExperts = [],
   template,
   auth,
   credentialVersion,
@@ -810,6 +814,7 @@ export function RemoteExpertEditorPage({
   const promptRef = useRef<HTMLTextAreaElement>(null)
   const [addCapabilityOpen, setAddCapabilityOpen] = useState(false)
   const [addSkillOpen, setAddSkillOpen] = useState(false)
+  const [addWorkerOpen, setAddWorkerOpen] = useState(false)
   const requestAuth = useMemo<CosmosApiAuthContext>(() => ({
     accessToken: auth.accessToken,
     requestIdentity: auth.requestIdentity,
@@ -896,6 +901,7 @@ export function RemoteExpertEditorPage({
       capabilities: form.capabilities,
       launchGuidance: form.launchGuidance,
       skillIds: form.skillIds,
+      workerExpertIds: form.workerExpertIds,
     }
     return expert
       ? updateExpert(organizationId, spaceId, expert.id, input, expert.version, requestAuth)
@@ -987,6 +993,9 @@ export function RemoteExpertEditorPage({
   }
 
   const missingCapabilities = capabilityOptions.filter((capability) => !form.capabilities.includes(capability))
+  const workerCandidates = publishedExperts.filter((candidate) => (
+    candidate.status === 'published' && candidate.id !== expertId && !form.workerExpertIds.includes(candidate.id)
+  ))
 
   return editorShell(<>
     <button type="button" className="prototype-expert-back" onClick={onBack}>← {text(locale, '全部 Experts', 'All Experts')}</button>
@@ -1123,6 +1132,32 @@ export function RemoteExpertEditorPage({
         {addSkillOpen ? <div className="prototype-expert-add-menu">
           {skills.filter((skill) => !form.skillIds.includes(skill.id)).map((skill) => <button type="button" key={skill.id} onClick={() => { field('skillIds', [...form.skillIds, skill.id]); setAddSkillOpen(false) }}>
             <span className="prototype-expert-chip-icon"><PrototypeHexIcon aria-hidden="true" /></span>{skill.name}
+          </button>)}
+        </div> : null}
+      </div>
+    </div>
+
+    <div className="prototype-expert-section">
+      <div className="prototype-expert-section-intro">
+        <h2>Workers</h2>
+        <p>{text(locale, '该 Expert 可异步启动处理子任务的下游 Expert。仅可引用已发布的 Expert。', 'Experts this agent can launch asynchronously to handle sub-tasks. Only published Experts can be referenced.')}</p>
+      </div>
+      <div className="prototype-expert-section-fields">
+        <div className="prototype-expert-chip-box">
+          {form.workerExpertIds.map((workerId) => {
+            const worker = publishedExperts.find((candidate) => candidate.id === workerId)
+            return <span className="prototype-expert-chip" key={workerId}>
+              <span className="prototype-expert-chip-icon"><PrototypeHexIcon aria-hidden="true" /></span>
+              {worker?.name ?? workerId}
+              <button type="button" className="prototype-expert-chip-x" aria-label={text(locale, `移除 Worker ${worker?.name ?? workerId}`, `Remove worker ${worker?.name ?? workerId}`)} onClick={() => field('workerExpertIds', form.workerExpertIds.filter((id) => id !== workerId))}>×</button>
+            </span>
+          })}
+          {!form.workerExpertIds.length ? <span className="prototype-expert-chip-empty">{text(locale, '无 Worker', 'No workers')}</span> : null}
+          {workerCandidates.length ? <button type="button" className="prototype-expert-chip prototype-expert-chip-add" aria-label={text(locale, '添加 Worker', 'Add worker')} aria-expanded={addWorkerOpen} onClick={() => setAddWorkerOpen((open) => !open)}>+ {text(locale, '添加 Worker', 'Add worker')}</button> : null}
+        </div>
+        {addWorkerOpen ? <div className="prototype-expert-add-menu">
+          {workerCandidates.map((candidate) => <button type="button" key={candidate.id} onClick={() => { field('workerExpertIds', [...form.workerExpertIds, candidate.id]); setAddWorkerOpen(false) }}>
+            <span className="prototype-expert-chip-icon"><PrototypeHexIcon aria-hidden="true" /></span>{candidate.name}
           </button>)}
         </div> : null}
       </div>

@@ -92,6 +92,7 @@ const expertDetail: ExpertDetailDto = {
     capabilities: ['code-search', 'read-code', 'git'],
     launchGuidance: 'Describe the change to review and the acceptance criteria.',
     skillIds: [],
+    workerExpertIds: [],
   },
   draftRevisionId: null,
   draftRevision: null,
@@ -124,6 +125,7 @@ const createdExpertDetail: ExpertDetailDto = {
     capabilities: ['code-search', 'read-code', 'git'],
     launchGuidance: '',
     skillIds: [],
+    workerExpertIds: [],
     createdAt: '2026-07-13T09:00:00.000Z',
   },
 }

@@ -45,12 +45,18 @@ const SkillIdsSchema = z.array(z.string().trim().min(1).max(128)).max(32)
     message: 'Expert skillIds must be unique',
   })
 
+const WorkerExpertIdsSchema = z.array(z.string().trim().min(1).max(128)).max(16)
+  .refine((workerExpertIds) => new Set(workerExpertIds).size === workerExpertIds.length, {
+    message: 'Expert workerExpertIds must be unique',
+  })
+
 const expertRevisionFields = {
   ...expertRevisionExecutionFields,
   instructions: z.string().max(100_000),
   capabilities: CapabilitiesSchema,
   launchGuidance: z.string().max(10_000),
   skillIds: SkillIdsSchema.default([]),
+  workerExpertIds: WorkerExpertIdsSchema.default([]),
 }
 
 export const ExpertPublishedRevisionDtoSchema = z.object({
@@ -214,6 +220,7 @@ const expertMutableRevisionFields = {
   capabilities: CapabilitiesSchema,
   launchGuidance: z.string().max(10_000),
   skillIds: SkillIdsSchema.default([]),
+  workerExpertIds: WorkerExpertIdsSchema.default([]),
 }
 
 export const CreateExpertRequestSchema = z.object({

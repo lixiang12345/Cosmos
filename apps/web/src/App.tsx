@@ -1,4 +1,4 @@
-import { DEFAULT_AGENT_MODEL, type AdvisorPlanDto, type ArtifactDto, type ContextPackResponse, type EnvironmentSummaryDto, type SessionDto, type SessionEventDto, type SessionMessageDto, type ShareGrantDto, type SkillDto } from '@cosmos/contracts'
+import { DEFAULT_AGENT_MODEL, type AdvisorPlanDto, type ArtifactDto, type ContextPackResponse, type EnvironmentSummaryDto, type ExpertSummaryDto, type SessionDto, type SessionEventDto, type SessionMessageDto, type ShareGrantDto, type SkillDto } from '@cosmos/contracts'
 import { AlertTriangle, CheckCircle2, LoaderCircle, RefreshCw, X } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
@@ -1047,6 +1047,7 @@ function RemoteExpertEditorRoute({
   handleUnauthorized,
   environments,
   skills,
+  publishedExperts,
   onOpenNavigation,
   onBack,
   onCreated,
@@ -1064,6 +1065,7 @@ function RemoteExpertEditorRoute({
   handleUnauthorized: (failedAccessToken: string | undefined) => Promise<void>
   environments: EnvironmentSummaryDto[]
   skills?: SkillDto[]
+  publishedExperts?: ExpertSummaryDto[]
   onOpenNavigation: () => void
   onBack: (expertId?: string) => void
   onCreated: (expertId: string) => void
@@ -1088,6 +1090,7 @@ function RemoteExpertEditorRoute({
     expertId={expertId}
     environments={environments}
     skills={skills}
+    publishedExperts={publishedExperts}
     template={template}
     auth={auth}
     credentialVersion={credentialVersion}
@@ -2251,10 +2254,10 @@ function CosmosApp() {
           : <RemoteExpertRoute organizationId={organizationId} spaceId={activeSpace.id} accessToken={accessToken} credentialVersion={credentialVersion} requestIdentity={requestIdentity} handleUnauthorized={handleUnauthorized} onOpenNavigation={openNavigation} onBack={() => navigate('/experts')} onStartSession={openNewTask} sessionCreationEnabled={sessionCreationEnabled} canManage={expertManagementEnabled} onEdit={(expertId) => navigate(`/experts/${expertId}/edit`)} navigationCollapsed={sidebarCollapsed} onOpenCommand={() => setCommandOpen(true)} />} />
         <Route path="/experts/new" element={demoMode
           ? <Navigate to="/experts" replace />
-          : expertManagementEnabled ? <RemoteExpertEditorRoute organizationId={organizationId} spaceId={activeSpace.id} accessToken={accessToken} credentialVersion={credentialVersion} requestIdentity={requestIdentity} handleUnauthorized={handleUnauthorized} environments={catalog.environments.items} skills={catalog.skills.items} onOpenNavigation={openNavigation} onBack={() => navigate('/experts')} onCreated={(expertId) => navigate(`/experts/${expertId}/edit`, { replace: true })} onArchived={() => navigate('/experts', { replace: true })} onCatalogChange={catalog.experts.retry} navigationCollapsed={sidebarCollapsed} onOpenCommand={() => setCommandOpen(true)} onOpenAdvisor={() => navigate('/home')} /> : <Navigate to="/experts" replace />} />
+          : expertManagementEnabled ? <RemoteExpertEditorRoute organizationId={organizationId} spaceId={activeSpace.id} accessToken={accessToken} credentialVersion={credentialVersion} requestIdentity={requestIdentity} handleUnauthorized={handleUnauthorized} environments={catalog.environments.items} skills={catalog.skills.items} publishedExperts={catalog.experts.items} onOpenNavigation={openNavigation} onBack={() => navigate('/experts')} onCreated={(expertId) => navigate(`/experts/${expertId}/edit`, { replace: true })} onArchived={() => navigate('/experts', { replace: true })} onCatalogChange={catalog.experts.retry} navigationCollapsed={sidebarCollapsed} onOpenCommand={() => setCommandOpen(true)} onOpenAdvisor={() => navigate('/home')} /> : <Navigate to="/experts" replace />} />
         <Route path="/experts/:expertId/edit" element={demoMode
           ? <ExpertEditorRoute store={scopedExpertStore} onStoreChange={mergeScopedExpertStore} onOpenNavigation={openNavigation} onBack={() => navigate('/experts')} onStartSession={openNewTask} onNotify={setToast} />
-          : expertManagementEnabled ? <RemoteExpertEditorRoute organizationId={organizationId} spaceId={activeSpace.id} accessToken={accessToken} credentialVersion={credentialVersion} requestIdentity={requestIdentity} handleUnauthorized={handleUnauthorized} environments={catalog.environments.items} skills={catalog.skills.items} onOpenNavigation={openNavigation} onBack={(expertId) => navigate(expertId ? `/experts/${expertId}` : '/experts')} onCreated={(expertId) => navigate(`/experts/${expertId}/edit`, { replace: true })} onArchived={() => navigate('/experts', { replace: true })} onCatalogChange={catalog.experts.retry} navigationCollapsed={sidebarCollapsed} onOpenCommand={() => setCommandOpen(true)} onOpenAdvisor={() => navigate('/home')} /> : <Navigate to="/experts" replace />} />
+          : expertManagementEnabled ? <RemoteExpertEditorRoute organizationId={organizationId} spaceId={activeSpace.id} accessToken={accessToken} credentialVersion={credentialVersion} requestIdentity={requestIdentity} handleUnauthorized={handleUnauthorized} environments={catalog.environments.items} skills={catalog.skills.items} publishedExperts={catalog.experts.items} onOpenNavigation={openNavigation} onBack={(expertId) => navigate(expertId ? `/experts/${expertId}` : '/experts')} onCreated={(expertId) => navigate(`/experts/${expertId}/edit`, { replace: true })} onArchived={() => navigate('/experts', { replace: true })} onCatalogChange={catalog.experts.retry} navigationCollapsed={sidebarCollapsed} onOpenCommand={() => setCommandOpen(true)} onOpenAdvisor={() => navigate('/home')} /> : <Navigate to="/experts" replace />} />
         <Route path="/environments" element={demoMode
           ? <EnvironmentsPage onOpenNavigation={openNavigation} />
           : <RemoteEnvironmentsPage

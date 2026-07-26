@@ -45,6 +45,7 @@ const publishedRevision = {
   capabilities: ['code-search', 'read-code', 'git'],
   launchGuidance: 'Describe the incident, affected service, and available evidence.',
   skillIds: [] as string[],
+  workerExpertIds: [],
 } as const
 
 const expertDetail = {

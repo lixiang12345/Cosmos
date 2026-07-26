@@ -1883,6 +1883,27 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     return missing
   }
 
+  async function findInvalidWorkerExpertIds(
+    organizationId: string,
+    spaceId: string,
+    actorId: string,
+    workerExpertIds: string[],
+    selfExpertId?: string,
+  ): Promise<string[]> {
+    const invalid: string[] = []
+    for (const workerExpertId of workerExpertIds) {
+      if (selfExpertId !== undefined && workerExpertId === selfExpertId) {
+        invalid.push(workerExpertId)
+        continue
+      }
+      const worker = await configurationCatalogRepository.getExpert(
+        organizationId, spaceId, workerExpertId, actorId,
+      )
+      if (!worker || worker.status !== 'published') invalid.push(workerExpertId)
+    }
+    return invalid
+  }
+
   function denySkillMutation(request: FastifyRequest, reply: FastifyReply) {
     return sendApiError(reply, 403, request, {
       code: 'PERMISSION_DENIED',
@@ -2229,6 +2250,19 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
           })
         }
       }
+      if (parsed.data.workerExpertIds.length > 0) {
+        const invalidWorkerIds = await findInvalidWorkerExpertIds(
+          authorization.organizationId, authorization.spaceId, authorization.actor.id, parsed.data.workerExpertIds,
+        )
+        if (invalidWorkerIds.length > 0) {
+          return sendApiError(reply, 400, request, {
+            code: 'VALIDATION_FAILED',
+            message: 'Worker Experts must be published Experts in this Space.',
+            retryable: false,
+            fieldErrors: { workerExpertIds: invalidWorkerIds.map((workerId) => `Expert ${workerId} is not a published Expert in this Space.`) },
+          })
+        }
+      }
       const result = await configurationCatalogRepository.createExpert({
         organizationId: authorization.organizationId,
         spaceId: authorization.spaceId,
@@ -2294,6 +2328,20 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
             message: 'One or more referenced Skills do not exist or are archived.',
             retryable: false,
             fieldErrors: { skillIds: missingSkillIds.map((skillId) => `Skill ${skillId} is not an active Skill in this Space.`) },
+          })
+        }
+      }
+      if (parsed.data.workerExpertIds !== undefined && parsed.data.workerExpertIds.length > 0) {
+        const invalidWorkerIds = await findInvalidWorkerExpertIds(
+          authorization.organizationId, authorization.spaceId, authorization.actor.id,
+          parsed.data.workerExpertIds, expertId,
+        )
+        if (invalidWorkerIds.length > 0) {
+          return sendApiError(reply, 400, request, {
+            code: 'VALIDATION_FAILED',
+            message: 'Worker Experts must be published Experts in this Space and cannot include the Expert itself.',
+            retryable: false,
+            fieldErrors: { workerExpertIds: invalidWorkerIds.map((workerId) => `Expert ${workerId} is not a valid worker for this Expert.`) },
           })
         }
       }

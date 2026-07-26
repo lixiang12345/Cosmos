@@ -159,6 +159,7 @@ const productionExpertDetail: ExpertDetailDto = {
     capabilities: ['code-search', 'read-code', 'git'],
     launchGuidance: 'Describe the requested production change and the expected verification.',
     skillIds: [],
+    workerExpertIds: [],
   },
   draftRevisionId: null,
   draftRevision: null,
