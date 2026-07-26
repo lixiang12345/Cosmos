@@ -20683,6 +20683,19 @@ main.cosmos-home.prototype-home {
   gap: 6px;
 }
 
+.prototype-mcp-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.prototype-mcp-presets .prototype-expert-chip.selected {
+  border-style: solid;
+  border-color: var(--proto-text, #1a1a1a);
+  color: var(--proto-text, #1a1a1a);
+}
+
 .prototype-session-toast {
   position: fixed;
   right: 18px;

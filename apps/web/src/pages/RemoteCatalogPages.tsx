@@ -2127,6 +2127,13 @@ export function RemoteWebhooksPage({
 
 
 type McpDraft = { name: string; transport: McpServerDto['transport']; endpoint: string; command: string }
+
+const mcpPartnerPresets: Array<{ id: string; name: string; endpoint: string }> = [
+  { id: 'atlassian', name: 'Atlassian', endpoint: 'https://mcp.atlassian.com/v1/sse' },
+  { id: 'sentry', name: 'Sentry', endpoint: 'https://mcp.sentry.dev/mcp' },
+  { id: 'stripe', name: 'Stripe', endpoint: 'https://mcp.stripe.com' },
+  { id: 'figma', name: 'Figma', endpoint: 'https://mcp.figma.com/mcp' },
+]
 const initialMcpDraft: McpDraft = { name: '', transport: 'http', endpoint: '', command: '' }
 
 export function RemoteMcpServersPage({
@@ -2274,6 +2281,13 @@ export function RemoteMcpServersPage({
       <form className="prototype-automation-drawer" role="dialog" aria-modal="true" aria-label={text(locale, '新增 MCP Server', 'Add MCP server')} onKeyDown={(event) => catalogDialogKeyDown(event, closeForm, mutating)} onSubmit={(event) => { event.preventDefault(); void submitServer() }}>
         <header className="prototype-drawer-header"><h2>{editing ? text(locale, '编辑 MCP Server', 'Edit MCP server') : text(locale, '新增 MCP Server', 'Add MCP server')}</h2><button type="button" className="icon-btn" aria-label={text(locale, '关闭', 'Close')} disabled={mutating} onClick={closeForm}>×</button></header>
         <div className="prototype-drawer-body">
+          {!editing ? <>
+            <span className="prototype-field-label">{text(locale, '合作伙伴目录', 'Partner catalog')}</span>
+            <div className="prototype-mcp-presets">
+              {mcpPartnerPresets.map((preset) => <button type="button" key={preset.id} className={`prototype-expert-chip prototype-expert-chip-add${draft.name === preset.name ? ' selected' : ''}`} onClick={() => setDraft({ name: preset.name, transport: 'http', endpoint: preset.endpoint, command: '' })}>{preset.name}</button>)}
+            </div>
+            <p className="prototype-field-help">{text(locale, '选择合作伙伴预填配置，或在下方手动填写自定义端点。', 'Pick a partner to prefill the configuration, or enter a custom endpoint below.')}</p>
+          </> : null}
           <label className="prototype-field-label" htmlFor="mcp-name">{text(locale, '名称', 'Name')}</label>
           <input id="mcp-name" className="prototype-field" autoFocus={!editing} required disabled={Boolean(editing)} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Internal Docs MCP" />
           <label className="prototype-field-label" htmlFor="mcp-transport">Transport</label>
