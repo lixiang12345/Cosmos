@@ -53,8 +53,12 @@
 * { box-sizing: border-box; }
 
 html {
-  scroll-behavior: smooth;
   -webkit-text-size-adjust: 100%;
+}
+
+/* 页内点击才平滑滚动；带锚点直达页面时瞬时定位 */
+html:focus-within {
+  scroll-behavior: smooth;
 }
 
 body {
@@ -688,9 +692,16 @@ p { margin: 0 0 14px; }
 .ticker__track {
   display: flex;
   align-items: center;
-  gap: 34px;
   width: max-content;
   animation: ticker-scroll 44s linear infinite;
+}
+
+/* 两个完全相同的分组各自带尾距，translateX(-50%) 恰好推进一组宽度，循环无缝 */
+.ticker__group {
+  display: flex;
+  align-items: center;
+  gap: 34px;
+  padding-right: 34px;
 }
 
 .ticker span {
