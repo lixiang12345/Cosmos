@@ -659,14 +659,14 @@ describe('Cosmos prototype', () => {
     await user.click(screen.getByRole('tab', { name: 'Terminal' }))
     await user.click(screen.getByRole('button', { name: '打开 Worker 详情' }))
     expect(await screen.findByRole('heading', { name: 'Worker 树' })).toBeInTheDocument()
-    expect(listSessionWorkers).toHaveBeenCalledWith(
+    await waitFor(() => expect(listSessionWorkers).toHaveBeenCalledWith(
       detail.organizationId,
       detail.spaceId,
       detail.id,
       expect.objectContaining({ accessToken: 'production-access-token' }),
       expect.any(AbortSignal),
       { limit: 50 },
-    )
+    ))
 
     await user.click(screen.getByRole('button', { name: '返回会话' }))
     expect(await screen.findByRole('heading', { name: detail.title })).toBeInTheDocument()

@@ -17,6 +17,9 @@ export default defineConfig(({ mode }) => {
       setupFiles: './vitest.setup.ts',
       globals: true,
       css: true,
+      // Full-gate runs execute three package suites concurrently; the default
+      // 5s per-test budget flakes on loaded machines.
+      testTimeout: 15_000,
     },
   }
 })

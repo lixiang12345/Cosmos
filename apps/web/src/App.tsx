@@ -1148,10 +1148,13 @@ function CosmosApp() {
   const [commandOpen, setCommandOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
-      return window.localStorage.getItem('cosmos.sidebarCollapsed') === 'true'
+      const stored = window.localStorage.getItem('cosmos.sidebarCollapsed')
+      if (stored !== null) return stored === 'true'
     } catch {
       return false
     }
+    // First visit on a narrow viewport: start collapsed so content gets the width.
+    return typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 820px)').matches
   })
   const [newTaskOpen, setNewTaskOpen] = useState(false)
   const [presetExpertId, setPresetExpertId] = useState<string>()
