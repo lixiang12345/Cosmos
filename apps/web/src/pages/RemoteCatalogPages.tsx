@@ -23,7 +23,6 @@ import {
   Activity,
   AlertTriangle,
   Bot,
-  Box,
   CheckCircle2,
   ChevronRight,
   CircleOff,
@@ -58,6 +57,8 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode, type RefObject } from 'react'
 import { GlobalControls } from '../components/GlobalControls'
 import {
+  PrototypeCloudIcon,
+  PrototypeDaemonIcon,
   PrototypeGitHubIcon,
   PrototypeHexIcon,
   PrototypeLinearIcon,
@@ -169,6 +170,9 @@ export type RemoteEnvironmentsPageProps = RemoteCatalogListState<EnvironmentSumm
     secretsLoading?: boolean
     secretsError?: Error | null
     onRetrySecrets?: () => void
+    navigationCollapsed?: boolean
+    onOpenCommand?: () => void
+    onOpenAdvisor?: () => void
   }
 
 export type RemoteRepositoriesPageProps = RemoteCatalogListState<RepositoryDto>
@@ -1185,9 +1189,15 @@ export function RemoteEnvironmentsPage({
   secretsLoading = false,
   secretsError = null,
   onRetrySecrets,
+  navigationCollapsed,
+  onOpenCommand,
+  onOpenAdvisor,
 }: RemoteEnvironmentsPageProps) {
   const { locale } = usePreferences()
   const [selectedId, setSelectedId] = useState<string>()
+  const [scope, setScope] = useState<'mine' | 'all'>('all')
+  const [query, setQuery] = useState('')
+  const [checkedIds, setCheckedIds] = useState<ReadonlySet<string>>(new Set())
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingExisting, setEditingExisting] = useState(false)
   const [busy, setBusy] = useState<'retry' | 'disable' | 'archive'>()
@@ -1274,78 +1284,146 @@ export function RemoteEnvironmentsPage({
     }
   }
 
-  return (
-    <main className="cosmos-page remote-catalog-page">
-      <PageHeader
-        icon={Container}
-        title={text(locale, '运行环境', 'Environments')}
-        description={text(locale, '当前 Space 中由服务端管理的运行环境', 'Server-managed runtimes in this Space')}
-        onOpenNavigation={onOpenNavigation}
-        actions={canManage ? <button type="button" className="cosmos-button cosmos-button--primary" onClick={() => openEditor(false)}><Plus aria-hidden="true" />{text(locale, '创建环境', 'Create Environment')}</button> : undefined}
-      />
-      <div className="cosmos-page__scroll">
-        {state === 'loading' ? <LoadState status="loading" resource={text(locale, '运行环境', 'Environments')} onRetry={onRetry} /> : null}
-        {state === 'error' ? <LoadState status="error" resource={text(locale, '运行环境', 'Environments')} error={error} onRetry={onRetry} /> : null}
-        {state === 'ready' && items.length === 0 && !editorOpen ? (
-          <section className="cosmos-panel remote-catalog-empty"><Container aria-hidden="true" /><strong>{text(locale, '暂无运行环境', 'No Environments')}</strong>{canManage ? <button type="button" className="cosmos-button cosmos-button--primary" onClick={() => openEditor(false)}><Plus aria-hidden="true" />{text(locale, '创建环境', 'Create Environment')}</button> : null}</section>
-        ) : null}
-        {state === 'ready' && (items.length > 0 || editorOpen) ? (
-          <section className="remote-environment-layout">
-            <aside className="cosmos-panel remote-environment-list" aria-label={text(locale, '运行环境列表', 'Environment list')}>
-              <header className="cosmos-section-heading">
-                <div><span>Catalog</span><h2>{text(locale, `${items.length} 个运行环境`, `${items.length} Environments`)}</h2></div>
-                <IconButton icon={RefreshCw} label={text(locale, '刷新运行环境列表', 'Refresh Environment list')} onClick={onRetry} />
-              </header>
-              {items.map((item) => (
-                <button
-                  type="button"
-                  className={`remote-environment-row${item.id === selectedEnvironmentId ? ' remote-environment-row--selected' : ''}`}
-                  aria-pressed={item.id === selectedEnvironmentId}
-                  key={item.id}
-                  onClick={() => setSelectedId(item.id)}
-                >
-                  <span className="cosmos-resource-row__icon"><Box aria-hidden="true" /></span>
-                  <span><strong>{item.name}</strong><small>{item.activeRevision?.defaultRepository.repository ?? text(locale, '未绑定默认仓库', 'No default repository')}</small></span>
-                  <StatusLabel status={item.status} />
-                  <ChevronRight aria-hidden="true" />
-                </button>
-              ))}
-            </aside>
-            <section className="cosmos-panel remote-environment-detail" aria-label={text(locale, '运行环境详情', 'Environment detail')}>
-              {editorOpen ? <EnvironmentEditor
-                environment={editingExisting ? environment : undefined}
-                organizationId={organizationId}
-                spaceId={spaceId}
-                auth={requestAuth}
-                secrets={secrets}
-                secretsLoading={secretsLoading}
-                secretsError={secretsError}
-                onRetrySecrets={onRetrySecrets}
-                onCancel={closeEditor}
-                onSaved={(next) => { closeEditor(); refreshAfterMutation(next) }}
-              /> : null}
-              {!editorOpen ? <>
-              {detail.status === 'loading' ? <LoadState status="loading" resource={text(locale, '运行环境详情', 'Environment detail')} onRetry={detail.retry} /> : null}
-              {detail.status === 'not_found' ? <LoadState status="not_found" resource={text(locale, '运行环境', 'Environment')} error={detail.error} onRetry={detail.retry} /> : null}
-              {detail.status === 'error' ? <LoadState status="error" resource={text(locale, '运行环境详情', 'Environment detail')} error={detail.error} onRetry={detail.retry} /> : null}
-              {environment ? <EnvironmentDetail
-                environment={environment}
-                revisions={revisions.status === 'ready' ? revisions.item?.items ?? [] : []}
-                canManage={canManage}
-                busy={busy}
-                error={mutationError}
-                onEdit={() => openEditor(true)}
-                onRetry={() => void runAction('retry')}
-                onDisable={() => void runAction('disable')}
-                onArchive={() => void runAction('archive')}
-              /> : null}
-              </> : null}
-            </section>
-          </section>
-        ) : null}
+  const rows = items
+    .filter((item) => (scope === 'mine' ? item.visibility === 'private' : true))
+    .filter((item) => {
+      const normalized = query.trim().toLowerCase()
+      if (!normalized) return true
+      return item.name.toLowerCase().includes(normalized)
+        || item.description.toLowerCase().includes(normalized)
+        || (item.activeRevision?.defaultRepository.repository ?? '').toLowerCase().includes(normalized)
+    })
+    .sort((a, b) => a.name.localeCompare(b.name))
+  const allChecked = rows.length > 0 && rows.every((item) => checkedIds.has(item.id))
+  const toggleAllChecked = () => setCheckedIds(allChecked ? new Set() : new Set(rows.map((item) => item.id)))
+  const toggleChecked = (environmentId: string) => {
+    setCheckedIds((current) => {
+      const next = new Set(current)
+      if (next.has(environmentId)) next.delete(environmentId)
+      else next.add(environmentId)
+      return next
+    })
+  }
+  const environmentStatusLabel = (status: EnvironmentStatus) => {
+    if (status === 'ready') return text(locale, '就绪', 'Ready')
+    if (status === 'provisioning') return text(locale, '配置中', 'Provisioning')
+    if (status === 'updating') return text(locale, '更新中', 'Updating')
+    if (status === 'failed') return text(locale, '失败', 'Failed')
+    if (status === 'disabled') return text(locale, '已停用', 'Disabled')
+    return text(locale, '已归档', 'Archived')
+  }
+
+  return <main className="prototype-automation-page">
+    <PrototypePageTopbar
+      crumb={text(locale, '配置 · Environments', 'Configuration · Environments')}
+      navigationCollapsed={navigationCollapsed}
+      onOpenNavigation={onOpenNavigation}
+      onOpenCommand={onOpenCommand}
+    />
+    <div className="prototype-automation-viewport">
+      <div className="prototype-automation-content prototype-expert-content">
+        <div className="prototype-automation-header">
+          <div>
+            <h1>Environments</h1>
+            <p>{text(locale,
+              'Environment 是带有预装工具、依赖和仓库的可复用运行环境快照，每个会话都在其中运行。Daemon pool 将本地运行的 daemon 分组，会话可以指向特定 daemon。',
+              'An environment is a reusable VM snapshot with pre-installed tools, packages, and repositories. Each session runs inside one. Daemon pools group locally-running daemons so sessions can target a specific daemon.')}</p>
+          </div>
+          {canManage ? <button type="button" className="prototype-primary-button" onClick={() => openEditor(false)}>{text(locale, '创建环境', 'Create an environment')}</button> : null}
+        </div>
+
+        <button type="button" className="prototype-advisor-banner" disabled={!onOpenAdvisor && !onOpenCommand} onClick={onOpenAdvisor ?? onOpenCommand}>
+          <span className="prototype-advisor-mark" aria-hidden="true" />
+          <span><strong>{text(locale, '描述你的环境，让 Agent 为你完成配置 →', 'Describe your environment and an agent will set it up →')}</strong><small>{text(locale, 'Cosmos Advisor Agent 会配置这个环境', 'Cosmos Advisor agent configures the environment')}</small></span>
+        </button>
+
+        <div className="prototype-automation-toolbar">
+          <div className="prototype-segmented" aria-label={text(locale, '环境范围', 'Environment scope')}>
+            <button type="button" className={scope === 'mine' ? 'active' : ''} aria-pressed={scope === 'mine'} onClick={() => setScope('mine')}>{text(locale, '我的', 'Mine')}</button>
+            <button type="button" className={scope === 'all' ? 'active' : ''} aria-pressed={scope === 'all'} onClick={() => setScope('all')}>{text(locale, '全部', 'All')}</button>
+          </div>
+          <label className="prototype-automation-search"><PrototypeSearchIcon aria-hidden="true" /><span className="sr-only">{text(locale, '搜索环境', 'Search environments')}</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={text(locale, '搜索环境…', 'Search environments…')} /></label>
+        </div>
+
+        <div className="prototype-automation-table-wrap">
+          <table className="prototype-automation-table prototype-expert-table prototype-environment-table">
+            <thead><tr>
+              <th className="col-check"><input type="checkbox" checked={allChecked} disabled={!rows.length} aria-label={text(locale, '选择全部环境', 'Select all environments')} onChange={toggleAllChecked} /></th>
+              <th>{text(locale, '名称', 'Name')} <span className="sort-icon">↑</span></th>
+              <th className="col-status">{text(locale, '状态', 'Status')}</th>
+              <th className="col-repo">{text(locale, '仓库', 'Repos')}</th>
+              <th>{text(locale, '构建时间', 'Last built')}</th>
+              <th className="col-menu"><span className="sr-only">{text(locale, '操作', 'Actions')}</span></th>
+            </tr></thead>
+            <tbody>
+              {state === 'loading' ? <tr><td colSpan={6} className="prototype-automation-state"><LoaderCircle className="spin" aria-hidden="true" />{text(locale, '加载中…', 'Loading…')}</td></tr> : null}
+              {state === 'error' ? <tr><td colSpan={6} className="prototype-automation-state prototype-automation-state--error"><span role="alert">{text(locale, '无法加载运行环境。', 'Unable to load Environments.')}{error ? ` ${error.message}` : ''}</span><button type="button" onClick={onRetry}><RefreshCw aria-hidden="true" />{text(locale, '重试', 'Retry')}</button></td></tr> : null}
+              {state === 'ready' && !rows.length ? <tr><td colSpan={6} className="prototype-automation-state">{query || scope === 'mine' ? text(locale, '没有匹配的环境', 'No environments match') : text(locale, '当前 Space 尚无运行环境。', 'No Environments exist in this Space yet.')}</td></tr> : null}
+              {state === 'ready' ? rows.map((item) => {
+                const repository = item.activeRevision?.defaultRepository.repository
+                return <tr key={item.id} className={item.id === selectedEnvironmentId ? 'expanded' : ''} onClick={() => setSelectedId(item.id)}>
+                  <td className="col-check" onClick={(event) => event.stopPropagation()}>
+                    <input type="checkbox" checked={checkedIds.has(item.id)} aria-label={text(locale, `选择 ${item.name}`, `Select ${item.name}`)} onChange={() => toggleChecked(item.id)} />
+                  </td>
+                  <td className="col-name">
+                    <div className="prototype-expert-name-cell">
+                      <span className="prototype-automation-expert-icon" title={item.type === 'daemon' ? 'Daemon' : 'Cloud'}>{item.type === 'daemon' ? <PrototypeDaemonIcon aria-hidden="true" /> : <PrototypeCloudIcon aria-hidden="true" />}</span>
+                      <div className="prototype-expert-name-body">
+                        <div className="prototype-expert-name-line">
+                          <strong>{item.name}</strong>
+                          {item.visibility === 'space' ? <span className="prototype-expert-tag">shared</span> : null}
+                        </div>
+                        {item.description ? <div className="prototype-expert-desc-line">{item.description}</div> : null}
+                      </div>
+                    </div>
+                  </td>
+                  <td className="col-status"><span className={`prototype-environment-status prototype-environment-status--${item.status}`}>{environmentStatusLabel(item.status)}</span></td>
+                  <td className="col-repo">{repository ? <span className="prototype-environment-repo-pill">{repository}</span> : <span className="muted">—</span>}</td>
+                  <td className="muted">{item.activeRevision ? formatDate(item.activeRevision.createdAt, locale) : '—'}</td>
+                  <td className="col-menu" onClick={(event) => event.stopPropagation()}>
+                    <button type="button" className="icon-btn prototype-automation-more" aria-label={text(locale, `查看 ${item.name}`, `Open ${item.name}`)} onClick={() => setSelectedId(item.id)}>⋯</button>
+                  </td>
+                </tr>
+              }) : null}
+            </tbody>
+          </table>
+        </div>
+
+        {state === 'ready' ? <div className="prototype-automation-footer"><span>{rows.length} {rows.length === 1 ? 'environment' : 'environments'}</span><div><button type="button" disabled>‹</button><span>{text(locale, '第 1 页，共 1 页', 'Page 1 of 1')}</span><button type="button" disabled>›</button><span>{text(locale, '行数', 'Rows')}</span><select disabled aria-label={text(locale, '每页行数', 'Rows per page')}><option>25</option></select></div></div> : null}
+
+        {state === 'ready' && (items.length > 0 || editorOpen) ? <section className="prototype-environment-detail-panel" aria-label={text(locale, '运行环境详情', 'Environment detail')}>
+          {editorOpen ? <EnvironmentEditor
+            environment={editingExisting ? environment : undefined}
+            organizationId={organizationId}
+            spaceId={spaceId}
+            auth={requestAuth}
+            secrets={secrets}
+            secretsLoading={secretsLoading}
+            secretsError={secretsError}
+            onRetrySecrets={onRetrySecrets}
+            onCancel={closeEditor}
+            onSaved={(next) => { closeEditor(); refreshAfterMutation(next) }}
+          /> : null}
+          {!editorOpen ? <>
+          {detail.status === 'loading' ? <div className="prototype-automation-state" role="status"><LoaderCircle className="spin" aria-hidden="true" />{text(locale, '正在加载运行环境详情…', 'Loading Environment detail…')}</div> : null}
+          {detail.status === 'not_found' ? <div className="prototype-automation-state prototype-automation-state--error"><span role="alert">{text(locale, '未找到运行环境。', 'Environment not found.')}</span><button type="button" onClick={detail.retry}><RefreshCw aria-hidden="true" />{text(locale, '重试', 'Retry')}</button></div> : null}
+          {detail.status === 'error' ? <div className="prototype-automation-state prototype-automation-state--error"><span role="alert">{text(locale, '无法加载运行环境详情。', 'Unable to load Environment detail.')}{detail.error ? ` ${detail.error.message}` : ''}</span><button type="button" onClick={detail.retry}><RefreshCw aria-hidden="true" />{text(locale, '重试', 'Retry')}</button></div> : null}
+          {environment ? <EnvironmentDetail
+            environment={environment}
+            revisions={revisions.status === 'ready' ? revisions.item?.items ?? [] : []}
+            canManage={canManage}
+            busy={busy}
+            error={mutationError}
+            onEdit={() => openEditor(true)}
+            onRetry={() => void runAction('retry')}
+            onDisable={() => void runAction('disable')}
+            onArchive={() => void runAction('archive')}
+          /> : null}
+          </> : null}
+        </section> : null}
       </div>
-    </main>
-  )
+    </div>
+  </main>
 }
 
 type EnvironmentEditorState = {

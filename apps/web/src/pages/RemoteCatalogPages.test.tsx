@@ -502,12 +502,11 @@ describe('remote Catalog pages', () => {
     const initialProps = environmentPageProps()
     const view = render(withPreferences(<RemoteEnvironmentsPage {...initialProps} />))
 
-    expect(screen.getByRole('heading', { level: 1, name: '运行环境' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { level: 2, name: '2 个运行环境' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1, name: 'Environments' })).toBeInTheDocument()
+    expect(screen.getByText('2 environments')).toBeInTheDocument()
     await waitFor(() => expect(getEnvironment).toHaveBeenCalledTimes(1))
     const firstSignal = vi.mocked(getEnvironment).mock.calls[0]?.[4]
-    const list = screen.getByRole('complementary', { name: '运行环境列表' })
-    await user.click(within(list).getByRole('button', { name: /Environment B/ }))
+    await user.click(screen.getByRole('button', { name: '查看 Environment B' }))
     expect(firstSignal?.aborted).toBe(true)
 
     await act(async () => { second.resolve(environmentDetail(environmentB)) })

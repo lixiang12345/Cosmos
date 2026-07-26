@@ -84,6 +84,14 @@ export function PrototypeSlackIcon(props: IconProps) {
   return <StrokeIcon {...props}><path d="M5.5 9.5a1.2 1.2 0 01-1.2 1.2H3.1a1.2 1.2 0 010-2.4h1.2a1.2 1.2 0 011.2 1.2zm.6 0a1.2 1.2 0 011.2-1.2h2.4v1.2a1.2 1.2 0 01-2.4 0V9.5zM6.1 5.5A1.2 1.2 0 015 4.3V3.1a1.2 1.2 0 012.4 0v1.2a1.2 1.2 0 01-1.2 1.2zm0 .6a1.2 1.2 0 011.2 1.2v2.4H6.1a1.2 1.2 0 010-2.4V6.1z" /></StrokeIcon>
 }
 
+export function PrototypeCloudIcon(props: IconProps) {
+  return <StrokeIcon {...props}><path d="M4.5 11.5h7.2a2.6 2.6 0 00.3-5.2 3.5 3.5 0 00-6.7-1.2A2.8 2.8 0 004.5 11.5z" /></StrokeIcon>
+}
+
+export function PrototypeDaemonIcon(props: IconProps) {
+  return <StrokeIcon {...props}><rect x="3" y="5" width="10" height="7" rx="1" /><path d="M5.5 5V3.8a2.5 2.5 0 015 0V5M6.5 8.5h3" /></StrokeIcon>
+}
+
 export function PrototypeTopbarSearchIcon(props: IconProps) {
   return (
     <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" {...props}>

@@ -2183,6 +2183,9 @@ function CosmosApp() {
               secretsError={catalog.secrets.error}
               onRetrySecrets={catalog.secrets.retry}
               onOpenNavigation={openNavigation}
+              navigationCollapsed={sidebarCollapsed}
+              onOpenCommand={() => setCommandOpen(true)}
+              onOpenAdvisor={() => navigate('/home')}
             />} />
         <Route path="/daemons" element={demoMode
           ? <DaemonsPage onOpenNavigation={openNavigation} />
