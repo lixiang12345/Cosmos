@@ -20717,6 +20717,20 @@ main.cosmos-home.prototype-home {
   flex-shrink: 0;
 }
 
+.prototype-artifact-type-filter {
+  width: auto;
+  min-width: 140px;
+}
+
+.prototype-artifact-link {
+  color: var(--proto-text, #1a1a1a);
+  text-decoration: none;
+}
+
+.prototype-artifact-link:hover strong {
+  text-decoration: underline;
+}
+
 .prototype-session-toast {
   position: fixed;
   right: 18px;

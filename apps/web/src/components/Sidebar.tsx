@@ -13,6 +13,7 @@ import {
   PrototypeFolderIcon,
   PrototypePlusIcon,
   PrototypeSessionsIcon,
+  PrototypeSubscriptionsIcon,
   PrototypeSidebarIcon,
 } from './PrototypeIcons'
 
@@ -168,6 +169,11 @@ export function Sidebar({
           <NavLink to="/sessions" className={({ isActive }) => `sb-item${isActive ? ' active' : ''}`} aria-label={locale === 'zh' ? '会话' : 'Sessions'} onClick={onClose}>
             <PrototypeSessionsIcon aria-hidden="true" />
             {locale === 'zh' ? '会话' : 'Sessions'}
+          </NavLink>
+
+          <NavLink to="/artifacts" className={({ isActive }) => `sb-item${isActive ? ' active' : ''}`} aria-label={locale === 'zh' ? '产出物' : 'Artifacts'} onClick={onClose}>
+            <PrototypeSubscriptionsIcon aria-hidden="true" />
+            {locale === 'zh' ? '产出物' : 'Artifacts'}
           </NavLink>
 
           <button type="button" className={`sb-group${filesOpen ? '' : ' collapsed'}`} aria-label={locale === 'zh' ? '文件' : 'Files'} aria-expanded={filesOpen} onClick={() => setFilesOpen((value) => !value)}>

@@ -75,6 +75,7 @@ const RemoteSecretsPage = lazy(() => import('./pages/RemoteCatalogPages').then((
 const RemoteWebhooksPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteWebhooksPage })))
 const RemoteMcpServersPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteMcpServersPage })))
 const RemoteSkillsPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteSkillsPage })))
+const RemoteArtifactsPage = lazy(() => import('./pages/RemoteArtifactsPage').then((module) => ({ default: module.RemoteArtifactsPage })))
 const RemoteDaemonsPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteDaemonsPage })))
 const RemoteIntegrationsPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteIntegrationsPage })))
 const RemoteFilesPage = lazy(() => import('./pages/RemoteFilesPage').then((module) => ({ default: module.RemoteFilesPage })))
@@ -2344,6 +2345,17 @@ function CosmosApp() {
             navigationCollapsed={sidebarCollapsed}
               onOpenCommand={() => setCommandOpen(true)}
               />} />
+        <Route path="/artifacts" element={<RemoteArtifactsPage
+              organizationId={organizationId}
+              spaceId={activeSpace.id}
+              auth={catalogAuth}
+              credentialVersion={credentialVersion}
+              enabled={!demoMode}
+              onOpenSession={(sessionId) => navigate(`/sessions/${sessionId}`)}
+              onOpenNavigation={openNavigation}
+              navigationCollapsed={sidebarCollapsed}
+              onOpenCommand={() => setCommandOpen(true)}
+            />} />
         <Route path="/skills" element={<RemoteSkillsPage
               items={catalog.skills.items}
               loading={demoMode ? false : catalog.skills.loading}

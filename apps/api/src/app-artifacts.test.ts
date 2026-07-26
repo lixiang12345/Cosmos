@@ -47,6 +47,9 @@ function repository(overrides: Partial<ArtifactRepository> = {}): ArtifactReposi
     async list() {
       return { items: [artifact], hasMore: false, nextCursor: null }
     },
+    async listSpace() {
+      return { items: [artifact], hasMore: false, nextCursor: null }
+    },
     async create() {
       return { artifact, replayed: false }
     },

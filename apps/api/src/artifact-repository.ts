@@ -61,6 +61,12 @@ export interface ArtifactRepository {
     actorId: string,
     options?: ArtifactListOptions,
   ): Promise<ArtifactListPage | null>
+  listSpace(
+    organizationId: string,
+    spaceId: string,
+    actorId: string,
+    options?: ArtifactListOptions,
+  ): Promise<ArtifactListPage>
   create(record: CreateArtifactRecord): Promise<ArtifactMutationResult | null>
   update(record: UpdateArtifactRecord): Promise<ArtifactDto | null>
   remove(record: RemoveArtifactRecord): Promise<ArtifactMutationResult | null>
@@ -69,6 +75,10 @@ export interface ArtifactRepository {
 export class EmptyArtifactRepository implements ArtifactRepository {
   async list(): Promise<null> {
     return null
+  }
+
+  async listSpace(): Promise<{ items: never[]; hasMore: false; nextCursor: null }> {
+    return { items: [], hasMore: false, nextCursor: null }
   }
 
   async create(): Promise<null> {

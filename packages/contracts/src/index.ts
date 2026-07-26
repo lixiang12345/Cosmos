@@ -115,11 +115,13 @@ export {
 export {
   ArtifactDtoSchema,
   ArtifactListResponseSchema,
+  SpaceArtifactListResponseSchema,
   ArtifactTypeSchema,
   CreateArtifactRequestSchema,
   UpdateArtifactRequestSchema,
   type ArtifactDto,
   type ArtifactListResponse,
+  type SpaceArtifactListResponse,
   type ArtifactType,
   type CreateArtifactRequest,
   type CreateArtifactRequestInput,

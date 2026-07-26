@@ -229,6 +229,99 @@ export class PostgresArtifactRepository implements ArtifactRepository {
     }
   }
 
+  async listSpace(
+    organizationId: string,
+    spaceId: string,
+    actorId: string,
+    options: ArtifactListOptions = {},
+  ): Promise<ArtifactListPage> {
+    const limit = options.limit ?? 25
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      throw new RangeError('Artifact page limit must be an integer between 1 and 100.')
+    }
+    const parameters: unknown[] = [organizationId, spaceId, actorId]
+    const clauses = ['artifact.removed_at IS NULL']
+    if (options.type) {
+      parameters.push(options.type)
+      clauses.push(`artifact.type = $${parameters.length}`)
+    }
+    if (options.cursor) {
+      if (!options.cursor.id.trim() || Number.isNaN(Date.parse(options.cursor.createdAt))) {
+        throw new RangeError('Artifact cursor must contain a valid timestamp and id.')
+      }
+      parameters.push(options.cursor.createdAt, options.cursor.id)
+      clauses.push(`(artifact.created_at, artifact.id) < (
+        $${parameters.length - 1}::timestamptz, $${parameters.length}
+      )`)
+    }
+    parameters.push(limit + 1)
+
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      await setLocalApiDatabaseContext(client, { organizationId, spaceId, actorId })
+      const result = await client.query<ArtifactRow>(`
+        SELECT ${artifactColumns.split(',').map((column) => `artifact.${column.trim()}`).join(', ')}
+        FROM cosmos_artifacts artifact
+        JOIN cosmos_sessions session
+          ON session.organization_id = artifact.organization_id
+          AND session.space_id = artifact.space_id
+          AND session.id = artifact.session_id
+        JOIN cosmos_organization_memberships organization_membership
+          ON organization_membership.organization_id = session.organization_id
+          AND organization_membership.actor_id = $3
+        JOIN cosmos_space_memberships space_membership
+          ON space_membership.organization_id = session.organization_id
+          AND space_membership.space_id = session.space_id
+          AND space_membership.actor_id = $3
+        WHERE artifact.organization_id = $1
+          AND artifact.space_id = $2
+          AND (
+            session.visibility = 'space'
+            OR session.created_by = $3
+            OR EXISTS (
+              SELECT 1 FROM cosmos_session_share_grants share_grant
+              WHERE share_grant.organization_id = session.organization_id
+                AND share_grant.space_id = session.space_id
+                AND share_grant.session_id = session.id
+                AND share_grant.revoked_at IS NULL
+                AND (share_grant.expires_at IS NULL
+                  OR share_grant.expires_at > transaction_timestamp())
+                AND (
+                  (share_grant.principal_type = 'user' AND share_grant.principal_id = $3)
+                  OR (
+                    share_grant.principal_type = 'group'
+                    AND EXISTS (
+                      SELECT 1 FROM cosmos_group_memberships group_membership
+                      WHERE group_membership.organization_id = share_grant.organization_id
+                        AND group_membership.group_id = share_grant.principal_id
+                        AND group_membership.actor_id = $3
+                    )
+                  )
+                )
+            )
+          )
+          AND ${clauses.join('\n          AND ')}
+        ORDER BY artifact.created_at DESC, artifact.id DESC
+        LIMIT $${parameters.length}
+      `, parameters)
+      await client.query('COMMIT')
+      const hasMore = result.rows.length > limit
+      const items = result.rows.slice(0, limit).map(mapArtifact)
+      const last = items.at(-1)
+      return {
+        items,
+        hasMore,
+        nextCursor: hasMore && last ? { createdAt: last.createdAt, id: last.id } : null,
+      }
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+  }
+
   async create(record: CreateArtifactRecord): Promise<ArtifactMutationResult | null> {
     assertAttributesSize(record.request.attributes)
     return this.inTransaction(record, (client) => this.createInTransaction(client, record))

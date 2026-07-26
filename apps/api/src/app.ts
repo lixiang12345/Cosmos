@@ -18,6 +18,7 @@ import {
   ApprovalListResponseSchema,
   ArtifactDtoSchema,
   ArtifactListResponseSchema,
+  SpaceArtifactListResponseSchema,
   CancelSessionRequestSchema,
   ContextEngineStatusRequestSchema,
   ContextPackRequestSchema,
@@ -4992,6 +4993,58 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     },
   )
 
+
+  // ── Space Artifacts ─────────────────────────────────────────────────────────
+
+  app.get<{ Params: SkillParams; Querystring: ArtifactListQuery }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/artifacts',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      let options
+      try {
+        options = parseArtifactPagination(
+          request.query,
+          authorization.organizationId,
+          authorization.spaceId,
+          '*',
+        )
+      } catch (error) {
+        if (error instanceof InvalidArtifactPaginationError) {
+          return sendApiError(reply, 400, request, {
+            code: 'VALIDATION_FAILED',
+            message: error.message,
+            retryable: false,
+            fieldErrors: { [error.field]: [error.message] },
+          })
+        }
+        throw error
+      }
+      const page = await artifactRepository.listSpace(
+        authorization.organizationId,
+        authorization.spaceId,
+        authorization.actor.id,
+        options,
+      )
+      return SpaceArtifactListResponseSchema.parse({
+        organizationId: authorization.organizationId,
+        spaceId: authorization.spaceId,
+        items: page.items,
+        page: {
+          nextCursor: page.nextCursor
+            ? encodeArtifactCursor(
+              page.nextCursor,
+              authorization.organizationId,
+              authorization.spaceId,
+              '*',
+              options.type,
+            )
+            : null,
+          hasMore: page.hasMore,
+        },
+      })
+    },
+  )
 
   // ── Skills ──────────────────────────────────────────────────────────────────
 

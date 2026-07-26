@@ -57,6 +57,7 @@ import {
   ShareGrantDtoSchema,
   ArtifactDtoSchema,
   ArtifactListResponseSchema,
+  SpaceArtifactListResponseSchema,
   SessionMessagePageSchema,
   SessionWorkerListResponseSchema,
   SendSessionMessageResponseSchema,
@@ -115,6 +116,7 @@ import {
   type CreateShareGrantRequestInput,
   type ArtifactDto,
   type ArtifactListResponse,
+  type SpaceArtifactListResponse,
   type CreateArtifactRequestInput,
   type SessionMessagePage,
   type SessionWorkerListResponse,
@@ -950,6 +952,23 @@ export function revokeSessionShare(
       'If-Match': `"${version}"`,
     },
   }, ShareGrantDtoSchema, auth)
+}
+
+export function listSpaceArtifacts(
+  organizationId: string,
+  spaceId: string,
+  auth?: CosmosApiAuthContext,
+  signal?: AbortSignal,
+  options?: { type?: string; cursor?: string; limit?: number },
+): Promise<SpaceArtifactListResponse> {
+  const query = new URLSearchParams()
+  if (options?.type) query.set('type', options.type)
+  if (options?.cursor) query.set('cursor', options.cursor)
+  if (options?.limit) query.set('limit', String(options.limit))
+  const suffix = query.size ? `?${query.toString()}` : ''
+  return request(`/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/artifacts${suffix}`, {
+    method: 'GET', headers: { Accept: 'application/json' }, signal,
+  }, SpaceArtifactListResponseSchema, auth)
 }
 
 export function listSessionArtifacts(

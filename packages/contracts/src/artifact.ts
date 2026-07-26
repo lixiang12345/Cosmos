@@ -146,3 +146,23 @@ export const ArtifactListResponseSchema = z.object({
 })
 
 export type ArtifactListResponse = z.infer<typeof ArtifactListResponseSchema>
+
+export const SpaceArtifactListResponseSchema = z.object({
+  organizationId: IdentifierSchema,
+  spaceId: IdentifierSchema,
+  items: z.array(ArtifactDtoSchema).max(100),
+  page: z.object({
+    nextCursor: z.string().trim().min(1).max(2_048).nullable(),
+    hasMore: z.boolean(),
+  }).strict(),
+}).strict().superRefine((response, context) => {
+  if (response.page.hasMore !== (response.page.nextCursor !== null)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['page', 'nextCursor'],
+      message: 'nextCursor must be present exactly when hasMore is true',
+    })
+  }
+})
+
+export type SpaceArtifactListResponse = z.infer<typeof SpaceArtifactListResponseSchema>
