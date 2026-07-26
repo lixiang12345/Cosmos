@@ -2131,6 +2131,13 @@ function CosmosApp() {
               sessionCreationEnabled={sessionCreationEnabled}
               canManage={expertManagementEnabled}
               onCreate={() => navigate('/experts/new')}
+              navigationCollapsed={sidebarCollapsed}
+              onOpenCommand={() => setCommandOpen(true)}
+              onOpenAdvisor={() => navigate('/home')}
+              organizationId={organizationId}
+              spaceId={activeSpace.id}
+              auth={catalogAuth}
+              credentialVersion={credentialVersion}
             />
           )
         } />

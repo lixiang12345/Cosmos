@@ -1260,10 +1260,9 @@ describe('Cosmos prototype', () => {
       return { session: makeApiSession(organizationId, spaceId, input, { id: 'session-production-create' }) }
     })
     renderAuthenticatedApp('/experts')
-    const expertRow = (await screen.findByText('Production Expert')).closest('article')
-    if (!expertRow) throw new Error('Expected the production Expert row.')
-
-    await user.click(within(expertRow).getByRole('button', { name: '新建会话' }))
+    await screen.findByText('Production Expert')
+    await user.click(screen.getByRole('button', { name: 'Production Expert 更多操作' }))
+    await user.click(screen.getByRole('menuitem', { name: /新建会话/ }))
     expect(screen.queryByText('Cosmos Advisor')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '添加文件或图片' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '增强提示词' })).not.toBeInTheDocument()
@@ -1552,9 +1551,9 @@ describe('Cosmos prototype', () => {
     vi.mocked(createSession).mockResolvedValueOnce({ session: created })
 
     renderAuthenticatedApp('/experts')
-    const expertRow = (await screen.findByText('Production Expert')).closest('article')
-    if (!expertRow) throw new Error('Expected the production Expert row.')
-    await user.click(within(expertRow).getByRole('button', { name: '新建会话' }))
+    await screen.findByText('Production Expert')
+    await user.click(screen.getByRole('button', { name: 'Production Expert 更多操作' }))
+    await user.click(screen.getByRole('menuitem', { name: /新建会话/ }))
     await user.type(screen.getByLabelText('会话任务'), createInput.message.content)
     await user.click(screen.getByRole('button', { name: '保存草稿' }))
     await waitFor(() => expect(createSession).toHaveBeenCalled())

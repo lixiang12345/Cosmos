@@ -1,6 +1,8 @@
 import {
   DEFAULT_AGENT_MODEL,
   SUPPORTED_AGENT_MODELS,
+  type AutomationDto,
+  type AutomationSource,
   type CreateEnvironmentRequestInput,
   type EnvironmentDetailDto,
   type EnvironmentRevisionDto,
@@ -58,6 +60,14 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { GlobalControls } from '../components/GlobalControls'
+import {
+  PrototypeGitHubIcon,
+  PrototypeHexIcon,
+  PrototypeLinearIcon,
+  PrototypeSearchIcon,
+  PrototypeSlackIcon,
+} from '../components/PrototypeIcons'
+import { PrototypePageTopbar } from '../components/PrototypePageTopbar'
 import { IconButton } from '../components/ui'
 import { usePreferences, type Locale } from '../preferences'
 import {
@@ -87,6 +97,7 @@ import {
   createIntegration,
   updateIntegration,
   archiveIntegration,
+  listAutomations,
   listExpertRevisions,
   listEnvironmentRevisions,
   publishExpert,
@@ -118,6 +129,13 @@ export type RemoteExpertsPageProps = RemoteCatalogListState<ExpertSummaryDto> & 
   sessionCreationEnabled?: boolean
   canManage?: boolean
   onCreate?: () => void
+  navigationCollapsed?: boolean
+  onOpenCommand?: () => void
+  onOpenAdvisor?: () => void
+  organizationId?: string
+  spaceId?: string
+  auth?: CosmosApiAuthContext
+  credentialVersion?: number
 }
 
 export type RemoteExpertDetailPageProps = RemoteCatalogRequestProps & {
@@ -357,6 +375,25 @@ function canStartExpert(expert: ExpertSummaryDto | ExpertDetailDto) {
       : expert.publishedRevisionSummary !== null)
 }
 
+const EXPERT_PIN_STORAGE_KEY = 'cosmos.expertPins'
+
+function readExpertPins(): Set<string> {
+  try {
+    const raw = window.localStorage.getItem(EXPERT_PIN_STORAGE_KEY)
+    const parsed: unknown = raw ? JSON.parse(raw) : []
+    return new Set(Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function ExpertSourceIcon({ source }: { source: AutomationSource }) {
+  if (source === 'github') return <PrototypeGitHubIcon aria-hidden="true" />
+  if (source === 'linear') return <PrototypeLinearIcon aria-hidden="true" />
+  if (source === 'slack') return <PrototypeSlackIcon aria-hidden="true" />
+  return <PrototypeHexIcon aria-hidden="true" />
+}
+
 export function RemoteExpertsPage({
   items,
   loading,
@@ -369,73 +406,177 @@ export function RemoteExpertsPage({
   sessionCreationEnabled = true,
   canManage = false,
   onCreate,
+  navigationCollapsed,
+  onOpenCommand,
+  onOpenAdvisor,
+  organizationId,
+  spaceId,
+  auth,
+  credentialVersion,
 }: RemoteExpertsPageProps) {
   const { locale } = usePreferences()
   const state = listState(loading, ready, error)
+  const [scope, setScope] = useState<'mine' | 'all'>('all')
+  const [query, setQuery] = useState('')
+  const [menuId, setMenuId] = useState<string>()
+  const [checkedIds, setCheckedIds] = useState<ReadonlySet<string>>(new Set())
+  const [pinnedIds, setPinnedIds] = useState<ReadonlySet<string>>(readExpertPins)
+  const [automations, setAutomations] = useState<AutomationDto[]>([])
 
-  return (
-    <main className="cosmos-page remote-catalog-page">
-      <PageHeader
-        icon={Bot}
-        title={text(locale, '专家库', 'Experts')}
-        description={text(locale, '当前 Space 中可用的服务端 Expert 配置', 'Server-managed Expert configurations in this Space')}
-        onOpenNavigation={onOpenNavigation}
-        actions={canManage && onCreate ? (
-          <button type="button" className="cosmos-button cosmos-button--primary" onClick={onCreate}>
-            <Plus aria-hidden="true" />{text(locale, '新建 Expert', 'New Expert')}
-          </button>
-        ) : null}
-      />
-      <div className="cosmos-page__scroll">
-        <section className="cosmos-panel remote-catalog-panel" aria-label={text(locale, '专家列表', 'Expert list')}>
-          <header className="cosmos-section-heading">
-            <div><span>Catalog</span><h2>{text(locale, `${items.length} 个专家`, `${items.length} Experts`)}</h2></div>
-            {state === 'ready' ? (
-              <IconButton icon={RefreshCw} label={text(locale, '刷新专家列表', 'Refresh Expert list')} onClick={onRetry} />
-            ) : null}
-          </header>
-          {state === 'loading' ? <LoadState status="loading" resource={text(locale, '专家', 'Experts')} onRetry={onRetry} /> : null}
-          {state === 'error' ? <LoadState status="error" resource={text(locale, '专家', 'Experts')} error={error} onRetry={onRetry} /> : null}
-          {state === 'ready' && items.length === 0 ? (
-            <div className="remote-catalog-empty"><Bot aria-hidden="true" /><strong>{text(locale, '暂无专家', 'No Experts')}</strong></div>
-          ) : null}
-          {state === 'ready' && items.length > 0 ? (
-            <div className="remote-catalog-list">
-              {items.map((expert) => {
-                const revision = expert.publishedRevisionSummary
+  useEffect(() => {
+    if (!organizationId || !spaceId || !auth) return
+    const controller = new AbortController()
+    listAutomations(organizationId, spaceId, auth, controller.signal).then((response) => {
+      if (!controller.signal.aborted) setAutomations(response.items)
+    }, () => {
+      /* The Automations column stays empty when the Trigger catalog is unavailable. */
+    })
+    return () => controller.abort()
+  }, [auth, credentialVersion, organizationId, spaceId])
+
+  const automationsByExpert = useMemo(() => {
+    const index = new Map<string, AutomationDto[]>()
+    for (const automation of automations) {
+      if (automation.status === 'archived') continue
+      const list = index.get(automation.expertId) ?? []
+      list.push(automation)
+      index.set(automation.expertId, list)
+    }
+    return index
+  }, [automations])
+
+  const togglePin = (expertId: string) => {
+    setPinnedIds((current) => {
+      const next = new Set(current)
+      if (next.has(expertId)) next.delete(expertId)
+      else next.add(expertId)
+      try {
+        window.localStorage.setItem(EXPERT_PIN_STORAGE_KEY, JSON.stringify([...next]))
+      } catch {
+        /* Pinning is a local convenience; ignore storage failures. */
+      }
+      return next
+    })
+  }
+
+  const rows = useMemo(() => {
+    const normalized = query.trim().toLowerCase()
+    return items
+      .filter((expert) => (scope === 'mine' ? expert.visibility === 'private' : true))
+      .filter((expert) => !normalized
+        || expert.name.toLowerCase().includes(normalized)
+        || expert.description.toLowerCase().includes(normalized))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  }, [items, query, scope])
+
+  const allChecked = rows.length > 0 && rows.every((expert) => checkedIds.has(expert.id))
+  const toggleAllChecked = () => {
+    setCheckedIds(allChecked ? new Set() : new Set(rows.map((expert) => expert.id)))
+  }
+  const toggleChecked = (expertId: string) => {
+    setCheckedIds((current) => {
+      const next = new Set(current)
+      if (next.has(expertId)) next.delete(expertId)
+      else next.add(expertId)
+      return next
+    })
+  }
+
+  return <main className="prototype-automation-page">
+    <PrototypePageTopbar
+      crumb={text(locale, '配置 · Experts', 'Configuration · Experts')}
+      navigationCollapsed={navigationCollapsed}
+      onOpenNavigation={onOpenNavigation}
+      onOpenCommand={onOpenCommand}
+    />
+    <div className="prototype-automation-viewport">
+      <div className="prototype-automation-content prototype-expert-content">
+        <div className="prototype-automation-header">
+          <div>
+            <h1>Experts</h1>
+            <p>{text(locale,
+              'Expert 是可复用的 AI Agent 配置。用系统提示词定义它的角色，选择运行方式，随时从它发起会话。',
+              'An Expert is a reusable AI agent configuration. Define its role with a system prompt, choose how it runs, and start sessions from it anytime.')}</p>
+          </div>
+          {canManage && onCreate ? <button type="button" className="prototype-primary-button" onClick={onCreate}>{text(locale, '创建 Expert', 'Create an expert')}</button> : null}
+        </div>
+
+        <button type="button" className="prototype-advisor-banner" disabled={!onOpenAdvisor && !onOpenCommand} onClick={onOpenAdvisor ?? onOpenCommand}>
+          <span className="prototype-advisor-mark" aria-hidden="true" />
+          <span><strong>{text(locale, '描述工作流，让 Agent 为你完成设置 →', 'Describe your workflow and an agent will set it up →')}</strong><small>{text(locale, 'Cosmos Advisor Agent 会配置 Expert 和 Automation', 'Cosmos Advisor agent configures the experts and automations')}</small></span>
+        </button>
+
+        <div className="prototype-automation-toolbar">
+          <div className="prototype-segmented" aria-label={text(locale, 'Expert 范围', 'Expert scope')}>
+            <button type="button" className={scope === 'mine' ? 'active' : ''} aria-pressed={scope === 'mine'} onClick={() => setScope('mine')}>{text(locale, '我的', 'Mine')}</button>
+            <button type="button" className={scope === 'all' ? 'active' : ''} aria-pressed={scope === 'all'} onClick={() => setScope('all')}>{text(locale, '全部', 'All')}</button>
+          </div>
+          <label className="prototype-automation-search"><PrototypeSearchIcon aria-hidden="true" /><span className="sr-only">{text(locale, '搜索 Expert', 'Search experts')}</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={text(locale, '搜索 Expert…', 'Search experts…')} /></label>
+        </div>
+
+        <div className="prototype-automation-table-wrap">
+          <table className="prototype-automation-table prototype-expert-table">
+            <thead><tr>
+              <th className="col-check"><input type="checkbox" checked={allChecked} disabled={!rows.length} aria-label={text(locale, '选择全部 Expert', 'Select all experts')} onChange={toggleAllChecked} /></th>
+              <th className="col-star"><span className="sr-only">{text(locale, '固定', 'Pinned')}</span></th>
+              <th>{text(locale, '名称', 'Name')}</th>
+              <th className="col-auto">Automations</th>
+              <th className="col-integ">{text(locale, '集成', 'Integrations')}</th>
+              <th>{text(locale, '更新时间', 'Updated')} <span className="sort-icon">↓</span></th>
+              <th className="col-menu"><span className="sr-only">{text(locale, '操作', 'Actions')}</span></th>
+            </tr></thead>
+            <tbody>
+              {state === 'loading' ? <tr><td colSpan={7} className="prototype-automation-state"><LoaderCircle className="spin" aria-hidden="true" />{text(locale, '加载中…', 'Loading…')}</td></tr> : null}
+              {state === 'error' ? <tr><td colSpan={7} className="prototype-automation-state prototype-automation-state--error"><span role="alert">{text(locale, '无法加载 Experts。', 'Unable to load Experts.')}{error ? ` ${error.message}` : ''}</span><button type="button" onClick={onRetry}><RefreshCw aria-hidden="true" />{text(locale, '重试', 'Retry')}</button></td></tr> : null}
+              {state === 'ready' && !rows.length ? <tr><td colSpan={7} className="prototype-automation-state">{query || scope === 'mine' ? text(locale, '没有匹配的 Expert', 'No experts match') : text(locale, '当前 Space 尚无 Expert。', 'No Experts exist in this Space yet.')}</td></tr> : null}
+              {state === 'ready' ? rows.map((expert) => {
                 const startable = canStartExpert(expert)
-                return (
-                  <article className="remote-catalog-row" key={expert.id}>
-                    <button type="button" className="remote-catalog-row__main" onClick={() => onOpenDetail(expert.id)}>
-                      <span className="cosmos-resource-row__icon"><Bot aria-hidden="true" /></span>
-                      <span className="remote-catalog-row__copy">
-                        <strong>{expert.name}</strong>
-                        <small>{expert.description || text(locale, '暂无说明', 'No description')}</small>
-                      </span>
-                      <span className="remote-catalog-row__meta">
-                        <StatusLabel status={expert.status} />
-                        <small>{revision ? `v${revision.revision} · ${revision.model}` : text(locale, '未发布版本', 'No published revision')}</small>
-                      </span>
-                      <ChevronRight aria-hidden="true" />
-                    </button>
-                    {sessionCreationEnabled ? <button
-                      type="button"
-                      className="cosmos-button cosmos-button--secondary remote-catalog-row__start"
-                      disabled={!startable}
-                      title={startable ? undefined : text(locale, '仅已发布且具有版本的 Expert 可发起会话', 'Only a published Expert revision can start a Session')}
-                      onClick={() => onStartSession(expert.id)}
-                    >
-                      <FilePlus2 aria-hidden="true" />{text(locale, '新建会话', 'New Session')}
-                    </button> : null}
-                  </article>
-                )
-              })}
-            </div>
-          ) : null}
-        </section>
+                const expertAutomations = automationsByExpert.get(expert.id) ?? []
+                const sources = [...new Set(expertAutomations.map((automation) => automation.source))]
+                const pinned = pinnedIds.has(expert.id)
+                return <tr key={expert.id} onClick={() => onOpenDetail(expert.id)}>
+                  <td className="col-check" onClick={(event) => event.stopPropagation()}>
+                    <input type="checkbox" checked={checkedIds.has(expert.id)} aria-label={text(locale, `选择 ${expert.name}`, `Select ${expert.name}`)} onChange={() => toggleChecked(expert.id)} />
+                  </td>
+                  <td className="col-star" onClick={(event) => event.stopPropagation()}>
+                    <button type="button" className={`prototype-expert-star${pinned ? ' on' : ''}`} aria-pressed={pinned} aria-label={pinned ? text(locale, `取消固定 ${expert.name}`, `Unpin ${expert.name}`) : text(locale, `固定 ${expert.name}`, `Pin ${expert.name}`)} onClick={() => togglePin(expert.id)}>{pinned ? '★' : '☆'}</button>
+                  </td>
+                  <td className="col-name">
+                    <div className="prototype-expert-name-cell">
+                      <span className="prototype-automation-expert-icon"><PrototypeHexIcon aria-hidden="true" /></span>
+                      <div className="prototype-expert-name-body">
+                        <div className="prototype-expert-name-line">
+                          <strong>{expert.name}</strong>
+                          {expert.visibility === 'space' ? <span className="prototype-expert-tag">shared</span> : null}
+                          {expert.status !== 'published' ? <span className="prototype-expert-tag">{expert.status === 'draft' ? text(locale, '草稿', 'draft') : text(locale, '已归档', 'archived')}</span> : null}
+                        </div>
+                        <div className="prototype-expert-desc-line">{expert.description || text(locale, '暂无说明', 'No description')}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="muted col-auto">{expertAutomations.length || ''}</td>
+                  <td className="col-integ">{sources.length ? <div className="prototype-expert-integ-stack">
+                    {sources.slice(0, 4).map((source) => <span className="prototype-expert-integ-icon" key={source} title={source}><ExpertSourceIcon source={source} /></span>)}
+                    <span className="prototype-expert-integ-count">{sources.length}</span>
+                  </div> : null}</td>
+                  <td className="muted">{formatDate(expert.updatedAt, locale)}</td>
+                  <td className="col-menu" onClick={(event) => event.stopPropagation()}>
+                    <button type="button" className="icon-btn prototype-automation-more" aria-label={text(locale, `${expert.name} 更多操作`, `More actions for ${expert.name}`)} aria-expanded={menuId === expert.id} onClick={() => setMenuId((current) => current === expert.id ? undefined : expert.id)}>⋯</button>
+                    {menuId === expert.id ? <div className="prototype-automation-row-menu" role="menu">
+                      {sessionCreationEnabled ? <button type="button" role="menuitem" disabled={!startable} title={startable ? undefined : text(locale, '仅已发布且具有版本的 Expert 可发起会话', 'Only a published Expert revision can start a Session')} onClick={() => { setMenuId(undefined); onStartSession(expert.id) }}><strong>{text(locale, '新建会话', 'New Session')}</strong>{!startable ? <small>{text(locale, '需要已发布版本', 'Requires a published revision')}</small> : null}</button> : null}
+                      <button type="button" role="menuitem" onClick={() => { setMenuId(undefined); onOpenDetail(expert.id) }}><strong>{text(locale, '查看详情', 'View details')}</strong></button>
+                    </div> : null}
+                  </td>
+                </tr>
+              }) : null}
+            </tbody>
+          </table>
+        </div>
+
+        {state === 'ready' ? <div className="prototype-automation-footer"><span>{rows.length} {rows.length === 1 ? 'expert' : 'experts'}</span><div><button type="button" disabled>‹</button><span>{text(locale, '第 1 页，共 1 页', 'Page 1 of 1')}</span><button type="button" disabled>›</button><span>{text(locale, '行数', 'Rows')}</span><select disabled aria-label={text(locale, '每页行数', 'Rows per page')}><option>25</option></select></div></div> : null}
       </div>
-    </main>
-  )
+    </div>
+  </main>
 }
 
 export function RemoteExpertDetailPage({

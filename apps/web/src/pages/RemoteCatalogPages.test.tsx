@@ -324,16 +324,20 @@ describe('remote Catalog pages', () => {
       />,
     ))
 
-    expect(screen.queryByRole('button', { name: '新建 Expert' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '创建 Expert' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '发布' })).not.toBeInTheDocument()
-    const startButtons = screen.getAllByRole('button', { name: '新建会话' })
-    expect(startButtons[0]).toBeEnabled()
-    expect(startButtons[1]).toBeDisabled()
 
-    await user.click(startButtons[0]!)
-    await user.click(screen.getByRole('button', { name: /Published Expert/ }))
+    await user.click(screen.getByRole('button', { name: 'Published Expert 更多操作' }))
+    const publishedStart = screen.getByRole('menuitem', { name: /新建会话/ })
+    expect(publishedStart).toBeEnabled()
+    await user.click(publishedStart)
     expect(onStartSession).toHaveBeenCalledWith(publishedExpert.id)
+
+    await user.click(screen.getByRole('button', { name: 'Draft Expert 更多操作' }))
+    expect(screen.getByRole('menuitem', { name: /新建会话/ })).toBeDisabled()
+
+    await user.click(screen.getByText('Published Expert'))
     expect(onOpenDetail).toHaveBeenCalledWith(publishedExpert.id)
 
     view.rerender(withPreferences(
@@ -349,7 +353,7 @@ describe('remote Catalog pages', () => {
         onCreate={onCreate}
       />,
     ))
-    await user.click(screen.getByRole('button', { name: '新建 Expert' }))
+    await user.click(screen.getByRole('button', { name: '创建 Expert' }))
     expect(onCreate).toHaveBeenCalledTimes(1)
   })
 
