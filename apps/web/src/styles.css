@@ -82,6 +82,19 @@
   flex-direction: column;
 }
 
+.remote-environment-editor__fields {
+  display: flex;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  flex-direction: column;
+}
+
+.remote-environment-editor__fields:disabled {
+  opacity: 0.7;
+}
+
 .remote-environment-editor > header,
 .remote-environment-editor > footer,
 .remote-environment-array > header,
@@ -190,6 +203,91 @@
 
 .remote-environment-array__row:last-child {
   border-bottom: 0;
+}
+
+.remote-environment-array__empty {
+  display: flex;
+  min-height: 58px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  color: var(--text-muted);
+}
+
+.remote-environment-array__notice {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--row-line);
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.remote-environment-array__notice > svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.remote-environment-array__notice > span {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+
+.remote-environment-array__notice--error {
+  color: var(--danger);
+}
+
+.remote-environment-array__notice .cosmos-button {
+  min-height: 28px;
+  padding: 4px 9px;
+  font-size: 9px;
+}
+
+.remote-environment-array__empty > svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.remote-environment-array__empty > span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.remote-environment-array__empty strong,
+.remote-environment-array__empty small {
+  overflow-wrap: anywhere;
+}
+
+.remote-environment-array__empty strong {
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.remote-environment-array__empty small {
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.remote-environment-array__field--invalid {
+  border-color: var(--danger);
+}
+
+.remote-environment-array__field--invalid:focus-visible {
+  outline-color: var(--danger);
+}
+
+.remote-environment-array__field-error {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .remote-environment-array__row .remote-environment-check {
@@ -552,6 +650,33 @@
 
 .remote-expert-editor__error small {
   overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.remote-expert-editor__field-errors {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.remote-expert-editor__field-errors li {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  overflow-wrap: anywhere;
+}
+
+.remote-expert-editor__field-errors code {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  font-size: 9px;
+}
+
+.remote-expert-editor__field-errors span {
   color: var(--text-muted);
   font-size: 9px;
 }

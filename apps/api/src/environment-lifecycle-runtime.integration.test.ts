@@ -1,7 +1,10 @@
 import type { CreateEnvironmentRequest } from '@cosmos/contracts'
 import { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { EnvironmentIdempotencyConflictError } from './configuration-catalog-repository.js'
+import {
+  EnvironmentIdempotencyConflictError,
+  EnvironmentSecretReferenceValidationError,
+} from './configuration-catalog-repository.js'
 import { UnavailableEnvironmentProvisioner } from './environment-provisioning-repository.js'
 import { EnvironmentProvisioningWorker } from './environment-provisioning-worker.js'
 import { runMigrations } from './migrations.js'
@@ -68,7 +71,48 @@ describeWithDatabase('Environment lifecycle under restricted runtime roles', () 
         ('environment-org-a', 'environment-space', 'environment-owner', 'space_manager'),
         ('environment-org-a', 'environment-space', 'environment-member', 'member'),
         ('environment-org-b', 'environment-space', 'environment-b-owner', 'space_manager');
+      INSERT INTO cosmos_secrets (
+        organization_id, space_id, id, name, scope, value_ciphertext,
+        last_four, status, created_by, archived_at
+      ) VALUES
+        ('environment-org-a', 'environment-space', 'secret-release-token', 'RELEASE_TOKEN',
+          'shared', 'ciphertext:release-token', '1234', 'active', 'environment-owner', NULL),
+        ('environment-org-a', 'environment-space', 'secret-archived-token', 'ARCHIVED_TOKEN',
+          'shared', 'ciphertext:archived-token', '5678', 'archived', 'environment-owner', now()),
+        ('environment-org-b', 'environment-space', 'secret-cross-tenant', 'CROSS_TENANT_TOKEN',
+          'shared', 'ciphertext:cross-tenant', '9012', 'active', 'environment-b-owner', NULL);
     `)
+  })
+
+  it('rejects missing, archived, and cross-tenant Secret references before writing', async () => {
+    for (const [secretId, key] of [
+      ['secret-missing', 'missing-secret-reference'],
+      ['secret-archived-token', 'archived-secret-reference'],
+      ['secret-cross-tenant', 'cross-tenant-secret-reference'],
+    ] as const) {
+      await expect(repository.createEnvironment({
+        organizationId: 'environment-org-a',
+        spaceId: 'environment-space',
+        actorId: 'environment-owner',
+        idempotencyKey: key,
+        request: {
+          ...createRequest,
+          name: `Rejected ${secretId}`,
+          variableReferences: [{ name: 'RELEASE_TOKEN', secretId }],
+        },
+      })).rejects.toMatchObject({
+        name: 'EnvironmentSecretReferenceValidationError',
+        fieldErrors: {
+          'variableReferences.0.secretId': ['Select an active Secret from the current Space.'],
+        },
+      })
+    }
+
+    const environments = await migrationPool.query<{ count: number }>(`
+      SELECT count(*)::integer AS count FROM cosmos_environments
+      WHERE organization_id = 'environment-org-a' AND space_id = 'environment-space'
+    `)
+    expect(environments.rows[0]?.count).toBe(0)
   })
 
   afterAll(async () => {
@@ -121,8 +165,22 @@ describeWithDatabase('Environment lifecycle under restricted runtime roles', () 
       spaceId: 'environment-space',
       actorId: 'environment-member',
       idempotencyKey: 'member-create-runtime',
-      request: { ...createRequest, name: 'Forbidden runtime' },
+      request: { ...createRequest, name: 'Forbidden runtime', variableReferences: [] },
     })).rejects.toMatchObject({ code: '42501' })
+
+    await migrationPool.query(`
+      UPDATE cosmos_secrets
+      SET status = 'archived', archived_at = now()
+      WHERE organization_id = 'environment-org-a'
+        AND space_id = 'environment-space' AND id = 'secret-release-token'
+    `)
+    await expect(repository.createEnvironment({
+      organizationId: 'environment-org-a',
+      spaceId: 'environment-space',
+      actorId: 'environment-owner',
+      idempotencyKey: 'create-release-runtime',
+      request: createRequest,
+    })).resolves.toMatchObject({ replayed: true, environment: { id: environmentId } })
 
     await expect(withApiDatabaseContext(
       apiPool,
@@ -197,6 +255,18 @@ describeWithDatabase('Environment lifecycle under restricted runtime roles', () 
   })
 
   it('creates and promotes a second immutable revision without cross-tenant visibility', async () => {
+    await expect(repository.updateEnvironment({
+      organizationId: 'environment-org-a',
+      spaceId: 'environment-space',
+      environmentId,
+      actorId: 'environment-owner',
+      expectedVersion: version,
+      idempotencyKey: 'update-invalid-secret-reference',
+      request: {
+        variableReferences: [{ name: 'RELEASE_TOKEN', secretId: 'secret-archived-token' }],
+      },
+    })).rejects.toBeInstanceOf(EnvironmentSecretReferenceValidationError)
+
     const updated = await repository.updateEnvironment({
       organizationId: 'environment-org-a',
       spaceId: 'environment-space',

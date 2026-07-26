@@ -164,6 +164,7 @@ import {
 import {
   EmptyConfigurationCatalogRepository,
   EnvironmentIdempotencyConflictError,
+  EnvironmentSecretReferenceValidationError,
   EnvironmentStateConflictError,
   EnvironmentVersionConflictError,
   ExpertConfigurationValidationError,
@@ -1104,6 +1105,15 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         code: 'ENVIRONMENT_STATE_CONFLICT',
         message: error.message,
         retryable: false,
+      })
+    }
+
+    if (error instanceof EnvironmentSecretReferenceValidationError) {
+      return sendApiError(reply, 422, request, {
+        code: 'ENVIRONMENT_SECRET_REFERENCE_INVALID',
+        message: error.message,
+        retryable: false,
+        fieldErrors: error.fieldErrors,
       })
     }
 

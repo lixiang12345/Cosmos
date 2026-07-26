@@ -49,7 +49,7 @@ Environment 已具备 Cloud/Daemon 类型、immutable revision、provisioning wo
 - Contracts/API/OpenAPI 对齐 create/update/retry/disable/archive、revision 与安全 provisioning error。
 - PostgreSQL migrations `062`-`065` 建立 revision checksum、provisioning lease/fencing、append-only audit、outbox、execution snapshot 与 manager-only RLS。
 - Worker 有有限重试、过期 lease 恢复和 fencing completion；没有 provider/daemon 能力时明确失败。
-- Web 提供 Cloud/Daemon 创建与编辑、仓库绑定、Secret reference、Hooks、network policy、状态进度、revision diff、retry/disable/archive。
+- Web 提供 Cloud/Daemon 创建与编辑、仓库绑定、当前 Space active Secret reference、旧引用不可用提示、Hooks、network policy、状态进度、revision diff、retry/disable/archive；Repository 在幂等重放之后的同一事务中验证引用，避免检查 / 写入竞态。
 - Expert 发布与 Session 启动继续只接受 active Ready revision；Session 创建持久化 immutable execution snapshot。
 
 ### 验证证据

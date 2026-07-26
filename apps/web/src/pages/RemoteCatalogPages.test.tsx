@@ -4,6 +4,7 @@ import type {
   EnvironmentSummaryDto,
   ExpertDetailDto,
   ExpertSummaryDto,
+  SecretDto,
 } from '@cosmos/contracts'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -221,6 +222,26 @@ function environmentDetail(summary: EnvironmentSummaryDto): EnvironmentDetailDto
 const environmentA = environmentSummary('environment-a', 'Environment A', repositoryA)
 const environmentB = environmentSummary('environment-b', 'Environment B', repositoryB)
 
+function secret(overrides: Partial<SecretDto> = {}): SecretDto {
+  return {
+    id: 'secret-model-key',
+    organizationId: 'organization-a',
+    spaceId: 'space-a',
+    name: 'MODEL_API_KEY',
+    scope: 'private',
+    description: null,
+    vmInstall: true,
+    lastFour: '1234',
+    status: 'active',
+    version: 1,
+    createdBy: 'user-a',
+    createdAt: '2026-07-13T07:00:00.000Z',
+    updatedAt: '2026-07-13T08:00:00.000Z',
+    archivedAt: null,
+    ...overrides,
+  }
+}
+
 const auth: CosmosApiAuthContext = {
   accessToken: 'token-a',
   onUnauthorized: vi.fn(async () => undefined),
@@ -282,6 +303,7 @@ describe('remote Catalog pages', () => {
     vi.mocked(listEnvironmentRevisions).mockReset()
     vi.mocked(listEnvironmentRevisions).mockResolvedValue({ items: [] })
     vi.mocked(listExpertRevisions).mockResolvedValue({ items: [] })
+    vi.mocked(getEnvironment).mockResolvedValue(environmentDetail(environmentA))
   })
 
   it('shows management only to authorized callers and starts only a published revision', async () => {
@@ -511,6 +533,7 @@ describe('remote Catalog pages', () => {
     render(withPreferences(<RemoteEnvironmentsPage {...environmentPageProps({ canManage: true, onRetry })} />))
 
     await user.click(screen.getByRole('button', { name: '创建环境' }))
+    expect(screen.getByLabelText('名称')).toHaveFocus()
     await user.type(screen.getByLabelText('名称'), 'Release runtime')
     await user.type(screen.getByLabelText('镜像'), 'ghcr.io/cosmos/runtime:stable')
     await user.type(screen.getByLabelText('仓库 ID'), 'repository-release')
@@ -535,6 +558,156 @@ describe('remote Catalog pages', () => {
       auth,
     )
     expect(onRetry).toHaveBeenCalled()
+  })
+
+  it('moves focus into the Environment editor and closes it with Escape', async () => {
+    const user = userEvent.setup()
+    render(withPreferences(
+      <RemoteEnvironmentsPage {...environmentPageProps({ canManage: true })} />,
+    ))
+
+    await user.click(screen.getByRole('button', { name: '创建环境' }))
+    expect(screen.getByLabelText('名称')).toHaveFocus()
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('heading', { name: '创建运行环境' })).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('button', { name: '创建环境' })).toHaveFocus())
+  })
+
+  it('maps a 422 variable-reference error to the offending Secret select', async () => {
+    const user = userEvent.setup()
+    vi.mocked(getEnvironment).mockResolvedValue(environmentDetail(environmentA))
+    vi.mocked(createEnvironment).mockRejectedValue(new CosmosApiError(
+      'One or more Environment variable references do not identify an active Secret in this Space.',
+      {
+        code: 'ENVIRONMENT_SECRET_REFERENCE_INVALID',
+        status: 422,
+        fieldErrors: { 'variableReferences.0.secretId': ['Select an active Secret from the current Space.'] },
+      },
+    ))
+    render(withPreferences(
+      <RemoteEnvironmentsPage {...environmentPageProps({ canManage: true, secrets: [secret()] })} />,
+    ))
+
+    await user.click(screen.getByRole('button', { name: '创建环境' }))
+    await user.type(screen.getByLabelText('名称'), 'Release runtime')
+    await user.type(screen.getByLabelText('镜像'), 'ghcr.io/cosmos/runtime:stable')
+    await user.type(screen.getByLabelText('仓库 ID'), 'repository-release')
+    await user.type(screen.getByLabelText('仓库'), 'cosmos/release')
+    await user.click(screen.getByRole('button', { name: '添加 变量引用' }))
+    await user.type(screen.getByLabelText('变量名'), 'MODEL_API_KEY')
+    const secretSelect = screen.getByLabelText('Secret reference')
+    await user.selectOptions(secretSelect, 'secret-model-key')
+    await user.click(screen.getByRole('button', { name: '保存并配置' }))
+
+    await waitFor(() => expect(createEnvironment).toHaveBeenCalledTimes(1))
+    const rowError = await screen.findByText('Select an active Secret from the current Space.')
+    expect(rowError).toBeInTheDocument()
+    expect(secretSelect).toHaveAttribute('aria-invalid', 'true')
+    expect(secretSelect).toHaveAttribute('aria-describedby', rowError.getAttribute('id'))
+  })
+
+  it('only offers active Secrets from the current Space as variable references', async () => {
+    const user = userEvent.setup()
+    render(withPreferences(
+      <RemoteEnvironmentsPage {...environmentPageProps({
+        canManage: true,
+        secrets: [
+          secret({ id: 'secret-active', name: 'MODEL_API_KEY' }),
+          secret({ id: 'secret-archived', name: 'OLD_KEY', status: 'archived' }),
+          secret({ id: 'secret-other-space', name: 'OTHER_KEY', spaceId: 'space-b' }),
+        ],
+      })} />,
+    ))
+
+    await user.click(screen.getByRole('button', { name: '创建环境' }))
+    await user.click(screen.getByRole('button', { name: '添加 变量引用' }))
+    const secretSelect = screen.getByLabelText('Secret reference') as HTMLSelectElement
+    const optionValues = Array.from(secretSelect.options).map((option) => option.value)
+    expect(optionValues).toContain('secret-active')
+    expect(optionValues).not.toContain('secret-archived')
+    expect(optionValues).not.toContain('secret-other-space')
+  })
+
+  it('shows a recoverable empty state when no active Secret is available', async () => {
+    const user = userEvent.setup()
+    render(withPreferences(
+      <RemoteEnvironmentsPage {...environmentPageProps({
+        canManage: true,
+        secrets: [secret({ id: 'secret-archived', status: 'archived' })],
+      })} />,
+    ))
+
+    await user.click(screen.getByRole('button', { name: '创建环境' }))
+    expect(screen.getByText('当前 Space 没有可用的 active Secret。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '添加 变量引用' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '保存并配置' })).toBeEnabled()
+  })
+
+  it('distinguishes Secret Catalog loading and error states', async () => {
+    const user = userEvent.setup()
+    const onRetrySecrets = vi.fn()
+    const props = environmentPageProps({ canManage: true, secretsLoading: true, onRetrySecrets })
+    const view = render(withPreferences(<RemoteEnvironmentsPage {...props} />))
+
+    await user.click(screen.getByRole('button', { name: '创建环境' }))
+    expect(screen.getByRole('status')).toHaveTextContent('正在加载 Secret')
+    expect(screen.getByRole('button', { name: '添加 变量引用' })).toBeDisabled()
+
+    view.rerender(withPreferences(
+      <RemoteEnvironmentsPage {...props} secretsLoading={false} secretsError={new Error('Catalog unavailable.')} />,
+    ))
+    expect(screen.getByRole('alert')).toHaveTextContent('无法加载 Secret Catalog')
+    await user.click(screen.getByRole('button', { name: '重试' }))
+    expect(onRetrySecrets).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a legacy unavailable Secret reference visible while editing', async () => {
+    const user = userEvent.setup()
+    const legacyEnvironment = environmentDetail(environmentA)
+    legacyEnvironment.latestRevision.variableReferences = [{
+      name: 'MODEL_API_KEY',
+      secretId: 'secret-archived',
+    }]
+    vi.mocked(getEnvironment).mockResolvedValue(legacyEnvironment)
+    render(withPreferences(
+      <RemoteEnvironmentsPage {...environmentPageProps({
+        canManage: true,
+        secrets: [secret({ id: 'secret-archived', status: 'archived' })],
+      })} />,
+    ))
+
+    await screen.findByRole('heading', { name: 'Environment A' })
+    await user.click(screen.getByRole('button', { name: '新建配置版本' }))
+    const reference = screen.getByLabelText('Secret reference') as HTMLSelectElement
+    expect(reference).toHaveValue('secret-archived')
+    expect(within(reference).getByRole('option', { name: '不可用的 Secret · secret-archived' })).toBeInTheDocument()
+    expect(reference).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByText('此 Secret 已不可用。请选择当前 Space 的 active Secret，或删除该变量引用。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存并配置' })).toBeDisabled()
+  })
+
+  it('locks the Environment editor while a save is pending', async () => {
+    const user = userEvent.setup()
+    const pending = deferred<EnvironmentDetailDto>()
+    vi.mocked(createEnvironment).mockReturnValue(pending.promise)
+    render(withPreferences(
+      <RemoteEnvironmentsPage {...environmentPageProps({ canManage: true })} />,
+    ))
+
+    await user.click(screen.getByRole('button', { name: '创建环境' }))
+    await user.type(screen.getByLabelText('名称'), 'Release runtime')
+    await user.type(screen.getByLabelText('镜像'), 'ghcr.io/cosmos/runtime:stable')
+    await user.type(screen.getByLabelText('仓库 ID'), 'repository-release')
+    await user.type(screen.getByLabelText('仓库'), 'cosmos/release')
+    await user.click(screen.getByRole('button', { name: '保存并配置' }))
+
+    const form = screen.getByRole('button', { name: '保存中…' }).closest('form')
+    expect(form).toHaveAttribute('aria-busy', 'true')
+    expect(screen.getByRole('button', { name: '保存中…' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '取消' })).toBeDisabled()
+    expect(screen.getByLabelText('名称')).toBeDisabled()
+
+    await act(async () => { pending.resolve(environmentDetail(environmentA)) })
   })
 
   it('shows list errors in English without exposing mutation actions', async () => {

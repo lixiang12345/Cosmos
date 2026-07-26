@@ -37,6 +37,7 @@ import type {
 } from './configuration-catalog-repository.js'
 import {
   EnvironmentIdempotencyConflictError,
+  EnvironmentSecretReferenceValidationError,
   EnvironmentStateConflictError,
   EnvironmentVersionConflictError,
   ExpertConfigurationValidationError,
@@ -954,6 +955,36 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
     ])
   }
 
+  private async validateEnvironmentSecretReferences(
+    client: PoolClient,
+    organizationId: string,
+    spaceId: string,
+    references: readonly { secretId: string }[],
+  ) {
+    const secretIds = [...new Set(references.map((reference) => reference.secretId))]
+    if (secretIds.length === 0) return
+
+    const active = await client.query<{ id: string }>(`
+      SELECT id
+      FROM cosmos_secrets
+      WHERE organization_id = $1 AND space_id = $2
+        AND id = ANY($3::text[]) AND status = 'active'
+      FOR KEY SHARE
+    `, [organizationId, spaceId, secretIds])
+    const activeIds = new Set(active.rows.map((secret) => secret.id))
+    const fieldErrors = Object.fromEntries(references.flatMap((reference, index) => (
+      activeIds.has(reference.secretId)
+        ? []
+        : [[
+            `variableReferences.${index}.secretId`,
+            ['Select an active Secret from the current Space.'],
+          ]]
+    )))
+    if (Object.keys(fieldErrors).length > 0) {
+      throw new EnvironmentSecretReferenceValidationError(fieldErrors)
+    }
+  }
+
   private async appendEnvironmentAudit(
     client: PoolClient,
     input: {
@@ -1496,6 +1527,12 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
         ...record, method: 'POST', canonicalPath, request: record.request,
       })
       if (idempotency.replay) return { environment: idempotency.replay, replayed: true }
+      await this.validateEnvironmentSecretReferences(
+        client,
+        record.organizationId,
+        record.spaceId,
+        record.request.variableReferences,
+      )
       const environmentId = this.createId()
       const revisionId = this.createId()
       const visibility = record.request.visibility
@@ -1601,6 +1638,14 @@ export class PostgresConfigurationCatalogRepository implements ConfigurationCata
       `, [record.organizationId, record.spaceId, record.environmentId])
       if (activeJob.rowCount) {
         throw new EnvironmentStateConflictError('Wait for the current Environment provisioning attempt to finish.')
+      }
+      if (record.request.variableReferences !== undefined) {
+        await this.validateEnvironmentSecretReferences(
+          client,
+          record.organizationId,
+          record.spaceId,
+          record.request.variableReferences,
+        )
       }
       const previousRevision = await client.query<{
         revision: number

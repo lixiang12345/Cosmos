@@ -857,6 +857,8 @@ paths:
           $ref: '#/components/responses/RuntimeCatalogUnauthorized'
         '403':
           $ref: '#/components/responses/RuntimeCatalogForbidden'
+        '422':
+          $ref: '#/components/responses/RuntimeUnprocessable'
         '500':
           $ref: '#/components/responses/RuntimeCatalogInternalError'
 
@@ -935,6 +937,8 @@ paths:
           $ref: '#/components/responses/RuntimeCatalogNotFound'
         '409':
           $ref: '#/components/responses/RuntimeConflict'
+        '422':
+          $ref: '#/components/responses/RuntimeUnprocessable'
         '500':
           $ref: '#/components/responses/RuntimeCatalogInternalError'
     delete:
@@ -4324,7 +4328,7 @@ components:
           schema:
             $ref: '#/components/schemas/RuntimeApiError'
     RuntimeUnprocessable:
-      description: The selected Expert or Environment cannot create an executable Session
+      description: The request is structurally valid but references incompatible or unavailable resources
       headers:
         Cache-Control:
           $ref: '#/components/headers/PrivateNoStore'

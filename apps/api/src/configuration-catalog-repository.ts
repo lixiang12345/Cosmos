@@ -256,6 +256,13 @@ export class EnvironmentIdempotencyConflictError extends Error {
   }
 }
 
+export class EnvironmentSecretReferenceValidationError extends Error {
+  constructor(readonly fieldErrors: Record<string, string[]>) {
+    super('One or more Environment variable references do not identify an active Secret in this Space.')
+    this.name = 'EnvironmentSecretReferenceValidationError'
+  }
+}
+
 export class ExpertVersionConflictError extends Error {
   constructor(readonly expectedVersion: number, readonly actualVersion: number) {
     super(`Expert version ${expectedVersion} does not match current version ${actualVersion}.`)

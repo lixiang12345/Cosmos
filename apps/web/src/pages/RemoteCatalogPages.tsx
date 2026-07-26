@@ -56,7 +56,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { GlobalControls } from '../components/GlobalControls'
 import { IconButton } from '../components/ui'
 import { usePreferences, type Locale } from '../preferences'
@@ -142,7 +142,14 @@ export type RemoteExpertEditorPageProps = RemoteCatalogRequestProps & {
 
 export type RemoteEnvironmentsPageProps = RemoteCatalogListState<EnvironmentSummaryDto>
   & RemoteCatalogRequestProps
-  & { onOpenNavigation?: () => void; canManage?: boolean }
+  & {
+    onOpenNavigation?: () => void
+    canManage?: boolean
+    secrets?: SecretDto[]
+    secretsLoading?: boolean
+    secretsError?: Error | null
+    onRetrySecrets?: () => void
+  }
 
 export type RemoteRepositoriesPageProps = RemoteCatalogListState<RepositoryDto>
   & RemoteCatalogRequestProps
@@ -837,6 +844,10 @@ export function RemoteEnvironmentsPage({
   credentialVersion,
   onOpenNavigation,
   canManage = false,
+  secrets = [],
+  secretsLoading = false,
+  secretsError = null,
+  onRetrySecrets,
 }: RemoteEnvironmentsPageProps) {
   const { locale } = usePreferences()
   const [selectedId, setSelectedId] = useState<string>()
@@ -844,6 +855,7 @@ export function RemoteEnvironmentsPage({
   const [editingExisting, setEditingExisting] = useState(false)
   const [busy, setBusy] = useState<'retry' | 'disable' | 'archive'>()
   const [mutationError, setMutationError] = useState<Error>()
+  const editorReturnFocusRef = useRef<HTMLElement | null>(null)
   const state = listState(loading, ready, error)
   const selectedSummary = items.find((item) => item.id === selectedId) ?? items[0]
   const selectedEnvironmentId = state === 'ready' ? selectedSummary?.id : undefined
@@ -893,6 +905,18 @@ export function RemoteEnvironmentsPage({
     detail.retry()
     onRetry()
   }, [detail, onRetry])
+  const openEditor = (editing: boolean) => {
+    const activeElement = document.activeElement
+    editorReturnFocusRef.current = activeElement && 'focus' in activeElement
+      ? activeElement as HTMLElement
+      : null
+    setEditingExisting(editing)
+    setEditorOpen(true)
+  }
+  const closeEditor = () => {
+    setEditorOpen(false)
+    window.requestAnimationFrame(() => editorReturnFocusRef.current?.focus())
+  }
 
   const runAction = async (action: 'retry' | 'disable' | 'archive') => {
     if (!environment) return
@@ -920,13 +944,13 @@ export function RemoteEnvironmentsPage({
         title={text(locale, '运行环境', 'Environments')}
         description={text(locale, '当前 Space 中由服务端管理的运行环境', 'Server-managed runtimes in this Space')}
         onOpenNavigation={onOpenNavigation}
-        actions={canManage ? <button type="button" className="cosmos-button cosmos-button--primary" onClick={() => { setEditingExisting(false); setEditorOpen(true) }}><Plus aria-hidden="true" />{text(locale, '创建环境', 'Create Environment')}</button> : undefined}
+        actions={canManage ? <button type="button" className="cosmos-button cosmos-button--primary" onClick={() => openEditor(false)}><Plus aria-hidden="true" />{text(locale, '创建环境', 'Create Environment')}</button> : undefined}
       />
       <div className="cosmos-page__scroll">
         {state === 'loading' ? <LoadState status="loading" resource={text(locale, '运行环境', 'Environments')} onRetry={onRetry} /> : null}
         {state === 'error' ? <LoadState status="error" resource={text(locale, '运行环境', 'Environments')} error={error} onRetry={onRetry} /> : null}
         {state === 'ready' && items.length === 0 && !editorOpen ? (
-          <section className="cosmos-panel remote-catalog-empty"><Container aria-hidden="true" /><strong>{text(locale, '暂无运行环境', 'No Environments')}</strong>{canManage ? <button type="button" className="cosmos-button cosmos-button--primary" onClick={() => { setEditingExisting(false); setEditorOpen(true) }}><Plus aria-hidden="true" />{text(locale, '创建环境', 'Create Environment')}</button> : null}</section>
+          <section className="cosmos-panel remote-catalog-empty"><Container aria-hidden="true" /><strong>{text(locale, '暂无运行环境', 'No Environments')}</strong>{canManage ? <button type="button" className="cosmos-button cosmos-button--primary" onClick={() => openEditor(false)}><Plus aria-hidden="true" />{text(locale, '创建环境', 'Create Environment')}</button> : null}</section>
         ) : null}
         {state === 'ready' && (items.length > 0 || editorOpen) ? (
           <section className="remote-environment-layout">
@@ -956,8 +980,12 @@ export function RemoteEnvironmentsPage({
                 organizationId={organizationId}
                 spaceId={spaceId}
                 auth={requestAuth}
-                onCancel={() => setEditorOpen(false)}
-                onSaved={(next) => { setEditorOpen(false); refreshAfterMutation(next) }}
+                secrets={secrets}
+                secretsLoading={secretsLoading}
+                secretsError={secretsError}
+                onRetrySecrets={onRetrySecrets}
+                onCancel={closeEditor}
+                onSaved={(next) => { closeEditor(); refreshAfterMutation(next) }}
               /> : null}
               {!editorOpen ? <>
               {detail.status === 'loading' ? <LoadState status="loading" resource={text(locale, '运行环境详情', 'Environment detail')} onRetry={detail.retry} /> : null}
@@ -969,7 +997,7 @@ export function RemoteEnvironmentsPage({
                 canManage={canManage}
                 busy={busy}
                 error={mutationError}
-                onEdit={() => { setEditingExisting(true); setEditorOpen(true) }}
+                onEdit={() => openEditor(true)}
                 onRetry={() => void runAction('retry')}
                 onDisable={() => void runAction('disable')}
                 onArchive={() => void runAction('archive')}
@@ -1020,6 +1048,10 @@ function EnvironmentEditor({
   organizationId,
   spaceId,
   auth,
+  secrets,
+  secretsLoading,
+  secretsError,
+  onRetrySecrets,
   onCancel,
   onSaved,
 }: {
@@ -1027,6 +1059,10 @@ function EnvironmentEditor({
   organizationId: string
   spaceId: string
   auth: CosmosApiAuthContext
+  secrets: SecretDto[]
+  secretsLoading: boolean
+  secretsError: Error | null
+  onRetrySecrets?: () => void
   onCancel: () => void
   onSaved: (environment: EnvironmentDetailDto) => void
 }) {
@@ -1034,9 +1070,34 @@ function EnvironmentEditor({
   const [state, setState] = useState(() => editorState(environment))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<Error>()
+  const nameInputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => { nameInputRef.current?.focus() }, [])
   const patchState = <Key extends keyof EnvironmentEditorState>(key: Key, value: EnvironmentEditorState[Key]) => {
+    setError(undefined)
     setState((current) => ({ ...current, [key]: value }))
   }
+  const fieldErrors = error instanceof CosmosApiError ? error.fieldErrors : undefined
+  // Backend keys variable-reference validation errors as `variableReferences.<index>.secretId`
+  // (ENVIRONMENT_SECRET_REFERENCE_INVALID). Map each back to its row so the invalid Secret
+  // <select> is flagged inline instead of only surfacing in the summary.
+  const variableSecretErrors = useMemo(() => {
+    const byRow = new Map<number, string[]>()
+    if (!fieldErrors) return byRow
+    for (const [path, messages] of Object.entries(fieldErrors)) {
+      const match = /^variableReferences\.(\d+)\.secretId$/.exec(path)
+      if (match) byRow.set(Number(match[1]), messages)
+    }
+    return byRow
+  }, [fieldErrors])
+  // Selectable Secrets must be active AND belong to the current Space. The catalog already
+  // scopes to the active Space, but guard on spaceId so a stale cross-Space item cannot leak in.
+  const selectableSecrets = useMemo(
+    () => secrets.filter((secret) => secret.status === 'active' && secret.spaceId === spaceId),
+    [secrets, spaceId],
+  )
+  const hasUnresolvedSecretReference = state.variables.some((reference) => (
+    !selectableSecrets.some((secret) => secret.id === reference.secretId)
+  ))
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     setSaving(true)
@@ -1087,12 +1148,13 @@ function EnvironmentEditor({
     }
   }
 
-  return <form className="remote-environment-editor" onSubmit={(event) => void submit(event)}>
-    <header><div><span>{environment ? text(locale, '新配置版本', 'New configuration revision') : text(locale, '新环境', 'New Environment')}</span><h2>{environment ? environment.name : text(locale, '创建运行环境', 'Create Environment')}</h2></div><IconButton icon={X} label={text(locale, '关闭编辑器', 'Close editor')} onClick={onCancel} /></header>
-    {error ? <InlineError error={error} /> : null}
+  return <form className="remote-environment-editor" aria-busy={saving} onKeyDown={(event) => { if (event.key === 'Escape' && !saving) onCancel() }} onSubmit={(event) => void submit(event)}>
+    <header><div><span>{environment ? text(locale, '新配置版本', 'New configuration revision') : text(locale, '新环境', 'New Environment')}</span><h2>{environment ? environment.name : text(locale, '创建运行环境', 'Create Environment')}</h2></div><IconButton icon={X} label={text(locale, '关闭编辑器', 'Close editor')} disabled={saving} onClick={onCancel} /></header>
+    {error ? <InlineError error={error} excludeFieldPrefixes={['variableReferences.']} /> : null}
+    <fieldset className="remote-environment-editor__fields" disabled={saving}>
     <div className="remote-environment-form-grid">
       <label><span>{text(locale, '类型', 'Type')}</span><select value={state.type} disabled={Boolean(environment)} onChange={(event) => patchState('type', event.target.value as EnvironmentEditorState['type'])}><option value="cloud">Cloud</option><option value="daemon">Self-hosted / Daemon</option></select></label>
-      <label><span>{text(locale, '名称', 'Name')}</span><input required maxLength={160} value={state.name} onChange={(event) => patchState('name', event.target.value)} /></label>
+      <label><span>{text(locale, '名称', 'Name')}</span><input ref={nameInputRef} required maxLength={160} value={state.name} onChange={(event) => patchState('name', event.target.value)} /></label>
       <label className="remote-environment-form-wide"><span>{text(locale, '说明', 'Description')}</span><textarea maxLength={10_000} value={state.description} onChange={(event) => patchState('description', event.target.value)} /></label>
       <label><span>{text(locale, '共享范围', 'Sharing')}</span><select value={state.visibility} onChange={(event) => patchState('visibility', event.target.value as EnvironmentEditorState['visibility'])}><option value="space">Space</option><option value="private">Private</option></select></label>
       <label><span>{text(locale, '镜像', 'Image')}</span><input required maxLength={1_000} value={state.image} onChange={(event) => patchState('image', event.target.value)} /></label>
@@ -1113,12 +1175,25 @@ function EnvironmentEditor({
     <EnvironmentArrayEditor
       title={text(locale, '变量引用', 'Variable references')}
       rows={state.variables}
+      addDisabled={secretsLoading || secretsError !== null || selectableSecrets.length === 0}
       onAdd={() => patchState('variables', [...state.variables, { name: '', secretId: '' }])}
       onRemove={(index) => patchState('variables', state.variables.filter((_, rowIndex) => rowIndex !== index))}
-      render={(row, index) => <>
-        <input required aria-label={text(locale, '变量名', 'Variable name')} value={row.name} onChange={(event) => patchState('variables', state.variables.map((item, rowIndex) => rowIndex === index ? { ...item, name: event.target.value } : item))} />
-        <input required aria-label="Secret reference ID" value={row.secretId} onChange={(event) => patchState('variables', state.variables.map((item, rowIndex) => rowIndex === index ? { ...item, secretId: event.target.value } : item))} />
-      </>}
+      notice={secretsLoading ? <div className="remote-environment-array__notice" role="status"><LoaderCircle className="is-spinning" aria-hidden="true" /><span>{text(locale, '正在加载 Secret…', 'Loading Secrets…')}</span></div> : secretsError ? <div className="remote-environment-array__notice remote-environment-array__notice--error" role="alert"><AlertTriangle aria-hidden="true" /><span>{text(locale, '无法加载 Secret Catalog。', 'Unable to load the Secret Catalog.')}</span>{onRetrySecrets ? <button type="button" className="cosmos-button cosmos-button--secondary" onClick={onRetrySecrets}>{text(locale, '重试', 'Retry')}</button> : null}</div> : undefined}
+      empty={!secretsLoading && !secretsError ? <div className="remote-environment-array__empty"><KeyRound aria-hidden="true" /><span><strong>{text(locale, '暂无变量引用', 'No variable references')}</strong><small>{selectableSecrets.length === 0 ? text(locale, '当前 Space 没有可用的 active Secret。', 'No active Secrets are available in this Space.') : text(locale, '仅在运行环境确实需要时添加 Secret。', 'Add a Secret only when the runtime requires it.')}</small></span></div> : undefined}
+      render={(row, index) => {
+        const rowErrors = variableSecretErrors.get(index)
+        const unavailable = row.secretId !== '' && !selectableSecrets.some((secret) => secret.id === row.secretId)
+        const errorId = rowErrors || unavailable ? `variable-secret-error-${index}` : undefined
+        return <>
+          <input required aria-label={text(locale, '变量名', 'Variable name')} value={row.name} onChange={(event) => patchState('variables', state.variables.map((item, rowIndex) => rowIndex === index ? { ...item, name: event.target.value } : item))} />
+          <select required aria-label="Secret reference" aria-invalid={rowErrors || unavailable ? true : undefined} aria-describedby={errorId} className={rowErrors || unavailable ? 'remote-environment-array__field--invalid' : undefined} value={row.secretId} disabled={(secretsLoading || secretsError !== null || selectableSecrets.length === 0) && row.secretId === ''} onChange={(event) => patchState('variables', state.variables.map((item, rowIndex) => rowIndex === index ? { ...item, secretId: event.target.value } : item))}>
+            <option value="" disabled>{text(locale, '选择 Secret…', 'Select a secret…')}</option>
+            {selectableSecrets.map((secret) => <option key={secret.id} value={secret.id}>{secret.name}</option>)}
+            {row.secretId && !selectableSecrets.some((secret) => secret.id === row.secretId) ? <option value={row.secretId}>{text(locale, `不可用的 Secret · ${row.secretId}`, `Unavailable Secret · ${row.secretId}`)}</option> : null}
+          </select>
+          {rowErrors ? <p id={errorId} className="remote-environment-array__field-error" role="alert">{rowErrors.join('; ')}</p> : unavailable ? <p id={errorId} className="remote-environment-array__field-error" role="alert">{text(locale, '此 Secret 已不可用。请选择当前 Space 的 active Secret，或删除该变量引用。', 'This Secret is unavailable. Select an active Secret in this Space or remove the variable reference.')}</p> : null}
+        </>
+      }}
     />
     <EnvironmentArrayEditor
       title="Hooks"
@@ -1132,24 +1207,32 @@ function EnvironmentEditor({
       </>}
     />
     <section className="remote-environment-network"><header><h3>{text(locale, '网络策略', 'Network policy')}</h3></header><select value={state.networkMode} onChange={(event) => patchState('networkMode', event.target.value as EnvironmentEditorState['networkMode'])}><option value="restricted">restricted</option><option value="allowlist">allowlist</option><option value="unrestricted">unrestricted</option></select>{state.networkMode === 'allowlist' ? <EnvironmentArrayEditor title={text(locale, '允许主机', 'Allowed hosts')} rows={state.allowedHosts} onAdd={() => patchState('allowedHosts', [...state.allowedHosts, ''])} onRemove={(index) => patchState('allowedHosts', state.allowedHosts.filter((_, rowIndex) => rowIndex !== index))} render={(host, index) => <input required aria-label={text(locale, '主机名', 'Host')} value={host} onChange={(event) => patchState('allowedHosts', state.allowedHosts.map((item, rowIndex) => rowIndex === index ? event.target.value : item))} />} /> : null}</section>
-    <footer><button type="button" className="cosmos-button cosmos-button--secondary" onClick={onCancel}>{text(locale, '取消', 'Cancel')}</button><button type="submit" className="cosmos-button cosmos-button--primary" disabled={saving}><Save aria-hidden="true" />{saving ? text(locale, '保存中…', 'Saving…') : text(locale, '保存并配置', 'Save and provision')}</button></footer>
+    </fieldset>
+    <footer><button type="button" className="cosmos-button cosmos-button--secondary" disabled={saving} onClick={onCancel}>{text(locale, '取消', 'Cancel')}</button><button type="submit" className="cosmos-button cosmos-button--primary" disabled={saving || hasUnresolvedSecretReference}><Save aria-hidden="true" />{saving ? text(locale, '保存中…', 'Saving…') : text(locale, '保存并配置', 'Save and provision')}</button></footer>
   </form>
 }
 
-function EnvironmentArrayEditor<Row>({ title, rows, onAdd, onRemove, render }: {
+function EnvironmentArrayEditor<Row>({ title, rows, onAdd, onRemove, render, empty, notice, addDisabled = false }: {
   title: string
   rows: Row[]
   onAdd: () => void
   onRemove: (index: number) => void
   render: (row: Row, index: number) => ReactNode
+  empty?: ReactNode
+  notice?: ReactNode
+  addDisabled?: boolean
 }) {
   const { locale } = usePreferences()
-  return <section className="remote-environment-array"><header><h3>{title}</h3><IconButton icon={Plus} label={`${text(locale, '添加', 'Add')} ${title}`} onClick={onAdd} /></header>{rows.map((row, index) => <div className="remote-environment-array__row" key={index}>{render(row, index)}<IconButton icon={Trash2} label={`${text(locale, '删除', 'Remove')} ${title}`} onClick={() => onRemove(index)} /></div>)}</section>
+  return <section className="remote-environment-array"><header><h3>{title}</h3><IconButton icon={Plus} label={`${text(locale, '添加', 'Add')} ${title}`} disabled={addDisabled} onClick={onAdd} /></header>{notice}{rows.length === 0 ? empty : null}{rows.map((row, index) => <div className="remote-environment-array__row" key={index}>{render(row, index)}<IconButton icon={Trash2} label={`${text(locale, '删除', 'Remove')} ${title}`} onClick={() => onRemove(index)} /></div>)}</section>
 }
 
-function InlineError({ error }: { error: Error }) {
+function InlineError({ error, excludeFieldPrefixes = [] }: { error: Error; excludeFieldPrefixes?: string[] }) {
   const { locale } = usePreferences()
-  return <div className="remote-expert-editor__error" role="alert"><AlertTriangle aria-hidden="true" /><span><strong>{text(locale, '操作未完成', 'Operation not completed')}</strong><small>{error.message}</small></span></div>
+  const fieldErrors = error instanceof CosmosApiError ? error.fieldErrors : undefined
+  const fieldEntries = fieldErrors
+    ? Object.entries(fieldErrors).filter(([field]) => !excludeFieldPrefixes.some((prefix) => field.startsWith(prefix)))
+    : []
+  return <div className="remote-expert-editor__error" role="alert"><AlertTriangle aria-hidden="true" /><span><strong>{text(locale, '操作未完成', 'Operation not completed')}</strong><small>{error.message}</small>{fieldEntries.length > 0 ? <ul className="remote-expert-editor__field-errors">{fieldEntries.map(([field, messages]) => <li key={field}><code>{field}</code><span>{messages.join('; ')}</span></li>)}</ul> : null}</span></div>
 }
 
 function EnvironmentDetail({

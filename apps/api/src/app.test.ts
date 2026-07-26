@@ -34,6 +34,7 @@ import type { SpaceRepository } from './space-repository.js'
 import { createDevelopmentAuthenticator } from './auth.js'
 import {
   EmptyConfigurationCatalogRepository,
+  EnvironmentSecretReferenceValidationError,
   type ConfigurationCatalogListOptions,
   type ConfigurationCatalogRepository,
 } from './configuration-catalog-repository.js'
@@ -876,6 +877,100 @@ describe('Cosmos API', () => {
     })
     expect(retried.statusCode).toBe(202)
     expect(retryEnvironment).toHaveBeenCalledWith(expect.objectContaining({ expectedVersion: 3 }))
+  })
+
+  it('accepts only active same-Space Secret references for Environment mutations', async () => {
+    const activeSecretId = 'secret-active'
+    const validateReferences = (references: readonly { secretId: string }[]) => {
+      const fieldErrors = Object.fromEntries(references.flatMap((reference, index) => (
+        reference.secretId === activeSecretId
+          ? []
+          : [[
+              `variableReferences.${index}.secretId`,
+              ['Select an active Secret from the current Space.'],
+            ]]
+      )))
+      if (Object.keys(fieldErrors).length > 0) {
+        throw new EnvironmentSecretReferenceValidationError(fieldErrors)
+      }
+    }
+    const createEnvironment = vi.fn(async (
+      record: Parameters<ConfigurationCatalogRepository['createEnvironment']>[0],
+    ) => {
+      validateReferences(record.request.variableReferences)
+      return { environment: environmentDetail, replayed: false }
+    })
+    const updateEnvironment = vi.fn(async (
+      record: Parameters<ConfigurationCatalogRepository['updateEnvironment']>[0],
+    ) => {
+      if (record.request.variableReferences) validateReferences(record.request.variableReferences)
+      return { environment: environmentDetail, replayed: false }
+    })
+    const catalog = Object.assign(testConfigurationCatalog(), { createEnvironment, updateEnvironment })
+    const app = testApp(testRepository(), catalog)
+    const requestBody = {
+      type: 'cloud',
+      name: 'Platform runtime',
+      description: 'Isolated runtime for platform repositories.',
+      visibility: 'space',
+      image: 'ghcr.io/cosmos/runtime:stable',
+      repositoryBindings: [defaultRepository],
+      variableReferences: [{ name: 'MODEL_API_KEY', secretId: activeSecretId }],
+      hooks: [],
+      networkPolicy: { mode: 'restricted', allowedHosts: [] },
+      sharing: 'space',
+      daemonPoolId: null,
+    }
+
+    for (const [secretId, idempotencyKey] of [
+      ['secret-missing', 'missing-secret'],
+      ['secret-archived', 'archived-secret'],
+      ['secret-other-space', 'cross-space-secret'],
+    ] as const) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/organizations/cosmos/spaces/platform/environments',
+        headers: { 'idempotency-key': idempotencyKey },
+        payload: {
+          ...requestBody,
+          variableReferences: [{ name: 'MODEL_API_KEY', secretId }],
+        },
+      })
+      expect(response.statusCode).toBe(422)
+      expect(ApiErrorSchema.parse(response.json())).toMatchObject({
+        code: 'ENVIRONMENT_SECRET_REFERENCE_INVALID',
+        retryable: false,
+        fieldErrors: {
+          'variableReferences.0.secretId': ['Select an active Secret from the current Space.'],
+        },
+      })
+    }
+    expect(createEnvironment).toHaveBeenCalledTimes(3)
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v1/organizations/cosmos/spaces/platform/environments',
+      headers: { 'idempotency-key': 'active-secret' },
+      payload: requestBody,
+    })
+    expect(created.statusCode).toBe(202)
+    expect(createEnvironment).toHaveBeenCalledTimes(4)
+
+    const invalidUpdate = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/organizations/cosmos/spaces/platform/environments/${environmentDetail.id}`,
+      headers: {
+        'idempotency-key': 'invalid-update-secret',
+        'if-match': '"3"',
+        'content-type': 'application/merge-patch+json',
+      },
+      payload: JSON.stringify({
+        variableReferences: [{ name: 'MODEL_API_KEY', secretId: 'secret-other-space' }],
+      }),
+    })
+    expect(invalidUpdate.statusCode).toBe(422)
+    expect(ApiErrorSchema.parse(invalidUpdate.json()).code).toBe('ENVIRONMENT_SECRET_REFERENCE_INVALID')
+    expect(updateEnvironment).toHaveBeenCalledTimes(1)
   })
 
   it('rejects invalid or cross-resource catalog pagination before reading data', async () => {

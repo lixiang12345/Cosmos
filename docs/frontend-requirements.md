@@ -197,7 +197,7 @@ AppShell
 
 | ID | 需求 |
 | --- | --- |
-| FE-CP01 | Environment 表单覆盖 image/repositories/variables/hooks/sharing/network；Secret value 只接受引用，不回显 |
+| FE-CP01 | Environment 表单覆盖 image/repositories/variables/hooks/sharing/network；Secret value 只接受当前 Space 的 active 引用，不回显；旧引用不可用时保留原 ID 与不可用状态，禁止静默替换，并提供 empty / validation / saving / disabled 状态 |
 | FE-CP02 | Provisioning 使用阶段、progress、message、updatedAt；失败提供日志摘要和 Retry |
 | FE-CP03 | Terminal 明确连接状态、只读/可写和 Update Environment 操作；原型模拟必须标记 |
 | FE-CP04 | Automations 按 Expert 可展开多个 Trigger；启用前提供 Test event；新建默认 disabled |

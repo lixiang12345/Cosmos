@@ -2096,6 +2096,10 @@ function CosmosApp() {
               auth={catalogAuth}
               credentialVersion={credentialVersion}
               canManage={expertManagementEnabled}
+              secrets={catalog.secrets.items}
+              secretsLoading={catalog.secrets.loading}
+              secretsError={catalog.secrets.error}
+              onRetrySecrets={catalog.secrets.retry}
               onOpenNavigation={openNavigation}
             />} />
         <Route path="/daemons" element={demoMode

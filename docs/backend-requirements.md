@@ -154,7 +154,7 @@ EnvironmentRevision 核心字段：`image`、`repositoryBindings`、`variableRef
 
 约束：
 
-- 环境变量只保存 Secret reference；API 永不返回明文。
+- 环境变量只保存 Secret reference；API 永不返回明文。Environment 创建或显式更新 `variableReferences` 时，repository 必须在幂等重放检查之后、同一写事务内验证每个引用属于当前 Organization / Space 且状态为 `active`；缺失、已归档或跨租户引用返回结构化 `422 ENVIRONMENT_SECRET_REFERENCE_INVALID` 和逐行字段错误。
 - 每个 Cloud Session 从固定 Environment Revision 创建新隔离 Snapshot。
 - 默认按工作负载自动分配计算资源；CPU/Memory 上限属于 Cosmos Enterprise Policy，不是 Expert 的业务字段。
 - Update/Refresh 创建新 Revision；运行中的 Snapshot 不原地变更。
