@@ -23144,6 +23144,73 @@ code.prototype-detail-value {
   flex-wrap: wrap;
 }
 
+/* Integrations cards (prototype-aligned production surface) */
+.prototype-integ-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+
+.prototype-integ-card {
+  background: var(--proto-bg, #fff);
+  border: 1px solid var(--proto-border, #e0e0e5);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.prototype-integ-card-left {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+
+.prototype-integ-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--proto-surface, #f0f0f2);
+  border: 1px solid var(--proto-border, #e0e0e5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--proto-muted, #6e6e7a);
+  flex-shrink: 0;
+}
+
+.prototype-integ-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.prototype-integ-card h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--proto-text, #1a1a1a);
+}
+
+.prototype-integ-card p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--proto-dim, #a0a0aa);
+}
+
+.prototype-integ-diagnostic {
+  color: #b45309 !important;
+}
+
+.prototype-integ-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 /* Prototype reskin of the Environment editor and detail while their structure
    (and the Secret-reference validation markup the tests target) stays intact. */
 .prototype-environment-detail-panel .remote-environment-editor > header,

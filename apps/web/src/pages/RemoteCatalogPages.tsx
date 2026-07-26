@@ -22,35 +22,28 @@ import {
 import {
   Activity,
   AlertTriangle,
-  Bot,
   CheckCircle2,
-  ChevronRight,
   CircleOff,
   Clock3,
   Container,
-  FolderGit2,
   GitBranch,
   History,
   PlugZap,
   Wrench,
   KeyRound,
   LoaderCircle,
-  LockKeyhole,
-  Menu,
   ListRestart,
   Pencil,
   Plus,
   Power,
   RefreshCw,
   Save,
-  Server,
   ServerCog,
   ShieldCheck,
   Trash2,
   X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode, type RefObject } from 'react'
-import { GlobalControls } from '../components/GlobalControls'
 import {
   PrototypeCloudIcon,
   PrototypeDaemonIcon,
@@ -73,14 +66,12 @@ import {
   disableEnvironment,
   getEnvironment,
   getExpert,
-  getRepository,
   createSecret,
   archiveSecret,
   createWebhook,
   archiveWebhook,
   createMcpServer,
   archiveMcpServer,
-  getDaemon,
   createDaemon,
   updateDaemon,
   archiveDaemon,
@@ -169,7 +160,7 @@ export type RemoteEnvironmentsPageProps = RemoteCatalogListState<EnvironmentSumm
 
 export type RemoteRepositoriesPageProps = RemoteCatalogListState<RepositoryDto>
   & RemoteCatalogRequestProps
-  & { onOpenNavigation?: () => void }
+  & { onOpenNavigation?: () => void; navigationCollapsed?: boolean; onOpenCommand?: () => void }
 
 export type RemoteSecretsPageProps = RemoteCatalogListState<SecretDto>
   & RemoteCatalogRequestProps
@@ -185,11 +176,11 @@ export type RemoteMcpServersPageProps = RemoteCatalogListState<McpServerDto>
 
 export type RemoteDaemonsPageProps = RemoteCatalogListState<DaemonDto>
   & RemoteCatalogRequestProps
-  & { onOpenNavigation?: () => void; canManage?: boolean; environments?: EnvironmentSummaryDto[] }
+  & { onOpenNavigation?: () => void; canManage?: boolean; environments?: EnvironmentSummaryDto[]; navigationCollapsed?: boolean; onOpenCommand?: () => void }
 
 export type RemoteIntegrationsPageProps = RemoteCatalogListState<IntegrationDto>
   & RemoteCatalogRequestProps
-  & { onOpenNavigation?: () => void; canManage?: boolean }
+  & { onOpenNavigation?: () => void; canManage?: boolean; navigationCollapsed?: boolean; onOpenCommand?: () => void }
 
 type DetailStatus = 'idle' | 'loading' | 'ready' | 'not_found' | 'error'
 
@@ -259,43 +250,6 @@ function useRemoteDetail<T>(
   }
 }
 
-function PageHeader({
-  icon,
-  title,
-  description,
-  onOpenNavigation,
-  actions,
-  readOnly = false,
-}: {
-  icon: typeof Bot
-  title: string
-  description: string
-  onOpenNavigation?: () => void
-  actions?: ReactNode
-  readOnly?: boolean
-}) {
-  const { locale } = usePreferences()
-  const Icon = icon
-  return (
-    <header className="cosmos-page-header remote-catalog-header">
-      <div className="cosmos-page-header__identity">
-        <IconButton
-          icon={Menu}
-          label={text(locale, '打开导航', 'Open navigation')}
-          className="cosmos-mobile-menu"
-          onClick={onOpenNavigation}
-        />
-        <span className="cosmos-page-header__icon"><Icon aria-hidden="true" /></span>
-        <div><h1>{title}</h1><p>{description}</p></div>
-      </div>
-      <div className="cosmos-page-header__actions">
-        {readOnly ? <span className="remote-catalog-readonly"><LockKeyhole aria-hidden="true" />{text(locale, '只读', 'Read only')}</span> : null}
-        <GlobalControls className="cosmos-global-controls" />
-        {actions}
-      </div>
-    </header>
-  )
-}
 
 function StatusLabel({ status }: { status: ExpertStatus | EnvironmentStatus }) {
   const { locale } = usePreferences()
@@ -316,43 +270,6 @@ function StatusLabel({ status }: { status: ExpertStatus | EnvironmentStatus }) {
   )
 }
 
-function LoadState({
-  status,
-  resource,
-  error,
-  onRetry,
-}: {
-  status: 'loading' | 'error' | 'not_found'
-  resource: string
-  error?: Error | null
-  onRetry: () => void
-}) {
-  const { locale } = usePreferences()
-  if (status === 'loading') {
-    return (
-      <div className="remote-catalog-state" role="status">
-        <LoaderCircle className="cosmos-spin" aria-hidden="true" />
-        <p>{text(locale, `正在加载${resource}…`, `Loading ${resource}…`)}</p>
-      </div>
-    )
-  }
-
-  const notFound = status === 'not_found'
-  return (
-    <div className="remote-catalog-state remote-catalog-state--error" role={notFound ? 'status' : 'alert'}>
-      {notFound ? <CircleOff aria-hidden="true" /> : <AlertTriangle aria-hidden="true" />}
-      <div>
-        <strong>{notFound
-          ? text(locale, `未找到${resource}`, `${resource} not found`)
-          : text(locale, `无法加载${resource}`, `Unable to load ${resource}`)}</strong>
-        {error?.message ? <p>{error.message}</p> : null}
-      </div>
-      <button type="button" className="cosmos-button cosmos-button--secondary" onClick={onRetry}>
-        <RefreshCw aria-hidden="true" />{text(locale, '重试', 'Retry')}
-      </button>
-    </div>
-  )
-}
 
 function listState(
   loading: boolean,
@@ -1715,16 +1632,6 @@ function EnvironmentDetail({
   )
 }
 
-function RepositoryStatusLabel({ status }: { status: RepositoryDto['connectionStatus'] }) {
-  const { locale } = usePreferences()
-  const map: Record<RepositoryDto['connectionStatus'], { label: string; tone: string }> = {
-    connected: { label: text(locale, '已连接', 'Connected'), tone: 'ok' },
-    action_required: { label: text(locale, '需处理', 'Action required'), tone: 'warn' },
-    archived: { label: text(locale, '已归档', 'Archived'), tone: 'muted' },
-  }
-  const entry = map[status]
-  return <span className={`cosmos-status-label cosmos-status-label--${entry.tone}`}>{entry.label}</span>
-}
 
 export function RemoteRepositoriesPage({
   items,
@@ -1737,94 +1644,65 @@ export function RemoteRepositoriesPage({
   auth,
   credentialVersion,
   onOpenNavigation,
+  navigationCollapsed,
+  onOpenCommand,
 }: RemoteRepositoriesPageProps) {
   const { locale } = usePreferences()
-  const [selectedId, setSelectedId] = useState<string>()
   const state = listState(loading, ready, error)
-  const selectedSummary = items.find((item) => item.id === selectedId) ?? items[0]
-  const selectedRepositoryId = state === 'ready' ? selectedSummary?.id : undefined
-  const requestAuth = useMemo<CosmosApiAuthContext>(() => ({
-    accessToken: auth.accessToken,
-    requestIdentity: auth.requestIdentity,
-    onUnauthorized: auth.onUnauthorized,
-  }), [auth.accessToken, auth.onUnauthorized, auth.requestIdentity])
-  const identity = useMemo(() => selectedRepositoryId ? ({
-    organizationId,
-    spaceId,
-    repositoryId: selectedRepositoryId,
-    requestIdentity: requestAuth.requestIdentity,
-    credentialVersion,
-  }) : undefined, [credentialVersion, organizationId, requestAuth.requestIdentity, selectedRepositoryId, spaceId])
-  const load = useCallback((signal: AbortSignal) => {
-    if (!selectedRepositoryId) throw new Error('No Repository selected.')
-    return getRepository(organizationId, spaceId, selectedRepositoryId, requestAuth, signal)
-  }, [organizationId, requestAuth, selectedRepositoryId, spaceId])
-  const detail = useRemoteDetail(identity, load)
-  const repository = detail.status === 'ready' ? detail.item : selectedSummary
+  void organizationId; void spaceId; void auth; void credentialVersion
 
-  return (
-    <main className="cosmos-page remote-catalog-page">
-      <PageHeader
-        icon={FolderGit2}
-        title={text(locale, '代码仓库', 'Repositories')}
-        description={text(locale, '当前 Space 中由服务端管理的仓库连接', 'Server-managed repository connections in this Space')}
-        onOpenNavigation={onOpenNavigation}
-        readOnly
-      />
-      <div className="cosmos-page__scroll">
-        {state === 'loading' ? <LoadState status="loading" resource={text(locale, '代码仓库', 'Repositories')} onRetry={onRetry} /> : null}
-        {state === 'error' ? <LoadState status="error" resource={text(locale, '代码仓库', 'Repositories')} error={error} onRetry={onRetry} /> : null}
-        {state === 'ready' && items.length === 0 ? (
-          <section className="cosmos-panel remote-catalog-empty"><FolderGit2 aria-hidden="true" /><strong>{text(locale, '暂无仓库', 'No Repositories')}</strong><p>{text(locale, '通过 Integrations 连接 GitHub 或 GitLab 后，仓库会显示在这里。', 'Connect GitHub or GitLab from Integrations and repositories will appear here.')}</p></section>
-        ) : null}
-        {state === 'ready' && items.length > 0 ? (
-          <section className="remote-environment-layout">
-            <aside className="cosmos-panel remote-environment-list" aria-label={text(locale, '仓库列表', 'Repository list')}>
-              <header className="cosmos-section-heading">
-                <div><span>Catalog</span><h2>{text(locale, `${items.length} 个仓库`, `${items.length} Repositories`)}</h2></div>
-                <IconButton icon={RefreshCw} label={text(locale, '刷新仓库列表', 'Refresh Repository list')} onClick={onRetry} />
-              </header>
-              {items.map((item) => (
-                <button
-                  type="button"
-                  className={`remote-environment-row${item.id === selectedRepositoryId ? ' remote-environment-row--selected' : ''}`}
-                  aria-pressed={item.id === selectedRepositoryId}
-                  key={item.id}
-                  onClick={() => setSelectedId(item.id)}
-                >
-                  <span className="cosmos-resource-row__icon"><FolderGit2 aria-hidden="true" /></span>
-                  <span><strong>{item.fullName}</strong><small>{item.provider}</small></span>
-                  <RepositoryStatusLabel status={item.connectionStatus} />
-                  <ChevronRight aria-hidden="true" />
-                </button>
-              ))}
-            </aside>
-            <section className="cosmos-panel remote-environment-detail" aria-label={text(locale, '仓库详情', 'Repository detail')}>
-              {repository ? (
-                <>
-                  <header className="cosmos-section-heading">
-                    <div><span>{repository.provider}</span><h2>{repository.fullName}</h2></div>
-                    <RepositoryStatusLabel status={repository.connectionStatus} />
-                  </header>
-                  <section className="remote-detail-section">
-                    <header><GitBranch aria-hidden="true" /><h3>{text(locale, '配置', 'Configuration')}</h3></header>
-                    <dl className="remote-detail-list">
-                      <div><dt>{text(locale, '默认分支', 'Default branch')}</dt><dd><GitBranch aria-hidden="true" />{repository.defaultBranch}</dd></div>
-                      <div><dt>{text(locale, '提供方', 'Provider')}</dt><dd>{repository.provider}</dd></div>
-                      <div><dt>{text(locale, '安装 ID', 'Installation ID')}</dt><dd>{repository.installationId ? <code>{repository.installationId}</code> : '—'}</dd></div>
-                    </dl>
-                  </section>
-                  <footer className="remote-detail-footer"><Clock3 aria-hidden="true" />{text(locale, '创建于', 'Created')} {formatDate(repository.createdAt, locale)}</footer>
-                </>
-              ) : (
-                <div className="remote-detail-unavailable"><CircleOff aria-hidden="true" />{detail.error?.message ?? text(locale, '无法加载仓库详情。', 'Unable to load the Repository detail.')}</div>
-              )}
-            </section>
-          </section>
-        ) : null}
+  const providerLabel = (provider: RepositoryDto['provider']) => provider === 'github' ? 'GitHub' : provider === 'gitlab' ? 'GitLab' : text(locale, '未知', 'Unknown')
+
+  return <main className="prototype-automation-page">
+    <PrototypePageTopbar
+      crumb={text(locale, '配置 · Repositories', 'Configuration · Repositories')}
+      navigationCollapsed={navigationCollapsed}
+      onOpenNavigation={onOpenNavigation}
+      onOpenCommand={onOpenCommand}
+    />
+    <div className="prototype-automation-viewport">
+      <div className="prototype-automation-content prototype-expert-content">
+        <div className="prototype-automation-header">
+          <div>
+            <h1>Repositories</h1>
+            <p>{text(locale, '当前 Space 中由服务端管理的仓库连接。通过 Integrations 连接 GitHub 或 GitLab 后，仓库会显示在这里。', 'Server-managed repository connections in this Space. Connect GitHub or GitLab from Integrations and repositories appear here.')}</p>
+          </div>
+        </div>
+
+        <div className="prototype-automation-table-wrap">
+          <table className="prototype-automation-table prototype-environment-table">
+            <thead><tr>
+              <th>{text(locale, '仓库', 'Repository')}</th>
+              <th>{text(locale, '提供方', 'Provider')}</th>
+              <th>{text(locale, '默认分支', 'Default branch')}</th>
+              <th className="col-status">{text(locale, '状态', 'Status')}</th>
+              <th>{text(locale, '更新时间', 'Updated')}</th>
+            </tr></thead>
+            <tbody>
+              {state === 'loading' ? <tr><td colSpan={5} className="prototype-automation-state"><LoaderCircle className="spin" aria-hidden="true" />{text(locale, '加载中…', 'Loading…')}</td></tr> : null}
+              {state === 'error' ? <tr><td colSpan={5} className="prototype-automation-state prototype-automation-state--error"><span role="alert">{text(locale, '无法加载仓库。', 'Unable to load Repositories.')}{error ? ` ${error.message}` : ''}</span><button type="button" onClick={onRetry}><RefreshCw aria-hidden="true" />{text(locale, '重试', 'Retry')}</button></td></tr> : null}
+              {state === 'ready' && !items.length ? <tr><td colSpan={5} className="prototype-automation-state">{text(locale, '暂无仓库。通过 Integrations 连接 GitHub 或 GitLab 后，仓库会显示在这里。', 'No repositories yet. Connect GitHub or GitLab from Integrations and repositories will appear here.')}</td></tr> : null}
+              {state === 'ready' ? items.map((item) => <tr key={item.id}>
+                <td><div className="prototype-expert-name-cell">
+                  <span className="prototype-automation-expert-icon">{item.provider === 'github' ? <PrototypeGitHubIcon aria-hidden="true" /> : <PrototypeHexIcon aria-hidden="true" />}</span>
+                  <div className="prototype-expert-name-body">
+                    <div className="prototype-expert-name-line"><strong><code className="prototype-secret-name">{item.fullName}</code></strong></div>
+                    {item.installationId ? <div className="prototype-expert-desc-line">{text(locale, '安装', 'Installation')} {item.installationId}</div> : null}
+                  </div>
+                </div></td>
+                <td className="muted">{providerLabel(item.provider)}</td>
+                <td><span className="prototype-environment-repo-pill">{item.defaultBranch}</span></td>
+                <td className="col-status"><span className={`prototype-environment-status${item.connectionStatus === 'connected' ? ' prototype-environment-status--ready' : item.connectionStatus === 'action_required' ? ' prototype-environment-status--failed' : ''}`}>{item.connectionStatus === 'connected' ? text(locale, '已连接', 'connected') : item.connectionStatus === 'action_required' ? text(locale, '需处理', 'action required') : text(locale, '已归档', 'archived')}</span></td>
+                <td className="muted">{formatDate(item.updatedAt, locale)}</td>
+              </tr>) : null}
+            </tbody>
+          </table>
+        </div>
+
+        {state === 'ready' ? <div className="prototype-automation-footer"><span>{items.length} {items.length === 1 ? 'repository' : 'repositories'}</span><div /></div> : null}
       </div>
-    </main>
-  )
+    </div>
+  </main>
 }
 
 
@@ -2313,22 +2191,6 @@ export function RemoteMcpServersPage({
   </main>
 }
 
-function DaemonStatusLabel({ status, enabled }: { status: DaemonDto['status']; enabled: boolean }) {
-  const { locale } = usePreferences()
-  if (status === 'archived') {
-    return <span className="cosmos-status-label cosmos-status-label--muted">{text(locale, '已归档', 'Archived')}</span>
-  }
-  if (!enabled) {
-    return <span className="cosmos-status-label cosmos-status-label--muted">{text(locale, '已停用', 'Disabled')}</span>
-  }
-  const map: Record<Exclude<DaemonDto['status'], 'archived'>, { label: string; tone: string }> = {
-    online: { label: text(locale, '在线', 'Online'), tone: 'ok' },
-    offline: { label: text(locale, '离线', 'Offline'), tone: 'warn' },
-    degraded: { label: text(locale, '降级', 'Degraded'), tone: 'warn' },
-  }
-  const entry = map[status]
-  return <span className={`cosmos-status-label cosmos-status-label--${entry.tone}`}>{entry.label}</span>
-}
 
 type DaemonDraft = { name: string; environmentId: string; description: string; capabilities: string; concurrencySlots: number }
 const initialDaemonDraft: DaemonDraft = { name: '', environmentId: '', description: '', capabilities: '', concurrencySlots: 4 }
@@ -2346,34 +2208,22 @@ export function RemoteDaemonsPage({
   canManage,
   environments = [],
   onOpenNavigation,
+  navigationCollapsed,
+  onOpenCommand,
 }: RemoteDaemonsPageProps) {
   const { locale } = usePreferences()
-  const [selectedId, setSelectedId] = useState<string>()
   const [formOpen, setFormOpen] = useState(false)
   const [draft, setDraft] = useState<DaemonDraft>(initialDaemonDraft)
   const [mutating, setMutating] = useState(false)
   const [mutationError, setMutationError] = useState<Error | null>(null)
+  const [confirmArchiveId, setConfirmArchiveId] = useState<string>()
   const state = listState(loading, ready, error)
-  const selectedSummary = items.find((item) => item.id === selectedId) ?? items[0]
-  const selectedDaemonId = state === 'ready' ? selectedSummary?.id : undefined
   const requestAuth = useMemo<CosmosApiAuthContext>(() => ({
     accessToken: auth.accessToken,
     requestIdentity: auth.requestIdentity,
     onUnauthorized: auth.onUnauthorized,
   }), [auth.accessToken, auth.onUnauthorized, auth.requestIdentity])
-  const identity = useMemo(() => selectedDaemonId ? ({
-    organizationId,
-    spaceId,
-    daemonId: selectedDaemonId,
-    requestIdentity: requestAuth.requestIdentity,
-    credentialVersion,
-  }) : undefined, [credentialVersion, organizationId, requestAuth.requestIdentity, selectedDaemonId, spaceId])
-  const load = useCallback((signal: AbortSignal) => {
-    if (!selectedDaemonId) throw new Error('No daemon selected.')
-    return getDaemon(organizationId, spaceId, selectedDaemonId, requestAuth, signal)
-  }, [organizationId, requestAuth, selectedDaemonId, spaceId])
-  const detail = useRemoteDetail(identity, load)
-  const daemon = detail.status === 'ready' ? detail.item : selectedSummary
+  void credentialVersion
 
   const environmentName = useCallback((environmentId: string) => (
     environments.find((environment) => environment.id === environmentId)?.name ?? environmentId
@@ -2408,159 +2258,121 @@ export function RemoteDaemonsPage({
     }
   }, [closeForm, draft, environments, locale, onRetry, organizationId, requestAuth, spaceId])
 
-  const toggleEnabled = useCallback(async () => {
-    if (!daemon) return
+  const toggleEnabled = useCallback(async (item: DaemonDto) => {
     setMutating(true)
     setMutationError(null)
     try {
-      await updateDaemon(organizationId, spaceId, daemon.id, daemon.version, { enabled: !daemon.enabled }, crypto.randomUUID(), requestAuth)
+      await updateDaemon(organizationId, spaceId, item.id, item.version, { enabled: !item.enabled }, crypto.randomUUID(), requestAuth)
       onRetry()
     } catch (cause) {
       setMutationError(cause instanceof Error ? cause : new Error(String(cause)))
     } finally {
       setMutating(false)
     }
-  }, [daemon, onRetry, organizationId, requestAuth, spaceId])
+  }, [onRetry, organizationId, requestAuth, spaceId])
 
-  const archiveSelected = useCallback(async () => {
-    if (!daemon) return
+  const archiveRow = useCallback(async (item: DaemonDto) => {
     setMutating(true)
     setMutationError(null)
     try {
-      await archiveDaemon(organizationId, spaceId, daemon.id, daemon.version, requestAuth)
-      setSelectedId(undefined)
+      await archiveDaemon(organizationId, spaceId, item.id, item.version, requestAuth)
+      setConfirmArchiveId(undefined)
       onRetry()
     } catch (cause) {
       setMutationError(cause instanceof Error ? cause : new Error(String(cause)))
     } finally {
       setMutating(false)
     }
-  }, [daemon, onRetry, organizationId, requestAuth, spaceId])
+  }, [onRetry, organizationId, requestAuth, spaceId])
 
-  return (
-    <main className="cosmos-page remote-catalog-page">
-      <PageHeader
-        icon={Server}
-        title={text(locale, 'Daemon Pools', 'Daemon pools')}
-        description={text(locale, '管理自托管执行机器与容量，供调度器分配 Session 运行。', 'Manage self-hosted execution machines and capacity for the scheduler to assign Session runs.')}
-        onOpenNavigation={onOpenNavigation}
-        readOnly={!canManage}
-        actions={canManage ? (
-          <button type="button" className="cosmos-button cosmos-button--primary" disabled={environments.length === 0} onClick={() => setFormOpen(true)}>
-            <Plus aria-hidden="true" />{text(locale, '注册机器', 'Register machine')}
-          </button>
-        ) : undefined}
-      />
-      <div className="cosmos-page__scroll">
-        {state === 'loading' ? <LoadState status="loading" resource={text(locale, 'daemons', 'daemons')} onRetry={onRetry} /> : null}
-        {state === 'error' ? <LoadState status="error" resource={text(locale, 'daemons', 'daemons')} error={error} onRetry={onRetry} /> : null}
-        {state === 'ready' && items.length === 0 ? (
-          <section className="cosmos-panel remote-catalog-empty"><Server aria-hidden="true" /><strong>{text(locale, '没有已注册机器', 'No machines registered')}</strong><p>{text(locale, '注册第一台 Daemon 为该 Space 提供执行容量。', 'Register the first daemon to provide execution capacity for this Space.')}</p></section>
-        ) : null}
-        {state === 'ready' && items.length > 0 ? (
-          <section className="remote-environment-layout">
-            <aside className="cosmos-panel remote-environment-list" aria-label={text(locale, 'Daemon 列表', 'Daemon list')}>
-              <header className="cosmos-section-heading">
-                <div><span>Pools</span><h2>{text(locale, `${items.filter((item) => item.enabled).length}/${items.length} 台在线`, `${items.filter((item) => item.enabled).length}/${items.length} online`)}</h2></div>
-                <IconButton icon={RefreshCw} label={text(locale, '刷新 Daemon 列表', 'Refresh daemon list')} onClick={onRetry} />
-              </header>
-              {items.map((item) => (
-                <button
-                  type="button"
-                  className={`remote-environment-row${item.id === selectedDaemonId ? ' remote-environment-row--selected' : ''}`}
-                  aria-pressed={item.id === selectedDaemonId}
-                  key={item.id}
-                  onClick={() => setSelectedId(item.id)}
-                >
-                  <span className="cosmos-resource-row__icon"><Server aria-hidden="true" /></span>
-                  <span><strong>{item.name}</strong><small>{environmentName(item.environmentId)}</small></span>
-                  <DaemonStatusLabel status={item.status} enabled={item.enabled} />
-                  <ChevronRight aria-hidden="true" />
-                </button>
-              ))}
-            </aside>
-            <section className="cosmos-panel remote-environment-detail" aria-label={text(locale, 'Daemon 详情', 'Daemon detail')}>
-              {daemon ? (
-                <>
-                  <header className="cosmos-section-heading">
-                    <div><span>Daemon</span><h2>{daemon.name}</h2></div>
-                    <DaemonStatusLabel status={daemon.status} enabled={daemon.enabled} />
-                  </header>
-                  {daemon.description ? <p className="remote-detail-lead">{daemon.description}</p> : null}
-                  <section className="remote-detail-section">
-                    <header><ServerCog aria-hidden="true" /><h3>{text(locale, '容量', 'Capacity')}</h3></header>
-                    <dl className="remote-detail-list">
-                      <div><dt>{text(locale, '执行环境', 'Environment')}</dt><dd>{environmentName(daemon.environmentId)}</dd></div>
-                      <div><dt>{text(locale, '并发槽位', 'Concurrency slots')}</dt><dd>{daemon.concurrencySlots}</dd></div>
-                      <div><dt>{text(locale, '能力', 'Capabilities')}</dt><dd>{daemon.capabilities.length ? <code>{daemon.capabilities.join(' · ')}</code> : text(locale, '未声明', 'None declared')}</dd></div>
-                      <div><dt>{text(locale, '最近心跳', 'Last heartbeat')}</dt><dd>{daemon.lastHeartbeatAt ? formatDate(daemon.lastHeartbeatAt, locale) : text(locale, '从未', 'Never')}</dd></div>
-                    </dl>
-                  </section>
-                  {mutationError ? <InlineError error={mutationError} /> : null}
-                  <footer className="remote-detail-footer">
-                    <span><Clock3 aria-hidden="true" />{text(locale, '更新于', 'Updated')} {formatDate(daemon.updatedAt, locale)}</span>
-                    {canManage ? (
-                      <div className="remote-detail-actions">
-                        <button type="button" className="cosmos-button cosmos-button--secondary" disabled={mutating} onClick={toggleEnabled}>
-                          <Power aria-hidden="true" />{daemon.enabled ? text(locale, '停用', 'Disable') : text(locale, '启用', 'Enable')}
-                        </button>
-                        <button type="button" className="cosmos-button cosmos-button--danger" disabled={mutating} onClick={archiveSelected}>
-                          <Trash2 aria-hidden="true" />{text(locale, '归档机器', 'Archive machine')}
-                        </button>
-                      </div>
-                    ) : null}
-                  </footer>
-                </>
-              ) : (
-                <div className="remote-detail-unavailable"><CircleOff aria-hidden="true" />{detail.error?.message ?? text(locale, '无法加载 Daemon 详情。', 'Unable to load the daemon detail.')}</div>
-              )}
-            </section>
-          </section>
-        ) : null}
-      </div>
-      {formOpen ? (
-        <div className="cosmos-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeForm() }}>
-          <section className="cosmos-modal" role="dialog" aria-modal="true" aria-label={text(locale, '注册 Daemon', 'Register daemon')}>
-            <header><h2>{text(locale, '注册 Daemon', 'Register daemon')}</h2><IconButton icon={X} label={text(locale, '关闭', 'Close')} onClick={closeForm} /></header>
-            <div className="cosmos-modal__body">
-              <div className="cosmos-form-grid">
-                <label className="cosmos-field cosmos-field--wide">
-                  <span>{text(locale, '名称', 'Name')}</span>
-                  <input autoFocus value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Commerce runner" />
-                </label>
-                <label className="cosmos-field cosmos-field--wide">
-                  <span>{text(locale, '执行环境', 'Environment')}</span>
-                  <select value={draft.environmentId || environments[0]?.id || ''} onChange={(event) => setDraft({ ...draft, environmentId: event.target.value })}>
-                    {environments.map((environment) => <option key={environment.id} value={environment.id}>{environment.name}</option>)}
-                  </select>
-                </label>
-                <label className="cosmos-field cosmos-field--wide">
-                  <span>{text(locale, '描述', 'Description')}</span>
-                  <input value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} placeholder={text(locale, '执行仓库感知的专家运行。', 'Executes repository-aware Expert runs.')} />
-                </label>
-                <label className="cosmos-field cosmos-field--wide">
-                  <span>{text(locale, '能力（逗号分隔）', 'Capabilities (comma separated)')}</span>
-                  <input value={draft.capabilities} onChange={(event) => setDraft({ ...draft, capabilities: event.target.value })} placeholder="code-search, shell, git" />
-                </label>
-                <label className="cosmos-field">
-                  <span>{text(locale, '并发槽位', 'Concurrency slots')}</span>
-                  <input type="number" min={1} max={64} value={draft.concurrencySlots} onChange={(event) => setDraft({ ...draft, concurrencySlots: Math.min(64, Math.max(1, Number(event.target.value) || 1)) })} />
-                </label>
-              </div>
-              {mutationError ? <InlineError error={mutationError} /> : null}
-            </div>
-            <footer className="cosmos-modal__footer">
-              <button type="button" className="cosmos-button cosmos-button--ghost" onClick={closeForm}>{text(locale, '取消', 'Cancel')}</button>
-              <span />
-              <button type="button" className="cosmos-button cosmos-button--primary" disabled={mutating} onClick={submitDaemon}>
-                <Server aria-hidden="true" />{text(locale, '注册机器', 'Register machine')}
-              </button>
-            </footer>
-          </section>
+  return <main className="prototype-automation-page">
+    <PrototypePageTopbar
+      crumb={text(locale, '配置 · Daemons', 'Configuration · Daemons')}
+      navigationCollapsed={navigationCollapsed}
+      onOpenNavigation={onOpenNavigation}
+      onOpenCommand={onOpenCommand}
+    />
+    <div className="prototype-automation-viewport">
+      <div className="prototype-automation-content prototype-expert-content">
+        <div className="prototype-automation-header">
+          <div>
+            <h1>Daemon pools</h1>
+            <p>{text(locale, '管理自托管执行机器与容量。Daemon pool 将本地运行的 daemon 分组，调度器据此分配 Session 运行。', 'Manage self-hosted execution machines and capacity. Daemon pools group locally-running daemons so the scheduler can assign Session runs.')}</p>
+          </div>
+          {canManage ? <button type="button" className="prototype-primary-button" disabled={!environments.length} onClick={() => setFormOpen(true)}>{text(locale, '注册机器', 'Register machine')}</button> : null}
         </div>
-      ) : null}
-    </main>
-  )
+
+        <div className="prototype-automation-table-wrap">
+          <table className="prototype-automation-table prototype-environment-table">
+            <thead><tr>
+              <th>{text(locale, '名称', 'Name')}</th>
+              <th>Environment</th>
+              <th>{text(locale, '能力', 'Capabilities')}</th>
+              <th>{text(locale, '并发', 'Slots')}</th>
+              <th className="col-status">{text(locale, '状态', 'Status')}</th>
+              {canManage ? <th className="col-menu"><span className="sr-only">{text(locale, '操作', 'Actions')}</span></th> : null}
+            </tr></thead>
+            <tbody>
+              {state === 'loading' ? <tr><td colSpan={canManage ? 6 : 5} className="prototype-automation-state"><LoaderCircle className="spin" aria-hidden="true" />{text(locale, '加载中…', 'Loading…')}</td></tr> : null}
+              {state === 'error' ? <tr><td colSpan={canManage ? 6 : 5} className="prototype-automation-state prototype-automation-state--error"><span role="alert">{text(locale, '无法加载 daemon。', 'Unable to load daemons.')}{error ? ` ${error.message}` : ''}</span><button type="button" onClick={onRetry}><RefreshCw aria-hidden="true" />{text(locale, '重试', 'Retry')}</button></td></tr> : null}
+              {state === 'ready' && !items.length ? <tr><td colSpan={canManage ? 6 : 5} className="prototype-automation-state">{text(locale, '还没有注册的机器。注册第一台自托管 daemon，让会话可以指向它运行。', 'No machines registered yet. Register the first self-hosted daemon so sessions can target it.')}</td></tr> : null}
+              {state === 'ready' ? items.map((item) => {
+                const working = mutating && confirmArchiveId === item.id
+                return <tr key={item.id}>
+                  <td><div className="prototype-expert-name-cell">
+                    <span className="prototype-automation-expert-icon"><PrototypeDaemonIcon aria-hidden="true" /></span>
+                    <div className="prototype-expert-name-body">
+                      <div className="prototype-expert-name-line"><strong>{item.name}</strong></div>
+                      {item.description ? <div className="prototype-expert-desc-line">{item.description}</div> : null}
+                      {item.lastHeartbeatAt ? <div className="prototype-expert-desc-line">{text(locale, '心跳', 'Heartbeat')} {formatDate(item.lastHeartbeatAt, locale)}</div> : null}
+                    </div>
+                  </div></td>
+                  <td className="muted">{environmentName(item.environmentId)}</td>
+                  <td>{item.capabilities.length ? <div className="prototype-expert-integ-stack">{item.capabilities.slice(0, 3).map((capability) => <span className="prototype-expert-tag" key={capability}>{capability}</span>)}{item.capabilities.length > 3 ? <span className="prototype-expert-integ-count">+{item.capabilities.length - 3}</span> : null}</div> : <span className="muted">—</span>}</td>
+                  <td className="muted">{item.concurrencySlots}</td>
+                  <td className="col-status"><span className={`prototype-environment-status${item.status === 'online' && item.enabled ? ' prototype-environment-status--ready' : item.status === 'degraded' || item.status === 'offline' ? ' prototype-environment-status--failed' : ''}`}>{item.status === 'archived' ? text(locale, '已归档', 'archived') : !item.enabled ? text(locale, '已停用', 'disabled') : item.status === 'online' ? text(locale, '在线', 'online') : item.status === 'offline' ? text(locale, '离线', 'offline') : text(locale, '降级', 'degraded')}</span></td>
+                  {canManage ? <td className="col-menu" style={{ whiteSpace: 'nowrap' }}>
+                    {item.status !== 'archived' ? <button type="button" role="switch" aria-checked={item.enabled} aria-label={item.enabled ? text(locale, `停用 ${item.name}`, `Disable ${item.name}`) : text(locale, `启用 ${item.name}`, `Enable ${item.name}`)} className={`prototype-automation-toggle${item.enabled ? '' : ' off'}`} disabled={mutating} onClick={() => void toggleEnabled(item)}><span /></button> : null}
+                    {item.status !== 'archived' ? (confirmArchiveId === item.id
+                      ? <span className="prototype-automation-confirm"><button type="button" disabled={working} onClick={() => setConfirmArchiveId(undefined)}>{text(locale, '取消', 'Cancel')}</button><button type="button" className="danger" disabled={working} onClick={() => void archiveRow(item)}>{text(locale, '确认', 'Confirm')}</button></span>
+                      : <button type="button" className="icon-btn prototype-automation-remove" aria-label={text(locale, `归档 ${item.name}`, `Archive ${item.name}`)} disabled={mutating} onClick={() => setConfirmArchiveId(item.id)}>×</button>) : null}
+                  </td> : null}
+                </tr>
+              }) : null}
+            </tbody>
+          </table>
+        </div>
+
+        {mutationError && !formOpen ? <p className="prototype-automation-error" role="alert">{mutationError.message}</p> : null}
+        {state === 'ready' ? <div className="prototype-automation-footer"><span>{items.length} {items.length === 1 ? 'machine' : 'machines'}</span><div /></div> : null}
+      </div>
+    </div>
+
+    {formOpen ? <div className="prototype-drawer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !mutating) closeForm() }}>
+      <form className="prototype-automation-drawer" role="dialog" aria-modal="true" aria-label={text(locale, '注册机器', 'Register machine')} onKeyDown={(event) => { if (event.key === 'Escape' && !mutating) closeForm() }} onSubmit={(event) => { event.preventDefault(); void submitDaemon() }}>
+        <header className="prototype-drawer-header"><h2>{text(locale, '注册机器', 'Register machine')}</h2><button type="button" className="icon-btn" aria-label={text(locale, '关闭', 'Close')} disabled={mutating} onClick={closeForm}>×</button></header>
+        <div className="prototype-drawer-body">
+          <label className="prototype-field-label" htmlFor="daemon-name">{text(locale, '名称', 'Name')}</label>
+          <input id="daemon-name" className="prototype-field" autoFocus required value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="build-runner-1" />
+          <label className="prototype-field-label" htmlFor="daemon-environment">Environment</label>
+          <select id="daemon-environment" className="prototype-field-select" required value={draft.environmentId || environments[0]?.id || ''} onChange={(event) => setDraft({ ...draft, environmentId: event.target.value })}>
+            {environments.map((environment) => <option key={environment.id} value={environment.id}>{environment.name}</option>)}
+          </select>
+          <label className="prototype-field-label" htmlFor="daemon-capabilities">{text(locale, '能力（逗号分隔）', 'Capabilities (comma separated)')}</label>
+          <input id="daemon-capabilities" className="prototype-field prototype-mono-field" value={draft.capabilities} onChange={(event) => setDraft({ ...draft, capabilities: event.target.value })} placeholder="docker, gpu" />
+          <label className="prototype-field-label" htmlFor="daemon-slots">{text(locale, '并发槽位（1-64）', 'Concurrency slots (1-64)')}</label>
+          <input id="daemon-slots" className="prototype-field" type="number" min={1} max={64} value={draft.concurrencySlots} onChange={(event) => setDraft({ ...draft, concurrencySlots: Number(event.target.value) })} />
+          <label className="prototype-field-label" htmlFor="daemon-description">{text(locale, '说明', 'Description')}</label>
+          <textarea id="daemon-description" className="prototype-field" rows={2} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} />
+          {mutationError ? <p className="prototype-automation-error" role="alert">{mutationError.message}</p> : null}
+        </div>
+        <footer className="prototype-drawer-footer">
+          <button type="button" className="prototype-ghost-button" disabled={mutating} onClick={closeForm}>{text(locale, '取消', 'Cancel')}</button>
+          <button type="submit" className="prototype-primary-button" disabled={mutating}>{mutating ? text(locale, '注册中…', 'Registering…') : text(locale, '注册机器', 'Register machine')}</button>
+        </footer>
+      </form>
+    </div> : null}
+  </main>
 }
 
 const integrationIcons: Record<IntegrationDto['type'], typeof GitBranch> = {
@@ -2581,28 +2393,7 @@ const integrationTypeLabels: Record<IntegrationDto['type'], string> = {
   custom: 'Custom',
 }
 
-function IntegrationStatusLabel({ status }: { status: IntegrationDto['connectionStatus'] }) {
-  const { locale } = usePreferences()
-  const map: Record<IntegrationDto['connectionStatus'], { label: string; tone: string }> = {
-    connected: { label: text(locale, '已连接', 'Connected'), tone: 'ok' },
-    action_required: { label: text(locale, '需要处理', 'Action required'), tone: 'warn' },
-    disconnected: { label: text(locale, '未连接', 'Disconnected'), tone: 'muted' },
-    archived: { label: text(locale, '已归档', 'Archived'), tone: 'muted' },
-  }
-  const entry = map[status]
-  return <span className={`cosmos-status-label cosmos-status-label--${entry.tone}`}>{entry.label}</span>
-}
 
-function IntegrationHealthLabel({ health }: { health: IntegrationDto['health'] }) {
-  const { locale } = usePreferences()
-  const map: Record<IntegrationDto['health'], { label: string; tone: string }> = {
-    healthy: { label: text(locale, '健康', 'Healthy'), tone: 'ok' },
-    degraded: { label: text(locale, '降级', 'Degraded'), tone: 'warn' },
-    unknown: { label: text(locale, '未知', 'Unknown'), tone: 'muted' },
-  }
-  const entry = map[health]
-  return <span className={`cosmos-status-label cosmos-status-label--${entry.tone}`}>{entry.label}</span>
-}
 
 type IntegrationDraft = { type: IntegrationDto['type']; name: string; externalAccount: string; scopes: string }
 const initialIntegrationDraft: IntegrationDraft = { type: 'github', name: '', externalAccount: '', scopes: '' }
@@ -2618,6 +2409,8 @@ export function RemoteIntegrationsPage({
   auth,
   canManage,
   onOpenNavigation,
+  navigationCollapsed,
+  onOpenCommand,
 }: RemoteIntegrationsPageProps) {
   const { locale } = usePreferences()
   const [formOpen, setFormOpen] = useState(false)
@@ -2690,100 +2483,78 @@ export function RemoteIntegrationsPage({
 
   const active = items.filter((item) => item.connectionStatus !== 'archived')
 
-  return (
-    <main className="cosmos-page remote-catalog-page">
-      <PageHeader
-        icon={PlugZap}
-        title={text(locale, '集成', 'Integrations')}
-        description={text(locale, '连接该 Space 的开发与协作系统，管理连接健康与授权范围。', 'Connect development and collaboration systems for this Space and manage connection health and scopes.')}
-        onOpenNavigation={onOpenNavigation}
-        readOnly={!canManage}
-        actions={canManage ? (
-          <button type="button" className="cosmos-button cosmos-button--primary" onClick={() => setFormOpen(true)}>
-            <Plus aria-hidden="true" />{text(locale, '添加集成', 'Add integration')}
-          </button>
-        ) : undefined}
-      />
-      <div className="cosmos-page__scroll">
-        {state === 'loading' ? <LoadState status="loading" resource={text(locale, 'integrations', 'integrations')} onRetry={onRetry} /> : null}
-        {state === 'error' ? <LoadState status="error" resource={text(locale, 'integrations', 'integrations')} error={error} onRetry={onRetry} /> : null}
-        {state === 'ready' && active.length === 0 ? (
-          <section className="cosmos-panel remote-catalog-empty"><PlugZap aria-hidden="true" /><strong>{text(locale, '还没有集成', 'No integrations yet')}</strong><p>{text(locale, '连接第一个开发或协作系统，为该 Space 引入外部事件与操作。', 'Connect the first development or collaboration system to bring external events and actions into this Space.')}</p></section>
-        ) : null}
-        {mutationError ? <InlineError error={mutationError} /> : null}
-        {state === 'ready' && active.length > 0 ? (
-          <div className="cosmos-integration-grid">
-            {active.map((integration) => {
-              const IntegrationIcon = integrationIcons[integration.type]
-              const working = workingId === integration.id
-              const needsRepair = integration.connectionStatus === 'action_required' || integration.health === 'degraded'
-              return (
-                <article className="cosmos-panel cosmos-integration-card" key={integration.id}>
-                  <header>
-                    <span className="cosmos-integration-card__icon"><IntegrationIcon aria-hidden="true" /></span>
-                    <IntegrationStatusLabel status={integration.connectionStatus} />
-                  </header>
-                  <h2>{integration.name}</h2>
-                  <p>{integration.externalAccount || text(locale, '尚未绑定账号', 'No account connected')}</p>
-                  <dl>
-                    <div><dt>{text(locale, '类型', 'Type')}</dt><dd>{integrationTypeLabels[integration.type]}</dd></div>
-                    <div><dt>{text(locale, '健康状态', 'Health')}</dt><dd><IntegrationHealthLabel health={integration.health} /></dd></div>
-                    <div><dt>Scopes</dt><dd>{integration.scopes.join(', ') || '—'}</dd></div>
-                    <div><dt>{text(locale, '最近事件', 'Last event')}</dt><dd>{integration.lastEventAt ? formatDate(integration.lastEventAt, locale) : text(locale, '暂无', 'None')}</dd></div>
-                  </dl>
-                  {integration.diagnostic ? <div className="cosmos-diagnostic"><AlertTriangle aria-hidden="true" /><span><strong>{text(locale, '诊断', 'Diagnostic')}</strong>{integration.diagnostic}</span></div> : null}
-                  {canManage ? (
-                    <footer className="remote-integration-actions">
-                      <button type="button" className={needsRepair ? 'cosmos-button cosmos-button--primary' : 'cosmos-button cosmos-button--secondary'} disabled={working} onClick={() => reconnect(integration)}>
-                        {working ? <LoaderCircle className="cosmos-spin" aria-hidden="true" /> : needsRepair ? <Wrench aria-hidden="true" /> : <RefreshCw aria-hidden="true" />}
-                        {needsRepair ? text(locale, '修复连接', 'Repair connection') : text(locale, '标记已连接', 'Mark connected')}
-                      </button>
-                      <IconButton icon={Trash2} label={text(locale, '归档集成', 'Archive integration')} onClick={() => archiveSelected(integration)} />
-                    </footer>
-                  ) : null}
-                </article>
-              )
-            })}
+  return <main className="prototype-automation-page">
+    <PrototypePageTopbar
+      crumb={text(locale, '配置 · Integrations', 'Configuration · Integrations')}
+      navigationCollapsed={navigationCollapsed}
+      onOpenNavigation={onOpenNavigation}
+      onOpenCommand={onOpenCommand}
+    />
+    <div className="prototype-automation-viewport">
+      <div className="prototype-automation-content prototype-expert-content">
+        <div className="prototype-automation-header">
+          <div>
+            <h1>Integrations</h1>
+            <p>{text(locale, 'Team Apps 驱动组织级触发器，Personal Apps 附加到你的会话。在工作发生的地方连接工作。', 'Team Apps power org-wide triggers. Personal Apps attach to your sessions. Meet the work where it happens.')}</p>
           </div>
-        ) : null}
-      </div>
-      {formOpen ? (
-        <div className="cosmos-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeForm() }}>
-          <section className="cosmos-modal" role="dialog" aria-modal="true" aria-label={text(locale, '添加集成', 'Add integration')}>
-            <header><h2>{text(locale, '添加集成', 'Add integration')}</h2><IconButton icon={X} label={text(locale, '关闭', 'Close')} onClick={closeForm} /></header>
-            <div className="cosmos-modal__body">
-              <div className="cosmos-form-grid">
-                <label className="cosmos-field">
-                  <span>{text(locale, '类型', 'Type')}</span>
-                  <select value={draft.type} onChange={(event) => setDraft({ ...draft, type: event.target.value as IntegrationDto['type'] })}>
-                    {(Object.keys(integrationTypeLabels) as IntegrationDto['type'][]).map((type) => <option key={type} value={type}>{integrationTypeLabels[type]}</option>)}
-                  </select>
-                </label>
-                <label className="cosmos-field cosmos-field--wide">
-                  <span>{text(locale, '名称', 'Name')}</span>
-                  <input autoFocus value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Production GitHub" />
-                </label>
-                <label className="cosmos-field cosmos-field--wide">
-                  <span>{text(locale, '外部账号（可选）', 'External account (optional)')}</span>
-                  <input value={draft.externalAccount} onChange={(event) => setDraft({ ...draft, externalAccount: event.target.value })} placeholder="acme-inc" />
-                </label>
-                <label className="cosmos-field cosmos-field--wide">
-                  <span>{text(locale, '授权范围（逗号分隔）', 'Scopes (comma separated)')}</span>
-                  <input value={draft.scopes} onChange={(event) => setDraft({ ...draft, scopes: event.target.value })} placeholder="repo, read:org" />
-                </label>
-              </div>
-              {mutationError ? <InlineError error={mutationError} /> : null}
-            </div>
-            <footer className="cosmos-modal__footer">
-              <button type="button" className="cosmos-button cosmos-button--ghost" onClick={closeForm}>{text(locale, '取消', 'Cancel')}</button>
-              <span />
-              <button type="button" className="cosmos-button cosmos-button--primary" disabled={workingId === '__create__'} onClick={submitIntegration}>
-                <PlugZap aria-hidden="true" />{text(locale, '添加集成', 'Add integration')}
-              </button>
-            </footer>
-          </section>
+          {canManage ? <button type="button" className="prototype-primary-button" onClick={() => setFormOpen(true)}>{text(locale, '添加集成', 'Add integration')}</button> : null}
         </div>
-      ) : null}
-    </main>
-  )
+
+        {state === 'loading' ? <div className="prototype-automation-state"><LoaderCircle className="spin" aria-hidden="true" />{text(locale, '加载中…', 'Loading…')}</div> : null}
+        {state === 'error' ? <div className="prototype-automation-state prototype-automation-state--error"><span role="alert">{text(locale, '无法加载集成。', 'Unable to load integrations.')}{error ? ` ${error.message}` : ''}</span><button type="button" onClick={onRetry}><RefreshCw aria-hidden="true" />{text(locale, '重试', 'Retry')}</button></div> : null}
+        {state === 'ready' && !active.length ? <div className="prototype-automation-state">{text(locale, '还没有集成。连接第一个开发或协作系统，为该 Space 引入外部事件与操作。', 'No integrations yet. Connect the first development or collaboration system to bring external events and actions into this Space.')}</div> : null}
+        {mutationError && !formOpen ? <p className="prototype-automation-error" role="alert">{mutationError.message}</p> : null}
+
+        {state === 'ready' && active.length ? <div className="prototype-integ-grid">
+          {active.map((integration) => {
+            const IntegrationIcon = integrationIcons[integration.type]
+            const working = workingId === integration.id
+            const needsRepair = integration.connectionStatus === 'action_required' || integration.health === 'degraded'
+            return <div className="prototype-integ-card" key={integration.id}>
+              <div className="prototype-integ-card-left">
+                <span className="prototype-integ-icon"><IntegrationIcon aria-hidden="true" /></span>
+                <div>
+                  <h3>{integration.name}</h3>
+                  <p>
+                    {integration.connectionStatus === 'connected' ? text(locale, '已连接', 'Connected') : integration.connectionStatus === 'action_required' ? text(locale, '需要处理', 'Action required') : text(locale, '未连接', 'Not connected')}
+                    {' · '}{integrationTypeLabels[integration.type]}
+                    {integration.externalAccount ? ` · ${integration.externalAccount}` : ''}
+                    {integration.lastEventAt ? ` · ${text(locale, '最近事件', 'last event')} ${formatDate(integration.lastEventAt, locale)}` : ''}
+                  </p>
+                  {integration.diagnostic ? <p className="prototype-integ-diagnostic" role="status">{integration.diagnostic}</p> : null}
+                </div>
+              </div>
+              {canManage ? <div className="prototype-integ-card-actions">
+                <button type="button" className={needsRepair ? 'prototype-primary-button' : 'prototype-ghost-button'} disabled={working} onClick={() => reconnect(integration)}>{working ? text(locale, '处理中…', 'Working…') : needsRepair ? text(locale, '修复连接', 'Repair') : text(locale, '标记已连接', 'Mark connected')}</button>
+                <button type="button" className="icon-btn prototype-automation-remove" aria-label={text(locale, `归档 ${integration.name}`, `Archive ${integration.name}`)} disabled={working} onClick={() => void archiveSelected(integration)}>×</button>
+              </div> : null}
+            </div>
+          })}
+        </div> : null}
+      </div>
+    </div>
+
+    {formOpen ? <div className="prototype-drawer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && workingId !== '__create__') closeForm() }}>
+      <form className="prototype-automation-drawer" role="dialog" aria-modal="true" aria-label={text(locale, '添加集成', 'Add integration')} onKeyDown={(event) => { if (event.key === 'Escape' && workingId !== '__create__') closeForm() }} onSubmit={(event) => { event.preventDefault(); void submitIntegration() }}>
+        <header className="prototype-drawer-header"><h2>{text(locale, '添加集成', 'Add integration')}</h2><button type="button" className="icon-btn" aria-label={text(locale, '关闭', 'Close')} onClick={closeForm}>×</button></header>
+        <div className="prototype-drawer-body">
+          <label className="prototype-field-label" htmlFor="integration-type">{text(locale, '类型', 'Type')}</label>
+          <select id="integration-type" className="prototype-field-select" value={draft.type} onChange={(event) => setDraft({ ...draft, type: event.target.value as IntegrationDto['type'] })}>
+            {(Object.keys(integrationTypeLabels) as IntegrationDto['type'][]).map((type) => <option key={type} value={type}>{integrationTypeLabels[type]}</option>)}
+          </select>
+          <label className="prototype-field-label" htmlFor="integration-name">{text(locale, '名称', 'Name')}</label>
+          <input id="integration-name" className="prototype-field" autoFocus required value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Production GitHub" />
+          <label className="prototype-field-label" htmlFor="integration-account">{text(locale, '外部账号（可选）', 'External account (optional)')}</label>
+          <input id="integration-account" className="prototype-field" value={draft.externalAccount} onChange={(event) => setDraft({ ...draft, externalAccount: event.target.value })} placeholder="acme-inc" />
+          <label className="prototype-field-label" htmlFor="integration-scopes">{text(locale, '授权范围（逗号分隔）', 'Scopes (comma separated)')}</label>
+          <input id="integration-scopes" className="prototype-field prototype-mono-field" value={draft.scopes} onChange={(event) => setDraft({ ...draft, scopes: event.target.value })} placeholder="repo, read:org" />
+          {mutationError ? <p className="prototype-automation-error" role="alert">{mutationError.message}</p> : null}
+        </div>
+        <footer className="prototype-drawer-footer">
+          <button type="button" className="prototype-ghost-button" onClick={closeForm}>{text(locale, '取消', 'Cancel')}</button>
+          <button type="submit" className="prototype-primary-button" disabled={workingId === '__create__'}>{workingId === '__create__' ? text(locale, '添加中…', 'Adding…') : text(locale, '添加集成', 'Add integration')}</button>
+        </footer>
+      </form>
+    </div> : null}
+  </main>
 }

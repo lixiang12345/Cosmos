@@ -2202,7 +2202,9 @@ function CosmosApp() {
               canManage={expertManagementEnabled}
               environments={catalog.environments.items}
               onOpenNavigation={openNavigation}
-            />} />
+            navigationCollapsed={sidebarCollapsed}
+              onOpenCommand={() => setCommandOpen(true)}
+              />} />
         <Route path="/repositories" element={demoMode
           ? <RepositoriesControlPage onOpenNavigation={openNavigation} />
           : <RemoteRepositoriesPage
@@ -2216,7 +2218,9 @@ function CosmosApp() {
               auth={catalogAuth}
               credentialVersion={credentialVersion}
               onOpenNavigation={openNavigation}
-            />} />
+            navigationCollapsed={sidebarCollapsed}
+              onOpenCommand={() => setCommandOpen(true)}
+              />} />
         <Route path="/integrations" element={demoMode
           ? <IntegrationsControlPage onOpenNavigation={openNavigation} />
           : <RemoteIntegrationsPage
@@ -2231,7 +2235,9 @@ function CosmosApp() {
               credentialVersion={credentialVersion}
               canManage={expertManagementEnabled}
               onOpenNavigation={openNavigation}
-            />} />
+            navigationCollapsed={sidebarCollapsed}
+              onOpenCommand={() => setCommandOpen(true)}
+              />} />
         <Route path="/mcp" element={demoMode
           ? <McpRegistryPage onOpenNavigation={openNavigation} />
           : <RemoteMcpServersPage
