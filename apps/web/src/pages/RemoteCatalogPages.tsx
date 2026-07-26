@@ -43,7 +43,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode, type RefObject } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react'
 import {
   PrototypeCloudIcon,
   PrototypeDaemonIcon,
@@ -191,6 +191,29 @@ type DetailSnapshot<T> = {
   status: Exclude<DetailStatus, 'idle' | 'loading'>
   item?: T
   error?: Error
+}
+
+function catalogDialogKeyDown(event: ReactKeyboardEvent<HTMLElement>, onClose: () => void, closeDisabled = false) {
+  if (event.key === 'Escape') {
+    if (closeDisabled) return
+    event.preventDefault()
+    onClose()
+    return
+  }
+  if (event.key !== 'Tab') return
+  const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(
+    'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])',
+  ))
+  const first = focusable[0]
+  const last = focusable.at(-1)
+  if (!first || !last) return
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
 }
 
 function text(locale: Locale, zh: string, en: string) {
@@ -1899,7 +1922,7 @@ export function RemoteSecretsPage({
     </div>
 
     {formOpen ? <div className="prototype-drawer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !mutating) closeForm() }}>
-      <form className="prototype-automation-drawer" role="dialog" aria-modal="true" aria-label={text(locale, '添加密钥', 'Add secret')} onKeyDown={(event) => { if (event.key === 'Escape' && !mutating) closeForm() }} onSubmit={(event) => { event.preventDefault(); void submitSecret() }}>
+      <form className="prototype-automation-drawer" role="dialog" aria-modal="true" aria-label={text(locale, '添加密钥', 'Add secret')} onKeyDown={(event) => catalogDialogKeyDown(event, closeForm, mutating)} onSubmit={(event) => { event.preventDefault(); void submitSecret() }}>
         <header className="prototype-drawer-header"><h2>{text(locale, '添加密钥', 'Add secret')}</h2><button type="button" className="icon-btn" aria-label={text(locale, '关闭', 'Close')} disabled={mutating} onClick={closeForm}>×</button></header>
         <div className="prototype-drawer-body">
           <label className="prototype-field-label" htmlFor="secret-name">{text(locale, '名称（大写下划线）', 'Name (upper snake case)')}</label>
@@ -2076,7 +2099,7 @@ export function RemoteWebhooksPage({
     </div>
 
     {formOpen ? <div className="prototype-drawer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !mutating) closeForm() }}>
-      <form className="prototype-automation-drawer" role="dialog" aria-modal="true" aria-label={text(locale, '创建 Webhook', 'Create webhook')} onKeyDown={(event) => { if (event.key === 'Escape' && !mutating) closeForm() }} onSubmit={(event) => { event.preventDefault(); void submitWebhook() }}>
+      <form className="prototype-automation-drawer" role="dialog" aria-modal="true" aria-label={text(locale, '创建 Webhook', 'Create webhook')} onKeyDown={(event) => catalogDialogKeyDown(event, closeForm, mutating)} onSubmit={(event) => { event.preventDefault(); void submitWebhook() }}>
         <header className="prototype-drawer-header"><h2>{text(locale, '创建 Webhook', 'Create webhook')}</h2><button type="button" className="icon-btn" aria-label={text(locale, '关闭', 'Close')} disabled={mutating} onClick={closeForm}>×</button></header>
         <div className="prototype-drawer-body">
           <label className="prototype-field-label" htmlFor="webhook-name">{text(locale, '名称 / 描述', 'Description / name')}</label>
@@ -2248,7 +2271,7 @@ export function RemoteMcpServersPage({
     </div>
 
     {formOpen ? <div className="prototype-drawer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !mutating) closeForm() }}>
-      <form className="prototype-automation-drawer" role="dialog" aria-modal="true" aria-label={text(locale, '新增 MCP Server', 'Add MCP server')} onKeyDown={(event) => { if (event.key === 'Escape' && !mutating) closeForm() }} onSubmit={(event) => { event.preventDefault(); void submitServer() }}>
+      <form className="prototype-automation-drawer" role="dialog" aria-modal="true" aria-label={text(locale, '新增 MCP Server', 'Add MCP server')} onKeyDown={(event) => catalogDialogKeyDown(event, closeForm, mutating)} onSubmit={(event) => { event.preventDefault(); void submitServer() }}>
         <header className="prototype-drawer-header"><h2>{editing ? text(locale, '编辑 MCP Server', 'Edit MCP server') : text(locale, '新增 MCP Server', 'Add MCP server')}</h2><button type="button" className="icon-btn" aria-label={text(locale, '关闭', 'Close')} disabled={mutating} onClick={closeForm}>×</button></header>
         <div className="prototype-drawer-body">
           <label className="prototype-field-label" htmlFor="mcp-name">{text(locale, '名称', 'Name')}</label>
@@ -2435,7 +2458,7 @@ export function RemoteDaemonsPage({
     </div>
 
     {formOpen ? <div className="prototype-drawer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !mutating) closeForm() }}>
-      <form className="prototype-automation-drawer" role="dialog" aria-modal="true" aria-label={text(locale, '注册机器', 'Register machine')} onKeyDown={(event) => { if (event.key === 'Escape' && !mutating) closeForm() }} onSubmit={(event) => { event.preventDefault(); void submitDaemon() }}>
+      <form className="prototype-automation-drawer" role="dialog" aria-modal="true" aria-label={text(locale, '注册机器', 'Register machine')} onKeyDown={(event) => catalogDialogKeyDown(event, closeForm, mutating)} onSubmit={(event) => { event.preventDefault(); void submitDaemon() }}>
         <header className="prototype-drawer-header"><h2>{text(locale, '注册机器', 'Register machine')}</h2><button type="button" className="icon-btn" aria-label={text(locale, '关闭', 'Close')} disabled={mutating} onClick={closeForm}>×</button></header>
         <div className="prototype-drawer-body">
           <label className="prototype-field-label" htmlFor="daemon-name">{text(locale, '名称', 'Name')}</label>
@@ -2640,7 +2663,7 @@ export function RemoteIntegrationsPage({
     </div>
 
     {formOpen ? <div className="prototype-drawer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && workingId !== '__create__') closeForm() }}>
-      <form className="prototype-automation-drawer" role="dialog" aria-modal="true" aria-label={text(locale, '添加集成', 'Add integration')} onKeyDown={(event) => { if (event.key === 'Escape' && workingId !== '__create__') closeForm() }} onSubmit={(event) => { event.preventDefault(); void submitIntegration() }}>
+      <form className="prototype-automation-drawer" role="dialog" aria-modal="true" aria-label={text(locale, '添加集成', 'Add integration')} onKeyDown={(event) => catalogDialogKeyDown(event, closeForm, !(workingId !== '__create__'))} onSubmit={(event) => { event.preventDefault(); void submitIntegration() }}>
         <header className="prototype-drawer-header"><h2>{text(locale, '添加集成', 'Add integration')}</h2><button type="button" className="icon-btn" aria-label={text(locale, '关闭', 'Close')} onClick={closeForm}>×</button></header>
         <div className="prototype-drawer-body">
           <label className="prototype-field-label" htmlFor="integration-type">{text(locale, '类型', 'Type')}</label>

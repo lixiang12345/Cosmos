@@ -20605,6 +20605,84 @@ main.cosmos-home.prototype-home {
   font-weight: 500;
 }
 
+.prototype-inspector-artifact {
+  position: relative;
+}
+
+.prototype-inspector-artifact a {
+  color: var(--proto-text);
+  text-decoration: none;
+}
+
+.prototype-inspector-artifact a:hover strong {
+  text-decoration: underline;
+}
+
+.prototype-inspector-remove {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  border: none;
+  background: none;
+  color: var(--proto-dim);
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 4px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.prototype-inspector-remove:hover {
+  color: var(--proto-text);
+  background: var(--proto-surface-hover);
+}
+
+.prototype-inspector-add {
+  margin-left: auto;
+  border: 1px dashed var(--proto-border);
+  background: none;
+  color: var(--proto-muted);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 7px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.prototype-inspector-add:hover {
+  color: var(--proto-text);
+  border-color: var(--proto-muted);
+}
+
+.prototype-inspector-form {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px;
+  margin-bottom: 8px;
+  border: 1px solid var(--proto-border-soft);
+  border-radius: 10px;
+  background: var(--proto-elevated);
+}
+
+.prototype-inspector-form .prototype-field,
+.prototype-inspector-form .prototype-field-select {
+  min-height: 30px;
+  font-size: 12px;
+}
+
+.prototype-inspector-form > div:last-child {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.prototype-inspector-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
 .prototype-session-toast {
   position: fixed;
   right: 18px;

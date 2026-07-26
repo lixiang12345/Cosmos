@@ -50,6 +50,10 @@ import {
   SessionEventDtoSchema,
   SessionEventPageSchema,
   SessionListResponseSchema,
+  SessionShareListResponseSchema,
+  ShareGrantDtoSchema,
+  ArtifactDtoSchema,
+  ArtifactListResponseSchema,
   SessionMessagePageSchema,
   SessionWorkerListResponseSchema,
   SendSessionMessageResponseSchema,
@@ -103,6 +107,12 @@ import {
   type SessionEventDto,
   type SessionEventPage,
   type SessionListResponse,
+  type SessionShareListResponse,
+  type ShareGrantDto,
+  type CreateShareGrantRequestInput,
+  type ArtifactDto,
+  type ArtifactListResponse,
+  type CreateArtifactRequestInput,
   type SessionMessagePage,
   type SessionWorkerListResponse,
   type CreateSpaceRequestInput,
@@ -876,6 +886,108 @@ export function retryAdvisorPlan(
     assertAdvisorPlanScope(plan, organizationId, spaceId, sessionId, planId)
     return plan
   })
+}
+
+const EmptyResponseSchema = { safeParse: () => ({ success: true as const, data: null }) }
+
+export function listSessionShares(
+  organizationId: string,
+  spaceId: string,
+  sessionId: string,
+  auth?: CosmosApiAuthContext,
+  signal?: AbortSignal,
+): Promise<SessionShareListResponse> {
+  return request(`${sessionPath(organizationId, spaceId, sessionId)}/shares`, {
+    method: 'GET', headers: { Accept: 'application/json' }, signal,
+  }, SessionShareListResponseSchema, auth)
+}
+
+export function createSessionShare(
+  organizationId: string,
+  spaceId: string,
+  sessionId: string,
+  input: CreateShareGrantRequestInput,
+  idempotencyKey: string,
+  auth?: CosmosApiAuthContext,
+): Promise<ShareGrantDto> {
+  return request(`${sessionPath(organizationId, spaceId, sessionId)}/shares`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey,
+    },
+    body: JSON.stringify(input),
+  }, ShareGrantDtoSchema, auth)
+}
+
+export function revokeSessionShare(
+  organizationId: string,
+  spaceId: string,
+  sessionId: string,
+  shareId: string,
+  version: number,
+  idempotencyKey: string,
+  auth?: CosmosApiAuthContext,
+): Promise<ShareGrantDto> {
+  return request(`${sessionPath(organizationId, spaceId, sessionId)}/shares/${encodeURIComponent(shareId)}`, {
+    method: 'DELETE',
+    headers: {
+      Accept: 'application/json',
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': `"${version}"`,
+    },
+  }, ShareGrantDtoSchema, auth)
+}
+
+export function listSessionArtifacts(
+  organizationId: string,
+  spaceId: string,
+  sessionId: string,
+  auth?: CosmosApiAuthContext,
+  signal?: AbortSignal,
+): Promise<ArtifactListResponse> {
+  return request(`${sessionPath(organizationId, spaceId, sessionId)}/artifacts`, {
+    method: 'GET', headers: { Accept: 'application/json' }, signal,
+  }, ArtifactListResponseSchema, auth)
+}
+
+export function createSessionArtifact(
+  organizationId: string,
+  spaceId: string,
+  sessionId: string,
+  input: CreateArtifactRequestInput,
+  idempotencyKey: string,
+  auth?: CosmosApiAuthContext,
+): Promise<ArtifactDto> {
+  return request(`${sessionPath(organizationId, spaceId, sessionId)}/artifacts`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey,
+    },
+    body: JSON.stringify(input),
+  }, ArtifactDtoSchema, auth)
+}
+
+export function deleteSessionArtifact(
+  organizationId: string,
+  spaceId: string,
+  sessionId: string,
+  artifactId: string,
+  version: number,
+  idempotencyKey: string,
+  auth?: CosmosApiAuthContext,
+): Promise<null> {
+  return request(`${sessionPath(organizationId, spaceId, sessionId)}/artifacts/${encodeURIComponent(artifactId)}`, {
+    method: 'DELETE',
+    headers: {
+      Accept: 'application/json',
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': `"${version}"`,
+    },
+  }, EmptyResponseSchema, auth)
 }
 
 export function listSessionWorkers(

@@ -1,10 +1,12 @@
 import type {
   AdvisorPlanDto,
+  ArtifactDto,
   SessionDto,
   SessionEventDto,
   SessionMessageDto,
   SessionStatus,
   SessionVisibility,
+  ShareGrantDto,
 } from '@cosmos/contracts'
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import {
@@ -58,6 +60,14 @@ export type RemoteSessionWorkbenchProps = {
   advisorManagementEnabled?: boolean
   advisorMutationPlanId?: string
   onAdvisorDecision?: (plan: AdvisorPlanDto, decision: 'confirmed' | 'rejected') => void
+  serverArtifacts?: ArtifactDto[]
+  onAddArtifactLink?: (input: { label: string; url: string }) => Promise<void>
+  onRemoveArtifact?: (artifact: ArtifactDto) => Promise<void>
+  shares?: ShareGrantDto[]
+  sharesStatus?: 'idle' | 'loading' | 'ready' | 'error'
+  sharesError?: string
+  onCreateShare?: (input: { principalType: 'user' | 'group'; principalId: string; role: 'viewer' | 'collaborator' }) => Promise<void>
+  onRevokeShare?: (share: ShareGrantDto) => Promise<void>
   onAdvisorRetry?: (plan: AdvisorPlanDto) => void
 }
 
@@ -244,6 +254,14 @@ export function RemoteSessionWorkbench({
   advisorManagementEnabled = false,
   advisorMutationPlanId,
   onAdvisorDecision,
+  serverArtifacts = [],
+  onAddArtifactLink,
+  onRemoveArtifact,
+  shares = [],
+  sharesStatus = 'idle',
+  sharesError,
+  onCreateShare,
+  onRevokeShare,
   onAdvisorRetry,
 }: RemoteSessionWorkbenchProps) {
   const { locale } = usePreferences()
@@ -267,10 +285,56 @@ export function RemoteSessionWorkbench({
   const canResume = session.status === 'paused'
   const canCancel = ['draft', 'queued', 'active', 'waiting', 'paused'].includes(session.status)
   const canRetry = session.status === 'failed' && Boolean(onRetry)
-  const artifacts = useMemo(() => [...localArtifacts, ...events.flatMap((event) => {
-    if (event.type !== 'artifact.created' && event.type !== 'artifact.updated') return []
-    return [{ id: event.eventId, label: event.payload.label, type: event.payload.type, status: event.payload.status }]
-  })], [events, localArtifacts])
+  const artifacts = useMemo(() => {
+    const server = serverArtifacts.filter((artifact) => artifact.removedAt === null)
+    const serverLabels = new Set(server.map((artifact) => artifact.label))
+    const derived = events.flatMap((event) => {
+      if (event.type !== 'artifact.created' && event.type !== 'artifact.updated') return []
+      if (serverLabels.has(event.payload.label)) return []
+      return [{ id: event.eventId, label: event.payload.label, type: event.payload.type, status: event.payload.status }]
+    })
+    return [
+      ...localArtifacts,
+      ...server.map((artifact) => ({ id: artifact.id, label: artifact.label, type: artifact.type, status: artifact.status, url: artifact.url, server: artifact })),
+      ...derived,
+    ] as Array<{ id: string; label: string; type: string; status?: string | null; url?: string; server?: ArtifactDto }>
+  }, [events, localArtifacts, serverArtifacts])
+  const [artifactFormOpen, setArtifactFormOpen] = useState(false)
+  const [artifactDraft, setArtifactDraft] = useState({ label: '', url: '' })
+  const [artifactBusy, setArtifactBusy] = useState(false)
+  const [artifactError, setArtifactError] = useState('')
+  const [shareDraft, setShareDraft] = useState<{ principalType: 'user' | 'group'; principalId: string; role: 'viewer' | 'collaborator' }>({ principalType: 'user', principalId: '', role: 'viewer' })
+  const [shareBusy, setShareBusy] = useState(false)
+  const [shareError, setShareError] = useState('')
+
+  const submitArtifactLink = async () => {
+    if (!onAddArtifactLink) return
+    setArtifactBusy(true)
+    setArtifactError('')
+    try {
+      await onAddArtifactLink({ label: artifactDraft.label.trim(), url: artifactDraft.url.trim() })
+      setArtifactDraft({ label: '', url: '' })
+      setArtifactFormOpen(false)
+    } catch (cause) {
+      setArtifactError(cause instanceof Error ? cause.message : text(locale, '无法添加产物链接。', 'Unable to add the artifact link.'))
+    } finally {
+      setArtifactBusy(false)
+    }
+  }
+
+  const submitShare = async () => {
+    if (!onCreateShare) return
+    setShareBusy(true)
+    setShareError('')
+    try {
+      await onCreateShare({ ...shareDraft, principalId: shareDraft.principalId.trim() })
+      setShareDraft({ principalType: 'user', principalId: '', role: 'viewer' })
+    } catch (cause) {
+      setShareError(cause instanceof Error ? cause.message : text(locale, '无法创建分享。', 'Unable to create the share.'))
+    } finally {
+      setShareBusy(false)
+    }
+  }
 
   useEffect(() => () => {
     if (copyTimer.current) window.clearTimeout(copyTimer.current)
@@ -480,7 +544,44 @@ export function RemoteSessionWorkbench({
             <div><dt>{text(locale, '环境修订 ID', 'Environment revision ID')}</dt><dd><code>{revisionValue(session.environmentRevisionId, locale)}</code></dd></div>
             <div><dt>{text(locale, '仓库绑定 ID', 'Repository binding ID')}</dt><dd><code>{revisionValue(session.repositoryId, locale)}</code></dd></div>
           </dl></section>
-          <section className="prototype-inspector-section"><h2>{text(locale, '产物', 'Artifacts')}<span>{artifacts.length}</span></h2>{artifacts.length ? artifacts.map((artifact) => <article className="prototype-inspector-artifact" key={artifact.id}><small>{artifact.type.replace('_', ' ')}</small><strong>{artifact.label}</strong>{artifact.status ? <span>{artifact.status}</span> : null}</article>) : <p>{text(locale, '尚未生成产物', 'No artifacts yet')}</p>}</section>
+          <section className="prototype-inspector-section">
+            <h2>{text(locale, '产物', 'Artifacts')}<span>{artifacts.length}</span>{onAddArtifactLink ? <button type="button" className="prototype-inspector-add" aria-expanded={artifactFormOpen} onClick={() => setArtifactFormOpen((open) => !open)}>＋ {text(locale, '链接', 'Link')}</button> : null}</h2>
+            {artifactFormOpen && onAddArtifactLink ? <form className="prototype-inspector-form" onSubmit={(event) => { event.preventDefault(); void submitArtifactLink() }}>
+              <input className="prototype-field" required maxLength={240} placeholder={text(locale, '标签', 'Label')} value={artifactDraft.label} onChange={(event) => setArtifactDraft({ ...artifactDraft, label: event.target.value })} />
+              <input className="prototype-field prototype-mono-field" required type="url" placeholder="https://…" value={artifactDraft.url} onChange={(event) => setArtifactDraft({ ...artifactDraft, url: event.target.value })} />
+              {artifactError ? <p className="prototype-automation-error" role="alert">{artifactError}</p> : null}
+              <div><button type="button" className="prototype-ghost-button" disabled={artifactBusy} onClick={() => setArtifactFormOpen(false)}>{text(locale, '取消', 'Cancel')}</button><button type="submit" className="prototype-primary-button" disabled={artifactBusy}>{artifactBusy ? text(locale, '添加中…', 'Adding…') : text(locale, '添加', 'Add')}</button></div>
+            </form> : null}
+            {artifacts.length ? artifacts.map((artifact) => <article className="prototype-inspector-artifact" key={artifact.id}>
+              <small>{artifact.type.replace('_', ' ')}</small>
+              {artifact.url ? <a href={artifact.url} target="_blank" rel="noreferrer"><strong>{artifact.label}</strong></a> : <strong>{artifact.label}</strong>}
+              {artifact.status ? <span>{artifact.status}</span> : null}
+              {artifact.server && onRemoveArtifact ? <button type="button" className="prototype-inspector-remove" aria-label={text(locale, `移除 ${artifact.label}`, `Remove ${artifact.label}`)} onClick={() => { void onRemoveArtifact(artifact.server!) }}>×</button> : null}
+            </article>) : <p>{text(locale, '尚未生成产物', 'No artifacts yet')}</p>}
+          </section>
+          {sharesStatus !== 'idle' ? <section className="prototype-inspector-section">
+            <h2>{text(locale, '分享', 'Sharing')}<span>{shares.filter((share) => share.revokedAt === null).length}</span></h2>
+            {sharesStatus === 'loading' ? <p>{text(locale, '加载中…', 'Loading…')}</p> : null}
+            {sharesStatus === 'error' ? <p role="alert">{sharesError ?? text(locale, '无法加载分享。', 'Unable to load shares.')}</p> : null}
+            {sharesStatus === 'ready' ? <>
+              {shares.filter((share) => share.revokedAt === null).map((share) => <article className="prototype-inspector-artifact" key={share.id}>
+                <small>{share.principalType} · {share.role === 'collaborator' ? text(locale, '协作者', 'collaborator') : text(locale, '只读', 'viewer')}</small>
+                <strong>{share.principalId}</strong>
+                {share.expiresAt ? <span>{text(locale, '到期', 'expires')} {new Date(share.expiresAt).toLocaleDateString()}</span> : null}
+                {onRevokeShare ? <button type="button" className="prototype-inspector-remove" aria-label={text(locale, `撤销 ${share.principalId} 的分享`, `Revoke share for ${share.principalId}`)} onClick={() => { void onRevokeShare(share) }}>×</button> : null}
+              </article>)}
+              {!shares.filter((share) => share.revokedAt === null).length ? <p>{text(locale, '尚未分享', 'Not shared yet')}</p> : null}
+              {onCreateShare ? <form className="prototype-inspector-form" onSubmit={(event) => { event.preventDefault(); void submitShare() }}>
+                <input className="prototype-field prototype-mono-field" required maxLength={128} placeholder={text(locale, '用户或用户组 ID', 'User or group id')} value={shareDraft.principalId} onChange={(event) => setShareDraft({ ...shareDraft, principalId: event.target.value })} />
+                <div className="prototype-inspector-form-row">
+                  <select className="prototype-field-select" aria-label={text(locale, '主体类型', 'Principal type')} value={shareDraft.principalType} onChange={(event) => setShareDraft({ ...shareDraft, principalType: event.target.value as 'user' | 'group' })}><option value="user">{text(locale, '用户', 'User')}</option><option value="group">{text(locale, '用户组', 'Group')}</option></select>
+                  <select className="prototype-field-select" aria-label={text(locale, '角色', 'Role')} value={shareDraft.role} onChange={(event) => setShareDraft({ ...shareDraft, role: event.target.value as 'viewer' | 'collaborator' })}><option value="viewer">{text(locale, '只读', 'Viewer')}</option><option value="collaborator">{text(locale, '协作者', 'Collaborator')}</option></select>
+                </div>
+                {shareError ? <p className="prototype-automation-error" role="alert">{shareError}</p> : null}
+                <div><button type="submit" className="prototype-primary-button" disabled={shareBusy || !shareDraft.principalId.trim()}>{shareBusy ? text(locale, '分享中…', 'Sharing…') : text(locale, '分享', 'Share')}</button></div>
+              </form> : null}
+            </> : null}
+          </section> : null}
           <section className="prototype-inspector-section"><h2>{text(locale, '摘要', 'Summary')}</h2><p>{session.summary || text(locale, '服务端未提供摘要。', 'No summary was provided by the server.')}</p>{onOpenFiles ? <button type="button" className="prototype-pane-action" onClick={onOpenFiles}>{text(locale, '打开文件', 'Open Files')}</button> : null}{onOpenWorkers ? <button type="button" className="prototype-pane-action" onClick={onOpenWorkers}>{text(locale, '打开 Workers', 'Open Workers')}</button> : null}</section>
         </div>
       </aside> : null}

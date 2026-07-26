@@ -1,4 +1,4 @@
-import { DEFAULT_AGENT_MODEL, type AdvisorPlanDto, type ContextPackResponse, type EnvironmentSummaryDto, type SessionDto, type SessionEventDto, type SessionMessageDto } from '@cosmos/contracts'
+import { DEFAULT_AGENT_MODEL, type AdvisorPlanDto, type ArtifactDto, type ContextPackResponse, type EnvironmentSummaryDto, type SessionDto, type SessionEventDto, type SessionMessageDto, type ShareGrantDto } from '@cosmos/contracts'
 import { AlertTriangle, CheckCircle2, LoaderCircle, RefreshCw, X } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
@@ -47,6 +47,12 @@ import {
   retryAdvisorPlan,
   resumeSession,
   retrySessionTurn,
+  listSessionArtifacts,
+  listSessionShares,
+  createSessionArtifact,
+  deleteSessionArtifact,
+  createSessionShare,
+  revokeSessionShare,
   sendSessionMessage,
   startSession,
 } from './services/cosmosApi'
@@ -312,6 +318,7 @@ function SessionRoute({
   onPause,
   onStop,
   advisorManagementEnabled,
+  sessionWriteEnabled,
 }: {
   runs: Run[]
   organizationId: string
@@ -334,6 +341,7 @@ function SessionRoute({
   onPause: (runId: string) => void
   onStop: (runId: string) => void
   advisorManagementEnabled: boolean
+  sessionWriteEnabled: boolean
 }) {
   const { sessionId } = useParams()
   const navigate = useNavigate()
@@ -527,6 +535,65 @@ function SessionRoute({
       })
     }
   }, [advisorPlans, auth, locale, organizationId, spaceId])
+
+  const [railData, setRailData] = useState<{
+    key: string
+    artifacts: ArtifactDto[]
+    shares: ShareGrantDto[]
+    status: 'loading' | 'ready' | 'error'
+    error?: string
+  }>()
+  const [railVersion, setRailVersion] = useState(0)
+  useEffect(() => {
+    if (demoMode || detailConcealed || !sessionId) return
+    const controller = new AbortController()
+    const key = `${requestKey}:${railVersion}`
+    void Promise.resolve().then(() => {
+      if (controller.signal.aborted) return
+      setRailData((current) => ({
+        key,
+        artifacts: current?.artifacts ?? [],
+        shares: current?.shares ?? [],
+        status: 'loading',
+      }))
+    })
+    void Promise.all([
+      listSessionArtifacts(organizationId, spaceId, sessionId, auth, controller.signal),
+      listSessionShares(organizationId, spaceId, sessionId, auth, controller.signal),
+    ]).then(([artifactsResponse, sharesResponse]) => {
+      if (controller.signal.aborted) return
+      setRailData({ key, artifacts: artifactsResponse.items, shares: sharesResponse.items, status: 'ready' })
+    }, (cause: unknown) => {
+      if (controller.signal.aborted) return
+      setRailData({
+        key,
+        artifacts: [],
+        shares: [],
+        status: 'error',
+        error: cause instanceof Error ? cause.message : (locale === 'zh' ? '无法加载分享与产物。' : 'Unable to load shares and artifacts.'),
+      })
+    })
+    return () => controller.abort()
+  }, [auth, demoMode, detailConcealed, locale, organizationId, railVersion, requestKey, sessionId, spaceId])
+  const refreshRail = useCallback(() => setRailVersion((value) => value + 1), [])
+  const addArtifactLink = useCallback(async (input: { label: string; url: string }) => {
+    if (!sessionId) return
+    await createSessionArtifact(organizationId, spaceId, sessionId, { type: 'link', label: input.label, url: input.url }, makeSessionIdempotencyKey(`artifact-${sessionId}-${input.url}`), auth)
+    refreshRail()
+  }, [auth, organizationId, refreshRail, sessionId, spaceId])
+  const removeArtifact = useCallback(async (artifact: ArtifactDto) => {
+    await deleteSessionArtifact(organizationId, spaceId, artifact.sessionId, artifact.id, artifact.version, makeSessionIdempotencyKey(`artifact-remove-${artifact.id}-${artifact.version}`), auth)
+    refreshRail()
+  }, [auth, organizationId, refreshRail, spaceId])
+  const createShare = useCallback(async (input: { principalType: 'user' | 'group'; principalId: string; role: 'viewer' | 'collaborator' }) => {
+    if (!sessionId) return
+    await createSessionShare(organizationId, spaceId, sessionId, input, makeSessionIdempotencyKey(`share-${sessionId}-${input.principalType}-${input.principalId}-${input.role}`), auth)
+    refreshRail()
+  }, [auth, organizationId, refreshRail, sessionId, spaceId])
+  const revokeShare = useCallback(async (share: ShareGrantDto) => {
+    await revokeSessionShare(organizationId, spaceId, share.sessionId, share.id, share.version, makeSessionIdempotencyKey(`share-revoke-${share.id}-${share.version}`), auth)
+    refreshRail()
+  }, [auth, organizationId, refreshRail, spaceId])
 
   const startDraft = useCallback(() => {
     if (!resolvedSession || resolvedSession.status !== 'draft' || !executionEnabled) return
@@ -757,6 +824,14 @@ function SessionRoute({
         advisorMutationPlanId={advisorMutation.planId}
         onAdvisorDecision={(plan, decision) => { void runAdvisorDecision(plan, decision) }}
         onAdvisorRetry={(plan) => { void runAdvisorRetry(plan) }}
+        serverArtifacts={railData?.artifacts ?? []}
+        onAddArtifactLink={sessionWriteEnabled ? addArtifactLink : undefined}
+        onRemoveArtifact={sessionWriteEnabled ? removeArtifact : undefined}
+        shares={railData?.shares ?? []}
+        sharesStatus={railData?.status ?? 'idle'}
+        sharesError={railData?.error}
+        onCreateShare={sessionWriteEnabled ? createShare : undefined}
+        onRevokeShare={sessionWriteEnabled ? revokeShare : undefined}
       />
     )
   }
@@ -2027,7 +2102,8 @@ function CosmosApp() {
             onPause={pauseRun}
             onStop={stopRun}
             advisorManagementEnabled={expertManagementEnabled}
-          />
+          sessionWriteEnabled={sessionCreationEnabled}
+            />
         } />
         <Route path="/sessions/:sessionId/files" element={demoMode
           ? <Navigate to="/sessions" replace />
