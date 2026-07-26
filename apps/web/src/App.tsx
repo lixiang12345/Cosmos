@@ -797,6 +797,8 @@ function SessionWorkspaceFilesRoute({
   requestModificationEnabled,
   locale,
   onOpenNavigation,
+  navigationCollapsed,
+  onOpenCommand,
 }: {
   organizationId: string
   spaceId: string
@@ -805,6 +807,8 @@ function SessionWorkspaceFilesRoute({
   requestModificationEnabled: boolean
   locale: 'zh' | 'en'
   onOpenNavigation: () => void
+  navigationCollapsed: boolean
+  onOpenCommand: () => void
 }) {
   const { sessionId } = useParams()
   const navigate = useNavigate()
@@ -818,7 +822,9 @@ function SessionWorkspaceFilesRoute({
     auth={auth}
     credentialVersion={credentialVersion}
     sessionCreationEnabled={requestModificationEnabled}
+    navigationCollapsed={navigationCollapsed}
     onOpenNavigation={onOpenNavigation}
+    onOpenCommand={onOpenCommand}
     onBackToSession={() => navigate(sessionPath)}
     onRequestModification={(path) => navigate(sessionPath, {
       state: {
@@ -2014,6 +2020,8 @@ function CosmosApp() {
               requestModificationEnabled={productionExecutionEnabled}
               locale={locale}
               onOpenNavigation={openNavigation}
+              navigationCollapsed={sidebarCollapsed}
+              onOpenCommand={() => setCommandOpen(true)}
             />} />
         <Route path="/sessions/:sessionId/workers" element={demoMode
           ? <Navigate to="/sessions" replace />
@@ -2027,7 +2035,7 @@ function CosmosApp() {
         <Route path="/runs/:sessionId" element={<LegacySessionRedirect />} />
         <Route path="/files" element={<Navigate to={demoMode ? '/files/user' : '/files/organization'} replace />} />
         <Route path="/files/user" element={demoMode
-          ? <CosmosFilesPage key="user" initialScope="user" onOpenNavigation={openNavigation} />
+          ? <CosmosFilesPage key="user" initialScope="user" navigationCollapsed={sidebarCollapsed} onOpenNavigation={openNavigation} onOpenCommand={() => setCommandOpen(true)} />
           : <RemoteFilesPage
               key="user"
               organizationId={organizationId}
@@ -2036,11 +2044,13 @@ function CosmosApp() {
               auth={catalogAuth}
               credentialVersion={credentialVersion}
               sessionCreationEnabled={sessionCreationEnabled}
+              navigationCollapsed={sidebarCollapsed}
               onOpenNavigation={openNavigation}
+              onOpenCommand={() => setCommandOpen(true)}
               onRequestModification={(path) => openNewTask(undefined, locale === 'zh' ? `请修改 ${path}：` : `Please update ${path}:`)}
             />} />
         <Route path="/files/organization" element={demoMode
-          ? <CosmosFilesPage key="organization" initialScope="organization" onOpenNavigation={openNavigation} />
+          ? <CosmosFilesPage key="organization" initialScope="organization" navigationCollapsed={sidebarCollapsed} onOpenNavigation={openNavigation} onOpenCommand={() => setCommandOpen(true)} />
           : <RemoteFilesPage
               key="organization"
               organizationId={organizationId}
@@ -2049,7 +2059,9 @@ function CosmosApp() {
               auth={catalogAuth}
               credentialVersion={credentialVersion}
               sessionCreationEnabled={sessionCreationEnabled}
+              navigationCollapsed={sidebarCollapsed}
               onOpenNavigation={openNavigation}
+              onOpenCommand={() => setCommandOpen(true)}
               onRequestModification={(path) => openNewTask(undefined, locale === 'zh' ? `请修改 ${path}：` : `Please update ${path}:`)}
             />} />
         <Route path="/approvals" element={demoMode

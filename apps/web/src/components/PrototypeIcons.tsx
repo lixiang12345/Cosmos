@@ -52,6 +52,10 @@ export function PrototypeFolderIcon(props: IconProps) {
   return <StrokeIcon {...props}><path d="M2.5 4h3.2l1.3 1.3H13.5v7.2a1 1 0 01-1 1h-9a1 1 0 01-1-1V4z" /></StrokeIcon>
 }
 
+export function PrototypeFileIcon(props: IconProps) {
+  return <StrokeIcon size={14} {...props}><path d="M4.2 2.5h4.3L11.8 5.8V13.5H4.2V2.5z" /><path d="M8.5 2.5V5.8h3.3" /></StrokeIcon>
+}
+
 export function PrototypeConfigurationIcon(props: IconProps) {
   return <StrokeIcon {...props}><path d="M3 4.5h10M3 8h10M3 11.5h10" /><path d="M6 3.5v2M10 7v2M7.5 10.5v2" /></StrokeIcon>
 }

@@ -25,19 +25,20 @@ describe('Cosmos Files browser', () => {
     window.localStorage.removeItem('cosmos.controlPlane.v1')
   })
 
-  it('browses scoped files without exposing direct mutation actions', async () => {
+  it('browses scoped prototype files with the VFS actions and without edit or delete controls', async () => {
     const user = userEvent.setup()
     renderFiles()
 
     expect(screen.getByRole('heading', { level: 1, name: '组织文件' })).toBeInTheDocument()
-    expect(screen.getByRole('treeitem', { name: '查看 AGENTS.md' })).toBeInTheDocument()
-    expect(screen.getByRole('treeitem', { name: '查看 docs/payment-architecture.md' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '新建文件' })).not.toBeInTheDocument()
+    expect(screen.getByRole('treeitem', { name: 'AGENTS.md' })).toBeInTheDocument()
+    expect(screen.queryByRole('treeitem', { name: 'payment-architecture.md' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '上传文件' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '新建文件夹' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '删除' })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('treeitem', { name: 'docs' }))
-    expect(screen.queryByRole('treeitem', { name: '查看 docs/payment-architecture.md' })).not.toBeInTheDocument()
+    expect(screen.getByRole('treeitem', { name: 'payment-architecture.md' })).toBeInTheDocument()
   })
 
   it('copies the scoped path and exposes immutable version snapshots', async () => {
@@ -45,12 +46,13 @@ describe('Cosmos Files browser', () => {
     const writeText = vi.spyOn(navigator.clipboard, 'writeText')
     renderFiles()
 
+    await user.click(screen.getByRole('row', { name: '预览文件: AGENTS.md' }))
     await user.click(screen.getByRole('button', { name: '复制路径' }))
     expect(writeText).toHaveBeenCalledWith('organization/AGENTS.md')
     expect(screen.getByRole('status')).toHaveTextContent('路径已复制')
 
     await user.click(screen.getByRole('button', { name: /版本历史/ }))
-    expect(screen.getByRole('button', { name: /v1 · 当前/ })).toBeInTheDocument()
+    expect(screen.getByRole('menuitemradio', { name: /v1 · 当前/ })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /恢复版本/ })).not.toBeInTheDocument()
   })
 })

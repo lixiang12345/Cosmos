@@ -4,7 +4,6 @@ import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
-  Building2,
   CalendarClock,
   Check,
   CheckCircle2,
@@ -13,13 +12,7 @@ import {
   CirclePause,
   CirclePlay,
   Clock3,
-  Copy,
-  Download,
   ExternalLink,
-  FileClock,
-  FileText,
-  Folder,
-  FolderOpen,
   GitPullRequest,
   Menu,
   MessageSquareText,
@@ -27,18 +20,19 @@ import {
   Plus,
   Search,
   ShieldCheck,
-  User,
   Webhook,
   Workflow,
   X,
   type LucideIcon,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { GlobalControls } from '../components/GlobalControls'
 import {
   PrototypeChevronDownLargeIcon,
   PrototypeEnvironmentIcon,
+  PrototypeFileIcon,
+  PrototypeFolderIcon,
   PrototypeHexIcon,
   PrototypeKeyboardIcon,
   PrototypeMoonIcon,
@@ -49,6 +43,7 @@ import {
   PrototypeTopbarSearchIcon,
   PrototypeToolsIcon,
 } from '../components/PrototypeIcons'
+import { PrototypePageTopbar } from '../components/PrototypePageTopbar'
 import {
   useControlPlane,
   type Automation,
@@ -608,9 +603,15 @@ function getScopedFilePath(file: CosmosFileRecord) {
 
 function getFileSize(content: string, locale: Locale) {
   const bytes = new Blob([content]).size
+  return formatCosmosFileSize(bytes, locale)
+}
+
+function formatCosmosFileSize(bytes: number, locale: Locale) {
   if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${new Intl.NumberFormat(locale === 'zh' ? 'zh-CN' : 'en-US', { maximumFractionDigits: 1 }).format(bytes / 1024)} KB`
-  return `${new Intl.NumberFormat(locale === 'zh' ? 'zh-CN' : 'en-US', { maximumFractionDigits: 1 }).format(bytes / 1024 / 1024)} MB`
+  const formatter = new Intl.NumberFormat(locale === 'zh' ? 'zh-CN' : 'en-US', { maximumFractionDigits: 1 })
+  return bytes < 1024 * 1024
+    ? `${formatter.format(bytes / 1024)} KiB`
+    : `${formatter.format(bytes / 1024 / 1024)} MiB`
 }
 
 async function copyToClipboard(value: string) {
@@ -698,11 +699,59 @@ function toCosmosFileRecord(file: MemoryFile, locale: Locale): CosmosFileRecord 
   }
 }
 
-export type CosmosFilesPageProps = Pick<CosmosPageBaseProps, 'onOpenNavigation'> & {
-  initialScope?: CosmosFileScope
+type CosmosDirectoryEntry = {
+  kind: 'directory'
+  path: string
+  name: string
+  size: number
+  updatedAt: string
 }
 
-export function CosmosFilesPage({ onOpenNavigation, initialScope = 'user' }: CosmosFilesPageProps) {
+type CosmosFileEntry = { kind: 'file'; file: CosmosFileRecord }
+
+function getCosmosFolderEntries(files: CosmosFileRecord[], folder: string): Array<CosmosDirectoryEntry | CosmosFileEntry> {
+  const prefix = folder ? `${folder}/` : ''
+  const directories = new Map<string, CosmosDirectoryEntry>()
+  const directFiles: CosmosFileEntry[] = []
+
+  files.forEach((file) => {
+    if (!file.path.startsWith(prefix)) return
+    const relative = file.path.slice(prefix.length)
+    const slash = relative.indexOf('/')
+    if (slash === -1) {
+      directFiles.push({ kind: 'file', file })
+      return
+    }
+    const name = relative.slice(0, slash)
+    const path = `${prefix}${name}`
+    const current = directories.get(path)
+    directories.set(path, {
+      kind: 'directory',
+      path,
+      name,
+      size: (current?.size ?? 0) + new Blob([file.content]).size,
+      updatedAt: current?.updatedAt ?? file.updatedAt,
+    })
+  })
+
+  return [
+    ...[...directories.values()].sort((left, right) => left.name.localeCompare(right.name)),
+    ...directFiles.sort((left, right) => left.file.path.localeCompare(right.file.path)),
+  ]
+}
+
+export type CosmosFilesPageProps = Pick<CosmosPageBaseProps, 'onOpenNavigation'> & {
+  initialScope?: CosmosFileScope
+  navigationCollapsed?: boolean
+  onOpenCommand?: () => void
+}
+
+export function CosmosFilesPage({
+  onOpenNavigation,
+  initialScope = 'user',
+  navigationCollapsed = false,
+  onOpenCommand,
+}: CosmosFilesPageProps) {
   const { locale } = usePreferences()
   const { scope: controlPlaneScope } = useControlPlane()
   const navigate = useNavigate()
@@ -711,11 +760,34 @@ export function CosmosFilesPage({ onOpenNavigation, initialScope = 'user' }: Cos
     [controlPlaneScope.memoryFiles, locale],
   )
   const [query, setQuery] = useState('')
-  const [selectedFileId, setSelectedFileId] = useState<string | null>(() => files.find((file) => file.scope === initialScope)?.id ?? null)
-  const [expandedDirectories, setExpandedDirectories] = useState<Set<string>>(() => getDirectoryPaths(files))
+  const [selectedFileId, setSelectedFileId] = useState<string | null>(null)
+  const [currentFolder, setCurrentFolder] = useState('')
+  const [expandedDirectories, setExpandedDirectories] = useState<Set<string>>(new Set())
   const [viewVersionId, setViewVersionId] = useState<string | null>(null)
-  const [versionsOpen, setVersionsOpen] = useState(false)
+  const [scopeMenuOpen, setScopeMenuOpen] = useState(false)
+  const [versionMenuOpen, setVersionMenuOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
   const [notice, setNotice] = useState('')
+  const scopeTriggerRef = useRef<HTMLButtonElement>(null)
+  const scopeMenuRef = useRef<HTMLDivElement>(null)
+  const versionTriggerRef = useRef<HTMLButtonElement>(null)
+  const versionMenuRef = useRef<HTMLDivElement>(null)
+  const searchDialogRef = useRef<HTMLElement>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const searchReturnFocusRef = useRef<HTMLElement | null>(null)
+
+  const openSearch = useCallback(() => {
+    searchReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setSearchOpen(true)
+  }, [])
+
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false)
+    window.requestAnimationFrame(() => {
+      if (searchReturnFocusRef.current?.isConnected) searchReturnFocusRef.current.focus()
+      else scopeTriggerRef.current?.focus()
+    })
+  }, [])
 
   const scopedFiles = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
@@ -729,24 +801,93 @@ export function CosmosFilesPage({ onOpenNavigation, initialScope = 'user' }: Cos
     () => getFileTreeRows(scopedFiles, visibleDirectories),
     [scopedFiles, visibleDirectories],
   )
-  const selectedFile = scopedFiles.find((file) => file.id === selectedFileId) ?? scopedFiles[0] ?? null
+  const selectedFile = scopedFiles.find((file) => file.id === selectedFileId) ?? null
   const viewedVersion = selectedFile?.versions.find((version) => version.id === viewVersionId) ?? null
   const previewContent = viewedVersion?.content ?? selectedFile?.content ?? ''
+  const listEntries = useMemo(() => getCosmosFolderEntries(scopedFiles, currentFolder), [currentFolder, scopedFiles])
+  const totalSize = useMemo(() => scopedFiles.reduce((sum, file) => sum + new Blob([file.content]).size, 0), [scopedFiles])
+
+  useEffect(() => {
+    if (!notice) return
+    const timer = window.setTimeout(() => setNotice(''), 2800)
+    return () => window.clearTimeout(timer)
+  }, [notice])
+
+  useEffect(() => {
+    if (scopeMenuOpen) scopeMenuRef.current?.querySelector<HTMLButtonElement>('button')?.focus()
+    if (versionMenuOpen) versionMenuRef.current?.querySelector<HTMLButtonElement>('button')?.focus()
+    if (searchOpen) searchInputRef.current?.focus()
+    const closeOnPointer = (event: PointerEvent) => {
+      const target = event.target as Node
+      if (scopeMenuOpen && !scopeMenuRef.current?.contains(target) && target !== scopeTriggerRef.current) setScopeMenuOpen(false)
+      if (versionMenuOpen && !versionMenuRef.current?.contains(target) && target !== versionTriggerRef.current) setVersionMenuOpen(false)
+    }
+    const closeOnKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'p') {
+        event.preventDefault()
+        openSearch()
+        return
+      }
+      if (event.key === 'Tab' && searchOpen) {
+        const focusable = Array.from(searchDialogRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled)') ?? [])
+        const first = focusable[0]
+        const last = focusable.at(-1)
+        if (first && last && event.shiftKey && document.activeElement === first) {
+          event.preventDefault()
+          last.focus()
+        } else if (first && last && !event.shiftKey && document.activeElement === last) {
+          event.preventDefault()
+          first.focus()
+        }
+        return
+      }
+      if (event.key !== 'Escape') return
+      if (scopeMenuOpen) {
+        setScopeMenuOpen(false)
+        window.requestAnimationFrame(() => scopeTriggerRef.current?.focus())
+      }
+      if (versionMenuOpen) {
+        setVersionMenuOpen(false)
+        window.requestAnimationFrame(() => versionTriggerRef.current?.focus())
+      }
+      if (searchOpen) closeSearch()
+    }
+    document.addEventListener('pointerdown', closeOnPointer)
+    document.addEventListener('keydown', closeOnKey)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnPointer)
+      document.removeEventListener('keydown', closeOnKey)
+    }
+  }, [closeSearch, openSearch, scopeMenuOpen, searchOpen, versionMenuOpen])
 
   const selectFile = (file: CosmosFileRecord) => {
     setSelectedFileId(file.id)
     setViewVersionId(null)
-    setVersionsOpen(false)
+    setVersionMenuOpen(false)
     setNotice('')
   }
 
-  const toggleDirectory = (path: string) => {
+  const openDirectory = (path: string) => {
+    setCurrentFolder(path)
+    setSelectedFileId(null)
+    setVersionMenuOpen(false)
     setExpandedDirectories((current) => {
       const next = new Set(current)
-      if (next.has(path)) next.delete(path)
-      else next.add(path)
+      next.add(path)
       return next
     })
+  }
+
+  const toggleTreeDirectory = (path: string) => {
+    if (currentFolder === path && expandedDirectories.has(path)) {
+      setExpandedDirectories((current) => {
+        const next = new Set(current)
+        next.delete(path)
+        return next
+      })
+      return
+    }
+    openDirectory(path)
   }
 
   const copyValue = async (value: string, successMessage: string) => {
@@ -764,129 +905,127 @@ export function CosmosFilesPage({ onOpenNavigation, initialScope = 'user' }: Cos
     setNotice(localize(locale, '文件下载已开始', 'File download started'))
   }
 
+  const title = initialScope === 'organization' ? 'Organization VFS' : 'User VFS'
+  const scopeLabel = initialScope === 'organization' ? 'Organization' : 'User'
+
   return (
-    <main className="cosmos-page cosmos-files-page">
-      <CosmosPageHeader
-        title={initialScope === 'organization'
-          ? localize(locale, '组织文件', 'Organization files')
-          : localize(locale, '个人文件', 'User files')}
-        description={initialScope === 'organization'
-          ? localize(locale, '跨会话共享的团队知识、产物与 Skills', 'Team knowledge, outputs, and Skills shared across Sessions')
-          : localize(locale, '仅你的会话可访问的持久知识与产物', 'Persistent knowledge and outputs available only to your Sessions')}
+    <main className="prototype-files-page">
+      <h1 className="prototype-visually-hidden">{initialScope === 'organization'
+        ? localize(locale, '组织文件', 'Organization Files')
+        : localize(locale, '个人文件', 'User Files')}</h1>
+      <PrototypePageTopbar
+        crumb={title}
+        navigationCollapsed={navigationCollapsed}
         onOpenNavigation={onOpenNavigation}
+        onOpenCommand={onOpenCommand}
       />
-      <div className="cosmos-page__content">
-        {notice ? <CosmosNotice>{notice}</CosmosNotice> : null}
-        <CosmosPrototypeNote locale={locale} />
+      <div className="prototype-files-viewport">
+        <div className="prototype-vfs-page">
+          <div className="prototype-vfs-layout">
+            <aside className="prototype-vfs-sidebar" aria-label={localize(locale, '文件树', 'File tree')}>
+              <button ref={scopeTriggerRef} type="button" className="prototype-vfs-scope-btn" aria-haspopup="menu" aria-expanded={scopeMenuOpen} onClick={() => setScopeMenuOpen((value) => !value)}>
+                {title}<PrototypeChevronDownLargeIcon aria-hidden="true" />
+              </button>
+              {scopeMenuOpen ? <div ref={scopeMenuRef} className="prototype-vfs-scope-menu" role="menu">
+                <button type="button" role="menuitem" className={initialScope === 'user' ? 'active' : undefined} onClick={() => navigate('/files/user')}>User VFS</button>
+                <button type="button" role="menuitem" className={initialScope === 'organization' ? 'active' : undefined} onClick={() => navigate('/files/organization')}>Organization VFS</button>
+              </div> : null}
 
-        <div className="cosmos-files-layout">
-          <aside className="cosmos-files-browser" aria-label={localize(locale, '文件树', 'File tree')}>
-            <div className="cosmos-segmented-control" role="tablist" aria-label={localize(locale, '文件范围', 'File scope')}>
-              <button type="button" role="tab" aria-selected={initialScope === 'organization'} className={initialScope === 'organization' ? 'cosmos-segmented-control__active' : ''} onClick={() => navigate('/files/organization')}><Building2 aria-hidden="true" />{localize(locale, '组织', 'Organization')}</button>
-              <button type="button" role="tab" aria-selected={initialScope === 'user'} className={initialScope === 'user' ? 'cosmos-segmented-control__active' : ''} onClick={() => navigate('/files/user')}><User aria-hidden="true" />{localize(locale, '个人', 'User')}</button>
-            </div>
-            <label className="cosmos-search-field">
-              <Search aria-hidden="true" />
-              <span className="cosmos-visually-hidden">{localize(locale, '搜索文件', 'Search files')}</span>
-              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={localize(locale, '搜索路径或写入者', 'Search path or writer')} />
-            </label>
-            <div className="cosmos-files-browser__summary">
-              <span>{localize(locale, '文件树', 'File tree')}</span>
-              <strong>{scopedFiles.length}</strong>
-            </div>
-            <div className="cosmos-file-list" role="tree">
-              {treeRows.map((row) => row.kind === 'directory' ? (
-                <button
-                  type="button"
-                  role="treeitem"
-                  aria-expanded={visibleDirectories.has(row.path)}
-                  className="cosmos-file-directory-row"
-                  key={`directory:${row.path}`}
-                  style={{ '--tree-indent': `${row.depth * 16}px` } as CSSProperties}
-                  onClick={() => toggleDirectory(row.path)}
-                >
-                  {visibleDirectories.has(row.path) ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
-                  {visibleDirectories.has(row.path) ? <FolderOpen aria-hidden="true" /> : <Folder aria-hidden="true" />}
-                  <span>{row.name}</span>
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  role="treeitem"
-                  aria-selected={row.file.id === selectedFile?.id}
-                  aria-label={localize(locale, `查看 ${row.file.path}`, `View ${row.file.path}`)}
-                  className={`cosmos-file-row${row.file.id === selectedFile?.id ? ' cosmos-file-row--active' : ''}`}
-                  key={row.file.id}
-                  style={{ '--tree-indent': `${row.depth * 16}px` } as CSSProperties}
-                  onClick={() => selectFile(row.file)}
-                >
-                  <FileText aria-hidden="true" />
-                  <span>
-                    <strong>{row.file.path.split('/').at(-1)}</strong>
-                    <small>{row.file.path}</small>
-                    <small>{getFileSize(row.file.content, locale)} · {row.file.updatedAt} · {row.file.author}</small>
-                  </span>
-                </button>
-              ))}
-              {!scopedFiles.length ? <p className="cosmos-empty-state">{query.trim()
-                ? localize(locale, '没有匹配的文件', 'No matching files')
-                : localize(locale, '当前范围还没有文件', 'No files in this scope yet')}</p> : null}
-            </div>
-          </aside>
-
-          <section className="cosmos-file-viewer" aria-label={localize(locale, '文件预览', 'File preview')}>
-            {selectedFile ? (
-              <>
-                <header className="cosmos-file-viewer__header">
-                  <div>
-                    <p>{selectedFile.scope === 'user' ? 'User' : 'Organization'}{viewedVersion ? ` · v${viewedVersion.version}` : ''}</p>
-                    <h2>{selectedFile.path}</h2>
-                    <span>{viewedVersion
-                      ? `${viewedVersion.author} · ${viewedVersion.createdAt}`
-                      : `${selectedFile.author} · ${selectedFile.updatedAt}`}</span>
+              <div className="prototype-vfs-tree" role="tree">
+                {treeRows.map((row) => row.kind === 'directory' ? (
+                  <div className={`prototype-vfs-tree-item depth-${Math.min(row.depth, 2)}`} key={`directory:${row.path}`}>
+                    <button type="button" role="treeitem" aria-expanded={visibleDirectories.has(row.path)} aria-selected={currentFolder === row.path} className={`prototype-vfs-tree-row${currentFolder === row.path ? ' active' : ''}`} onClick={() => toggleTreeDirectory(row.path)}>
+                      <span className={`prototype-vfs-chev${visibleDirectories.has(row.path) ? ' open' : ''}`} aria-hidden="true">›</span>
+                      <span className="prototype-vfs-ico"><PrototypeFolderIcon aria-hidden="true" /></span>
+                      <span className="prototype-vfs-label" title={row.name}>{row.name}</span>
+                      <span className="prototype-vfs-row-more" aria-hidden="true">⋯</span>
+                    </button>
                   </div>
-                  <div>
-                    <CosmosIconButton icon={Copy} label={localize(locale, '复制路径', 'Copy path')} onClick={() => { void copyValue(getScopedFilePath(selectedFile), localize(locale, '路径已复制', 'Path copied')) }} />
-                    <CosmosIconButton icon={FileText} label={localize(locale, '复制内容', 'Copy content')} onClick={() => { void copyValue(previewContent, localize(locale, '内容已复制', 'Content copied')) }} />
-                    <CosmosIconButton icon={Download} label={localize(locale, '下载文件', 'Download file')} onClick={downloadSelectedFile} />
+                ) : (
+                  <div className={`prototype-vfs-tree-item depth-${Math.min(row.depth, 2)}`} key={row.file.id}>
+                    <button type="button" role="treeitem" aria-selected={selectedFile?.id === row.file.id} className={`prototype-vfs-tree-row${selectedFile?.id === row.file.id ? ' active' : ''}`} onClick={() => selectFile(row.file)}>
+                      <span className="prototype-vfs-chev" aria-hidden="true" />
+                      <span className="prototype-vfs-ico"><PrototypeFileIcon aria-hidden="true" /></span>
+                      <span className="prototype-vfs-label" title={row.file.path.split('/').at(-1)}>{row.file.path.split('/').at(-1)}</span>
+                    </button>
                   </div>
-                </header>
+                ))}
+                {!scopedFiles.length ? <div className="prototype-vfs-state">{query.trim()
+                  ? localize(locale, '没有匹配的文件', 'No matching Files')
+                  : localize(locale, '当前范围没有文件', 'No Files')}</div> : null}
+              </div>
+              <div className="prototype-vfs-side-foot">{scopedFiles.length} {localize(locale, '个文件', scopedFiles.length === 1 ? 'file' : 'files')} · {formatCosmosFileSize(totalSize, locale)}</div>
+            </aside>
 
-                <dl className="cosmos-file-metadata">
-                  <div><dt>{localize(locale, '路径', 'Path')}</dt><dd><code>{getScopedFilePath(selectedFile)}</code></dd></div>
-                  <div><dt>{localize(locale, '大小', 'Size')}</dt><dd>{getFileSize(previewContent, locale)}</dd></div>
-                  <div><dt>{localize(locale, '最近写入者', 'Last writer')}</dt><dd>{viewedVersion?.author ?? selectedFile.author}</dd></div>
-                  <div><dt>{localize(locale, '更新时间', 'Modified')}</dt><dd>{viewedVersion?.createdAt ?? selectedFile.updatedAt}</dd></div>
-                </dl>
-                {selectedFile.description ? <p className="cosmos-file-description">{selectedFile.description}</p> : null}
-                <pre className="cosmos-file-preview" aria-label={localize(locale, '文件内容', 'File content')}>{previewContent}</pre>
+            <section className="prototype-vfs-main" aria-label={localize(locale, '文件浏览器', 'Files browser')}>
+              <div className="prototype-vfs-main-head">
+                <div className="prototype-vfs-crumb"><span className="prototype-vfs-ico"><PrototypeFolderIcon aria-hidden="true" /></span>{currentFolder ? currentFolder.split('/').at(-1) : scopeLabel}</div>
+                <div className="prototype-vfs-actions">
+                  <button type="button" aria-label={localize(locale, '上传文件', 'Upload')} title="Upload" onClick={() => setNotice(localize(locale, '原型上传：每个文件最大 4 MiB', 'Prototype upload: 4 MiB per File'))}>↑</button>
+                  <button type="button" aria-label={localize(locale, '新建文件夹', 'New folder')} title="New folder" onClick={() => {
+                    const name = window.prompt(localize(locale, '文件夹名称', 'Folder name'))?.trim()
+                    if (name) setNotice(localize(locale, `原型已创建文件夹“${name}”`, `Prototype folder “${name}” created`))
+                  }}>＋</button>
+                  <button type="button" aria-label={localize(locale, '下载文件', 'Download File')} title="Download" disabled={!selectedFile} onClick={downloadSelectedFile}>↓</button>
+                </div>
+              </div>
 
-                <section className="cosmos-version-history" aria-labelledby="cosmos-version-title">
-                  <button type="button" className="cosmos-version-toggle" aria-expanded={versionsOpen} onClick={() => setVersionsOpen((value) => !value)}>
-                    <span><FileClock aria-hidden="true" /><span><small>{localize(locale, '不可变快照', 'Immutable snapshots')}</small><strong id="cosmos-version-title">{localize(locale, '版本历史', 'Version history')} · {selectedFile.versions.length}</strong></span></span>
-                    {versionsOpen ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
-                  </button>
-                  {versionsOpen ? (
-                    <div className="cosmos-version-list">
+              <div className="prototype-vfs-list-wrap">
+                <table className="prototype-vfs-table" aria-label={localize(locale, '文件', 'Files')}>
+                  <thead><tr><th>{localize(locale, '名称', 'Name')}</th><th className="col-size">{localize(locale, '大小', 'Size')}</th><th className="col-mod">{localize(locale, '修改时间', 'Modified')}</th></tr></thead>
+                  <tbody>
+                    {listEntries.map((entry) => (
+                      <tr
+                        key={entry.kind === 'directory' ? `directory:${entry.path}` : entry.file.id}
+                        tabIndex={0}
+                        className={entry.kind === 'file' && selectedFile?.id === entry.file.id ? 'active' : undefined}
+                        aria-label={entry.kind === 'directory' ? `${localize(locale, '打开文件夹', 'Open folder')}: ${entry.name}` : `${localize(locale, '预览文件', 'Preview File')}: ${entry.file.path.split('/').at(-1)}`}
+                        onClick={() => { if (entry.kind === 'directory') openDirectory(entry.path); else selectFile(entry.file) }}
+                        onKeyDown={(event) => {
+                          if (event.key !== 'Enter' && event.key !== ' ') return
+                          event.preventDefault()
+                          if (entry.kind === 'directory') openDirectory(entry.path)
+                          else selectFile(entry.file)
+                        }}
+                      >
+                        <td><span className="prototype-vfs-row-name"><span className="prototype-vfs-ico">{entry.kind === 'directory' ? <PrototypeFolderIcon aria-hidden="true" /> : <PrototypeFileIcon aria-hidden="true" />}</span>{entry.kind === 'directory' ? entry.name : entry.file.path.split('/').at(-1)}</span></td>
+                        <td className="muted col-size">{entry.kind === 'directory' ? formatCosmosFileSize(entry.size, locale) : getFileSize(entry.file.content, locale)}</td>
+                        <td className="muted col-mod">{entry.kind === 'directory' ? entry.updatedAt : entry.file.updatedAt}</td>
+                      </tr>
+                    ))}
+                    {!listEntries.length ? <tr><td colSpan={3} className="prototype-vfs-table-state">{query.trim() ? localize(locale, '没有匹配的文件', 'No matching Files') : localize(locale, '空文件夹', 'Empty folder')}</td></tr> : null}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="prototype-vfs-main-foot">{listEntries.length} {localize(locale, '项', listEntries.length === 1 ? 'item' : 'items')}{selectedFile ? ` · ${localize(locale, '已选择', 'selected')} ${selectedFile.path.split('/').at(-1)}` : ''} · {formatCosmosFileSize(totalSize, locale)}</div>
+
+              {selectedFile ? <div className="prototype-vfs-preview">
+                <div className="prototype-vfs-preview-head">
+                  <span className="prototype-vfs-version-wrap">
+                    <button ref={versionTriggerRef} type="button" className="prototype-vfs-file-title" aria-label={`${localize(locale, '版本历史', 'Version history')}: ${selectedFile.path.split('/').at(-1)}`} aria-haspopup="menu" aria-expanded={versionMenuOpen} onClick={() => setVersionMenuOpen((value) => !value)}>{selectedFile.path.split('/').at(-1)}</button>
+                    {versionMenuOpen ? <div ref={versionMenuRef} className="prototype-vfs-version-menu" role="menu">
                       {selectedFile.versions.map((version, index) => {
                         const active = index === 0 ? viewVersionId === null : version.id === viewVersionId
-                        return (
-                          <article className={`cosmos-version-row${active ? ' cosmos-version-row--active' : ''}`} key={version.id}>
-                            <button type="button" aria-pressed={active} onClick={() => setViewVersionId(index === 0 ? null : version.id)}>
-                              <FileClock aria-hidden="true" />
-                              <span><strong>v{version.version}{index === 0 ? ` · ${localize(locale, '当前', 'Current')}` : ''}</strong><small>{version.author} · {version.createdAt}</small></span>
-                            </button>
-                          </article>
-                        )
+                        return <button type="button" role="menuitemradio" aria-checked={active} key={version.id} onClick={() => { setViewVersionId(index === 0 ? null : version.id); setVersionMenuOpen(false) }}><strong>v{version.version}{index === 0 ? ` · ${localize(locale, '当前', 'Current')}` : ''}</strong><small>{version.createdAt}</small></button>
                       })}
-                    </div>
-                  ) : null}
-                </section>
-              </>
-            ) : <p className="cosmos-empty-state">{localize(locale, '选择一个文件查看内容和版本', 'Select a file to view its content and versions')}</p>}
-          </section>
+                    </div> : null}
+                  </span>
+                  <div>
+                    <button type="button" onClick={() => { void copyValue(getScopedFilePath(selectedFile), localize(locale, '路径已复制', 'Path copied')) }}>{localize(locale, '复制路径', 'Copy path')}</button>
+                    <button type="button" onClick={() => { void copyValue(previewContent, localize(locale, '内容已复制', 'Content copied')) }}>{localize(locale, '复制', 'Copy')}</button>
+                    <button type="button" onClick={downloadSelectedFile}>{localize(locale, '下载', 'Download')}</button>
+                  </div>
+                </div>
+                <pre className="prototype-vfs-preview-body" aria-label={localize(locale, '文件内容', 'File content')}>{previewContent}</pre>
+              </div> : null}
+            </section>
+          </div>
         </div>
       </div>
+
+      {notice ? <div className="prototype-files-toast" role="status">{notice}</div> : null}
+      {searchOpen ? <div className="prototype-session-dialog-backdrop" role="presentation"><section ref={searchDialogRef} className="prototype-session-dialog prototype-files-search-dialog" role="dialog" aria-modal="true" aria-labelledby="prototype-demo-files-search-title"><h2 id="prototype-demo-files-search-title">{localize(locale, '搜索文件', 'Search Files')}</h2><input ref={searchInputRef} value={query} onChange={(event) => setQuery(event.target.value)} aria-label={localize(locale, '搜索文件', 'Search Files')} placeholder={localize(locale, '搜索路径…', 'Search paths…')} /><div><button type="button" onClick={closeSearch}>{localize(locale, '完成', 'Done')}</button></div></section></div> : null}
     </main>
   )
 }
