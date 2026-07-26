@@ -2,9 +2,9 @@
 
 > 文档状态：当前执行基线
 >
-> 更新日期：2026-07-22
+> 更新日期：2026-07-26
 >
-> 基线提交：Advisor 受控执行交付后更新
+> 基线提交：`9d26d58`（原型全站对齐 + Skills/Templates/Artifacts/Workers 产品缺口补齐后更新）
 
 ## 结论
 
@@ -28,6 +28,8 @@ Environment 已具备 Cloud/Daemon 类型、immutable revision、provisioning wo
 - Automation 的创建、更新、测试、启停、Event 接收/去重/匹配、ServiceAccount Session 创建、Event Log 与 Run History。
 - Space 的权威列表/创建/更新、Default Space、默认 Expert/Environment 校验、真实 scope 切换与删除迁移影响预览。
 - 黑白主题、中文/英文、桌面/390px 小屏的主要页面验收。
+- 生产 Web 全站原型对齐（18+ 路由统一 PrototypePageTopbar/原型表格体系）；窄屏首访侧边栏默认收起。
+- Skills 目录与 Expert 绑定 + 执行注入（migrations 084/085）；Template Experts 模板库；跨会话 Artifacts 浏览面；Session 分享面板与权威 Artifact 管理；Expert Workers 委派配置；gitlab/datadog Integration 类型（migration 086）。
 
 仍是缺口或受限能力：
 

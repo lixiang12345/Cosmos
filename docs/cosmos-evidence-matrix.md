@@ -1,7 +1,7 @@
 # Augment Cosmos 官方证据矩阵与 Cosmos 原型决策
 
-> 文档状态：原型重构事实基线  
-> 核验日期：2026-07-12  
+> 文档状态：原型重构事实基线（含 2026-07-26 交付快照）  
+> 核验日期：2026-07-12（矩阵）· 2026-07-26（交付快照）  
 > 资料范围：Augment Code 官方 Cosmos 文档（`docs.augmentcode.com`）  
 > 用途：约束 Cosmos 原型、产品需求和技术需求，避免把推测设计误写成 Cosmos 官方行为
 
@@ -25,6 +25,31 @@
 6. Environments 当前突出 CPU、内存和超时，而官方 Cloud Environment 的主配置是镜像、仓库、环境变量、Hooks、共享和网络；计算资源由平台按负载自动扩展。
 
 以下矩阵是下一轮原型修改和前后端需求拆分的验收依据。
+
+
+## 2026-07-26 交付基线快照
+
+原型对齐与产品缺口补齐在本日完成一轮集中交付（提交区间 `3d005c5`…`9d26d58`，24 个提交，全部经全仓门禁 + Docker 运行态 + 截图/冒烟验证）。相对本矩阵撰写时的状态：
+
+**已落地为生产能力（矩阵中的差距已消除）：**
+
+- 生产 Web 全部路由（18+）统一运行在原型视觉与交互体系（PrototypePageTopbar + prototype 表格/卡片/抽屉），旧目录壳（PageHeader/LoadState/GlobalControls）退役。
+- Automations 前后端补齐七种官方触发源（github/linear/slack/schedule/webhook/gitlab/pagerduty）、schedule cron/时区、每分钟限流（migration 083）。
+- Skills 目录端到端（migration 084/085）：inline/url 知识包、Expert 绑定快照（revision configuration）、执行注入（claim SQL 聚合 inline 内容进 systemPrompt）、worker 角色 RLS 授权。对标 config-skills（Official）。
+- Template Experts：6 个参考模板（PR Author/Deep Reviewer/Pair Reviewer/Verifier/Ticket Dispatcher/Incident Investigator）经创建下拉预填编辑器，产出普通 custom draft。托管提示词追加语义（矩阵 §Template Expert 判定）仍为 Cosmos 简化——模板为创建起点而非托管更新，已在产品文案中如实呈现。
+- 跨会话 Artifacts 浏览面（GET /spaces/{s}/artifacts，复用会话可见性规则），对标 Understanding Artifacts（Official）；Cmd+K 的 Artifact 搜索索引仍为余项。
+- Session 分享面板与权威 Artifacts 管理（右栏授予/撤销、手动 link 产物）接线完成。
+- Expert Workers 委派配置（workerExpertIds 快照 + 已发布/非自引用校验）；执行侧自动启动子会话仍属 runtime 编排余项，未虚构。
+- Integration 类型扩至 gitlab/datadog（migration 086）；MCP partner 预设；键盘参考面修正为真实绑定。
+- 窄屏（≤820px）首访侧边栏默认收起；全站抽屉焦点陷阱、a11y 标签、390px 批扫完成。
+
+**仍然有效的矩阵判定（未变）：**
+
+- Home 不做监控 Dashboard；New Session 为轻量启动器；Files 以浏览为主；Configuration 分组为 Cosmos 研发 IA 而非官方 IA；Approvals/主题/语言为 Cosmos extension。
+
+**剩余余项（按矩阵语义）：**
+
+- Cmd+K Artifact 维度搜索、Pinned Sessions 文件夹/排序、Slack/GitHub 实测触发样例、MCP 三步添加流的 connect/test 步（后端无 test 端点）、Workers 委派的 runtime 执行联动。
 
 ## 3. 核心页面与对象证据矩阵
 
