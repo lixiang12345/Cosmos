@@ -50,7 +50,6 @@ import {
   Plus,
   Power,
   RefreshCw,
-  Rocket,
   Save,
   Server,
   ServerCog,
@@ -58,7 +57,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode, type RefObject } from 'react'
 import { GlobalControls } from '../components/GlobalControls'
 import {
   PrototypeGitHubIcon,
@@ -156,6 +155,9 @@ export type RemoteExpertEditorPageProps = RemoteCatalogRequestProps & {
   onCreated: (expertId: string) => void
   onArchived: () => void
   onCatalogChange: () => void
+  navigationCollapsed?: boolean
+  onOpenCommand?: () => void
+  onOpenAdvisor?: () => void
 }
 
 export type RemoteEnvironmentsPageProps = RemoteCatalogListState<EnvironmentSummaryDto>
@@ -705,6 +707,49 @@ function editableRevision(expert: ExpertDetailDto) {
   return expert.draftRevision ?? expert.publishedRevision
 }
 
+const markdownActions = [
+  { kind: 'b', label: 'B', title: 'Bold' },
+  { kind: 'i', label: 'I', title: 'Italic' },
+  { kind: 'h2', label: 'H2', title: 'Heading 2' },
+  { kind: 'h3', label: 'H3', title: 'Heading 3' },
+  { kind: 'ul', label: '•', title: 'Bullet list' },
+  { kind: 'ol', label: '1.', title: 'Numbered list' },
+  { kind: 'code', label: '<>', title: 'Code' },
+  { kind: 'link', label: '🔗', title: 'Link' },
+] as const
+
+function MarkdownToolbar({
+  textareaRef,
+  value,
+  onApply,
+}: {
+  textareaRef: RefObject<HTMLTextAreaElement | null>
+  value: string
+  onApply: (next: string) => void
+}) {
+  const apply = (kind: typeof markdownActions[number]['kind']) => {
+    const area = textareaRef.current
+    const start = area?.selectionStart ?? value.length
+    const end = area?.selectionEnd ?? value.length
+    const selection = value.slice(start, end) || 'text'
+    const wraps: Record<typeof kind, string> = {
+      b: `**${selection}**`,
+      i: `*${selection}*`,
+      h2: `## ${selection}`,
+      h3: `### ${selection}`,
+      ul: `- ${selection}`,
+      ol: `1. ${selection}`,
+      code: `\`${selection}\``,
+      link: `[${selection}](https://)`,
+    }
+    onApply(value.slice(0, start) + wraps[kind] + value.slice(end))
+    area?.focus()
+  }
+  return <div className="prototype-md-toolbar" role="toolbar" aria-label="Markdown">
+    {markdownActions.map((action) => <button type="button" key={action.kind} className="prototype-md-button" title={action.title} aria-label={action.title} onClick={() => apply(action.kind)}>{action.label}</button>)}
+  </div>
+}
+
 function formFromExpert(
   environments: EnvironmentSummaryDto[],
   expert?: ExpertDetailDto,
@@ -741,8 +786,14 @@ export function RemoteExpertEditorPage({
   onCreated,
   onArchived,
   onCatalogChange,
+  navigationCollapsed,
+  onOpenCommand,
+  onOpenAdvisor,
 }: RemoteExpertEditorPageProps) {
   const { locale } = usePreferences()
+  const descriptionRef = useRef<HTMLTextAreaElement>(null)
+  const promptRef = useRef<HTMLTextAreaElement>(null)
+  const [addCapabilityOpen, setAddCapabilityOpen] = useState(false)
   const requestAuth = useMemo<CosmosApiAuthContext>(() => ({
     accessToken: auth.accessToken,
     requestIdentity: auth.requestIdentity,
@@ -896,81 +947,195 @@ export function RemoteExpertEditorPage({
     })
   }
 
+  const editorShell = (children: ReactNode) => <main className="prototype-automation-page">
+    <PrototypePageTopbar
+      crumb={expert ? text(locale, `Experts · ${expert.name}`, `Experts · ${expert.name}`) : text(locale, 'Experts · 新建', 'Experts · New')}
+      navigationCollapsed={navigationCollapsed}
+      onOpenNavigation={onOpenNavigation}
+      onOpenCommand={onOpenCommand}
+    />
+    <div className="prototype-automation-viewport">
+      <div className="prototype-automation-content prototype-expert-detail">{children}</div>
+    </div>
+  </main>
+
   if (expertId && detail.status === 'loading' && !expert) {
-    return <main className="cosmos-page remote-catalog-page"><PageHeader icon={Bot} title={text(locale, '编辑 Expert', 'Edit Expert')} description="" onOpenNavigation={onOpenNavigation} /><div className="cosmos-page__scroll"><LoadState status="loading" resource="Expert" onRetry={detail.retry} /></div></main>
+    return editorShell(<div className="prototype-automation-state"><LoaderCircle className="spin" aria-hidden="true" />{text(locale, '加载中…', 'Loading…')}</div>)
   }
   if (expertId && (detail.status === 'error' || detail.status === 'not_found') && !expert) {
-    return <main className="cosmos-page remote-catalog-page"><PageHeader icon={Bot} title={text(locale, '编辑 Expert', 'Edit Expert')} description="" onOpenNavigation={onOpenNavigation} /><div className="cosmos-page__scroll"><LoadState status={detail.status} resource="Expert" error={detail.error} onRetry={detail.retry} /></div></main>
+    return editorShell(<div className="prototype-automation-state prototype-automation-state--error">
+      <span role="alert">{detail.status === 'not_found' ? text(locale, '未找到该 Expert。', 'Expert not found.') : detail.error?.message ?? text(locale, '无法加载 Expert。', 'Unable to load the Expert.')}</span>
+      <button type="button" onClick={detail.retry}><RefreshCw aria-hidden="true" />{text(locale, '重试', 'Retry')}</button>
+    </div>)
   }
 
-  return (
-    <main className="cosmos-page remote-catalog-page remote-expert-editor">
-      <PageHeader
-        icon={Bot}
-        title={expert ? expert.name : text(locale, '新建 Expert', 'New Expert')}
-        description={expert
-          ? text(locale, `资源版本 v${expert.version}`, `Resource version v${expert.version}`)
-          : text(locale, '创建可发布、可复用的工作流配置', 'Create a publishable, reusable workflow configuration')}
-        onOpenNavigation={onOpenNavigation}
-        actions={<>
-          <button type="button" className="cosmos-button cosmos-button--secondary" disabled={!valid || busy !== undefined} onClick={save}>
-            <Save aria-hidden="true" />{busy === 'save' ? text(locale, '保存中…', 'Saving…') : text(locale, '保存草稿', 'Save draft')}
-          </button>
-          <button type="button" className="cosmos-button cosmos-button--primary" disabled={!valid || busy !== undefined} onClick={publish}>
-            <Rocket aria-hidden="true" />{busy === 'publish' ? text(locale, '发布中…', 'Publishing…') : text(locale, '发布', 'Publish')}
-          </button>
-        </>}
-      />
-      <div className="cosmos-page__scroll remote-expert-editor__scroll">
-        <button type="button" className="remote-catalog-back" onClick={onBack}>
-          <ArrowLeft aria-hidden="true" />{text(locale, '返回专家库', 'Back to Experts')}
-        </button>
-        {error ? <div className="remote-expert-editor__error" role="alert"><AlertTriangle aria-hidden="true" /><span><strong>{text(locale, '操作未完成', 'Operation not completed')}</strong><small>{error.message}</small></span>{error instanceof CosmosApiError && error.status === 412 ? <button type="button" className="cosmos-button cosmos-button--secondary" onClick={() => { setSavedExpert(undefined); detail.retry() }}>{text(locale, '重新加载', 'Reload')}</button> : null}</div> : null}
-        <div className="remote-expert-editor__layout">
-          <div className="remote-expert-editor__main">
-            <section className="cosmos-panel remote-expert-form-section">
-              <header><span>01</span><div><h2>{text(locale, '基本信息', 'Identity')}</h2><p>{text(locale, '用于列表检索和团队识别。', 'Used for discovery and team recognition.')}</p></div></header>
-              <div className="remote-expert-form-grid remote-expert-form-grid--two">
-                <label className="field"><span>{text(locale, '名称', 'Name')}</span><input aria-label={text(locale, '名称', 'Name')} value={form.name} maxLength={160} onChange={(event) => field('name', event.target.value)} /></label>
-                <label className="field field--select"><span>{text(locale, '可见范围', 'Visibility')}</span><select aria-label={text(locale, '可见范围', 'Visibility')} value={form.visibility} onChange={(event) => field('visibility', event.target.value as ExpertEditorForm['visibility'])}><option value="space">Space</option><option value="private">{text(locale, '仅自己', 'Private')}</option></select></label>
-              </div>
-              <label className="field"><span>{text(locale, '描述', 'Description')}</span><textarea aria-label={text(locale, '描述', 'Description')} rows={3} maxLength={2000} value={form.description} onChange={(event) => field('description', event.target.value)} /></label>
-              <label className="field"><span>{text(locale, '启动提示', 'Launch guidance')}</span><textarea aria-label={text(locale, '启动提示', 'Launch guidance')} rows={3} maxLength={10000} value={form.launchGuidance} onChange={(event) => field('launchGuidance', event.target.value)} /></label>
-            </section>
+  const missingCapabilities = capabilityOptions.filter((capability) => !form.capabilities.includes(capability))
 
-            <section className="cosmos-panel remote-expert-form-section">
-              <header><span>02</span><div><h2>{text(locale, '系统指令', 'Instructions')}</h2><p>{text(locale, '定义职责、边界和交付标准。', 'Define responsibilities, boundaries, and delivery standards.')}</p></div></header>
-              <label className="field"><textarea className="remote-expert-instructions" aria-label={text(locale, '系统指令', 'Instructions')} rows={14} maxLength={100000} value={form.instructions} onChange={(event) => field('instructions', event.target.value)} /></label>
-            </section>
+  return editorShell(<>
+    <button type="button" className="prototype-expert-back" onClick={onBack}>← {text(locale, '全部 Experts', 'All Experts')}</button>
 
-            <section className="cosmos-panel remote-expert-form-section">
-              <header><span>03</span><div><h2>{text(locale, '能力', 'Capabilities')}</h2><p>{text(locale, '只开放完成职责所需的能力。', 'Grant only the capabilities required for the role.')}</p></div></header>
-              <div className="remote-expert-capabilities">{capabilityOptions.map((capability) => <label key={capability}><span><strong>{capability}</strong></span><input type="checkbox" role="switch" checked={form.capabilities.includes(capability)} onChange={() => toggleCapability(capability)} /></label>)}</div>
-            </section>
+    <div className="prototype-expert-detail-head">
+      <div className="prototype-expert-detail-head-main">
+        <div className="prototype-expert-name-line">
+          <span className="prototype-expert-tag">{form.visibility === 'space' ? 'Team' : text(locale, '私有', 'Private')}</span>
+          {expert && expert.status !== 'published' ? <span className="prototype-expert-tag">{expert.status}</span> : null}
+        </div>
+        <input
+          className="prototype-expert-title-input"
+          aria-label={text(locale, '名称', 'Name')}
+          value={form.name}
+          maxLength={160}
+          placeholder={text(locale, 'Expert 名称', 'Expert name')}
+          onChange={(event) => field('name', event.target.value)}
+        />
+        <p className="prototype-expert-detail-meta">{expert
+          ? text(locale, `更新于 ${formatDate(expert.updatedAt, locale)} · v${expert.version}`, `Updated ${formatDate(expert.updatedAt, locale)} · v${expert.version}`)
+          : text(locale, '新的可复用 Expert 配置', 'A new reusable Expert configuration')}</p>
+      </div>
+      <div className="prototype-expert-detail-actions">
+        <button type="button" className="prototype-ghost-button" disabled={!valid || busy !== undefined} onClick={save}>{busy === 'save' ? text(locale, '保存中…', 'Saving…') : text(locale, '保存草稿', 'Save draft')}</button>
+        <button type="button" className="prototype-primary-button" disabled={!valid || busy !== undefined} onClick={publish}>{busy === 'publish' ? text(locale, '发布中…', 'Publishing…') : text(locale, '发布', 'Publish')}</button>
+      </div>
+    </div>
+
+    <button type="button" className="prototype-advisor-banner" disabled={!onOpenAdvisor && !onOpenCommand} onClick={onOpenAdvisor ?? onOpenCommand}>
+      <span className="prototype-advisor-mark" aria-hidden="true" />
+      <span><strong>{text(locale, '让 Agent 调整这个 Expert →', 'Ask an agent to tune this expert →')}</strong><small>{text(locale, 'Cosmos Advisor Agent 会配置这个 Expert', 'Cosmos Advisor agent configures this expert')}</small></span>
+    </button>
+
+    {error ? <div className="prototype-expert-error" role="alert">
+      <span><strong>{text(locale, '操作未完成', 'Operation not completed')}</strong> {error.message}</span>
+      {error instanceof CosmosApiError && error.status === 412 ? <button type="button" className="prototype-ghost-button" onClick={() => { setSavedExpert(undefined); detail.retry() }}>{text(locale, '重新加载', 'Reload')}</button> : null}
+    </div> : null}
+
+    <div className="prototype-expert-lead">
+      <label className="prototype-field-label" htmlFor="expert-launch-guidance">{text(locale, '可选占位提示', 'Optional placeholder')}</label>
+      <p className="prototype-expert-hint">{text(locale, '选中该 Expert 时显示在首页对话框中的占位提示，留空使用默认值。', 'Optional placeholder shown in the home-page chat box when this expert is selected. Leave empty to use the default.')}</p>
+      <textarea id="expert-launch-guidance" className="prototype-field" aria-label={text(locale, '启动提示', 'Launch guidance')} rows={2} maxLength={10000} value={form.launchGuidance} onChange={(event) => field('launchGuidance', event.target.value)} placeholder={text(locale, '告诉我要跟踪或启动什么', 'Tell me what to track or kick off')} />
+
+      <label className="prototype-field-label" htmlFor="expert-description">{text(locale, '用户说明', 'User Instructions')}</label>
+      <p className="prototype-expert-hint">{text(locale, '向使用者解释如何使用该 Expert 的 Markdown 说明。', 'Markdown shown to users explaining how to use this expert.')}</p>
+      <div className="prototype-md-editor">
+        <MarkdownToolbar textareaRef={descriptionRef} value={form.description} onApply={(next) => field('description', next)} />
+        <textarea id="expert-description" ref={descriptionRef} className="prototype-field prototype-md-area" aria-label={text(locale, '描述', 'Description')} rows={5} maxLength={2000} value={form.description} onChange={(event) => field('description', event.target.value)} />
+      </div>
+    </div>
+
+    <div className="prototype-expert-section">
+      <div className="prototype-expert-section-intro">
+        <h2>System</h2>
+        <p>{text(locale, 'Agent 如何思考、在哪里运行、由哪个模型驱动。', 'How the agent thinks, where it runs, and which model powers it.')}</p>
+      </div>
+      <div className="prototype-expert-section-fields">
+        <div className="prototype-expert-field-pair">
+          <div>
+            <label className="prototype-field-label" htmlFor="expert-environment">Environment</label>
+            <p className="prototype-expert-hint">{text(locale, 'Cloud 沙箱或已连接的 Daemon 进程。', 'Cloud sandbox or a connected daemon process.')}</p>
+            <select id="expert-environment" className="prototype-field-select" aria-label="Environment" value={form.environmentId} onChange={(event) => field('environmentId', event.target.value)}>
+              <option value="" disabled>{text(locale, '选择运行环境', 'Select Environment')}</option>
+              {readyEnvironments.map((environment) => <option value={environment.id} key={environment.id}>{environment.name}</option>)}
+            </select>
           </div>
-
-          <aside className="remote-expert-editor__aside">
-            <section className="cosmos-panel remote-expert-runtime">
-              <header><ServerCog aria-hidden="true" /><h2>{text(locale, '运行配置', 'Runtime')}</h2></header>
-              <label className="field field--select"><span>{text(locale, '模型', 'Model')}</span><select aria-label={text(locale, '模型', 'Model')} value={form.model} onChange={(event) => field('model', event.target.value as ExpertEditorForm['model'])}>{SUPPORTED_AGENT_MODELS.map((model) => <option value={model} key={model}>{model}</option>)}</select></label>
-              <label className="field field--select"><span>Environment</span><select aria-label="Environment" value={form.environmentId} onChange={(event) => field('environmentId', event.target.value)}><option value="" disabled>{text(locale, '选择运行环境', 'Select Environment')}</option>{readyEnvironments.map((environment) => <option value={environment.id} key={environment.id}>{environment.name}</option>)}</select></label>
-              <div className="remote-expert-policy-row"><span><strong>{text(locale, '允许仓库覆盖', 'Repository override')}</strong></span><input type="checkbox" role="switch" checked={form.allowRepositoryOverride} onChange={(event) => field('allowRepositoryOverride', event.target.checked)} /></div>
-              <div className="remote-expert-policy-row"><span><strong>{text(locale, '允许分支覆盖', 'Branch override')}</strong></span><input type="checkbox" role="switch" checked={form.allowBaseBranchOverride} onChange={(event) => field('allowBaseBranchOverride', event.target.checked)} /></div>
-            </section>
-
-            {expert ? <section className="cosmos-panel remote-expert-runtime">
-              <header><History aria-hidden="true" /><h2>{text(locale, '版本', 'Revisions')}</h2></header>
-              <div className="remote-expert-revisions">{revisions?.items.map((revision) => <div key={revision.id}><span><strong>v{revision.revision}</strong><small>{formatDate(revision.createdAt, locale)}</small></span><StatusLabel status={revision.status} /></div>) ?? null}</div>
-            </section> : null}
-
-            {expert?.publishedRevisionId ? <button type="button" className="cosmos-button cosmos-button--secondary remote-expert-wide-action" disabled={busy !== undefined || expert.status === 'disabled'} onClick={disable}><Power aria-hidden="true" />{busy === 'disable' ? text(locale, '停用中…', 'Disabling…') : text(locale, '停用 Expert', 'Disable Expert')}</button> : null}
-            {expert && !confirmArchive ? <button type="button" className="cosmos-button cosmos-button--ghost remote-expert-wide-action remote-expert-danger" disabled={busy !== undefined} onClick={() => setConfirmArchive(true)}><Trash2 aria-hidden="true" />{text(locale, '归档 Expert', 'Archive Expert')}</button> : null}
-            {expert && confirmArchive ? <div className="remote-expert-archive-confirm"><strong>{text(locale, '确认归档？', 'Archive this Expert?')}</strong><div><button type="button" className="cosmos-button cosmos-button--secondary" onClick={() => setConfirmArchive(false)}>{text(locale, '取消', 'Cancel')}</button><button type="button" className="cosmos-button cosmos-button--primary" disabled={busy !== undefined} onClick={archive}>{text(locale, '确认归档', 'Archive')}</button></div></div> : null}
-          </aside>
+          <div>
+            <label className="prototype-field-label" htmlFor="expert-model">{text(locale, '模型', 'Model')}</label>
+            <p className="prototype-expert-hint">{text(locale, '影响质量、速度与额度消耗。', 'Affects quality, speed, and credit usage.')}</p>
+            <select id="expert-model" className="prototype-field-select" aria-label={text(locale, '模型', 'Model')} value={form.model} onChange={(event) => field('model', event.target.value as ExpertEditorForm['model'])}>
+              {SUPPORTED_AGENT_MODELS.map((model) => <option value={model} key={model}>{model}</option>)}
+            </select>
+          </div>
+        </div>
+        <label className="prototype-field-label" htmlFor="expert-instructions">{text(locale, '系统提示词', 'System Prompt')}</label>
+        <p className="prototype-expert-hint">{text(locale, '支持 Markdown。典型提示词为 50–300 行。', 'Supports Markdown. Typical prompts are 50–300 lines.')}</p>
+        <div className="prototype-md-editor">
+          <MarkdownToolbar textareaRef={promptRef} value={form.instructions} onApply={(next) => field('instructions', next)} />
+          <textarea id="expert-instructions" ref={promptRef} className="prototype-field prototype-md-area prototype-expert-prompt" aria-label={text(locale, '系统指令', 'Instructions')} rows={12} maxLength={100000} value={form.instructions} onChange={(event) => field('instructions', event.target.value)} />
         </div>
       </div>
-    </main>
-  )
+    </div>
+
+    <div className="prototype-expert-section">
+      <div className="prototype-expert-section-intro">
+        <h2>{text(locale, '能力', 'Capabilities')}</h2>
+        <p>{text(locale, '会话中 Agent 可使用的能力，只开放职责所需。', 'Capabilities the agent can reach during a session. Grant only what the role requires.')}</p>
+      </div>
+      <div className="prototype-expert-section-fields">
+        <div className="prototype-expert-chip-box">
+          {form.capabilities.map((capability) => <span className="prototype-expert-chip" key={capability}>
+            <span className="prototype-expert-chip-icon"><PrototypeHexIcon aria-hidden="true" /></span>
+            {capability}
+            <button type="button" className="prototype-expert-chip-x" aria-label={text(locale, `移除 ${capability}`, `Remove ${capability}`)} onClick={() => toggleCapability(capability)}>×</button>
+          </span>)}
+          {!form.capabilities.length ? <span className="prototype-expert-chip-empty">{text(locale, '未开放任何能力', 'No capabilities granted')}</span> : null}
+          {missingCapabilities.length ? <button type="button" className="prototype-expert-chip prototype-expert-chip-add" aria-expanded={addCapabilityOpen} onClick={() => setAddCapabilityOpen((open) => !open)}>+ {text(locale, '添加', 'Add')}</button> : null}
+        </div>
+        {addCapabilityOpen && missingCapabilities.length ? <div className="prototype-expert-add-menu">
+          {missingCapabilities.map((capability) => <button type="button" key={capability} onClick={() => { toggleCapability(capability); setAddCapabilityOpen(false) }}>
+            <span className="prototype-expert-chip-icon"><PrototypeHexIcon aria-hidden="true" /></span>{capability}
+          </button>)}
+        </div> : null}
+
+        <div className="prototype-expert-policy-row">
+          <span><strong>{text(locale, '允许仓库覆盖', 'Repository override')}</strong><small>{text(locale, '会话可改用其他 Repository。', 'Sessions may target a different repository.')}</small></span>
+          <input type="checkbox" role="switch" aria-label={text(locale, '允许仓库覆盖', 'Repository override')} checked={form.allowRepositoryOverride} onChange={(event) => field('allowRepositoryOverride', event.target.checked)} />
+        </div>
+        <div className="prototype-expert-policy-row">
+          <span><strong>{text(locale, '允许分支覆盖', 'Branch override')}</strong><small>{text(locale, '会话可改用其他基础分支。', 'Sessions may start from a different base branch.')}</small></span>
+          <input type="checkbox" role="switch" aria-label={text(locale, '允许分支覆盖', 'Branch override')} checked={form.allowBaseBranchOverride} onChange={(event) => field('allowBaseBranchOverride', event.target.checked)} />
+        </div>
+      </div>
+    </div>
+
+    <div className="prototype-expert-section">
+      <div className="prototype-expert-section-intro">
+        <h2>{text(locale, '共享', 'Sharing')}</h2>
+        <p>{text(locale, '管理谁可以发现并使用这个 Expert。', 'Manage who can discover and use this expert.')}</p>
+      </div>
+      <div className="prototype-expert-section-fields">
+        <select className="prototype-field-select prototype-expert-share-select" aria-label={text(locale, '可见范围', 'Visibility')} value={form.visibility} onChange={(event) => field('visibility', event.target.value as ExpertEditorForm['visibility'])}>
+          <option value="space">{text(locale, 'Team · Space 内可见', 'Team — visible to the Space')}</option>
+          <option value="private">{text(locale, '私有 · 仅自己可见', 'Private — only you')}</option>
+        </select>
+      </div>
+    </div>
+
+    {expert ? <div className="prototype-expert-section">
+      <div className="prototype-expert-section-intro">
+        <h2>{text(locale, '版本', 'Revisions')}</h2>
+        <p>{text(locale, '已发布版本不可变，Session 固定使用发布时的快照。', 'Published revisions are immutable; sessions pin the published snapshot.')}</p>
+      </div>
+      <div className="prototype-expert-section-fields">
+        <div className="prototype-expert-revisions">
+          {revisions?.items.length ? revisions.items.map((revision) => <div key={revision.id}>
+            <span><strong>v{revision.revision}</strong><small>{formatDate(revision.createdAt, locale)}</small></span>
+            <span className="prototype-expert-tag">{revision.status}</span>
+          </div>) : <span className="prototype-expert-chip-empty">{text(locale, '暂无版本记录', 'No revisions yet')}</span>}
+        </div>
+      </div>
+    </div> : null}
+
+    {expert ? <div className="prototype-expert-section prototype-expert-danger-section">
+      <div className="prototype-expert-section-intro">
+        <h2>{text(locale, '危险区', 'Danger zone')}</h2>
+        <p>{text(locale, '这些操作无法撤销。', 'These actions cannot be undone.')}</p>
+      </div>
+      <div className="prototype-expert-section-fields">
+        {expert.publishedRevisionId ? <div className="prototype-expert-danger-row">
+          <div>
+            <div className="prototype-expert-danger-title">{text(locale, '停用 Expert', 'Disable expert')}</div>
+            <p className="prototype-expert-hint">{text(locale, '停用后无法从该 Expert 发起新会话，直到重新发布。', 'New sessions cannot start from this expert until it is published again.')}</p>
+          </div>
+          <button type="button" className="prototype-expert-danger-button" disabled={busy !== undefined || expert.status === 'disabled'} onClick={disable}>{busy === 'disable' ? text(locale, '停用中…', 'Disabling…') : text(locale, '停用 Expert', 'Disable Expert')}</button>
+        </div> : null}
+        <div className="prototype-expert-danger-row">
+          <div>
+            <div className="prototype-expert-danger-title">{text(locale, '归档 Expert', 'Archive expert')}</div>
+            <p className="prototype-expert-hint">{text(locale, '归档后引用它的 Trigger 与 Automation 将停止工作。', 'Any triggers or automations that reference it will stop working.')}</p>
+          </div>
+          {!confirmArchive ? <button type="button" className="prototype-expert-danger-button" disabled={busy !== undefined} onClick={() => setConfirmArchive(true)}>{text(locale, '归档 Expert', 'Archive Expert')}</button> : <div className="prototype-automation-confirm"><span>{text(locale, '确认归档？', 'Archive this Expert?')}</span><button type="button" disabled={busy !== undefined} onClick={() => setConfirmArchive(false)}>{text(locale, '取消', 'Cancel')}</button><button type="button" className="danger" disabled={busy !== undefined} onClick={archive}>{text(locale, '确认归档', 'Archive')}</button></div>}
+        </div>
+      </div>
+    </div> : null}
+  </>)
 }
 
 export function RemoteEnvironmentsPage({
