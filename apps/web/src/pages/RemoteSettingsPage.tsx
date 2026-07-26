@@ -11,8 +11,7 @@ import {
   UserRound,
 } from 'lucide-react'
 import { useState } from 'react'
-import { GlobalControls } from '../components/GlobalControls'
-import { IconButton } from '../components/ui'
+import { PrototypePageTopbar } from '../components/PrototypePageTopbar'
 import { usePreferences, type Locale } from '../preferences'
 
 type SettingsSection = 'account' | 'organization' | 'appearance'
@@ -22,6 +21,8 @@ type Props = {
   organization: MeOrganization
   activeSpaceId: string
   onOpenNavigation?: () => void
+  navigationCollapsed?: boolean
+  onOpenCommand?: () => void
 }
 
 function copy(locale: Locale, zh: string, en: string) { return locale === 'zh' ? zh : en }
@@ -49,24 +50,8 @@ function actorKindLabel(locale: Locale, kind: MeResponse['actor']['kind']) {
     : copy(locale, '用户', 'User')
 }
 
-function Header({ onOpenNavigation }: { onOpenNavigation?: () => void }) {
-  const { locale } = usePreferences()
-  return (
-    <header className="cosmos-page-header">
-      <div className="cosmos-page-header__leading">
-        <IconButton icon={ShieldCheck} label={copy(locale, '打开导航', 'Open navigation')} onClick={onOpenNavigation} />
-        <div>
-          <p>Cosmos · Control Plane</p>
-          <h1>{copy(locale, '设置', 'Settings')}</h1>
-          <span>{copy(locale, '账号身份、组织成员关系与界面偏好', 'Account identity, organization membership, and interface preferences')}</span>
-        </div>
-      </div>
-      <GlobalControls />
-    </header>
-  )
-}
 
-export function RemoteSettingsPage({ me, organization, activeSpaceId, onOpenNavigation }: Props) {
+export function RemoteSettingsPage({ me, organization, activeSpaceId, onOpenNavigation, navigationCollapsed, onOpenCommand }: Props) {
   const { locale, theme, setLocale, setTheme } = usePreferences()
   const [section, setSection] = useState<SettingsSection>('account')
 
@@ -79,9 +64,11 @@ export function RemoteSettingsPage({ me, organization, activeSpaceId, onOpenNavi
   const spaces: MeSpace[] = organization.spaces
 
   return (
-    <main className="cosmos-page">
-      <Header onOpenNavigation={onOpenNavigation} />
-      <div className="cosmos-page__scroll">
+    <main className="prototype-automation-page">
+      <PrototypePageTopbar crumb={copy(locale, '配置 · Settings', 'Configuration · Settings')} navigationCollapsed={navigationCollapsed} onOpenNavigation={onOpenNavigation} onOpenCommand={onOpenCommand} />
+      <div className="prototype-automation-viewport">
+        <div className="prototype-automation-content prototype-expert-content">
+        <div className="prototype-automation-header"><div><h1>{copy(locale, '设置', 'Settings')}</h1><p>{copy(locale, '账号身份、组织成员关系与界面偏好。', 'Account identity, organization membership, and interface preferences.')}</p></div></div>
         <div className="cosmos-settings-layout">
           <nav className="cosmos-settings-nav" aria-label={copy(locale, '设置分类', 'Settings categories')}>
             {sections.map((item) => {
@@ -183,6 +170,7 @@ export function RemoteSettingsPage({ me, organization, activeSpaceId, onOpenNavi
             ) : null}
           </section>
         </div>
+      </div>
       </div>
     </main>
   )

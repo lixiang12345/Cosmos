@@ -1,21 +1,17 @@
 import type { SessionWorkerDto } from '@cosmos/contracts'
 import {
   AlertTriangle,
-  ArrowLeft,
   CheckCircle2,
   ChevronDown,
   CircleDot,
   Clock3,
   GitFork,
   LoaderCircle,
-  LockKeyhole,
-  Menu,
   RefreshCw,
   XCircle,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
-import { GlobalControls } from '../components/GlobalControls'
-import { IconButton } from '../components/ui'
+import { PrototypePageTopbar } from '../components/PrototypePageTopbar'
 import { usePreferences, type Locale } from '../preferences'
 import {
   CosmosApiError,
@@ -30,6 +26,8 @@ export type RemoteWorkersPageProps = {
   auth: CosmosApiAuthContext
   credentialVersion: number
   onOpenNavigation?: () => void
+  navigationCollapsed?: boolean
+  onOpenCommand?: () => void
   onBackToSession: () => void
 }
 
@@ -83,6 +81,8 @@ export function RemoteWorkersPage({
   auth,
   credentialVersion,
   onOpenNavigation,
+  navigationCollapsed,
+  onOpenCommand,
   onBackToSession,
 }: RemoteWorkersPageProps) {
   const { locale } = usePreferences()
@@ -160,24 +160,20 @@ export function RemoteWorkersPage({
   }, [current])
 
   return (
-    <main className="cosmos-page remote-workers-page">
-      <header className="cosmos-page-header">
-        <div className="cosmos-page-header__identity">
-          <IconButton icon={Menu} label={text(locale, '打开导航', 'Open navigation')} className="cosmos-mobile-menu" onClick={onOpenNavigation} />
-          <span className="cosmos-page-header__icon"><GitFork aria-hidden="true" /></span>
-          <div>
-            <h1>{text(locale, 'Worker 树', 'Worker Tree')}</h1>
-            <p>{organizationId} / {spaceId} / {sessionId}</p>
-          </div>
+    <main className="prototype-automation-page remote-workers-page">
+      <PrototypePageTopbar crumb={text(locale, '会话 · Worker 树', 'Sessions · Worker Tree')} navigationCollapsed={navigationCollapsed} onOpenNavigation={onOpenNavigation} onOpenCommand={onOpenCommand} />
+      <div className="prototype-automation-viewport">
+      <div className="prototype-automation-content prototype-expert-content">
+      <div className="prototype-automation-header">
+        <div>
+          <h1>{text(locale, 'Worker 树', 'Worker Tree')}</h1>
+          <p>{organizationId} / {spaceId} / {sessionId}</p>
         </div>
-        <div className="cosmos-page-header__actions">
-          <span className="remote-catalog-readonly"><LockKeyhole aria-hidden="true" />{text(locale, '只读', 'Read only')}</span>
-          <button type="button" className="cosmos-button cosmos-button--secondary" onClick={onBackToSession}><ArrowLeft aria-hidden="true" />{text(locale, '返回会话', 'Back to Session')}</button>
-          <GlobalControls className="cosmos-global-controls" />
-          <IconButton icon={RefreshCw} label={text(locale, '刷新 Worker', 'Refresh Workers')} onClick={() => setRetryVersion((value) => value + 1)} />
+        <div className="prototype-expert-detail-actions">
+          <button type="button" className="prototype-ghost-button" onClick={onBackToSession}>{text(locale, '返回会话', 'Back to Session')}</button>
+          <button type="button" className="prototype-ghost-button" onClick={() => setRetryVersion((value) => value + 1)}>{text(locale, '刷新', 'Refresh')}</button>
         </div>
-      </header>
-
+      </div>
       <div className="cosmos-page__content remote-workers-content">
         <section className="remote-workers-summary" aria-label={text(locale, 'Worker 摘要', 'Worker summary')}>
           <div><span>{text(locale, '已加载', 'Loaded')}</span><strong>{stats.total}</strong></div>
@@ -231,6 +227,8 @@ export function RemoteWorkersPage({
           {current?.status === 'ready' && current.error ? <div className="remote-workers-page-error" role="alert"><AlertTriangle aria-hidden="true" />{current.error}</div> : null}
           {current?.nextCursor ? <button type="button" className="remote-workers-load-more" disabled={current.loadingMore} onClick={loadMore}>{current.loadingMore ? <LoaderCircle className="cosmos-spin" aria-hidden="true" /> : <ChevronDown aria-hidden="true" />}{text(locale, '加载更多 Worker', 'Load more Workers')}</button> : null}
         </section>
+      </div>
+      </div>
       </div>
     </main>
   )

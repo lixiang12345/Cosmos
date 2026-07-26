@@ -842,12 +842,16 @@ function SessionWorkersRoute({
   auth,
   credentialVersion,
   onOpenNavigation,
+  navigationCollapsed,
+  onOpenCommand,
 }: {
   organizationId: string
   spaceId: string
   auth: CosmosApiAuthContext
   credentialVersion: number
   onOpenNavigation: () => void
+  navigationCollapsed?: boolean
+  onOpenCommand?: () => void
 }) {
   const { sessionId } = useParams()
   const navigate = useNavigate()
@@ -860,7 +864,7 @@ function SessionWorkersRoute({
     credentialVersion={credentialVersion}
     onOpenNavigation={onOpenNavigation}
     onBackToSession={() => navigate(`/sessions/${sessionId}`)}
-  />
+  navigationCollapsed={navigationCollapsed} onOpenCommand={onOpenCommand} />
 }
 
 function LegacySessionRedirect() {
@@ -1973,7 +1977,7 @@ function CosmosApp() {
         <Routes>
         <Route path="/" element={<Navigate to="/home" replace />} />
         <Route path="/home" element={<CosmosHomePage {...pageProps} displayName={displayName ?? actorId} navigationCollapsed={sidebarCollapsed} experts={sessionExpertOptions} catalogStatus={sessionCatalogStatus} catalogError={sessionCatalogError} prototypeTools={demoMode} sessionCreationEnabled={sessionCreationEnabled} executionEnabled={demoMode || productionExecutionEnabled} contextEnabled={!demoMode && contextEnabled} contextPreflight={preflightContext} onOpenCommand={() => setCommandOpen(true)} onRetryCatalog={retrySessionCatalog} onOpenSession={openSession} onCreateSession={createHomeSession} />} />
-        <Route path="/context" element={<ContextWorkspacePage repositories={sessionRepositories} demoMode={demoMode} contextEnabled={contextEnabled} onOpenNavigation={openNavigation} onNewTask={openNewTask} />} />
+        <Route path="/context" element={<ContextWorkspacePage repositories={sessionRepositories} demoMode={demoMode} contextEnabled={contextEnabled} onOpenNavigation={openNavigation} onNewTask={openNewTask} navigationCollapsed={sidebarCollapsed} onOpenCommand={() => setCommandOpen(true)} />} />
         <Route path="/sessions" element={
           <SessionsPage
             runs={scopedRuns}
@@ -2046,7 +2050,7 @@ function CosmosApp() {
               auth={catalogAuth}
               credentialVersion={credentialVersion}
               onOpenNavigation={openNavigation}
-            />} />
+            navigationCollapsed={sidebarCollapsed} onOpenCommand={() => setCommandOpen(true)} />} />
         <Route path="/runs/:sessionId" element={<LegacySessionRedirect />} />
         <Route path="/files" element={<Navigate to={demoMode ? '/files/user' : '/files/organization'} replace />} />
         <Route path="/files/user" element={demoMode
@@ -2088,7 +2092,7 @@ function CosmosApp() {
               credentialVersion={credentialVersion}
               onOpenNavigation={openNavigation}
               onOpenSession={openSession}
-            />} />
+            navigationCollapsed={sidebarCollapsed} onOpenCommand={() => setCommandOpen(true)} />} />
         <Route path="/automations" element={demoMode ? <CosmosAutomationsPage navigationCollapsed={sidebarCollapsed} onOpenNavigation={openNavigation} onOpenCommand={() => setCommandOpen(true)} /> : <RemoteAutomationsPage
           organizationId={organizationId}
           spaceId={activeSpace.id}
@@ -2289,7 +2293,7 @@ function CosmosApp() {
               navigationCollapsed={sidebarCollapsed}
               onOpenCommand={() => setCommandOpen(true)}
             />} />
-        <Route path="/spaces" element={demoMode ? <SpacesPage onOpenNavigation={openNavigation} /> : <RemoteSpacesPage key={workspace.space.id} organizationId={organizationId} accessibleSpaces={organization.spaces} activeSpaceId={workspace.space.id} auth={catalogAuth} credentialVersion={credentialVersion} canManage={expertManagementEnabled} onSelectSpace={(spaceId) => workspace.selectSpace(organizationId, spaceId)} onWorkspaceRefresh={refreshWorkspace} onOpenNavigation={openNavigation} />} />
+        <Route path="/spaces" element={demoMode ? <SpacesPage onOpenNavigation={openNavigation} /> : <RemoteSpacesPage key={workspace.space.id} organizationId={organizationId} accessibleSpaces={organization.spaces} activeSpaceId={workspace.space.id} auth={catalogAuth} credentialVersion={credentialVersion} canManage={expertManagementEnabled} onSelectSpace={(spaceId) => workspace.selectSpace(organizationId, spaceId)} onWorkspaceRefresh={refreshWorkspace} onOpenNavigation={openNavigation} navigationCollapsed={sidebarCollapsed} onOpenCommand={() => setCommandOpen(true)} />} />
         <Route path="/settings" element={demoMode
           ? <SettingsPage onOpenNavigation={openNavigation} />
           : <RemoteSettingsPage
@@ -2297,7 +2301,7 @@ function CosmosApp() {
               organization={organization}
               activeSpaceId={workspace.space.id}
               onOpenNavigation={openNavigation}
-            />} />
+            navigationCollapsed={sidebarCollapsed} onOpenCommand={() => setCommandOpen(true)} />} />
         <Route path="/governance" element={<Navigate to="/approvals" replace />} />
         <Route path="/activity" element={<Navigate to="/automations/events" replace />} />
         <Route path="*" element={<Navigate to="/home" replace />} />

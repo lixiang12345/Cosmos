@@ -19,7 +19,6 @@ import {
   GitFork,
   Layers3,
   LoaderCircle,
-  Menu,
   Network,
   PackageCheck,
   Search,
@@ -30,7 +29,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { GlobalControls } from '../components/GlobalControls'
+import { PrototypePageTopbar } from '../components/PrototypePageTopbar'
 import { createDemoContextStatus, packDemoContext, searchDemoContext } from '../data/contextEngineDemo'
 import { usePreferences } from '../preferences'
 import {
@@ -53,6 +52,8 @@ export type ContextWorkspacePageProps = {
   demoMode: boolean
   contextEnabled: boolean
   onOpenNavigation: () => void
+  navigationCollapsed?: boolean
+  onOpenCommand?: () => void
   onNewTask: (expertId?: string, initialPrompt?: string, contextPack?: ContextPackResponse) => void
 }
 
@@ -190,6 +191,8 @@ export function ContextWorkspacePage({
   demoMode,
   contextEnabled,
   onOpenNavigation,
+  navigationCollapsed,
+  onOpenCommand,
   onNewTask,
 }: ContextWorkspacePageProps) {
   const { locale } = usePreferences()
@@ -427,13 +430,12 @@ export function ContextWorkspacePage({
 
   return (
     <main className={`context-page${visibleResult ? ' context-page--active' : ''}`}>
-      <header className="cosmos-page-header context-page__header">
+      <PrototypePageTopbar crumb={locale === 'zh' ? '上下文 · Context Intelligence' : 'Context · Context Intelligence'} navigationCollapsed={navigationCollapsed} onOpenNavigation={onOpenNavigation} onOpenCommand={onOpenCommand} />
+      <header className="context-page__header context-page__header--inline">
         <div className="cosmos-page-header__identity context-page__identity">
-          <button type="button" className="cosmos-icon-button" aria-label={locale === 'zh' ? '打开导航' : 'Open navigation'} onClick={onOpenNavigation}><Menu aria-hidden="true" /></button>
           <span className="context-page__mark"><Waypoints aria-hidden="true" /></span>
           <div><span className="context-page__eyebrow">{copy.eyebrow}</span><h1>{copy.title}</h1><p>{copy.description}</p></div>
         </div>
-        <div className="cosmos-page-header__actions"><GlobalControls /></div>
       </header>
 
       <div className="context-page__scroll">

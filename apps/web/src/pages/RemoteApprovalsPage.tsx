@@ -8,15 +8,13 @@ import {
   ExternalLink,
   Inbox,
   LoaderCircle,
-  Menu,
   Pencil,
   RefreshCw,
   ShieldCheck,
   X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { GlobalControls } from '../components/GlobalControls'
-import { IconButton } from '../components/ui'
+import { PrototypePageTopbar } from '../components/PrototypePageTopbar'
 import { usePreferences, type Locale } from '../preferences'
 import {
   CosmosApiError,
@@ -31,6 +29,8 @@ export type RemoteApprovalsPageProps = {
   auth: CosmosApiAuthContext
   credentialVersion: number
   onOpenNavigation?: () => void
+  navigationCollapsed?: boolean
+  onOpenCommand?: () => void
   onOpenSession: (sessionId: string) => void
 }
 
@@ -90,6 +90,8 @@ export function RemoteApprovalsPage({
   auth,
   credentialVersion,
   onOpenNavigation,
+  navigationCollapsed,
+  onOpenCommand,
   onOpenSession,
 }: RemoteApprovalsPageProps) {
   const { locale } = usePreferences()
@@ -215,19 +217,14 @@ export function RemoteApprovalsPage({
   const canDecide = selected?.status === 'pending' && !alreadyDecided
 
   return (
-    <main className="cosmos-page cosmos-approvals-page remote-approvals-page">
-      <header className="cosmos-page-header">
-        <div className="cosmos-page-header__identity">
-          <IconButton icon={Menu} label={text(locale, '打开导航', 'Open navigation')} className="cosmos-mobile-menu" onClick={onOpenNavigation} />
-          <span className="cosmos-page-header__icon"><ShieldCheck aria-hidden="true" /></span>
-          <div><h1>{text(locale, '审批', 'Approvals')}</h1><p>{organizationId} / {spaceId}</p></div>
-        </div>
-        <div className="cosmos-page-header__actions">
-          <GlobalControls className="cosmos-global-controls" />
-          <IconButton icon={RefreshCw} label={text(locale, '刷新审批', 'Refresh Approvals')} onClick={refresh} />
-        </div>
-      </header>
-
+    <main className="prototype-automation-page cosmos-approvals-page remote-approvals-page">
+      <PrototypePageTopbar crumb={text(locale, '治理 · 审批', 'Governance · Approvals')} navigationCollapsed={navigationCollapsed} onOpenNavigation={onOpenNavigation} onOpenCommand={onOpenCommand} />
+      <div className="prototype-automation-viewport">
+      <div className="prototype-automation-content prototype-expert-content">
+      <div className="prototype-automation-header">
+        <div><h1>{text(locale, '审批', 'Approvals')}</h1><p>{organizationId} / {spaceId}</p></div>
+        <button type="button" className="prototype-ghost-button" onClick={refresh}>{text(locale, '刷新审批', 'Refresh')}</button>
+      </div>
       <div className="cosmos-page__content">
         {notice ? <div className="cosmos-notice" role="status"><CheckCircle2 aria-hidden="true" /><span>{notice}</span></div> : null}
         <section className="cosmos-approval-metrics" aria-label={text(locale, '审批概览', 'Approval overview')}>
@@ -306,6 +303,8 @@ export function RemoteApprovalsPage({
             </> : <div className="remote-approvals-empty"><ShieldCheck aria-hidden="true" /><h2>{text(locale, '没有待处理决策', 'No decisions waiting')}</h2></div>}
           </section>
         </div>
+      </div>
+      </div>
       </div>
     </main>
   )
