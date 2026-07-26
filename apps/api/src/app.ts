@@ -413,6 +413,7 @@ export type CreateAppOptions = {
   webhookRepository?: WebhookRepository
   mcpServerRepository?: McpServerRepository
   skillRepository?: SkillRepository
+  automationDispatchRetry?: { intervalMs?: number; maxAttempts?: number; batchSize?: number }
   daemonRepository?: DaemonRepository
   integrationRepository?: IntegrationRepository
   sessionRepository?: SessionRepository
@@ -3089,7 +3090,9 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         || error instanceof SessionConfigurationValidationError
         || error instanceof AuthorizationChangedError
       if (!expected) request.log.error({ err: error, eventId: receipt.event.id }, 'Automation Event dispatch failed')
-      const event = await automationRepository.failDispatch({
+      // Both expected (transient/configuration) and unexpected failures are
+      // retried with backoff; only an exhausted attempt budget dead-letters.
+      const event = await automationRepository.deferDispatch({
         organizationId: scope.organizationId,
         spaceId: scope.spaceId,
         actorId: scope.actorId,
@@ -3099,9 +3102,63 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         message: expected && error instanceof Error
           ? error.message
           : 'The Automation Event could not create a Session.',
+        maxAttempts: automationDispatchMaxAttempts,
       })
       return event ? { ...receipt, event } : receipt
     }
+  }
+
+  const automationDispatchMaxAttempts = positiveInteger(options.automationDispatchRetry?.maxAttempts, 5, 20)
+
+  async function sweepAutomationDispatchRetries(): Promise<number> {
+    const batch = await automationRepository.claimDispatchRetries(
+      positiveInteger(options.automationDispatchRetry?.batchSize, 20, 100),
+    )
+    let dispatched = 0
+    for (const claim of batch) {
+      const sweepContext = {
+        id: `automation-retry:${claim.eventId}`,
+        log: app.log,
+      } as FastifyRequest
+      const receipt = await automationRepository.resolveRetryMatch({
+        organizationId: claim.organizationId,
+        spaceId: claim.spaceId,
+        actorId: claim.receivedBy,
+        requestId: sweepContext.id,
+        eventId: claim.eventId,
+      })
+      if (!receipt) {
+        await automationRepository.failDispatch({
+          organizationId: claim.organizationId,
+          spaceId: claim.spaceId,
+          actorId: claim.receivedBy,
+          requestId: sweepContext.id,
+          eventId: claim.eventId,
+          code: 'automation_retry_unresolvable',
+          message: 'The Automation Event retry could not resolve its Automation.',
+        })
+        continue
+      }
+      const outcome = await dispatchReceivedAutomationEvent(sweepContext, {
+        organizationId: claim.organizationId,
+        spaceId: claim.spaceId,
+        actorId: claim.receivedBy,
+      }, receipt)
+      if (outcome.event.status === 'dispatched') dispatched += 1
+    }
+    return batch.length === 0 ? 0 : dispatched
+  }
+  app.decorate('sweepAutomationDispatchRetries', sweepAutomationDispatchRetries)
+
+  const automationRetryIntervalMs = options.automationDispatchRetry?.intervalMs ?? 0
+  if (automationRetryIntervalMs > 0) {
+    const timer = setInterval(() => {
+      void sweepAutomationDispatchRetries().catch((error) => {
+        app.log.error({ err: error }, 'Automation dispatch retry sweep failed')
+      })
+    }, automationRetryIntervalMs)
+    timer.unref?.()
+    app.addHook('onClose', async () => clearInterval(timer))
   }
 
   app.post<{ Params: SpaceParams }>(

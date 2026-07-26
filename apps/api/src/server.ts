@@ -109,6 +109,7 @@ const app = createApp({
   webhookRepository: pool ? new PostgresWebhookRepository(pool) : undefined,
   mcpServerRepository: pool ? new PostgresMcpServerRepository(pool) : undefined,
   skillRepository: pool ? new PostgresSkillRepository(pool) : undefined,
+  automationDispatchRetry: pool ? { intervalMs: 30_000 } : undefined,
   daemonRepository: pool ? new PostgresDaemonRepository(pool) : undefined,
   integrationRepository: pool ? new PostgresIntegrationRepository(pool) : undefined,
   fileRepository: pool ? new PostgresFileRepository(pool, objectStore) : undefined,

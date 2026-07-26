@@ -7407,7 +7407,7 @@ components:
           pattern: '^[a-f0-9]{64}$'
         status:
           type: string
-          enum: [received, matched, ignored, dispatching, dispatched, failed]
+          enum: [received, matched, ignored, dispatching, dispatched, failed, dead_letter]
         automationId:
           oneOf:
             - $ref: '#/components/schemas/RuntimeIdentifier'
@@ -8934,7 +8934,7 @@ components:
               format: date-time
     EventStatus:
       type: string
-      enum: [received, matched, ignored, dispatching, dispatched, failed]
+      enum: [received, matched, ignored, dispatching, dispatched, failed, dead_letter]
     Event:
       allOf:
         - $ref: '#/components/schemas/ResourceBase'

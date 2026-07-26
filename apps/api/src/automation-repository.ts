@@ -70,6 +70,9 @@ export interface AutomationRepository {
   receiveEvent(record: ReceiveAutomationEventRecord): Promise<AutomationEventMatchResult>
   completeDispatch(record: AutomationScope & { eventId: string; sessionId: string }): Promise<AutomationEventDto | null>
   failDispatch(record: AutomationScope & { eventId: string; code: string; message: string }): Promise<AutomationEventDto | null>
+  deferDispatch(record: AutomationScope & { eventId: string; code: string; message: string; maxAttempts: number }): Promise<AutomationEventDto | null>
+  claimDispatchRetries(limit: number): Promise<Array<{ organizationId: string; spaceId: string; eventId: string; receivedBy: string }>>
+  resolveRetryMatch(record: AutomationScope & { eventId: string }): Promise<AutomationEventMatchResult | null>
   listRuns(organizationId: string, spaceId: string, actorId: string): Promise<AutomationRunDto[]>
 }
 
@@ -114,6 +117,18 @@ export class EmptyAutomationRepository implements AutomationRepository {
   testAutomation(): Promise<null> { return Promise.resolve(null) }
   receiveEvent(): Promise<AutomationEventMatchResult> {
     return Promise.reject(new Error('Automation Events require a database-backed repository.'))
+  }
+
+  deferDispatch(): Promise<null> {
+    return Promise.resolve(null)
+  }
+
+  claimDispatchRetries(): Promise<[]> {
+    return Promise.resolve([])
+  }
+
+  resolveRetryMatch(): Promise<null> {
+    return Promise.resolve(null)
   }
   completeDispatch(): Promise<null> { return Promise.resolve(null) }
   failDispatch(): Promise<null> { return Promise.resolve(null) }

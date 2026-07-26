@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.js'
 import {
   EmptyAutomationRepository,
+  type AutomationEventMatchResult,
   type AutomationRepository,
 } from './automation-repository.js'
 import {
@@ -52,6 +53,8 @@ function automationRepository(overrides: Partial<AutomationRepository> = {}): Au
   const base = new EmptyAutomationRepository()
   return Object.assign(base, {
     receiveEvent: vi.fn(async () => ({ event, duplicate: false, match: null })),
+    deferDispatch: vi.fn(async () => null),
+    failDispatch: vi.fn(async () => null),
     ...overrides,
   })
 }
@@ -148,5 +151,65 @@ describe('Webhook delivery endpoint', () => {
 
     expect(response.statusCode).toBe(400)
     expect(automations.receiveEvent).not.toHaveBeenCalled()
+  })
+})
+
+describe('Automation dispatch retry pipeline', () => {
+  const matchedEvent: AutomationEventDto = { ...event, status: 'matched', automationId: 'automation-1' }
+  const match: NonNullable<AutomationEventMatchResult['match']> = {
+    automation: {
+      id: 'automation-1', organizationId, spaceId, expertId: 'expert-1', expertRevisionId: 'expert-revision-1',
+      triggerId: 'automation-1',
+      name: 'On alert', source: 'webhook' as const, eventType: 'alert.fired', filter: {},
+      scheduleCron: null, scheduleTimezone: null, maxRunsPerMinute: 10,
+      status: 'active' as const, autoArchive: false, serviceAccountId: 'sa-1',
+      lastTestedAt: null, lastMatchedAt: null, archivedAt: null, matchCount: 1, version: 1,
+      createdAt: matchedEvent.receivedAt, updatedAt: matchedEvent.receivedAt,
+    },
+    serviceAccountAudience: 'audience-1',
+  }
+
+  it('defers a failed dispatch instead of finalizing it', async () => {
+    const automations = automationRepository({
+      receiveEvent: vi.fn(async () => ({ event: matchedEvent, duplicate: false, match })),
+      deferDispatch: vi.fn(async () => ({ ...matchedEvent, errorCode: 'automation_dispatch_failed', errorMessage: 'x' })),
+    })
+    const app = application(webhookRepository(), automations)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: deliveryPath,
+      payload: { alert: 'cpu' },
+      headers: { authorization: 'Bearer whsec_valid', 'x-delivery-id': 'delivery-retry' },
+    })
+
+    expect(response.statusCode).toBe(202)
+    expect(automations.deferDispatch).toHaveBeenCalledWith(expect.objectContaining({
+      organizationId, spaceId, eventId: matchedEvent.id, maxAttempts: 5,
+    }))
+    expect(automations.failDispatch).not.toHaveBeenCalled()
+  })
+
+  it('sweeps due retries and finalizes unresolvable ones', async () => {
+    const automations = automationRepository({
+      claimDispatchRetries: vi.fn(async () => [
+        { organizationId, spaceId, eventId: matchedEvent.id, receivedBy: 'user-owner' },
+      ]),
+      resolveRetryMatch: vi.fn(async () => null),
+      failDispatch: vi.fn(async () => ({ ...matchedEvent, status: 'failed' as const })),
+    })
+    const app = application(webhookRepository(), automations) as ReturnType<typeof application> & {
+      sweepAutomationDispatchRetries: () => Promise<number>
+    }
+
+    await app.ready()
+    await app.sweepAutomationDispatchRetries()
+
+    expect(automations.resolveRetryMatch).toHaveBeenCalledWith(expect.objectContaining({
+      organizationId, spaceId, eventId: matchedEvent.id, actorId: 'user-owner',
+    }))
+    expect(automations.failDispatch).toHaveBeenCalledWith(expect.objectContaining({
+      code: 'automation_retry_unresolvable',
+    }))
   })
 })

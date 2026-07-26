@@ -669,6 +669,98 @@ export class PostgresAutomationRepository implements AutomationRepository {
     })
   }
 
+  async deferDispatch(record: AutomationScope & { eventId: string; code: string; message: string; maxAttempts: number }) {
+    return withApiDatabaseContext(this.pool, record, async (client) => {
+      const current = await client.query<{ dispatch_attempts: number }>(`
+        SELECT dispatch_attempts FROM cosmos_automation_events
+        WHERE organization_id = $1 AND space_id = $2 AND id = $3
+          AND status IN ('matched', 'dispatching')
+        FOR UPDATE
+      `, [record.organizationId, record.spaceId, record.eventId])
+      if (!current.rows[0]) return null
+      const attempts = current.rows[0].dispatch_attempts + 1
+      const exhausted = attempts >= record.maxAttempts
+      // Exponential backoff capped at five minutes: 15s, 60s, 240s, 300s, …
+      const delaySeconds = Math.min(300, 15 * 4 ** (attempts - 1))
+      const now = this.now()
+      const updated = await client.query<EventRow>(`
+        UPDATE cosmos_automation_events SET
+          dispatch_attempts = $4,
+          status = $5,
+          next_dispatch_at = $6,
+          error_code = $7,
+          error_message = $8,
+          processed_at = $9
+        WHERE organization_id = $1 AND space_id = $2 AND id = $3
+        RETURNING ${eventColumns.replaceAll('event.', '')}
+      `, [
+        record.organizationId, record.spaceId, record.eventId,
+        attempts,
+        exhausted ? 'dead_letter' : 'matched',
+        exhausted ? null : new Date(now.getTime() + delaySeconds * 1_000).toISOString(),
+        record.code,
+        record.message.slice(0, 2_000),
+        exhausted ? now.toISOString() : null,
+      ])
+      const event = updated.rows[0]
+      if (!event) return null
+      await this.appendAudit(client, {
+        ...record, eventId: event.id, automationId: event.automation_id ?? undefined,
+        action: exhausted ? 'automation.event.dead_letter' : 'automation.event.retry_scheduled',
+        metadata: { code: record.code, attempts },
+      })
+      return mapEvent(event)
+    })
+  }
+
+  async claimDispatchRetries(limit: number) {
+    const result = await this.pool.query<{
+      organization_id: string
+      space_id: string
+      event_id: string
+      received_by: string
+    }>('SELECT * FROM cosmos_claim_automation_dispatch_retries($1)', [limit])
+    return result.rows.map((row) => ({
+      organizationId: row.organization_id,
+      spaceId: row.space_id,
+      eventId: row.event_id,
+      receivedBy: row.received_by,
+    }))
+  }
+
+  async resolveRetryMatch(record: AutomationScope & { eventId: string }) {
+    return withApiDatabaseContext(this.pool, record, async (client) => {
+      const eventResult = await client.query<EventRow>(`
+        SELECT ${eventColumns.replaceAll('event.', '')}
+        FROM cosmos_automation_events
+        WHERE organization_id = $1 AND space_id = $2 AND id = $3
+      `, [record.organizationId, record.spaceId, record.eventId])
+      const eventRow = eventResult.rows[0]
+      if (!eventRow || !eventRow.automation_id) return null
+      const automationResult = await client.query<AutomationRow & { service_account_audience: string | null }>(`
+        SELECT ${automationColumns},
+          service_account.audience AS service_account_audience
+        FROM cosmos_expert_triggers trigger
+        JOIN cosmos_service_accounts service_account
+          ON service_account.organization_id = trigger.organization_id
+          AND service_account.id = trigger.service_account_id
+        WHERE trigger.organization_id = $1
+          AND trigger.space_id = $2
+          AND trigger.id = $3
+      `, [record.organizationId, record.spaceId, eventRow.automation_id])
+      const automationRow = automationResult.rows[0]
+      if (!automationRow || !automationRow.service_account_audience) return null
+      return {
+        event: mapEvent(eventRow),
+        duplicate: false,
+        match: {
+          automation: mapAutomation(automationRow),
+          serviceAccountAudience: automationRow.service_account_audience,
+        },
+      }
+    })
+  }
+
   async completeDispatch(record: AutomationScope & { eventId: string; sessionId: string }) {
     return withApiDatabaseContext(this.pool, record, async (client) => {
       const updated = await client.query<EventRow>(`

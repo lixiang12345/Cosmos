@@ -22515,6 +22515,7 @@ button.prototype-event-row.selected {
 }
 
 .prototype-event-status.failed::before,
+.prototype-event-status.dead_letter::before,
 .prototype-event-status.unmatched::before,
 .prototype-run-status.failed::before,
 .prototype-run-status.canceled::before {

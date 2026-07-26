@@ -28,6 +28,7 @@ export const AutomationEventStatusSchema = z.enum([
   'dispatching',
   'dispatched',
   'failed',
+  'dead_letter',
 ])
 export type AutomationEventStatus = z.infer<typeof AutomationEventStatusSchema>
 
