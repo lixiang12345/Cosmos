@@ -55,6 +55,7 @@ import {
   PrototypeSlackIcon,
 } from '../components/PrototypeIcons'
 import { PrototypePageTopbar } from '../components/PrototypePageTopbar'
+import { expertTemplates, type ExpertTemplate } from './expertTemplates'
 import { IconButton } from '../components/ui'
 import { usePreferences, type Locale } from '../preferences'
 import {
@@ -115,7 +116,7 @@ export type RemoteExpertsPageProps = RemoteCatalogListState<ExpertSummaryDto> & 
   onStartSession: (expertId: string) => void
   sessionCreationEnabled?: boolean
   canManage?: boolean
-  onCreate?: () => void
+  onCreate?: (template?: ExpertTemplate) => void
   navigationCollapsed?: boolean
   onOpenCommand?: () => void
   onOpenAdvisor?: () => void
@@ -141,6 +142,7 @@ export type RemoteExpertEditorPageProps = RemoteCatalogRequestProps & {
   expertId?: string
   environments: EnvironmentSummaryDto[]
   skills?: SkillDto[]
+  template?: ExpertTemplate
   onOpenNavigation?: () => void
   onBack: () => void
   onCreated: (expertId: string) => void
@@ -366,6 +368,7 @@ export function RemoteExpertsPage({
   const [menuId, setMenuId] = useState<string>()
   const [filterOpen, setFilterOpen] = useState(false)
   const [filters, setFilters] = useState({ shared: false, pinned: false, hasAutomations: false })
+  const [createMenuOpen, setCreateMenuOpen] = useState(false)
   const [checkedIds, setCheckedIds] = useState<ReadonlySet<string>>(new Set())
   const [pinnedIds, setPinnedIds] = useState<ReadonlySet<string>>(readExpertPins)
   const [automations, setAutomations] = useState<AutomationDto[]>([])
@@ -448,7 +451,18 @@ export function RemoteExpertsPage({
               'Expert 是可复用的 AI Agent 配置。用系统提示词定义它的角色，选择运行方式，随时从它发起会话。',
               'An Expert is a reusable AI agent configuration. Define its role with a system prompt, choose how it runs, and start sessions from it anytime.')}</p>
           </div>
-          {canManage && onCreate ? <button type="button" className="prototype-primary-button" onClick={onCreate}>{text(locale, '创建 Expert', 'Create an expert')}</button> : null}
+          {canManage && onCreate ? <div className="prototype-expert-filter">
+            <button type="button" className="prototype-primary-button" aria-label={text(locale, '创建 Expert', 'Create an expert')} aria-expanded={createMenuOpen} onClick={() => setCreateMenuOpen((open) => !open)}>{text(locale, '创建 Expert', 'Create an expert')} ▾</button>
+            {createMenuOpen ? <div className="prototype-expert-filter-menu prototype-expert-template-menu" role="menu">
+              <button type="button" role="menuitem" className="prototype-environment-create-option" onClick={() => { setCreateMenuOpen(false); onCreate() }}>
+                <PrototypeHexIcon aria-hidden="true" /><span><strong>{text(locale, '空白 Expert', 'Blank expert')}</strong><small>{text(locale, '从零开始配置', 'Start from scratch')}</small></span>
+              </button>
+              <div className="prototype-expert-template-menu-heading">{text(locale, '模板', 'Templates')}</div>
+              {expertTemplates.map((template) => <button type="button" role="menuitem" className="prototype-environment-create-option" key={template.id} onClick={() => { setCreateMenuOpen(false); onCreate(template) }}>
+                <PrototypeHexIcon aria-hidden="true" /><span><strong>{locale === 'zh' ? template.nameZh : template.name}</strong><small>{locale === 'zh' ? template.blurbZh : template.blurb}</small></span>
+              </button>)}
+            </div> : null}
+          </div> : null}
         </div>
 
         <button type="button" className="prototype-advisor-banner" disabled={!onOpenAdvisor && !onOpenCommand} onClick={onOpenAdvisor ?? onOpenCommand}>
@@ -749,6 +763,7 @@ function MarkdownToolbar({
 function formFromExpert(
   environments: EnvironmentSummaryDto[],
   expert?: ExpertDetailDto,
+  template?: ExpertTemplate,
 ): ExpertEditorForm {
   const revision = expert ? editableRevision(expert) : undefined
   const defaultEnvironment = environments.find((environment) => (
@@ -756,15 +771,16 @@ function formFromExpert(
   ))
   const model = SUPPORTED_AGENT_MODELS.find((candidate) => candidate === revision?.model)
     ?? DEFAULT_AGENT_MODEL
+  const seed = expert ? undefined : template
   return {
-    name: expert?.name ?? '',
-    description: expert?.description ?? '',
+    name: expert?.name ?? seed?.name ?? '',
+    description: expert?.description ?? seed?.description ?? '',
     visibility: expert?.visibility ?? 'space',
-    instructions: revision?.instructions ?? '',
+    instructions: revision?.instructions ?? seed?.instructions ?? '',
     model,
     environmentId: revision?.environmentId ?? defaultEnvironment?.id ?? '',
-    capabilities: revision?.capabilities ?? ['code-search', 'read-code', 'git'],
-    launchGuidance: revision?.launchGuidance ?? '',
+    capabilities: revision?.capabilities ?? seed?.capabilities ?? ['code-search', 'read-code', 'git'],
+    launchGuidance: revision?.launchGuidance ?? seed?.launchGuidance ?? '',
     allowRepositoryOverride: revision?.allowRepositoryOverride ?? true,
     allowBaseBranchOverride: revision?.allowBaseBranchOverride ?? true,
     skillIds: revision?.skillIds ?? [],
@@ -777,6 +793,7 @@ export function RemoteExpertEditorPage({
   expertId,
   environments,
   skills = [],
+  template,
   auth,
   credentialVersion,
   onOpenNavigation,
@@ -819,14 +836,14 @@ export function RemoteExpertEditorPage({
   ].join('\u0000')
   const [formState, setFormState] = useState(() => ({
     source: formSource,
-    value: formFromExpert(environments, expert),
+    value: formFromExpert(environments, expert, template),
   }))
   if (formState.source !== formSource) {
-    setFormState({ source: formSource, value: formFromExpert(environments, expert) })
+    setFormState({ source: formSource, value: formFromExpert(environments, expert, template) })
   }
   const form = formState.source === formSource
     ? formState.value
-    : formFromExpert(environments, expert)
+    : formFromExpert(environments, expert, template)
   const [busy, setBusy] = useState<'save' | 'publish' | 'disable' | 'archive'>()
   const [error, setError] = useState<Error>()
   const [confirmArchive, setConfirmArchive] = useState(false)

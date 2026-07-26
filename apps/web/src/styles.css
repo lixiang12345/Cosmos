@@ -20696,6 +20696,27 @@ main.cosmos-home.prototype-home {
   color: var(--proto-text, #1a1a1a);
 }
 
+.prototype-expert-template-menu {
+  min-width: 300px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.prototype-expert-template-menu-heading {
+  padding: 8px 10px 3px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--proto-dim, #a0a0aa);
+}
+
+.prototype-expert-template-menu .prototype-environment-create-option svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
 .prototype-session-toast {
   position: fixed;
   right: 18px;

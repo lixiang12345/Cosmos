@@ -377,7 +377,13 @@ describe('remote Catalog pages', () => {
       />,
     ))
     await user.click(screen.getByRole('button', { name: '创建 Expert' }))
+    await user.click(screen.getByRole('menuitem', { name: /空白 Expert/ }))
     expect(onCreate).toHaveBeenCalledTimes(1)
+    expect(onCreate).toHaveBeenCalledWith()
+
+    await user.click(screen.getByRole('button', { name: '创建 Expert' }))
+    await user.click(screen.getByRole('menuitem', { name: /PR Author/ }))
+    expect(onCreate).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'pr-author' }))
   })
 
   it('creates and publishes an Expert from the production editor', async () => {

@@ -17,6 +17,7 @@ import {
   type InjectEventResult,
 } from './features/control-plane'
 import { useCatalog } from './features/catalog'
+import { expertTemplates } from './pages/expertTemplates'
 import {
   createEmptyExpertStore,
   createBlankExpert,
@@ -1072,6 +1073,9 @@ function RemoteExpertEditorRoute({
   onOpenAdvisor?: () => void
 }) {
   const { expertId } = useParams()
+  const location = useLocation()
+  const templateId = (location.state as { templateId?: string } | null)?.templateId
+  const template = expertId ? undefined : expertTemplates.find((candidate) => candidate.id === templateId)
   const auth = useMemo(
     () => ({ accessToken, requestIdentity, onUnauthorized: handleUnauthorized }),
     [accessToken, handleUnauthorized, requestIdentity],
@@ -1083,6 +1087,7 @@ function RemoteExpertEditorRoute({
     expertId={expertId}
     environments={environments}
     skills={skills}
+    template={template}
     auth={auth}
     credentialVersion={credentialVersion}
     onOpenNavigation={onOpenNavigation}
@@ -2229,7 +2234,7 @@ function CosmosApp() {
               onStartSession={openNewTask}
               sessionCreationEnabled={sessionCreationEnabled}
               canManage={expertManagementEnabled}
-              onCreate={() => navigate('/experts/new')}
+              onCreate={(template) => navigate('/experts/new', template ? { state: { templateId: template.id } } : undefined)}
               navigationCollapsed={sidebarCollapsed}
               onOpenCommand={() => setCommandOpen(true)}
               onOpenAdvisor={() => navigate('/home')}
