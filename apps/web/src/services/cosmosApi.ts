@@ -38,6 +38,9 @@ import {
   WebhookMutationResponseSchema,
   McpServerDtoSchema,
   McpServerListResponseSchema,
+  SkillDtoSchema,
+  SkillListResponseSchema,
+  SkillMutationResponseSchema,
   McpServerMutationResponseSchema,
   DaemonDtoSchema,
   DaemonListResponseSchema,
@@ -129,6 +132,11 @@ import {
   type CreateWebhookRequest,
   type McpServerDto,
   type McpServerListResponse,
+  type SkillDto,
+  type SkillListResponse,
+  type SkillMutationResponse,
+  type CreateSkillRequestInput,
+  type UpdateSkillRequest,
   type McpServerMutationResponse,
   type CreateMcpServerRequest,
   type UpdateMcpServerRequest,
@@ -547,6 +555,10 @@ function mcpServersPath(organizationId: string, spaceId: string) {
   return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/mcp-servers`
 }
 
+function skillsPath(organizationId: string, spaceId: string) {
+  return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/skills`
+}
+
 function integrationsPath(organizationId: string, spaceId: string) {
   return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/integrations`
 }
@@ -671,7 +683,7 @@ function assertControlPlaneScope(
   resource: TenantScopedResource,
   organizationId: string,
   spaceId: string,
-  resourceType: 'Expert' | 'Environment' | 'Automation' | 'Repository' | 'Secret' | 'Webhook' | 'McpServer' | 'Daemon' | 'Integration',
+  resourceType: 'Expert' | 'Environment' | 'Automation' | 'Repository' | 'Secret' | 'Webhook' | 'McpServer' | 'Skill' | 'Daemon' | 'Integration',
   resourceId?: string,
 ) {
   if (
@@ -1904,12 +1916,111 @@ export function archiveMcpServer(
   spaceId: string,
   mcpServerId: string,
   version: number,
+  idempotencyKey: string,
   auth?: CosmosApiAuthContext,
 ): Promise<McpServerMutationResponse | null> {
   return request(`${mcpServersPath(organizationId, spaceId)}/${encodeURIComponent(mcpServerId)}`, {
     method: 'DELETE',
-    headers: { Accept: 'application/json', 'If-Match': `"${version}"` },
+    headers: {
+      Accept: 'application/json',
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': `"${version}"`,
+    },
   }, McpServerMutationResponseSchema.nullable(), auth)
+}
+
+export function listSkills(
+  organizationId: string,
+  spaceId: string,
+  auth?: CosmosApiAuthContext,
+  signal?: AbortSignal,
+  options?: CosmosCatalogListOptions,
+): Promise<SkillListResponse> {
+  return request(catalogListPath(skillsPath(organizationId, spaceId), options), {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    signal,
+  }, SkillListResponseSchema, auth).then((response) => {
+    for (const skill of response.items) {
+      assertControlPlaneScope(skill, organizationId, spaceId, 'Skill')
+    }
+    return response
+  })
+}
+
+export function getSkill(
+  organizationId: string,
+  spaceId: string,
+  skillId: string,
+  auth?: CosmosApiAuthContext,
+  signal?: AbortSignal,
+): Promise<SkillDto> {
+  return request(`${skillsPath(organizationId, spaceId)}/${encodeURIComponent(skillId)}`, {
+    method: 'GET', headers: { Accept: 'application/json' }, signal,
+  }, SkillDtoSchema, auth).then((skill) => {
+    assertControlPlaneScope(skill, organizationId, spaceId, 'Skill')
+    return skill
+  })
+}
+
+export function createSkill(
+  organizationId: string,
+  spaceId: string,
+  input: CreateSkillRequestInput,
+  idempotencyKey: string,
+  auth?: CosmosApiAuthContext,
+): Promise<SkillMutationResponse> {
+  return request(skillsPath(organizationId, spaceId), {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey,
+    },
+    body: JSON.stringify(input),
+  }, SkillMutationResponseSchema, auth).then((response) => {
+    assertControlPlaneScope(response.skill, organizationId, spaceId, 'Skill')
+    return response
+  })
+}
+
+export function updateSkill(
+  organizationId: string,
+  spaceId: string,
+  skillId: string,
+  version: number,
+  input: UpdateSkillRequest,
+  idempotencyKey: string,
+  auth?: CosmosApiAuthContext,
+): Promise<SkillMutationResponse | null> {
+  return request(`${skillsPath(organizationId, spaceId)}/${encodeURIComponent(skillId)}`, {
+    method: 'PATCH',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': `"${version}"`,
+    },
+    body: JSON.stringify(input),
+  }, SkillMutationResponseSchema.nullable(), auth)
+}
+
+export function archiveSkill(
+  organizationId: string,
+  spaceId: string,
+  skillId: string,
+  version: number,
+  idempotencyKey: string,
+  auth?: CosmosApiAuthContext,
+): Promise<SkillMutationResponse | null> {
+  return request(`${skillsPath(organizationId, spaceId)}/${encodeURIComponent(skillId)}`, {
+    method: 'DELETE',
+    headers: {
+      Accept: 'application/json',
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': `"${version}"`,
+    },
+  }, SkillMutationResponseSchema.nullable(), auth)
 }
 
 export function listDaemons(

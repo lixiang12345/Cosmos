@@ -4,6 +4,7 @@ import {
   type AutomationDto,
   type AutomationSource,
   type CreateEnvironmentRequestInput,
+  type SkillDto,
   type EnvironmentDetailDto,
   type EnvironmentRevisionDto,
   type EnvironmentStatus,
@@ -87,6 +88,9 @@ import {
   retryEnvironment,
   updateEnvironment,
   updateExpert,
+  createSkill,
+  updateSkill,
+  archiveSkill,
   type CosmosApiAuthContext,
 } from '../services/cosmosApi'
 
@@ -2213,7 +2217,7 @@ export function RemoteMcpServersPage({
     setMutating(true)
     setMutationError(null)
     try {
-      await archiveMcpServer(organizationId, spaceId, item.id, item.version, requestAuth)
+      await archiveMcpServer(organizationId, spaceId, item.id, item.version, crypto.randomUUID(), requestAuth)
       setConfirmArchiveId(undefined)
       onRetry()
     } catch (cause) {
@@ -2695,6 +2699,204 @@ export function RemoteIntegrationsPage({
         <footer className="prototype-drawer-footer">
           <button type="button" className="prototype-ghost-button" onClick={closeForm}>{text(locale, '取消', 'Cancel')}</button>
           <button type="submit" className="prototype-primary-button" disabled={workingId === '__create__'}>{workingId === '__create__' ? text(locale, '添加中…', 'Adding…') : text(locale, '添加集成', 'Add integration')}</button>
+        </footer>
+      </form>
+    </div> : null}
+  </main>
+}
+
+export type RemoteSkillsPageProps = RemoteCatalogListState<SkillDto>
+  & RemoteCatalogRequestProps
+  & { onOpenNavigation?: () => void; canManage?: boolean; navigationCollapsed?: boolean; onOpenCommand?: () => void }
+
+type SkillDraft = { name: string; description: string; source: SkillDto['source']; content: string; url: string; tags: string }
+const initialSkillDraft: SkillDraft = { name: '', description: '', source: 'inline', content: '', url: '', tags: '' }
+
+export function RemoteSkillsPage({
+  items,
+  loading,
+  ready,
+  error,
+  onRetry,
+  organizationId,
+  spaceId,
+  auth,
+  credentialVersion,
+  canManage,
+  onOpenNavigation,
+  navigationCollapsed,
+  onOpenCommand,
+}: RemoteSkillsPageProps) {
+  const { locale } = usePreferences()
+  const [formOpen, setFormOpen] = useState(false)
+  const [editing, setEditing] = useState<SkillDto>()
+  const [draft, setDraft] = useState<SkillDraft>(initialSkillDraft)
+  const [mutating, setMutating] = useState(false)
+  const [mutationError, setMutationError] = useState<Error | null>(null)
+  const [confirmArchiveId, setConfirmArchiveId] = useState<string>()
+  const state = listState(loading, ready, error)
+  const requestAuth = useMemo<CosmosApiAuthContext>(() => ({
+    accessToken: auth.accessToken,
+    requestIdentity: auth.requestIdentity,
+    onUnauthorized: auth.onUnauthorized,
+  }), [auth.accessToken, auth.onUnauthorized, auth.requestIdentity])
+  void credentialVersion
+
+  const closeForm = useCallback(() => { setDraft(initialSkillDraft); setMutationError(null); setFormOpen(false); setEditing(undefined) }, [])
+
+  const openEdit = useCallback((item: SkillDto) => {
+    setEditing(item)
+    setDraft({
+      name: item.name,
+      description: item.description,
+      source: item.source,
+      content: item.content ?? '',
+      url: item.url ?? '',
+      tags: item.tags.join(', '),
+    })
+    setMutationError(null)
+    setFormOpen(true)
+  }, [])
+
+  const submitSkill = useCallback(async () => {
+    const name = draft.name.trim()
+    const isInline = draft.source === 'inline'
+    const target = isInline ? draft.content.trim() : draft.url.trim()
+    if (!name || !target) {
+      setMutationError(new Error(isInline
+        ? text(locale, '名称和技能内容均为必填。', 'Name and skill content are both required.')
+        : text(locale, '名称和包 URL 均为必填。', 'Name and package URL are both required.')))
+      return
+    }
+    const tags = [...new Set(draft.tags.split(',').map((entry) => entry.trim()).filter(Boolean))]
+    setMutating(true)
+    setMutationError(null)
+    try {
+      if (editing) {
+        await updateSkill(organizationId, spaceId, editing.id, editing.version, {
+          description: draft.description,
+          ...(isInline ? { content: target } : { url: target }),
+          tags,
+        }, crypto.randomUUID(), requestAuth)
+      } else {
+        await createSkill(organizationId, spaceId, {
+          name,
+          description: draft.description,
+          source: draft.source,
+          ...(isInline ? { content: target } : { url: target }),
+          tags,
+        }, crypto.randomUUID(), requestAuth)
+      }
+      closeForm()
+      onRetry()
+    } catch (cause) {
+      setMutationError(cause instanceof Error ? cause : new Error(String(cause)))
+    } finally {
+      setMutating(false)
+    }
+  }, [closeForm, draft, editing, locale, onRetry, organizationId, requestAuth, spaceId])
+
+  const archiveRow = useCallback(async (item: SkillDto) => {
+    setMutating(true)
+    setMutationError(null)
+    try {
+      await archiveSkill(organizationId, spaceId, item.id, item.version, crypto.randomUUID(), requestAuth)
+      setConfirmArchiveId(undefined)
+      onRetry()
+    } catch (cause) {
+      setMutationError(cause instanceof Error ? cause : new Error(String(cause)))
+    } finally {
+      setMutating(false)
+    }
+  }, [onRetry, organizationId, requestAuth, spaceId])
+
+  return <main className="prototype-automation-page">
+    <PrototypePageTopbar
+      crumb={text(locale, '配置 · Skills', 'Configuration · Skills')}
+      navigationCollapsed={navigationCollapsed}
+      onOpenNavigation={onOpenNavigation}
+      onOpenCommand={onOpenCommand}
+    />
+    <div className="prototype-automation-viewport">
+      <div className="prototype-automation-content prototype-expert-content">
+        <div className="prototype-automation-header">
+          <div>
+            <h1>Skills</h1>
+            <p>{text(locale,
+              'Skill 是遵循 agentskills.io 规范的可复用知识包，为 Expert 提供领域专长。Inline 技能直接携带说明；URL 技能引用外部包，会话启动时加载。',
+              'A Skill is a reusable knowledge package (following the agentskills.io spec) that gives Experts domain expertise. Inline skills carry their instructions; url skills reference an external package loaded at session boot.')}</p>
+          </div>
+          {canManage ? <button type="button" className="prototype-primary-button" onClick={() => setFormOpen(true)}>{text(locale, '添加 Skill', 'Add skill')}</button> : null}
+        </div>
+
+        <div className="prototype-automation-table-wrap">
+          <table className="prototype-automation-table prototype-expert-table">
+            <thead><tr>
+              <th>{text(locale, '名称', 'Name')}</th>
+              <th>{text(locale, '来源', 'Source')}</th>
+              <th>{text(locale, '标签', 'Tags')}</th>
+              <th>{text(locale, '更新时间', 'Updated')}</th>
+              {canManage ? <th className="col-menu"><span className="sr-only">{text(locale, '操作', 'Actions')}</span></th> : null}
+            </tr></thead>
+            <tbody>
+              {state === 'loading' ? <tr><td colSpan={canManage ? 5 : 4} className="prototype-automation-state"><LoaderCircle className="spin" aria-hidden="true" />{text(locale, '加载中…', 'Loading…')}</td></tr> : null}
+              {state === 'error' ? <tr><td colSpan={canManage ? 5 : 4} className="prototype-automation-state prototype-automation-state--error"><span role="alert">{text(locale, '无法加载 Skills。', 'Unable to load Skills.')}{error ? ` ${error.message}` : ''}</span><button type="button" onClick={onRetry}><RefreshCw aria-hidden="true" />{text(locale, '重试', 'Retry')}</button></td></tr> : null}
+              {state === 'ready' && !items.length ? <tr><td colSpan={canManage ? 5 : 4} className="prototype-automation-state">{text(locale, '还没有 Skill。添加第一个知识包，然后在 Expert 编辑器中引用。', 'No skills yet. Add the first knowledge package, then reference it from the Expert editor.')}</td></tr> : null}
+              {state === 'ready' ? items.map((item) => <tr key={item.id}>
+                <td><div className="prototype-expert-name-cell">
+                  <span className="prototype-automation-expert-icon"><PrototypeHexIcon aria-hidden="true" /></span>
+                  <div className="prototype-expert-name-body">
+                    <div className="prototype-expert-name-line"><strong>{item.name}</strong></div>
+                    {item.description ? <div className="prototype-expert-desc-line">{item.description}</div> : null}
+                  </div>
+                </div></td>
+                <td className="muted">{item.source === 'inline' ? text(locale, '内联', 'inline') : <code className="prototype-mcp-endpoint">{item.url}</code>}</td>
+                <td>{item.tags.length ? <div className="prototype-expert-integ-stack">{item.tags.slice(0, 3).map((tag) => <span className="prototype-expert-tag" key={tag}>{tag}</span>)}{item.tags.length > 3 ? <span className="prototype-expert-integ-count">+{item.tags.length - 3}</span> : null}</div> : <span className="muted">—</span>}</td>
+                <td className="muted">{formatDate(item.updatedAt, locale)}</td>
+                {canManage ? <td className="col-menu" style={{ whiteSpace: 'nowrap' }}>
+                  {confirmArchiveId === item.id ? <div className="prototype-automation-confirm"><span>{text(locale, '确认归档？', 'Archive?')}</span><button type="button" disabled={mutating} onClick={() => setConfirmArchiveId(undefined)}>{text(locale, '取消', 'Cancel')}</button><button type="button" className="danger" disabled={mutating} onClick={() => void archiveRow(item)}>{text(locale, '确认', 'Confirm')}</button></div>
+                    : <>
+                      <button type="button" className="prototype-ghost-button" disabled={mutating} onClick={() => openEdit(item)}>{text(locale, '编辑', 'Edit')}</button>
+                      <button type="button" className="icon-btn prototype-automation-remove" aria-label={text(locale, `归档 ${item.name}`, `Archive ${item.name}`)} disabled={mutating} onClick={() => setConfirmArchiveId(item.id)}>×</button>
+                    </>}
+                </td> : null}
+              </tr>) : null}
+            </tbody>
+          </table>
+        </div>
+
+        {mutationError && !formOpen ? <p className="prototype-automation-error" role="alert">{mutationError.message}</p> : null}
+        {state === 'ready' ? <div className="prototype-automation-footer"><span>{items.length} {items.length === 1 ? 'skill' : 'skills'}</span><div /></div> : null}
+      </div>
+    </div>
+
+    {formOpen ? <div className="prototype-drawer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !mutating) closeForm() }}>
+      <form className="prototype-automation-drawer" role="dialog" aria-modal="true" aria-label={editing ? text(locale, '编辑 Skill', 'Edit skill') : text(locale, '添加 Skill', 'Add skill')} onKeyDown={(event) => catalogDialogKeyDown(event, closeForm, mutating)} onSubmit={(event) => { event.preventDefault(); void submitSkill() }}>
+        <header className="prototype-drawer-header"><h2>{editing ? text(locale, '编辑 Skill', 'Edit skill') : text(locale, '添加 Skill', 'Add skill')}</h2><button type="button" className="icon-btn" aria-label={text(locale, '关闭', 'Close')} disabled={mutating} onClick={closeForm}>×</button></header>
+        <div className="prototype-drawer-body">
+          <label className="prototype-field-label" htmlFor="skill-name">{text(locale, '名称', 'Name')}</label>
+          <input id="skill-name" className="prototype-field" autoFocus={!editing} required disabled={Boolean(editing)} maxLength={256} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="pr-review-checklist" />
+          <label className="prototype-field-label" htmlFor="skill-description">{text(locale, '说明', 'Description')}</label>
+          <textarea id="skill-description" className="prototype-field" rows={2} maxLength={2048} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} />
+          <label className="prototype-field-label" htmlFor="skill-source">{text(locale, '来源', 'Source')}</label>
+          <select id="skill-source" className="prototype-field-select" disabled={Boolean(editing)} value={draft.source} onChange={(event) => setDraft({ ...draft, source: event.target.value as SkillDto['source'] })}>
+            <option value="inline">{text(locale, '内联 — 直接粘贴说明', 'Inline — paste the instructions')}</option>
+            <option value="url">{text(locale, 'URL — 引用外部包', 'URL — reference an external package')}</option>
+          </select>
+          {draft.source === 'inline' ? <>
+            <label className="prototype-field-label" htmlFor="skill-content">{text(locale, '技能内容（Markdown）', 'Skill content (Markdown)')}</label>
+            <textarea id="skill-content" className="prototype-field prototype-mono-field" rows={8} required maxLength={65536} value={draft.content} onChange={(event) => setDraft({ ...draft, content: event.target.value })} placeholder={text(locale, '# 技能说明…', '# Skill instructions…')} />
+          </> : <>
+            <label className="prototype-field-label" htmlFor="skill-url">{text(locale, '包 URL（HTTPS）', 'Package URL (HTTPS)')}</label>
+            <input id="skill-url" className="prototype-field prototype-mono-field" type="url" required value={draft.url} onChange={(event) => setDraft({ ...draft, url: event.target.value })} placeholder="https://skills.example.com/pr-review.zip" />
+          </>}
+          <label className="prototype-field-label" htmlFor="skill-tags">{text(locale, '标签（逗号分隔）', 'Tags (comma separated)')}</label>
+          <input id="skill-tags" className="prototype-field" value={draft.tags} onChange={(event) => setDraft({ ...draft, tags: event.target.value })} placeholder="review, security" />
+          {mutationError ? <p className="prototype-automation-error" role="alert">{mutationError.message}</p> : null}
+        </div>
+        <footer className="prototype-drawer-footer">
+          <button type="button" className="prototype-ghost-button" disabled={mutating} onClick={closeForm}>{text(locale, '取消', 'Cancel')}</button>
+          <button type="submit" className="prototype-primary-button" disabled={mutating}>{mutating ? text(locale, '保存中…', 'Saving…') : editing ? text(locale, '保存修改', 'Save changes') : text(locale, '添加 Skill', 'Add skill')}</button>
         </footer>
       </form>
     </div> : null}

@@ -1,4 +1,4 @@
-import type { DaemonDto, EnvironmentSummaryDto, ExpertSummaryDto, IntegrationDto, McpServerDto, RepositoryDto, SecretDto, WebhookDto } from '@cosmos/contracts'
+import type { DaemonDto, EnvironmentSummaryDto, ExpertSummaryDto, IntegrationDto, McpServerDto, SkillDto, RepositoryDto, SecretDto, WebhookDto } from '@cosmos/contracts'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   listDaemons,
@@ -6,6 +6,7 @@ import {
   listExperts,
   listIntegrations,
   listMcpServers,
+  listSkills,
   listRepositories,
   listSecrets,
   listWebhooks,
@@ -77,6 +78,7 @@ export type CatalogReadModel = {
   secrets: CatalogResourceState<SecretDto>
   webhooks: CatalogResourceState<WebhookDto>
   mcpServers: CatalogResourceState<McpServerDto>
+  skills: CatalogResourceState<SkillDto>
   daemons: CatalogResourceState<DaemonDto>
   integrations: CatalogResourceState<IntegrationDto>
 }
@@ -231,6 +233,17 @@ export function useCatalog({
     [auth, organizationId, spaceId],
   )
 
+  const loadSkills = useCallback(
+    (signal: AbortSignal) => loadCatalogPages(signal, (cursor) => listSkills(
+      organizationId,
+      spaceId,
+      auth,
+      signal,
+      { limit: 100, ...(cursor ? { cursor } : {}) },
+    )),
+    [auth, organizationId, spaceId],
+  )
+
   const loadDaemons = useCallback(
     (signal: AbortSignal) => loadCatalogPages(signal, (cursor) => listDaemons(
       organizationId,
@@ -260,6 +273,7 @@ export function useCatalog({
     secrets: useCatalogResource(requestEnabled, identity, loadSecrets),
     webhooks: useCatalogResource(requestEnabled, identity, loadWebhooks),
     mcpServers: useCatalogResource(requestEnabled, identity, loadMcpServers),
+    skills: useCatalogResource(requestEnabled, identity, loadSkills),
     daemons: useCatalogResource(requestEnabled, identity, loadDaemons),
     integrations: useCatalogResource(requestEnabled, identity, loadIntegrations),
   }

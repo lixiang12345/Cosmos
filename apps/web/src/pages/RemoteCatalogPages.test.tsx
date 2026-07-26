@@ -14,6 +14,7 @@ import {
   CosmosApiError,
   createEnvironment,
   createExpert,
+  createSkill,
   getEnvironment,
   getExpert,
   listExpertRevisions,
@@ -27,6 +28,7 @@ import {
   RemoteExpertDetailPage,
   RemoteExpertEditorPage,
   RemoteExpertsPage,
+  RemoteSkillsPage,
   type RemoteEnvironmentsPageProps,
   type RemoteExpertDetailPageProps,
 } from './RemoteCatalogPages'
@@ -37,6 +39,7 @@ vi.mock('../services/cosmosApi', async (importOriginal) => ({
   getExpert: vi.fn(),
   createExpert: vi.fn(),
   createEnvironment: vi.fn(),
+  createSkill: vi.fn(),
   updateExpert: vi.fn(),
   publishExpert: vi.fn(),
   listExpertRevisions: vi.fn(),
@@ -718,6 +721,75 @@ describe('remote Catalog pages', () => {
     expect(screen.getByLabelText('名称')).toBeDisabled()
 
     await act(async () => { pending.resolve(environmentDetail(environmentA)) })
+  })
+
+
+  it('lets a manager create an inline Skill with deduplicated tags', async () => {
+    const user = userEvent.setup()
+    vi.mocked(createSkill).mockResolvedValue({
+      skill: {
+        id: 'skill-created', organizationId: 'organization-a', spaceId: 'space-a',
+        name: 'pr-review-checklist', description: '', source: 'inline',
+        content: '# Checklist', url: null, tags: ['review'], status: 'active',
+        version: 1, createdBy: 'user-a',
+        createdAt: '2026-07-26T00:00:00.000Z', updatedAt: '2026-07-26T00:00:00.000Z', archivedAt: null,
+      },
+      replayed: false,
+    })
+    const onRetry = vi.fn()
+    render(withPreferences(
+      <RemoteSkillsPage
+        items={[]}
+        loading={false}
+        ready
+        error={null}
+        onRetry={onRetry}
+        organizationId="organization-a"
+        spaceId="space-a"
+        auth={auth}
+        credentialVersion={1}
+        canManage
+      />,
+    ))
+
+    await user.click(screen.getByRole('button', { name: '添加 Skill' }))
+    await user.type(screen.getByLabelText('名称'), 'pr-review-checklist')
+    await user.type(screen.getByLabelText('技能内容（Markdown）'), '# Checklist')
+    await user.type(screen.getByLabelText('标签（逗号分隔）'), 'review, review')
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '添加 Skill' }))
+
+    await waitFor(() => expect(createSkill).toHaveBeenCalledTimes(1))
+    expect(createSkill).toHaveBeenCalledWith(
+      'organization-a', 'space-a',
+      expect.objectContaining({ name: 'pr-review-checklist', source: 'inline', content: '# Checklist', tags: ['review'] }),
+      expect.any(String),
+      expect.objectContaining({ accessToken: 'token-a' }),
+    )
+    expect(onRetry).toHaveBeenCalledTimes(1)
+  })
+
+  it('hides Skill management from non-managers and surfaces list errors', async () => {
+    const user = userEvent.setup()
+    const onRetry = vi.fn()
+    render(withPreferences(
+      <RemoteSkillsPage
+        items={[]}
+        loading={false}
+        ready={false}
+        error={new Error('Skill catalog unavailable.')}
+        onRetry={onRetry}
+        organizationId="organization-a"
+        spaceId="space-a"
+        auth={auth}
+        credentialVersion={1}
+        canManage={false}
+      />,
+    ))
+
+    expect(screen.queryByRole('button', { name: '添加 Skill' })).not.toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('无法加载 Skills')
+    await user.click(screen.getByRole('button', { name: '重试' }))
+    expect(onRetry).toHaveBeenCalledTimes(1)
   })
 
   it('shows list errors in English without exposing mutation actions', async () => {

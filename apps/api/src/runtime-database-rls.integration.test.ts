@@ -170,9 +170,9 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
         AND relname NOT IN ('cosmos_schema_migrations', 'cosmos_worker_heartbeats', 'cosmos_object_storage_gc_runs')
     `)
     expect(protection.rows[0]).toEqual({
-      protected_tables: '68',
-      rls_tables: '68',
-      forced_tables: '68',
+      protected_tables: '71',
+      rls_tables: '71',
+      forced_tables: '71',
     })
   })
 

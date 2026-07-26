@@ -3602,6 +3602,159 @@ paths:
         '500':
           $ref: '#/components/responses/RuntimeInternalError'
 
+  /organizations/{organizationId}/spaces/{spaceId}/skills:
+    parameters:
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
+    get:
+      tags: [Skills]
+      operationId: listSkills
+      x-cosmos-implementation-status: implemented
+      summary: List Skills in a Space
+      responses:
+        '200':
+          description: Skill list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeSkillListResponse'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+    post:
+      tags: [Skills]
+      operationId: createSkill
+      x-cosmos-implementation-status: implemented
+      summary: Create a Skill in a Space
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeCreateSkillRequest'
+      responses:
+        '200':
+          description: Skill creation replayed for a previously used Idempotency-Key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeSkillMutationResponse'
+        '201':
+          description: Skill created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeSkillMutationResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '409':
+          $ref: '#/components/responses/RuntimeConflict'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+
+  /organizations/{organizationId}/spaces/{spaceId}/skills/{skillId}:
+    parameters:
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
+      - $ref: '#/components/parameters/RuntimeSkillId'
+    get:
+      tags: [Skills]
+      operationId: getSkill
+      x-cosmos-implementation-status: implemented
+      summary: Get a Skill
+      responses:
+        '200':
+          description: Skill
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeSkill'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+    patch:
+      tags: [Skills]
+      operationId: updateSkill
+      x-cosmos-implementation-status: implemented
+      summary: Update a Skill
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeUpdateSkillRequest'
+      responses:
+        '200':
+          description: Updated Skill
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeSkillMutationResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '412':
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '428':
+          $ref: '#/components/responses/RuntimePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+    delete:
+      tags: [Skills]
+      operationId: archiveSkill
+      x-cosmos-implementation-status: implemented
+      summary: Archive a Skill
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Archived Skill
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeSkillMutationResponse'
+        '400':
+          $ref: '#/components/responses/RuntimeBadRequest'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '412':
+          $ref: '#/components/responses/RuntimePreconditionFailed'
+        '428':
+          $ref: '#/components/responses/RuntimePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+
   /organizations/{organizationId}/spaces/{spaceId}/daemons:
     parameters:
       - $ref: '#/components/parameters/RuntimeOrganizationId'
@@ -4018,6 +4171,13 @@ components:
       in: path
       required: true
       description: Runtime Webhook identifier.
+      schema:
+        $ref: '#/components/schemas/RuntimeIdentifier'
+    RuntimeSkillId:
+      name: skillId
+      in: path
+      required: true
+      description: Runtime Skill identifier.
       schema:
         $ref: '#/components/schemas/RuntimeIdentifier'
     RuntimeMcpServerId:
@@ -6469,6 +6629,149 @@ components:
               minLength: 1
               description: Write-once signing secret. Returned only on fresh creation, null on replay.
             - type: 'null'
+        replayed:
+          type: boolean
+      additionalProperties: false
+    RuntimeSkill:
+      type: object
+      description: Reusable knowledge package Experts can pin. Exactly one of content (inline) or url (url) is populated.
+      required: [id, organizationId, spaceId, name, description, source, content, url, tags, status, version, createdBy, createdAt, updatedAt, archivedAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        organizationId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        spaceId:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        description:
+          type: string
+          maxLength: 2048
+        source:
+          type: string
+          enum: [inline, url]
+        content:
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 65536
+            - type: 'null'
+        url:
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 2048
+            - type: 'null'
+        tags:
+          type: array
+          maxItems: 32
+          items:
+            type: string
+            minLength: 1
+            maxLength: 64
+        status:
+          type: string
+          enum: [active, archived]
+        version:
+          type: integer
+          minimum: 1
+        createdBy:
+          $ref: '#/components/schemas/RuntimeIdentifier'
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        updatedAt:
+          $ref: '#/components/schemas/Timestamp'
+        archivedAt:
+          oneOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+      additionalProperties: false
+    RuntimeSkillListResponse:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/RuntimeSkill'
+        page:
+          type: object
+          required: [nextCursor, hasMore]
+          properties:
+            nextCursor:
+              oneOf:
+                - type: string
+                  minLength: 1
+                  maxLength: 2048
+                - type: 'null'
+            hasMore:
+              type: boolean
+          additionalProperties: false
+      additionalProperties: false
+    RuntimeCreateSkillRequest:
+      type: object
+      required: [name, source]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        description:
+          type: string
+          maxLength: 2048
+        source:
+          type: string
+          enum: [inline, url]
+        content:
+          type: string
+          minLength: 1
+          maxLength: 65536
+          description: Required for inline Skills.
+        url:
+          type: string
+          minLength: 1
+          maxLength: 2048
+          description: Required for url Skills; must use HTTPS.
+        tags:
+          type: array
+          maxItems: 32
+          items:
+            type: string
+            minLength: 1
+            maxLength: 64
+      additionalProperties: false
+    RuntimeUpdateSkillRequest:
+      type: object
+      properties:
+        description:
+          type: string
+          maxLength: 2048
+        content:
+          type: string
+          minLength: 1
+          maxLength: 65536
+        url:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        tags:
+          type: array
+          maxItems: 32
+          items:
+            type: string
+            minLength: 1
+            maxLength: 64
+      additionalProperties: false
+    RuntimeSkillMutationResponse:
+      type: object
+      required: [skill, replayed]
+      properties:
+        skill:
+          $ref: '#/components/schemas/RuntimeSkill'
         replayed:
           type: boolean
       additionalProperties: false

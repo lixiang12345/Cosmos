@@ -85,6 +85,11 @@ import {
   McpServerDtoSchema,
   McpServerListResponseSchema,
   McpServerMutationResponseSchema,
+  CreateSkillRequestSchema,
+  UpdateSkillRequestSchema,
+  SkillDtoSchema,
+  SkillListResponseSchema,
+  SkillMutationResponseSchema,
   CreateDaemonRequestSchema,
   UpdateDaemonRequestSchema,
   DaemonDtoSchema,
@@ -206,6 +211,13 @@ import {
   McpServerVersionConflictError,
   type McpServerRepository,
 } from './mcp-server-repository.js'
+import {
+  EmptySkillRepository,
+  SkillDuplicateError,
+  SkillSourceMismatchError,
+  SkillVersionConflictError,
+  type SkillRepository,
+} from './skill-repository.js'
 import {
   EmptyDaemonRepository,
   DaemonDuplicateError,
@@ -396,6 +408,7 @@ export type CreateAppOptions = {
   secretRepository?: SecretRepository
   webhookRepository?: WebhookRepository
   mcpServerRepository?: McpServerRepository
+  skillRepository?: SkillRepository
   daemonRepository?: DaemonRepository
   integrationRepository?: IntegrationRepository
   sessionRepository?: SessionRepository
@@ -766,6 +779,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   const secretRepository = options.secretRepository ?? new EmptySecretRepository()
   const webhookRepository = options.webhookRepository ?? new EmptyWebhookRepository()
   const mcpServerRepository = options.mcpServerRepository ?? new EmptyMcpServerRepository()
+  const skillRepository = options.skillRepository ?? new EmptySkillRepository()
   const daemonRepository = options.daemonRepository ?? new EmptyDaemonRepository()
   const integrationRepository = options.integrationRepository ?? new EmptyIntegrationRepository()
   const advisorPlanRepository = options.advisorPlanRepository ?? new EmptyAdvisorPlanRepository()
@@ -1786,6 +1800,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   const canManageSecrets = canManageExperts
   const canManageWebhooks = canManageExperts
   const canManageMcpServers = canManageExperts
+  const canManageSkills = canManageExperts
   const canManageDaemons = canManageExperts
   const canManageIntegrations = canManageExperts
 
@@ -1849,6 +1864,14 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     return sendApiError(reply, 403, request, {
       code: 'PERMISSION_DENIED',
       message: 'Only Space Managers and Organization Administrators can manage integrations.',
+      retryable: false,
+    })
+  }
+
+  function denySkillMutation(request: FastifyRequest, reply: FastifyReply) {
+    return sendApiError(reply, 403, request, {
+      code: 'PERMISSION_DENIED',
+      message: 'Only Space Managers and Organization Administrators can manage skills.',
       retryable: false,
     })
   }
@@ -4921,6 +4944,191 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         if (error instanceof McpServerIdempotencyConflictError) {
           return sendApiError(reply, 409, request, {
             code: 'IDEMPOTENCY_KEY_REUSED', message: error.message, retryable: false,
+          })
+        }
+        throw error
+      }
+    },
+  )
+
+
+  // ── Skills ──────────────────────────────────────────────────────────────────
+
+  type SkillParams = { organizationId: string; spaceId: string }
+  type SkillIdParams = SkillParams & { skillId: string }
+
+  app.get<{ Params: SkillParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/skills',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      const { organizationId, spaceId } = authorization
+      const { items, nextCursor, hasMore } = await skillRepository.listSkills(
+        organizationId, spaceId, authorization.actor.id,
+      )
+      return SkillListResponseSchema.parse({ items, page: { nextCursor, hasMore } })
+    },
+  )
+
+  app.get<{ Params: SkillIdParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/skills/:skillId',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      const { organizationId, spaceId } = authorization
+      const skill = await skillRepository.getSkill(
+        organizationId, spaceId, request.params.skillId, authorization.actor.id,
+      )
+      if (!skill) return sendResourceNotFound(reply, request)
+      return SkillDtoSchema.parse(skill)
+    },
+  )
+
+  app.post<{ Params: SkillParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/skills',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageSkills(authorization.access)) return denySkillMutation(request, reply)
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
+          fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      const parsed = CreateSkillRequestSchema.safeParse(request.body)
+      if (!parsed.success) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED', message: 'The Skill request is invalid.', retryable: false,
+          fieldErrors: validationFieldErrors(parsed.error.issues),
+        })
+      }
+      try {
+        const result = await skillRepository.createSkill({
+          organizationId: authorization.organizationId,
+          spaceId: authorization.spaceId,
+          actorId: authorization.actor.id,
+          requestId: request.id,
+          idempotencyKey,
+          request: parsed.data,
+        })
+        const response = SkillMutationResponseSchema.parse(result)
+        reply.header('Idempotency-Replayed', String(response.replayed))
+        reply.header('Location', `/api/v1/organizations/${authorization.organizationId}/spaces/${authorization.spaceId}/skills/${response.skill.id}`)
+        reply.header('ETag', resourceEtag(response.skill))
+        return reply.code(response.replayed ? 200 : 201).send(response)
+      } catch (error) {
+        if (error instanceof SkillDuplicateError) {
+          return sendApiError(reply, 409, request, {
+            code: 'CONFLICT', message: error.message, retryable: false,
+            fieldErrors: { name: ['Choose a name that is not used by an active Skill in this Space.'] },
+          })
+        }
+        throw error
+      }
+    },
+  )
+
+  app.patch<{ Params: SkillIdParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/skills/:skillId',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageSkills(authorization.access)) return denySkillMutation(request, reply)
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
+          fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      const expectedVersion = requireIfMatchVersion(request, reply, 'Skill')
+      if (expectedVersion === null) return
+      const parsed = UpdateSkillRequestSchema.safeParse(request.body)
+      if (!parsed.success) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED', message: 'The Skill update is invalid.', retryable: false,
+          fieldErrors: validationFieldErrors(parsed.error.issues),
+        })
+      }
+      try {
+        const result = await skillRepository.updateSkill({
+          organizationId: authorization.organizationId,
+          spaceId: authorization.spaceId,
+          skillId: request.params.skillId,
+          actorId: authorization.actor.id,
+          requestId: request.id,
+          expectedVersion,
+          idempotencyKey,
+          request: parsed.data,
+        })
+        if (!result) return sendResourceNotFound(reply, request)
+        const response = SkillMutationResponseSchema.parse(result)
+        reply.header('Idempotency-Replayed', String(response.replayed))
+        reply.header('ETag', resourceEtag(response.skill))
+        return response
+      } catch (error) {
+        if (error instanceof SkillVersionConflictError) {
+          return sendApiError(reply, 412, request, {
+            code: 'PRECONDITION_FAILED', message: error.message, retryable: false,
+            details: { expectedVersion: error.expectedVersion, currentVersion: error.actualVersion },
+          })
+        }
+        if (error instanceof SkillSourceMismatchError) {
+          return sendApiError(reply, 400, request, {
+            code: 'VALIDATION_FAILED', message: error.message, retryable: false,
+            fieldErrors: { [error.field]: ['Inline Skills accept content; url Skills accept a package URL.'] },
+          })
+        }
+        throw error
+      }
+    },
+  )
+
+  app.delete<{ Params: SkillIdParams }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/skills/:skillId',
+    async (request, reply) => {
+      const authorization = await authorizeCatalogSpace(request, reply, request.params)
+      if (!authorization) return
+      if (!canManageSkills(authorization.access)) return denySkillMutation(request, reply)
+      const idempotencyKey = readIdempotencyKey(request)
+      if (!idempotencyKey) {
+        return sendApiError(reply, 400, request, {
+          code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
+          fieldErrors: { 'header.Idempotency-Key': ['Use 1 to 128 visible ASCII characters.'] },
+        })
+      }
+      const expectedVersion = requireIfMatchVersion(request, reply, 'Skill')
+      if (expectedVersion === null) return
+      if (request.body !== undefined) {
+        return sendApiError(reply, 400, request, {
+          code: 'VALIDATION_FAILED',
+          message: 'Archiving a Skill does not accept a request body.',
+          retryable: false,
+          fieldErrors: { body: ['Send the request without a body.'] },
+        })
+      }
+      try {
+        const result = await skillRepository.archiveSkill({
+          organizationId: authorization.organizationId,
+          spaceId: authorization.spaceId,
+          skillId: request.params.skillId,
+          actorId: authorization.actor.id,
+          requestId: request.id,
+          expectedVersion,
+          idempotencyKey,
+        })
+        if (!result) return sendResourceNotFound(reply, request)
+        const response = SkillMutationResponseSchema.parse(result)
+        reply.header('Idempotency-Replayed', String(response.replayed))
+        reply.header('ETag', resourceEtag(response.skill))
+        return response
+      } catch (error) {
+        if (error instanceof SkillVersionConflictError) {
+          return sendApiError(reply, 412, request, {
+            code: 'PRECONDITION_FAILED', message: error.message, retryable: false,
+            details: { expectedVersion: error.expectedVersion, currentVersion: error.actualVersion },
           })
         }
         throw error

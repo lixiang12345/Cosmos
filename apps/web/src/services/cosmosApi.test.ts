@@ -18,6 +18,11 @@ import {
   CosmosApiError,
   COSMOS_API_TIMEOUT_MS,
   archiveSession,
+  archiveMcpServer,
+  archiveSkill,
+  createSkill,
+  updateSkill,
+  listSkills,
   cancelSession,
   createSession,
   decideAdvisorPlan,
@@ -637,6 +642,96 @@ describe('Cosmos API client', () => {
     const headers = new Headers(fetchMock.mock.calls[0][1]?.headers)
     expect(headers.get('If-Match')).toBe('"1"')
     expect(headers.get('Content-Type')).toBe('application/merge-patch+json')
+  })
+
+
+  it('sends Skill mutations with exact CAS and idempotency headers', async () => {
+    const skill = {
+      id: 'skill-1',
+      organizationId: 'cosmos',
+      spaceId: 'space-platform',
+      name: 'pr-review-checklist',
+      description: 'Review checklist',
+      source: 'inline' as const,
+      content: '# Checklist',
+      url: null,
+      tags: ['review'],
+      status: 'active' as const,
+      version: 1,
+      createdBy: 'user-a',
+      createdAt: '2026-07-26T00:00:00.000Z',
+      updatedAt: '2026-07-26T00:00:00.000Z',
+      archivedAt: null,
+    }
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ items: [skill], page: { nextCursor: null, hasMore: false } }))
+      .mockResolvedValueOnce(jsonResponse({ skill, replayed: false }, 201))
+      .mockResolvedValueOnce(jsonResponse({ skill: { ...skill, version: 2 }, replayed: false }))
+      .mockResolvedValueOnce(jsonResponse({
+        skill: { ...skill, version: 3, status: 'archived', archivedAt: skill.updatedAt },
+        replayed: false,
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listSkills('cosmos', 'space-platform', { accessToken: 'access-token' }))
+      .resolves.toMatchObject({ items: [{ id: 'skill-1' }] })
+    await createSkill(
+      'cosmos', 'space-platform',
+      { name: skill.name, description: skill.description, source: 'inline', content: skill.content!, tags: skill.tags },
+      'skill-create-key', { accessToken: 'access-token' },
+    )
+    await updateSkill(
+      'cosmos', 'space-platform', skill.id, 1,
+      { description: 'Updated' },
+      'skill-update-key', { accessToken: 'access-token' },
+    )
+    await archiveSkill(
+      'cosmos', 'space-platform', skill.id, 2, 'skill-archive-key', { accessToken: 'access-token' },
+    )
+
+    expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
+      ['/api/v1/organizations/cosmos/spaces/space-platform/skills', 'GET'],
+      ['/api/v1/organizations/cosmos/spaces/space-platform/skills', 'POST'],
+      ['/api/v1/organizations/cosmos/spaces/space-platform/skills/skill-1', 'PATCH'],
+      ['/api/v1/organizations/cosmos/spaces/space-platform/skills/skill-1', 'DELETE'],
+    ])
+    const createHeaders = new Headers(fetchMock.mock.calls[1][1]?.headers)
+    expect(createHeaders.get('Idempotency-Key')).toBe('skill-create-key')
+    const updateHeaders = new Headers(fetchMock.mock.calls[2][1]?.headers)
+    expect(updateHeaders.get('If-Match')).toBe('"1"')
+    expect(updateHeaders.get('Idempotency-Key')).toBe('skill-update-key')
+    const archiveHeaders = new Headers(fetchMock.mock.calls[3][1]?.headers)
+    expect(archiveHeaders.get('If-Match')).toBe('"2"')
+    expect(archiveHeaders.get('Idempotency-Key')).toBe('skill-archive-key')
+  })
+
+  it('archives an MCP server with both CAS and idempotency headers', async () => {
+    const server = {
+      id: 'mcp-1',
+      organizationId: 'cosmos',
+      spaceId: 'space-platform',
+      name: 'Internal Docs MCP',
+      transport: 'http' as const,
+      endpoint: 'https://mcp.example.com',
+      command: null,
+      connectionStatus: 'archived' as const,
+      toolCount: 0,
+      version: 2,
+      createdBy: 'user-a',
+      createdAt: '2026-07-26T00:00:00.000Z',
+      updatedAt: '2026-07-26T00:00:00.000Z',
+      archivedAt: '2026-07-26T00:00:00.000Z',
+    }
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ server, replayed: false }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await archiveMcpServer(
+      'cosmos', 'space-platform', server.id, 1, 'mcp-archive-key', { accessToken: 'access-token' },
+    )
+    const headers = new Headers(fetchMock.mock.calls[0][1]?.headers)
+    expect(headers.get('If-Match')).toBe('"1"')
+    expect(headers.get('Idempotency-Key')).toBe('mcp-archive-key')
   })
 
   it('archives and restores a Session with CAS and idempotency', async () => {

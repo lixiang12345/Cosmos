@@ -44,6 +44,7 @@ const foundation: SidebarRoute[] = [
 const capabilities: SidebarRoute[] = [
   { to: '/integrations', en: 'Integrations', zh: '集成' },
   { to: '/mcp', en: 'MCP Registry', zh: 'MCP 注册表' },
+  { to: '/skills', en: 'Skills', zh: '技能' },
   { to: '/webhooks', en: 'Webhooks', zh: 'Webhooks' },
   { to: '/secrets', en: 'Secrets', zh: '密钥' },
 ]

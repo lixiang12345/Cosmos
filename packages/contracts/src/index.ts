@@ -452,3 +452,21 @@ export {
   type IntegrationType,
   type UpdateIntegrationRequest,
 } from './integration.js'
+
+export {
+  CreateSkillRequestSchema,
+  SkillDtoSchema,
+  SkillListResponseSchema,
+  SkillMutationResponseSchema,
+  SkillSourceSchema,
+  SkillStatusSchema,
+  UpdateSkillRequestSchema,
+  type CreateSkillRequest,
+  type CreateSkillRequestInput,
+  type SkillDto,
+  type SkillListResponse,
+  type SkillMutationResponse,
+  type SkillSource,
+  type SkillStatus,
+  type UpdateSkillRequest,
+} from './skill.js'

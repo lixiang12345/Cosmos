@@ -73,6 +73,7 @@ const RemoteRepositoriesPage = lazy(() => import('./pages/RemoteCatalogPages').t
 const RemoteSecretsPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteSecretsPage })))
 const RemoteWebhooksPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteWebhooksPage })))
 const RemoteMcpServersPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteMcpServersPage })))
+const RemoteSkillsPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteSkillsPage })))
 const RemoteDaemonsPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteDaemonsPage })))
 const RemoteIntegrationsPage = lazy(() => import('./pages/RemoteCatalogPages').then((module) => ({ default: module.RemoteIntegrationsPage })))
 const RemoteFilesPage = lazy(() => import('./pages/RemoteFilesPage').then((module) => ({ default: module.RemoteFilesPage })))
@@ -2335,6 +2336,21 @@ function CosmosApp() {
             navigationCollapsed={sidebarCollapsed}
               onOpenCommand={() => setCommandOpen(true)}
               />} />
+        <Route path="/skills" element={<RemoteSkillsPage
+              items={catalog.skills.items}
+              loading={demoMode ? false : catalog.skills.loading}
+              ready={demoMode ? true : catalog.skills.ready}
+              error={catalog.skills.error}
+              onRetry={catalog.skills.retry}
+              organizationId={organizationId}
+              spaceId={activeSpace.id}
+              auth={catalogAuth}
+              credentialVersion={credentialVersion}
+              canManage={expertManagementEnabled && !demoMode}
+              onOpenNavigation={openNavigation}
+              navigationCollapsed={sidebarCollapsed}
+              onOpenCommand={() => setCommandOpen(true)}
+            />} />
         <Route path="/webhooks" element={demoMode
           ? <WebhooksPage onOpenNavigation={openNavigation} />
           : <RemoteWebhooksPage
