@@ -135,7 +135,7 @@ export type MemoryFile = ScopedEntity & {
   versions: MemoryFileVersion[]
 }
 
-export type AutomationSource = 'manual' | 'github' | 'slack' | 'jira' | 'pagerduty' | 'schedule' | 'webhook'
+export type AutomationSource = 'manual' | 'github' | 'linear' | 'slack' | 'gitlab' | 'jira' | 'pagerduty' | 'schedule' | 'webhook'
 
 export type Automation = ScopedEntity & {
   name: string
@@ -143,6 +143,10 @@ export type Automation = ScopedEntity & {
   trigger: string
   source: AutomationSource
   filter: Record<string, string>
+  scheduleCron?: string
+  scheduleTimezone?: string
+  maxRunsPerMinute?: number
+  autoArchive?: boolean
   enabled: boolean
   expertId: string
   repositoryId?: string
@@ -245,6 +249,10 @@ export type CreateAutomationInput = {
   trigger: string
   source: AutomationSource
   filter?: Record<string, string>
+  scheduleCron?: string
+  scheduleTimezone?: string
+  maxRunsPerMinute?: number
+  autoArchive?: boolean
   enabled?: boolean
   expertId: string
   repositoryId?: string

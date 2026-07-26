@@ -5884,7 +5884,7 @@ components:
       additionalProperties: false
     RuntimeAutomationSource:
       type: string
-      enum: [github, slack, webhook, schedule]
+      enum: [github, linear, slack, gitlab, pagerduty, schedule, webhook]
     RuntimeAutomationStatus:
       type: string
       enum: [draft, paused, active, error, archived]
@@ -5910,6 +5910,20 @@ components:
           maxLength: 256
         filter:
           $ref: '#/components/schemas/RuntimeAutomationFilter'
+        scheduleCron:
+          type: [string, 'null']
+          pattern: '^\S+\s+\S+\s+\S+\s+\S+\s+\S+$'
+          default: null
+        scheduleTimezone:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 128
+          default: null
+        maxRunsPerMinute:
+          type: integer
+          minimum: 1
+          maximum: 120
+          default: 10
         autoArchive:
           type: boolean
           default: false
@@ -5930,6 +5944,17 @@ components:
           maxLength: 256
         filter:
           $ref: '#/components/schemas/RuntimeAutomationFilter'
+        scheduleCron:
+          type: [string, 'null']
+          pattern: '^\S+\s+\S+\s+\S+\s+\S+\s+\S+$'
+        scheduleTimezone:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 128
+        maxRunsPerMinute:
+          type: integer
+          minimum: 1
+          maximum: 120
         autoArchive:
           type: boolean
         serviceAccountId:
@@ -6030,7 +6055,7 @@ components:
 
     RuntimeAutomation:
       type: object
-      required: [id, organizationId, spaceId, expertId, expertRevisionId, triggerId, name, source, eventType, filter, status, autoArchive, serviceAccountId, lastTestedAt, lastMatchedAt, archivedAt, matchCount, version, createdAt, updatedAt]
+      required: [id, organizationId, spaceId, expertId, expertRevisionId, triggerId, name, source, eventType, filter, scheduleCron, scheduleTimezone, maxRunsPerMinute, status, autoArchive, serviceAccountId, lastTestedAt, lastMatchedAt, archivedAt, matchCount, version, createdAt, updatedAt]
       properties:
         id:
           $ref: '#/components/schemas/RuntimeIdentifier'
@@ -6056,6 +6081,17 @@ components:
           maxLength: 256
         filter:
           $ref: '#/components/schemas/RuntimeAutomationFilter'
+        scheduleCron:
+          type: [string, 'null']
+          pattern: '^\S+\s+\S+\s+\S+\s+\S+\s+\S+$'
+        scheduleTimezone:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 128
+        maxRunsPerMinute:
+          type: integer
+          minimum: 1
+          maximum: 120
         status:
           $ref: '#/components/schemas/RuntimeAutomationStatus'
         autoArchive:

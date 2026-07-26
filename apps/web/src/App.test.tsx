@@ -1903,11 +1903,13 @@ describe('Cosmos prototype', () => {
     const user = userEvent.setup()
     renderApp('/automations/events')
 
-    await user.click(await screen.findByRole('button', { name: 'Slack' }))
+    await user.click(await screen.findByRole('button', { name: '高级 Filter' }))
+    await user.click(screen.getByRole('button', { name: '打开 Demo 测试入口' }))
+    await user.selectOptions(screen.getByLabelText('来源'), 'slack')
     await user.click(screen.getByRole('button', { name: '注入并匹配' }))
 
     expect(screen.getByRole('status')).toHaveTextContent('事件已匹配 Payments alert investigation')
-    expect(screen.getByText('@Cosmos investigate payment timeouts')).toBeInTheDocument()
+    expect(screen.getAllByText(/@Cosmos investigate payment timeouts/).length).toBeGreaterThan(0)
     await waitFor(() => {
       const storedSessions = JSON.parse(window.localStorage.getItem('cosmos.demo.sessions') ?? '[]') as Array<{
         title: string

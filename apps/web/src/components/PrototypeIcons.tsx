@@ -72,6 +72,18 @@ export function PrototypeSearchIcon(props: IconProps) {
   return <StrokeIcon {...props}><circle cx="7" cy="7" r="4" /><path d="M10.5 10.5L13.2 13.2" /></StrokeIcon>
 }
 
+export function PrototypeGitHubIcon(props: IconProps) {
+  return <StrokeIcon {...props}><path d="M8 2.2a5.8 5.8 0 00-1.83 11.3c.3.05.4-.13.4-.28v-1c-1.67.36-2.02-.8-2.02-.8-.27-.7-.67-.88-.67-.88-.55-.37.04-.36.04-.36.6.04.92.62.92.62.54.92 1.4.66 1.75.5.05-.4.21-.66.38-.81-1.33-.15-2.73-.67-2.73-2.96 0-.66.23-1.19.62-1.61-.06-.15-.27-.77.06-1.6 0 0 .5-.16 1.65.62a5.7 5.7 0 013 0c1.14-.78 1.64-.62 1.64-.62.33.83.12 1.45.06 1.6.39.42.62.95.62 1.61 0 2.3-1.4 2.8-2.74 2.95.22.19.41.56.41 1.13v1.68c0 .15.1.34.41.28A5.8 5.8 0 008 2.2z" /></StrokeIcon>
+}
+
+export function PrototypeLinearIcon(props: IconProps) {
+  return <StrokeIcon {...props}><path d="M3.5 10.2L10.2 3.5M4.8 12.2a5.2 5.2 0 007.4-7.4" /></StrokeIcon>
+}
+
+export function PrototypeSlackIcon(props: IconProps) {
+  return <StrokeIcon {...props}><path d="M5.5 9.5a1.2 1.2 0 01-1.2 1.2H3.1a1.2 1.2 0 010-2.4h1.2a1.2 1.2 0 011.2 1.2zm.6 0a1.2 1.2 0 011.2-1.2h2.4v1.2a1.2 1.2 0 01-2.4 0V9.5zM6.1 5.5A1.2 1.2 0 015 4.3V3.1a1.2 1.2 0 012.4 0v1.2a1.2 1.2 0 01-1.2 1.2zm0 .6a1.2 1.2 0 011.2 1.2v2.4H6.1a1.2 1.2 0 010-2.4V6.1z" /></StrokeIcon>
+}
+
 export function PrototypeTopbarSearchIcon(props: IconProps) {
   return (
     <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" {...props}>

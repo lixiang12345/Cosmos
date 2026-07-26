@@ -81,9 +81,9 @@ const CosmosHomePage = lazy(() => import('./pages/CosmosOperationsPages').then((
 const ContextWorkspacePage = lazy(() => import('./pages/ContextWorkspacePage').then((module) => ({ default: module.ContextWorkspacePage })))
 const CosmosFilesPage = lazy(() => import('./pages/CosmosOperationsPages').then((module) => ({ default: module.CosmosFilesPage })))
 const CosmosApprovalsPage = lazy(() => import('./pages/CosmosOperationsPages').then((module) => ({ default: module.CosmosApprovalsPage })))
-const CosmosAutomationsPage = lazy(() => import('./pages/CosmosOperationsPages').then((module) => ({ default: module.CosmosAutomationsPage })))
-const CosmosEventLogPage = lazy(() => import('./pages/CosmosOperationsPages').then((module) => ({ default: module.CosmosEventLogPage })))
-const CosmosRunHistoryPage = lazy(() => import('./pages/CosmosOperationsPages').then((module) => ({ default: module.CosmosRunHistoryPage })))
+const CosmosAutomationsPage = lazy(() => import('./pages/DemoAutomationPages').then((module) => ({ default: module.DemoAutomationsPage })))
+const CosmosEventLogPage = lazy(() => import('./pages/DemoAutomationPages').then((module) => ({ default: module.DemoEventLogPage })))
+const CosmosRunHistoryPage = lazy(() => import('./pages/DemoAutomationPages').then((module) => ({ default: module.DemoRunHistoryPage })))
 const EnvironmentsPage = lazy(() => import('./pages/CosmosConfigurationPages').then((module) => ({ default: module.EnvironmentsPage })))
 const DaemonsPage = lazy(() => import('./pages/CosmosConfigurationPages').then((module) => ({ default: module.DaemonsPage })))
 const RepositoriesControlPage = lazy(() => import('./pages/CosmosConfigurationPages').then((module) => ({ default: module.RepositoriesControlPage })))
@@ -2074,9 +2074,38 @@ function CosmosApp() {
               onOpenNavigation={openNavigation}
               onOpenSession={openSession}
             />} />
-        <Route path="/automations" element={demoMode ? <CosmosAutomationsPage onOpenNavigation={openNavigation} /> : <RemoteAutomationsPage organizationId={organizationId} spaceId={activeSpace.id} auth={catalogAuth} credentialVersion={credentialVersion} canManage={expertManagementEnabled} onOpenNavigation={openNavigation} />} />
-        <Route path="/automations/events" element={demoMode ? <CosmosEventLogPage onOpenNavigation={openNavigation} onSessionCreated={materializeAutomationSession} /> : <RemoteAutomationEventLogPage organizationId={organizationId} spaceId={activeSpace.id} auth={catalogAuth} credentialVersion={credentialVersion} canManage={expertManagementEnabled} onOpenNavigation={openNavigation} />} />
-        <Route path="/automations/history" element={demoMode ? <CosmosRunHistoryPage runs={scopedRuns} onOpenNavigation={openNavigation} onOpenSession={openSession} /> : <RemoteAutomationRunHistoryPage organizationId={organizationId} spaceId={activeSpace.id} auth={catalogAuth} credentialVersion={credentialVersion} onOpenNavigation={openNavigation} onOpenSession={openSession} />} />
+        <Route path="/automations" element={demoMode ? <CosmosAutomationsPage navigationCollapsed={sidebarCollapsed} onOpenNavigation={openNavigation} onOpenCommand={() => setCommandOpen(true)} /> : <RemoteAutomationsPage
+          organizationId={organizationId}
+          spaceId={activeSpace.id}
+          auth={catalogAuth}
+          credentialVersion={credentialVersion}
+          canManage={expertManagementEnabled}
+          navigationCollapsed={sidebarCollapsed}
+          onOpenNavigation={openNavigation}
+          onOpenCommand={() => setCommandOpen(true)}
+          onOpenAdvisor={() => navigate('/home')}
+          onOpenRunHistory={() => navigate('/automations/history')}
+        />} />
+        <Route path="/automations/events" element={demoMode ? <CosmosEventLogPage navigationCollapsed={sidebarCollapsed} onOpenNavigation={openNavigation} onOpenCommand={() => setCommandOpen(true)} onSessionCreated={materializeAutomationSession} /> : <RemoteAutomationEventLogPage
+          organizationId={organizationId}
+          spaceId={activeSpace.id}
+          auth={catalogAuth}
+          credentialVersion={credentialVersion}
+          canManage={expertManagementEnabled}
+          navigationCollapsed={sidebarCollapsed}
+          onOpenNavigation={openNavigation}
+          onOpenCommand={() => setCommandOpen(true)}
+        />} />
+        <Route path="/automations/history" element={demoMode ? <CosmosRunHistoryPage runs={scopedRuns} navigationCollapsed={sidebarCollapsed} onOpenNavigation={openNavigation} onOpenCommand={() => setCommandOpen(true)} onOpenSession={openSession} /> : <RemoteAutomationRunHistoryPage
+          organizationId={organizationId}
+          spaceId={activeSpace.id}
+          auth={catalogAuth}
+          credentialVersion={credentialVersion}
+          navigationCollapsed={sidebarCollapsed}
+          onOpenNavigation={openNavigation}
+          onOpenCommand={() => setCommandOpen(true)}
+          onOpenSession={openSession}
+        />} />
         <Route path="/experts" element={
           demoMode ? (
             <ExpertsPage

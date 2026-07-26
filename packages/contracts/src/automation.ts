@@ -4,8 +4,18 @@ import { SessionDtoSchema } from './session.js'
 const IdentifierSchema = z.string().trim().min(1).max(128)
 const TimestampSchema = z.string().datetime({ offset: true })
 const EventTypeSchema = z.string().trim().min(1).max(256)
+const ScheduleCronSchema = z.string().trim().regex(/^\S+\s+\S+\s+\S+\s+\S+\s+\S+$/, 'Schedule cron must contain exactly five fields.')
+const ScheduleTimezoneSchema = z.string().trim().min(1).max(128).regex(/^[A-Za-z_+-]+(?:\/[A-Za-z0-9_+-]+)+$/, 'Schedule timezone must be an IANA timezone name.')
 
-export const AutomationSourceSchema = z.enum(['github', 'slack', 'webhook', 'schedule'])
+export const AutomationSourceSchema = z.enum([
+  'github',
+  'linear',
+  'slack',
+  'gitlab',
+  'pagerduty',
+  'schedule',
+  'webhook',
+])
 export type AutomationSource = z.infer<typeof AutomationSourceSchema>
 
 export const AutomationStatusSchema = z.enum(['draft', 'paused', 'active', 'error', 'archived'])
@@ -96,6 +106,9 @@ export const AutomationDtoSchema = z.object({
   source: AutomationSourceSchema,
   eventType: EventTypeSchema,
   filter: AutomationFilterSchema,
+  scheduleCron: ScheduleCronSchema.nullable().default(null),
+  scheduleTimezone: ScheduleTimezoneSchema.nullable().default(null),
+  maxRunsPerMinute: z.number().int().min(1).max(120).default(10),
   status: AutomationStatusSchema,
   autoArchive: z.boolean(),
   serviceAccountId: IdentifierSchema,
@@ -110,6 +123,9 @@ export const AutomationDtoSchema = z.object({
   if (automation.id !== automation.triggerId) {
     context.addIssue({ code: 'custom', path: ['triggerId'], message: 'Automation id must be the authoritative Trigger id.' })
   }
+  if ((automation.source === 'schedule') !== (automation.scheduleCron !== null && automation.scheduleTimezone !== null)) {
+    context.addIssue({ code: 'custom', path: ['scheduleCron'], message: 'Only Schedule Triggers require cron and timezone configuration.' })
+  }
   if ((automation.status === 'archived') !== (automation.archivedAt !== null)) {
     context.addIssue({ code: 'custom', path: ['archivedAt'], message: 'Only archived Automations may have an archivedAt timestamp.' })
   }
@@ -122,9 +138,16 @@ export const CreateAutomationRequestSchema = z.object({
   source: AutomationSourceSchema,
   eventType: EventTypeSchema,
   filter: AutomationFilterSchema.default({}),
+  scheduleCron: ScheduleCronSchema.nullable().default(null),
+  scheduleTimezone: ScheduleTimezoneSchema.nullable().default(null),
+  maxRunsPerMinute: z.number().int().min(1).max(120).default(10),
   autoArchive: z.boolean().default(false),
   serviceAccountId: IdentifierSchema,
-}).strict()
+}).strict().superRefine((request, context) => {
+  if ((request.source === 'schedule') !== (request.scheduleCron !== null && request.scheduleTimezone !== null)) {
+    context.addIssue({ code: 'custom', path: ['scheduleCron'], message: 'Only Schedule Triggers require cron and timezone configuration.' })
+  }
+})
 export type CreateAutomationRequest = z.infer<typeof CreateAutomationRequestSchema>
 export type CreateAutomationRequestInput = z.input<typeof CreateAutomationRequestSchema>
 
@@ -132,6 +155,9 @@ export const UpdateAutomationRequestSchema = z.object({
   name: z.string().trim().min(1).max(160).optional(),
   eventType: EventTypeSchema.optional(),
   filter: AutomationFilterSchema.optional(),
+  scheduleCron: ScheduleCronSchema.nullable().optional(),
+  scheduleTimezone: ScheduleTimezoneSchema.nullable().optional(),
+  maxRunsPerMinute: z.number().int().min(1).max(120).optional(),
   autoArchive: z.boolean().optional(),
   serviceAccountId: IdentifierSchema.optional(),
 }).strict().refine((request) => Object.keys(request).length > 0, {

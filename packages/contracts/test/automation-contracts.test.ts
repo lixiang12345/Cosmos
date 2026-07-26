@@ -2,11 +2,18 @@ import { describe, expect, it } from 'vitest'
 import {
   AutomationDtoSchema,
   AutomationFilterSchema,
+  AutomationSourceSchema,
   CreateAutomationRequestSchema,
   ReceiveAutomationEventRequestSchema,
 } from '../src/automation.js'
 
 describe('Automation contracts', () => {
+  it('supports every first-party, schedule, and webhook Trigger source exposed by the product', () => {
+    expect(AutomationSourceSchema.options).toEqual([
+      'github', 'linear', 'slack', 'gitlab', 'pagerduty', 'schedule', 'webhook',
+    ])
+  })
+
   it('accepts restricted JSONLogic filters and rejects arbitrary operators', () => {
     expect(AutomationFilterSchema.parse({ '==': [{ var: 'action' }, 'opened'] })).toEqual({
       '==': [{ var: 'action' }, 'opened'],

@@ -9,6 +9,7 @@ import {
   type AutomationDto,
   type AutomationEventDto,
   type AutomationRunDto,
+  type AutomationSource,
 } from '@cosmos/contracts'
 import type { Pool, PoolClient } from 'pg'
 import { evaluateAutomationFilter, redactAutomationData } from './automation-filter.js'
@@ -39,13 +40,17 @@ type AutomationRow = {
   expert_id: string
   expert_revision_id: string
   name: string
-  source: 'github' | 'slack' | 'webhook' | 'schedule'
+  source: AutomationSource
   event_type: string
   filter: unknown
+  schedule_cron: string | null
+  schedule_timezone: string | null
+  max_runs_per_minute: number
   status: 'draft' | 'paused' | 'active' | 'error' | 'archived'
   auto_archive: boolean
   service_account_id: string
   service_account_audience?: string
+  recent_run_count?: string | number
   last_tested_at: TimestampValue | null
   last_matched_at: TimestampValue | null
   archived_at: TimestampValue | null
@@ -59,7 +64,7 @@ type EventRow = {
   id: string
   organization_id: string
   space_id: string
-  source: 'github' | 'slack' | 'webhook' | 'schedule'
+  source: AutomationSource
   event_type: string
   external_id: string
   headers_redacted: unknown
@@ -78,7 +83,8 @@ type EventRow = {
 const automationColumns = `
   trigger.id, trigger.organization_id, trigger.space_id, trigger.expert_id,
   trigger.expert_revision_id, trigger.name, trigger.source, trigger.event_type,
-  trigger.filter, trigger.status, trigger.auto_archive, trigger.service_account_id,
+  trigger.filter, trigger.schedule_cron, trigger.schedule_timezone, trigger.max_runs_per_minute,
+  trigger.status, trigger.auto_archive, trigger.service_account_id,
   trigger.last_tested_at, trigger.last_matched_at, trigger.match_count,
   trigger.archived_at, trigger.version, trigger.created_at, trigger.updated_at
 `
@@ -123,6 +129,9 @@ function mapAutomation(row: AutomationRow): AutomationDto {
     source: row.source,
     eventType: row.event_type,
     filter: row.filter,
+    scheduleCron: row.schedule_cron,
+    scheduleTimezone: row.schedule_timezone,
+    maxRunsPerMinute: row.max_runs_per_minute,
     status: row.status,
     autoArchive: row.auto_archive,
     serviceAccountId: row.service_account_id,
@@ -327,15 +336,18 @@ export class PostgresAutomationRepository implements AutomationRepository {
       const inserted = await client.query<AutomationRow>(`
         INSERT INTO cosmos_expert_triggers (
           organization_id, space_id, id, expert_id, expert_revision_id,
-          name, source, event_type, filter, status, auto_archive,
+          name, source, event_type, filter, schedule_cron, schedule_timezone,
+          max_runs_per_minute, status, auto_archive,
           service_account_id, created_by, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, 'paused', $10, $11, $12, $13, $13)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, 'paused', $13, $14, $15, $16, $16)
         RETURNING ${automationColumns.replaceAll('trigger.', '')}
       `, [
         record.organizationId, record.spaceId, id, record.request.expertId,
         target.expert_revision_id, record.request.name, record.request.source,
         record.request.eventType, JSON.stringify(record.request.filter),
-        record.request.autoArchive, record.request.serviceAccountId, record.actorId,
+        record.request.scheduleCron, record.request.scheduleTimezone,
+        record.request.maxRunsPerMinute, record.request.autoArchive,
+        record.request.serviceAccountId, record.actorId,
         idempotency.now.toISOString(),
       ])
       const automation = mapAutomation(inserted.rows[0]!)
@@ -398,18 +410,21 @@ export class PostgresAutomationRepository implements AutomationRepository {
       const updated = await client.query<AutomationRow>(`
         UPDATE cosmos_expert_triggers SET
           name = COALESCE($4, name), event_type = COALESCE($5, event_type),
-          filter = COALESCE($6::jsonb, filter), auto_archive = COALESCE($7, auto_archive),
-          service_account_id = COALESCE($8, service_account_id),
+          filter = COALESCE($6::jsonb, filter), schedule_cron = COALESCE($7, schedule_cron),
+          schedule_timezone = COALESCE($8, schedule_timezone), max_runs_per_minute = COALESCE($9, max_runs_per_minute),
+          auto_archive = COALESCE($10, auto_archive), service_account_id = COALESCE($11, service_account_id),
           status = CASE WHEN status = 'active' THEN 'paused' ELSE status END,
           last_tested_at = CASE WHEN $5 IS NOT NULL OR $6 IS NOT NULL THEN NULL ELSE last_tested_at END,
-          version = version + 1, updated_at = $9
+          version = version + 1, updated_at = $12
         WHERE organization_id = $1 AND space_id = $2 AND id = $3
         RETURNING ${automationColumns.replaceAll('trigger.', '')}
       `, [
         record.organizationId, record.spaceId, record.automationId,
         record.request.name ?? null, record.request.eventType ?? null,
         record.request.filter === undefined ? null : JSON.stringify(record.request.filter),
-        record.request.autoArchive ?? null, record.request.serviceAccountId ?? null,
+        record.request.scheduleCron ?? null, record.request.scheduleTimezone ?? null,
+        record.request.maxRunsPerMinute ?? null, record.request.autoArchive ?? null,
+        record.request.serviceAccountId ?? null,
         idempotency.now.toISOString(),
       ])
       const automation = mapAutomation(updated.rows[0]!)
@@ -588,7 +603,12 @@ export class PostgresAutomationRepository implements AutomationRepository {
       }
       const initial = inserted.rows[0]
       const candidates = await client.query<AutomationRow>(`
-        SELECT ${automationColumns}, service.audience AS service_account_audience
+        SELECT ${automationColumns}, service.audience AS service_account_audience,
+          (SELECT count(*) FROM cosmos_automation_events recent
+            WHERE recent.organization_id = trigger.organization_id
+              AND recent.space_id = trigger.space_id
+              AND recent.automation_id = trigger.id
+              AND recent.received_at >= $5::timestamptz - interval '1 minute') AS recent_run_count
         FROM cosmos_expert_triggers trigger
         JOIN cosmos_service_accounts service
           ON service.organization_id = trigger.organization_id
@@ -597,15 +617,17 @@ export class PostgresAutomationRepository implements AutomationRepository {
         WHERE trigger.organization_id = $1 AND trigger.space_id = $2
           AND trigger.source = $3 AND trigger.event_type = $4 AND trigger.status = 'active'
         ORDER BY trigger.created_at, trigger.id
-        FOR SHARE OF trigger
-      `, [record.organizationId, record.spaceId, record.request.source, record.request.eventType])
-      const selected = candidates.rows.find((candidate) => evaluateAutomationFilter(
-        mapAutomation(candidate).filter,
-        record.request.payload,
+        FOR UPDATE OF trigger
+      `, [record.organizationId, record.spaceId, record.request.source, record.request.eventType, now])
+      const filterMatches = candidates.rows.filter((candidate) => evaluateAutomationFilter(
+        mapAutomation(candidate).filter, record.request.payload,
       ))
+      const selected = filterMatches.find((candidate) => Number(candidate.recent_run_count ?? 0) < candidate.max_runs_per_minute)
       const explanation = selected
         ? `Matched active Trigger ${selected.id} by source, event type, and restricted filter.`
-        : candidates.rowCount
+        : filterMatches.length
+          ? 'Matching active Triggers reached their configured per-minute run limit.'
+          : candidates.rowCount
           ? 'Active Triggers matched the source and event type, but all restricted filters returned false.'
           : 'No active Trigger matched the source and event type.'
       const status = selected ? 'matched' : 'ignored'

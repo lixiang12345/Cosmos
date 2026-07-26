@@ -115,6 +115,7 @@ describeWithDatabase('Automation authority under the restricted API runtime role
       source: 'github' as const,
       eventType: 'pull_request.opened',
       filter: { '==': [{ var: 'action' }, 'opened'] },
+      maxRunsPerMinute: 1,
       autoArchive: true,
       serviceAccountId: 'automation-service',
     }
@@ -122,7 +123,7 @@ describeWithDatabase('Automation authority under the restricted API runtime role
       organizationId: 'automation-org', spaceId: 'automation-space', actorId: 'automation-owner',
       requestId: 'request-create', idempotencyKey: 'automation-create', request,
     })
-    expect(created).toMatchObject({ replayed: false, automation: { status: 'paused', version: 1 } })
+    expect(created).toMatchObject({ replayed: false, automation: { status: 'paused', maxRunsPerMinute: 1, version: 1 } })
     await expect(repository.createAutomation({
       organizationId: 'automation-org', spaceId: 'automation-space', actorId: 'automation-owner',
       requestId: 'request-create-replay', idempotencyKey: 'automation-create', request,
@@ -178,6 +179,19 @@ describeWithDatabase('Automation authority under the restricted API runtime role
     })
     await expect(repository.receiveEvent({ ...eventRecord, requestId: 'request-event-replay' }))
       .resolves.toMatchObject({ duplicate: true, event: { id: received.event.id }, match: null })
+    await expect(repository.receiveEvent({
+      ...eventRecord,
+      requestId: 'request-event-rate-limited',
+      request: { ...eventRecord.request, externalId: 'provider-event-rate-limited' },
+    })).resolves.toMatchObject({
+      duplicate: false,
+      event: {
+        status: 'ignored',
+        automationId: null,
+        matchExplanation: 'Matching active Triggers reached their configured per-minute run limit.',
+      },
+      match: null,
+    })
     const session = await new PostgresSessionRepository(apiPool).create({
       organizationId: 'automation-org', spaceId: 'automation-space',
       actorId: 'automation-service', actorKind: 'service_account',
@@ -214,7 +228,7 @@ describeWithDatabase('Automation authority under the restricted API runtime role
       request: {
         expertId: 'expert-published', name: 'Slack archive lifecycle', source: 'slack',
         eventType: 'message.posted', filter: { '==': [{ var: 'channel' }, 'platform'] },
-        autoArchive: false, serviceAccountId: 'automation-service',
+        maxRunsPerMinute: 10, autoArchive: false, serviceAccountId: 'automation-service',
       },
     })
     const tested = await repository.testAutomation({

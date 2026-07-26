@@ -87,6 +87,9 @@ const automation: AutomationDto = {
   source: 'github',
   eventType: 'pull_request.opened',
   filter: { '==': [{ var: 'action' }, 'opened'] },
+  scheduleCron: null,
+  scheduleTimezone: null,
+  maxRunsPerMinute: 10,
   status: 'paused',
   autoArchive: false,
   serviceAccountId: 'service-account-automation-local',
@@ -195,6 +198,7 @@ describe('Remote Automation pages', () => {
   })
 
   it('shows loading, empty, error, and read-only permission states honestly', async () => {
+    const user = userEvent.setup()
     const pendingAutomations = deferred<Awaited<ReturnType<typeof listAutomations>>>()
     vi.mocked(listAutomations).mockReturnValueOnce(pendingAutomations.promise)
     vi.mocked(listExperts).mockResolvedValueOnce({
@@ -205,6 +209,7 @@ describe('Remote Automation pages', () => {
 
     expect(screen.getByText('加载中…')).toBeInTheDocument()
     await act(async () => pendingAutomations.resolve({ items: [], projectionUpdatedAt: null }))
+    await user.click(screen.getByRole('button', { name: '我的' }))
     expect(await screen.findByText('当前 Space 尚未配置自动化。')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '创建自动化' })).not.toBeInTheDocument()
     first.unmount()
@@ -221,9 +226,13 @@ describe('Remote Automation pages', () => {
     renderPage(<RemoteAutomationsPage {...commonProps} canManage />)
 
     await user.click(await screen.findByRole('button', { name: '创建自动化' }))
-    const form = screen.getByRole('heading', { name: '创建自动化', level: 2 }).closest('form')!
-    await user.type(within(form).getByLabelText('名称'), 'Release triage')
-    await user.click(within(form).getByRole('button', { name: '保存并暂停' }))
+    await user.click(screen.getByRole('button', { name: '+ 添加 Trigger' }))
+    await user.click(screen.getByRole('button', { name: /GitHub/ }))
+    const name = screen.getByLabelText('Trigger 名称')
+    await user.clear(name)
+    await user.type(name, 'Release triage')
+    await user.click(screen.getByRole('button', { name: '添加到自动化' }))
+    await user.click(screen.getByRole('button', { name: '保存自动化' }))
 
     await waitFor(() => expect(createAutomation).toHaveBeenCalledOnce())
     expect(createAutomation).toHaveBeenCalledWith(
@@ -233,7 +242,7 @@ describe('Remote Automation pages', () => {
         expertId: expert.id,
         name: 'Release triage',
         source: 'github',
-        eventType: 'pull_request.opened',
+        eventType: 'pull_request',
         serviceAccountId: 'service-account-automation-local',
       }),
       expect.stringMatching(/^automation-create-/),
@@ -254,9 +263,10 @@ describe('Remote Automation pages', () => {
     vi.mocked(pauseAutomation).mockResolvedValueOnce(paused)
     renderPage(<RemoteAutomationsPage {...commonProps} canManage />)
 
-    await user.click(await screen.findByRole('button', { name: '编辑' }))
+    await user.click(await screen.findByRole('button', { name: '展开 Trigger' }))
+    await user.click(screen.getByText('Pull request triage').closest('button')!)
     const editor = screen.getByText('编辑 Trigger').closest('form')!
-    const name = within(editor).getByLabelText('名称')
+    const name = within(editor).getByLabelText('Trigger 名称')
     await user.clear(name)
     await user.type(name, edited.name)
     await user.click(within(editor).getByRole('button', { name: '保存并暂停' }))
@@ -271,6 +281,7 @@ describe('Remote Automation pages', () => {
       auth,
     )
 
+    await user.click(screen.getByText('Updated triage').closest('button')!)
     await user.click(screen.getByRole('button', { name: '测试事件' }))
     expect(await screen.findByRole('status')).toHaveTextContent('测试匹配成功：action equals opened')
     expect(testAutomation).toHaveBeenCalledWith(
@@ -283,7 +294,8 @@ describe('Remote Automation pages', () => {
       auth,
     )
 
-    await user.click(screen.getByRole('button', { name: '启用' }))
+    await user.click(screen.getByRole('button', { name: '关闭编辑器' }))
+    await user.click(screen.getByRole('switch', { name: '启用 Updated triage' }))
     await waitFor(() => expect(screen.getByText('已启用')).toBeInTheDocument())
     expect(enableAutomation).toHaveBeenCalledWith(
       organizationId,
@@ -294,8 +306,8 @@ describe('Remote Automation pages', () => {
       auth,
     )
 
-    await user.click(screen.getByRole('button', { name: '暂停' }))
-    await waitFor(() => expect(screen.getByText('已暂停')).toBeInTheDocument())
+    await user.click(screen.getByRole('switch', { name: '停用 Updated triage' }))
+    await waitFor(() => expect(screen.getByText('已停用')).toBeInTheDocument())
     expect(pauseAutomation).toHaveBeenCalledWith(
       organizationId,
       spaceId,
@@ -312,7 +324,8 @@ describe('Remote Automation pages', () => {
     vi.mocked(archiveAutomation).mockResolvedValueOnce(archived)
     renderPage(<RemoteAutomationsPage {...commonProps} canManage />)
 
-    await user.click(await screen.findByRole('button', { name: '归档' }))
+    await user.click(await screen.findByRole('button', { name: '展开 Trigger' }))
+    await user.click(screen.getByRole('button', { name: '归档 Pull request triage' }))
     expect(screen.getByRole('button', { name: '确认归档' })).toBeInTheDocument()
     expect(archiveAutomation).not.toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: '确认归档' }))
@@ -327,9 +340,8 @@ describe('Remote Automation pages', () => {
     ))
     expect(await screen.findByRole('status')).toHaveTextContent('Trigger 已归档且不可恢复。')
     expect(screen.getAllByText('已归档').length).toBeGreaterThan(0)
-    expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '测试事件' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '启用' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '归档 Pull request triage' })).not.toBeInTheDocument()
   })
 
   it('receives, deduplicates, and exposes failed Events without hiding details', async () => {
@@ -350,20 +362,28 @@ describe('Remote Automation pages', () => {
       .mockResolvedValueOnce({ event: failedEvent, duplicate: false })
     renderPage(<RemoteAutomationEventLogPage {...commonProps} canManage />)
 
-    expect(await screen.findByText('还没有事件。')).toBeInTheDocument()
-    const externalId = screen.getByLabelText('外部幂等 ID')
-    await user.type(externalId, dispatchedEvent.externalId)
-    await user.click(screen.getByRole('button', { name: '接收并匹配' }))
+    expect(await screen.findByText('没有符合当前 Filter 的事件')).toBeInTheDocument()
+    const openEventInput = async () => {
+      await user.click(screen.getByRole('button', { name: '高级 Filter' }))
+      await user.click(screen.getByRole('button', { name: '打开受认证测试入口' }))
+    }
+    const submitEvent = async (externalId: string) => {
+      await openEventInput()
+      const input = screen.getByLabelText('外部幂等 ID')
+      await user.clear(input)
+      await user.type(input, externalId)
+      expect(input).toHaveValue(externalId)
+      await user.click(screen.getByRole('button', { name: '接收并匹配' }))
+    }
+    await submitEvent(dispatchedEvent.externalId)
     expect(await screen.findByRole('status')).toHaveTextContent('事件已匹配并创建 Session。')
     expect(screen.getByText(dispatchedEvent.sessionId!)).toBeInTheDocument()
 
-    await user.type(externalId, dispatchedEvent.externalId)
-    await user.click(screen.getByRole('button', { name: '接收并匹配' }))
+    await submitEvent(dispatchedEvent.externalId)
     expect(await screen.findByRole('status')).toHaveTextContent('重复事件已去重，没有创建第二个 Session。')
 
-    await user.type(externalId, failedEvent.externalId)
-    await user.click(screen.getByRole('button', { name: '接收并匹配' }))
-    expect(await screen.findByRole('status')).toHaveTextContent(failedEvent.errorMessage!)
+    await submitEvent(failedEvent.externalId)
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(failedEvent.errorMessage!))
     expect(screen.getAllByText(failedEvent.errorMessage!)).toHaveLength(2)
     expect(receiveAutomationEvent).toHaveBeenCalledTimes(3)
   })
@@ -384,10 +404,8 @@ describe('Remote Automation pages', () => {
     renderPage(<RemoteAutomationRunHistoryPage {...commonProps} onOpenSession={onOpenSession} />)
 
     expect(await screen.findByText(session.title)).toBeInTheDocument()
-    expect(screen.getByText(automation.name)).toBeInTheDocument()
-    expect(screen.getByText(session.id)).toBeInTheDocument()
-    expect(screen.getByText('启用自动归档')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '打开' }))
+    expect(screen.getByText(expert.name)).toBeInTheDocument()
+    await user.click(screen.getByText(session.title).closest('tr')!)
     expect(onOpenSession).toHaveBeenCalledWith(session.id)
   })
 })
