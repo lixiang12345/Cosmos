@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>User Guide — Cosmos</title>
+<meta name="description" content="The Cosmos user guide: quickstart, core concepts, creating Experts, configuring Environments, running Sessions, Automations and triggers, approvals, Files and Skills, integrations, deployment, and troubleshooting." />
+<link rel="icon" type="image/svg+xml" href="../assets/favicon.svg" />
+<link rel="stylesheet" href="../assets/site.css" />
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to main content</a>
+
+<header class="topbar topbar--docs">
+  <div class="topbar__inner">
+    <a class="brand" href="index.html" aria-label="Cosmos home">
+      <svg class="brand__mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <g transform="rotate(-24 12 12.8)"><ellipse class="orbit" cx="12" cy="12.8" rx="9.4" ry="4.1" stroke-width="1.4" /></g>
+        <circle cx="12" cy="12.8" r="3.9" fill="currentColor" />
+        <circle class="satellite" cx="19.2" cy="5.4" r="2" />
+      </svg>
+      Cosmos
+      <span class="brand__tag">Docs</span>
+    </a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation">
+      <svg class="icon-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+      <svg class="icon-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+    </button>
+    <nav id="site-nav" class="topbar__nav" aria-label="Site navigation">
+      <a class="topbar__link" href="index.html">Home</a>
+      <a class="topbar__link" href="product.html">Product</a>
+      <a class="topbar__link" href="manual.html" aria-current="page">User Guide</a>
+      <a class="btn btn--primary topbar__cta" href="#quickstart">Get Started</a>
+    </nav>
+    <div class="lang-switch" role="group" aria-label="语言 / Language">
+      <a href="../manual.html" data-lang-link lang="zh-CN" hreflang="zh-CN">中</a>
+      <a href="manual.html" aria-current="true" lang="en">EN</a>
+    </div>
+  </div>
+</header>
+
+<div class="docs-shell">
+
+  <!-- ======================= Docs sidebar ======================= -->
+  <nav id="docs-nav" class="docs-nav" aria-label="Guide contents">
+    <div class="docs-nav__group">
+      <h3>Getting started</h3>
+      <ul>
+        <li><a href="#quickstart">Quickstart</a></li>
+        <li><a href="#concepts">Core concepts</a></li>
+        <li><a href="#ui-tour">Interface tour</a></li>
+      </ul>
+    </div>
+    <div class="docs-nav__group">
+      <h3>Core workflows</h3>
+      <ul>
+        <li><a href="#experts">Creating Experts</a></li>
+        <li><a href="#environments">Configuring Environments</a></li>
+        <li><a href="#sessions">Running Sessions</a></li>
+        <li><a href="#automations">Automations &amp; triggers</a></li>
+        <li><a href="#approvals">Handling approvals</a></li>
+        <li><a href="#files">Files &amp; Skills</a></li>
+      </ul>
+    </div>
+    <div class="docs-nav__group">
+      <h3>Platform setup</h3>
+      <ul>
+        <li><a href="#integrations">Integrations &amp; credentials</a></li>
+      </ul>
+    </div>
+    <div class="docs-nav__group">
+      <h3>Operations &amp; reference</h3>
+      <ul>
+        <li><a href="#deploy">Deployment &amp; operations</a></li>
+        <li><a href="#shortcuts">Keyboard shortcuts</a></li>
+        <li><a href="#troubleshooting">Troubleshooting</a></li>
+      </ul>
+    </div>
+  </nav>
+  <div class="docs-overlay" aria-hidden="true"></div>
+
+  <!-- ======================= Docs body ======================= -->
+  <main id="main" class="docs-main prose">
+
+    <section id="quickstart">
+      <p class="eyebrow">Getting Started</p>
+      <h2>Quickstart<a class="anchor" href="#quickstart" aria-label="Anchor to Quickstart">#</a></h2>
+      <p>Bring up the full local runtime — PostgreSQL, API, Worker, and the Web console — in five minutes.</p>
+
+      <h3>Requirements</h3>
+      <ul>
+        <li><strong>Node.js 22</strong> and <strong>pnpm 11.7</strong></li>
+        <li><strong>Docker</strong> (with Docker Compose)</li>
+        <li>Optional: credentials for an OpenAI-compatible model provider (for real execution)</li>
+      </ul>
+
+      <h3>Install and run</h3>
+      <div class="code-panel">
+        <div class="code-panel__head">terminal<span class="spacer"></span><button class="copy-btn" type="button" data-copy-target="code-install" aria-label="Copy commands"><span>Copy</span></button></div>
+        <pre id="code-install"><code>pnpm install
+pnpm dev</code></pre>
+      </div>
+      <p><code>pnpm dev</code> starts the Docker Compose runtime. Compose waits for PostgreSQL to become healthy before starting the API; the API finishes database migrations before Worker and Web start; Web reverse-proxies same-origin <code>/api/*</code> to the API.</p>
+      <div class="table-wrap"><table style="min-width:420px">
+        <thead><tr><th>Entry point</th><th>Address</th></tr></thead>
+        <tbody>
+          <tr><td>Web console</td><td><code>http://127.0.0.1:5173</code></td></tr>
+          <tr><td>API health check</td><td><code>http://127.0.0.1:8787/api/health</code></td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Configure provider credentials</h3>
+      <p>On first use, copy <code>.env.example</code> to <code>.env.local</code> and fill in provider settings. Sensitive configuration is injected into the Worker only — it never reaches the browser bundle.</p>
+      <div class="callout callout--info">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M12 11v5"/></svg>
+        <p><strong>The console runs without credentials.</strong> The Worker stays failed and is flagged unavailable by its health check; execution can't start, but the entire control plane (Experts, Environments, Automations, catalogs) remains usable. That is deliberate safe failure, not a bug.</p>
+      </div>
+
+      <h3>Frontend demo only</h3>
+      <div class="code-panel">
+        <div class="code-panel__head">terminal<span class="spacer"></span><button class="copy-btn" type="button" data-copy-target="code-demo" aria-label="Copy command"><span>Copy</span></button></div>
+        <pre id="code-demo"><code><span class="c"># Seeded frontend prototype — not the real runtime</span>
+pnpm dev:demo</code></pre>
+      </div>
+      <p>Demo mode only allows a loopback local identity; production bundles always refuse to enter demo mode.</p>
+
+      <h3>If the default ports are taken</h3>
+      <div class="code-panel">
+        <div class="code-panel__head">terminal<span class="spacer"></span><button class="copy-btn" type="button" data-copy-target="code-port" aria-label="Copy command"><span>Copy</span></button></div>
+        <pre id="code-port"><code>PORT=8790 VITE_API_PROXY_TARGET=http://127.0.0.1:8790 pnpm dev</code></pre>
+      </div>
+
+      <div class="next-cards">
+        <a class="card card--hover" href="#concepts"><span class="card__kicker">Next</span><h3 class="card__title">Learn the core concepts</h3><p class="card__body">Eight terms that explain the whole product.</p></a>
+        <a class="card card--hover" href="#experts"><span class="card__kicker">Next</span><h3 class="card__title">Create your first Expert</h3><p class="card__body">Start from a template, publish in five minutes.</p></a>
+      </div>
+    </section>
+
+    <section id="concepts">
+      <p class="eyebrow">Concepts</p>
+      <h2>Core concepts<a class="anchor" href="#concepts" aria-label="Anchor to Core concepts">#</a></h2>
+      <p>Cosmos keeps its naming consistent — Experts and Sessions are always called exactly that, never “bots” or “assistants.”</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Term</th><th>Definition</th></tr></thead>
+        <tbody>
+          <tr><td>Expert</td><td>A reusable agent definition: responsibilities, instructions, model, capabilities, environment, and policy — published revisions are immutable</td></tr>
+          <tr><td>Session</td><td>A goal-driven, long-running execution instance, created by a person or an event; conversations are kept forever</td></tr>
+          <tr><td>Run</td><td>One execution attempt within a session; a retry produces a new run</td></tr>
+          <tr><td>Trigger</td><td>A manual or external-event condition that starts an Expert; attached to the Expert, disarmed when created</td></tr>
+          <tr><td>Environment</td><td>The isolated runtime where code and tools execute: a cloud sandbox or a self-hosted daemon</td></tr>
+          <tr><td>Approval</td><td>A recorded human decision on a high-risk write, showing risk, impact, evidence, and expiry</td></tr>
+          <tr><td>Artifact</td><td>Deliverable outputs — diffs, commits, PRs, reports, test results — searchable across sessions</td></tr>
+          <tr><td>Space</td><td>The team boundary: Experts, Environments, Sessions, and credentials are isolated per Space</td></tr>
+        </tbody>
+      </table></div>
+      <p>For the full conceptual model, see <a href="product.html#blocks">Product · Seven first-class citizens</a>.</p>
+    </section>
+
+    <section id="ui-tour">
+      <p class="eyebrow">Tour</p>
+      <h2>Interface tour<a class="anchor" href="#ui-tour" aria-label="Anchor to Interface tour">#</a></h2>
+      <p>The sidebar starts with the <strong>Space switcher</strong>, followed by the work area (New session, Sessions, Artifacts, Approvals), the Automations group, Files, and Configuration. Press <kbd>⌘K</kbd> anywhere to open the command palette and jump to any surface or action.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Area</th><th>Surfaces</th><th>The question it answers</th></tr></thead>
+        <tbody>
+          <tr><td>Work</td><td>Home, Sessions, Artifacts, Approvals</td><td>“What am I delivering right now?”</td></tr>
+          <tr><td>Automations</td><td>Automation list, Run history, Events log</td><td>“Which standing orders are watching for me?”</td></tr>
+          <tr><td>Files</td><td>Organization and User memory trees</td><td>“What has the organization learned?”</td></tr>
+          <tr><td>Configuration</td><td>Experts, Environments, Daemons, Integrations, MCP, Skills, Webhooks, Secrets, Repositories, Spaces, Settings</td><td>“How is this system assembled?”</td></tr>
+        </tbody>
+      </table></div>
+      <p>The interface ships in Chinese and English with light and dark themes — switch under <strong>Configuration → Settings → Appearance</strong>; preferences persist locally.</p>
+    </section>
+
+    <section id="experts">
+      <p class="eyebrow">Workflow</p>
+      <h2>Creating Experts<a class="anchor" href="#experts" aria-label="Anchor to Creating Experts">#</a></h2>
+      <p>An Expert is the product surface of a team workflow. Start from a built-in template (PR Author, Deep Reviewer, Pair Reviewer, Verifier, Ticket Dispatcher, Incident Investigator) and append your repo scope and local conventions.</p>
+      <ol class="steps">
+        <li>
+          <h4>Create a draft</h4>
+          <p>Go to <strong>Configuration → Experts</strong> and click “Create expert.” Start blank, or pick a template to pre-fill instructions and boundary conventions.</p>
+        </li>
+        <li>
+          <h4>State the responsibility and instructions</h4>
+          <p>Name and description say what the Expert does — and doesn't do. The <strong>system prompt</strong> carries workflow steps and acceptance rules; <strong>user instructions</strong> and launch guidance tell the person starting a session how to describe the task.</p>
+        </li>
+        <li>
+          <h4>Bind an environment and a model</h4>
+          <p>Pick the runtime environment and default model in the System section. Models come from the governed catalog (<code>claude-fable-5</code>, <code>claude-opus-4-8</code>, <code>claude-sonnet-5</code>, <code>gpt-5.6-sol</code>, <code>grok-4.5</code>); anything outside the catalog fails closed before any network request.</p>
+        </li>
+        <li>
+          <h4>Add capabilities and delegation</h4>
+          <p>Add tools, MCP servers, and Skills as chips; list delegable Experts explicitly under <strong>Workers</strong>. Fewer capabilities is better — least privilege is the default posture.</p>
+        </li>
+        <li>
+          <h4>Set visibility and publish</h4>
+          <p>Private Experts serve only you; shared Experts serve the whole Space. “Save draft” stays editable; “Publish” creates an immutable revision — production always runs a specific, known version. The danger zone offers disable and archive; archiving never deletes history.</p>
+        </li>
+      </ol>
+      <div class="callout callout--ok">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 5 6v5c0 4.4 3 8.4 7 9.6 4-1.2 7-5.2 7-9.6V6l-7-3Z"/><path d="m9.2 12 2 2 3.6-4"/></svg>
+        <p><strong>Publishing ≠ auto-running.</strong> An Expert's triggers remain disarmed after publish. Enable them explicitly under <a href="#automations">Automations</a> before they respond to events.</p>
+      </div>
+    </section>
+
+    <section id="environments">
+      <p class="eyebrow">Workflow</p>
+      <h2>Configuring Environments<a class="anchor" href="#environments" aria-label="Anchor to Configuring Environments">#</a></h2>
+      <p>Under <strong>Configuration → Environments</strong>, click “Create environment” and choose the type first:</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Type</th><th>Description</th><th>Choose when</th></tr></thead>
+        <tbody>
+          <tr><td>Cloud sandbox</td><td>Each session boots from a snapshot; reproducible, isolated, concurrent</td><td>The team default</td></tr>
+          <tr><td>Daemon pool</td><td>Self-hosted processes register as execution nodes with capability tags and concurrency slots; liveness by heartbeat</td><td>Private networks, regulated data, dedicated hardware</td></tr>
+        </tbody>
+      </table></div>
+      <p>Environment configuration covers the base image, <strong>repository bindings</strong> (which codebases Experts may check out — also the authorization boundary for Context Engine retrieval), environment variables, <strong>secret references</strong> (picked from the Space's active Secrets), hooks, and network policy.</p>
+      <p>Environment revisions are likewise immutable once active. Failed provisioning can be retried; disabling never touches the records of past sessions. Daemon nodes are managed under <strong>Configuration → Daemons</strong> and can be toggled individually.</p>
+    </section>
+
+    <section id="sessions">
+      <p class="eyebrow">Workflow</p>
+      <h2>Running Sessions<a class="anchor" href="#sessions" aria-label="Anchor to Running Sessions">#</a></h2>
+      <h3>Start from Home</h3>
+      <p>Pick an Expert and the composer placeholder adapts to its launch guidance. Describe the goal, not the steps — steps are the Expert's job. In real deployments you can pre-check codebase evidence via Context Engine and attach it to the first message as explicitly untrusted repository evidence.</p>
+      <h3>Reading the timeline</h3>
+      <p>The timeline shows plans, steps, tool-call summaries, logs, file diffs, and check results per turn — raw logs collapsed, conclusions and anomalies surfaced. Updates stream live over SSE; no refreshing.</p>
+      <h3>Three things in the right rail</h3>
+      <ul>
+        <li><strong>Artifacts:</strong> durable outputs — PRs, branches, links; add links manually too. The global Artifacts page searches across sessions.</li>
+        <li><strong>Workers:</strong> the delegation tree of this session; every worker is a real, openable session.</li>
+        <li><strong>Files:</strong> a preview of the current workspace and org/user memory.</li>
+      </ul>
+      <h3>Lifecycle controls</h3>
+      <p>Sessions pause, resume, and cancel; a failed turn can be retried (creating a new run). Lists support pinning and archiving; archives are restorable. Conversations are kept forever; idle environments pause automatically and resume on your next message. The share panel grants per-person view access with a copyable link.</p>
+      <div class="callout callout--warn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 4 2.8 19.5h18.4L12 4Z" stroke-linejoin="round"/><path d="M12 10v4M12 17h.01"/></svg>
+        <p><strong>No “start execution” button?</strong> The deployment has no live Worker (or execution is switched off). The control plane still works — save a draft; once a Worker heartbeat returns, you can start. The system never renders an unexecuted session as a success.</p>
+      </div>
+    </section>
+
+    <section id="automations">
+      <p class="eyebrow">Workflow</p>
+      <h2>Automations &amp; triggers<a class="anchor" href="#automations" aria-label="Anchor to Automations and triggers">#</a></h2>
+      <p>The Automations page is “Experts with their triggers”: one row per Expert; expand it to see its triggers and enable switches.</p>
+      <h3>Seven trigger sources</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Source</th><th>Typical use</th></tr></thead>
+        <tbody>
+          <tr><td><code>github</code> / <code>gitlab</code></td><td>Start a reviewer when a PR opens; start a fixer when CI fails</td></tr>
+          <tr><td><code>slack</code></td><td>An @mention opens a task session; results post back to the thread</td></tr>
+          <tr><td><code>linear</code> / <code>pagerduty</code></td><td>Ticket transitions; alerts trigger root-cause analysis</td></tr>
+          <tr><td><code>schedule</code></td><td>Five-field cron + timezone; singleton runs — if the previous run is still going, this one is skipped, never queued or backfilled</td></tr>
+          <tr><td><code>webhook</code></td><td>The escape hatch; JSONLogic filters run before any session opens, so unmatched events cost nothing</td></tr>
+        </tbody>
+      </table></div>
+      <h3>Safe defaults</h3>
+      <ul>
+        <li><strong>New triggers ship disarmed.</strong> Deploy → dry-run once → confirm the behavior → enable.</li>
+        <li><strong>Pause without delete.</strong> Disabling flips a switch; configuration and history stay intact. Removing a trigger never harms the Expert.</li>
+        <li><strong>Rate limits as a backstop.</strong> Each trigger can cap runs per minute, so an event storm can't stampede your environments.</li>
+        <li><strong>Fire-and-forget, optionally.</strong> Trigger-started sessions can auto-archive — and archived sessions remain fully auditable.</li>
+      </ul>
+      <h3>Two ledgers</h3>
+      <p>The <strong>Events log</strong> records every inbound event with a redacted payload — “what happened out there.” <strong>Run history</strong> records the runs Experts actually started — “what we did about it.” When debugging “why didn't it fire,” always read the former before the latter.</p>
+    </section>
+
+    <section id="approvals">
+      <p class="eyebrow">Workflow</p>
+      <h2>Handling approvals<a class="anchor" href="#approvals" aria-label="Anchor to Handling approvals">#</a></h2>
+      <p>When an Expert is about to take a high-risk action (an external write, a dangerous tool call), the run stops at an approval gate. The approval card shows <strong>the action, its impact, the supporting evidence, and an expiry</strong>.</p>
+      <div class="table-wrap"><table style="min-width:480px">
+        <thead><tr><th>Decision</th><th>Effect</th></tr></thead>
+        <tbody>
+          <tr><td>Approve</td><td>The action executes; the decision and the decision-maker enter the audit stream</td></tr>
+          <tr><td>Request changes</td><td>Feedback returns to the Expert, which adjusts and asks again</td></tr>
+          <tr><td>Reject</td><td>The action does not execute; the session continues or wraps up per the Expert's policy</td></tr>
+        </tbody>
+      </table></div>
+      <p>Two places to act: the unified inbox on the <strong>Approvals</strong> page (cross-session, ideal for on-call), or inline in the session timeline (fullest context). Expired approvals become void — an Expert never executes on stale authorization.</p>
+    </section>
+
+    <section id="files">
+      <p class="eyebrow">Workflow</p>
+      <h2>Files &amp; Skills<a class="anchor" href="#files" aria-label="Anchor to Files and Skills">#</a></h2>
+      <p>The Files page shows two trees: <strong>Organization</strong> (shared org-wide) and <strong>User</strong> (visible only to your sessions). They are not an upload box — Experts write review conclusions, convention digests, and investigation notes as a side effect of work, readable by the next session, another Expert, or a teammate.</p>
+      <ul>
+        <li>Every write creates an <strong>immutable version</strong> with attribution (which Expert, which session); deletion is a tombstone, not an erasure.</li>
+        <li>A third scope exists inside sessions: <code>/workspace</code> — the live VM disk, visible only within that session.</li>
+        <li>Storage is S3-compatible with SHA-256 integrity checks and per-organization quotas.</li>
+      </ul>
+      <h3>Skills: methodology as files</h3>
+      <p>Maintain skill entries under <strong>Configuration → Skills</strong> (say, “our migration safety checklist”). Bind a skill to an Expert and its content is folded into that Expert's system prompt, ordered by name — best practices go from word of mouth to organizational default.</p>
+    </section>
+
+    <section id="integrations">
+      <p class="eyebrow">Configuration</p>
+      <h2>Integrations &amp; credentials<a class="anchor" href="#integrations" aria-label="Anchor to Integrations and credentials">#</a></h2>
+
+      <h3>Integrations</h3>
+      <p>Eight types: <code>github</code>, <code>gitlab</code>, <code>slack</code>, <code>jira</code>, <code>pagerduty</code>, <code>linear</code>, <code>datadog</code>, and <code>custom</code>. Connect once; any Expert can listen. Cards show connection status and health; <code>action_required</code> offers a repair path, and disconnect and archive are distinct operations.</p>
+
+      <h3>MCP servers</h3>
+      <p>Three transports: <code>stdio</code> (launch command), and <code>sse</code> / <code>http</code> (endpoint URL). Partner presets for Atlassian, Sentry, Stripe, and Figma pre-fill in one click. Registered servers appear as capability chips in the Expert editor.</p>
+
+      <h3>Webhooks</h3>
+      <p>Creating a webhook yields a dedicated delivery URL (<code>POST …/webhooks/{id}</code> with Bearer auth) and a signing secret (<code>whsec_…</code>) that is <strong>shown exactly once</strong> — store it immediately; every later view shows only the last four characters. The UI provides a copyable curl test command. HTTPS targets only.</p>
+
+      <h3>Secrets</h3>
+      <p>Names must match <code>^[A-Z][A-Z0-9_]*$</code> (e.g. <code>DEPLOY_TOKEN</code>). Ciphertext is <strong>write-only</strong>: the database grants no read on the ciphertext column, so any query returns a last-four mask at most. Environments consume secrets by reference; rotation means swapping the reference.</p>
+
+      <h3>Repositories</h3>
+      <p>Register GitHub / GitLab repositories and default branches — the basis for environment repo bindings and the authorization boundary for Context Engine retrieval. Connection problems are surfaced explicitly as <code>action_required</code>.</p>
+
+      <div class="callout callout--warn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 4 2.8 19.5h18.4L12 4Z" stroke-linejoin="round"/><path d="M12 10v4M12 17h.01"/></svg>
+        <p><strong>Credential discipline:</strong> provider API keys are injected into the Worker from a secret manager. No plaintext key should ever appear in the browser bundle, URLs, localStorage, logs, or screenshots.</p>
+      </div>
+    </section>
+
+    <section id="deploy">
+      <p class="eyebrow">Operations</p>
+      <h2>Deployment &amp; operations<a class="anchor" href="#deploy" aria-label="Anchor to Deployment and operations">#</a></h2>
+
+      <h3>Build production images</h3>
+      <div class="code-panel">
+        <div class="code-panel__head">terminal<span class="spacer"></span><button class="copy-btn" type="button" data-copy-target="code-build" aria-label="Copy commands"><span>Copy</span></button></div>
+        <pre id="code-build"><code>docker build -f apps/api/Dockerfile -t cosmos-api .
+docker build -f apps/web/Dockerfile -t cosmos-web \
+  --build-arg VITE_OIDC_AUTHORITY=https://identity.example.com/ \
+  --build-arg VITE_OIDC_CLIENT_ID=cosmos-web \
+  --build-arg VITE_OIDC_AUDIENCE=cosmos-api \
+  --build-arg VITE_OIDC_REDIRECT_URI=https://cosmos.example.com/auth/callback \
+  --build-arg VITE_OIDC_POST_LOGOUT_REDIRECT_URI=https://cosmos.example.com/ \
+  --build-arg VITE_OIDC_SILENT_REDIRECT_URI=https://cosmos.example.com/auth/silent-callback .</code></pre>
+      </div>
+      <p>Both runtime images run as non-root with built-in health checks. The Web container reverse-proxies same-origin <code>/api/*</code> to <code>COSMOS_API_UPSTREAM</code> and requires explicit HTTPS origins for IdP/API via <code>COSMOS_CSP_CONNECT_SRC</code> and friends.</p>
+
+      <h3>Migrations are a separate job</h3>
+      <p>Startup migrations are <strong>forbidden</strong> in staging/production. Releases first run <code>node dist/migrate.js</code> as a standalone job from the same image, then roll the API. The migration identity owns schema work and runtime-role hardening; API/Worker login identities only receive role membership — no table ownership. Mismatched roles refuse to boot (fail closed).</p>
+
+      <h3>Required production configuration</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Component</th><th>Key variables</th></tr></thead>
+        <tbody>
+          <tr><td>API</td><td><code>NODE_ENV=production</code> · <code>AUTH_MODE=oidc</code> · <code>DATABASE_URL</code> · <code>CORS_ORIGIN</code> · <code>OIDC_ISSUER / OIDC_AUDIENCE / OIDC_JWKS_URI</code> · <code>SECURITY_AUDIT_HMAC_KEY</code> (with a stable <code>…_KEY_ID</code>)</td></tr>
+          <tr><td>Worker</td><td>A unique, stable <code>WORKER_ID</code> · <code>AGENT_PROVIDER_GPT_API_KEY / AGENT_PROVIDER_CLAUDE_API_KEY / AGENT_PROVIDER_GROK_API_KEY</code> (injected from a secret manager) · <code>EXECUTION_ENABLED=true</code></td></tr>
+          <tr><td>Web</td><td><code>VITE_AUTH_MODE=oidc</code> plus the OIDC public-client settings; missing identity configuration shows an error instead of silently entering demo mode</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Probes and metrics</h3>
+      <ul>
+        <li><code>GET /api/health</code> — the only public liveness probe.</li>
+        <li><code>GET /api/ready</code> — authenticated; validates database and migration state, rejecting both pending and unknown migration history.</li>
+        <li><code>GET /api/metrics</code> — exposed only when <code>METRICS_SCRAPE_TOKEN</code> is configured; low-cardinality HTTP/SSE metrics.</li>
+      </ul>
+      <p>Workers write periodic database heartbeats; the API advertises execution capability only while a fresh heartbeat exists. With Workers offline, the control plane stays readable and session drafts can be saved.</p>
+
+      <h3>Quality gates and runbooks</h3>
+      <div class="code-panel">
+        <div class="code-panel__head">terminal<span class="spacer"></span><button class="copy-btn" type="button" data-copy-target="code-check" aria-label="Copy commands"><span>Copy</span></button></div>
+        <pre id="code-check"><code>pnpm check          <span class="c"># lint + typecheck + tests + build</span>
+pnpm openapi:lint   <span class="c"># API contract validation</span></code></pre>
+      </div>
+      <p>The repository ships three operations runbooks: <strong>PostgreSQL backup &amp; recovery</strong> (with PITR preflight and quarterly drills), <strong>observability &amp; SLO alerting</strong>, and <strong>load / dependency-failure drills</strong>. CI enforces frozen-lockfile installs, integration tests, backup-restore verification, image scanning, and redacted secret scanning.</p>
+    </section>
+
+    <section id="shortcuts">
+      <p class="eyebrow">Reference</p>
+      <h2>Keyboard shortcuts<a class="anchor" href="#shortcuts" aria-label="Anchor to Keyboard shortcuts">#</a></h2>
+      <div class="kv-list">
+        <div class="kv-row">Open command palette<span class="keys"><kbd>⌘</kbd><kbd>K</kbd></span></div>
+        <div class="kv-row">New session<span class="keys"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>O</kbd></span></div>
+        <div class="kv-row">Go to sessions<span class="keys"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>L</kbd></span></div>
+        <div class="kv-row">Go to files<span class="keys"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>E</kbd></span></div>
+        <div class="kv-row">Toggle left sidebar<span class="keys"><kbd>⌘</kbd><kbd>.</kbd></span></div>
+        <div class="kv-row">Keyboard shortcuts panel<span class="keys"><kbd>⌘</kbd><kbd>/</kbd></span></div>
+      </div>
+      <p>On Windows / Linux, use <kbd>Ctrl</kbd> in place of <kbd>⌘</kbd>.</p>
+    </section>
+
+    <section id="troubleshooting">
+      <p class="eyebrow">Reference</p>
+      <h2>Troubleshooting<a class="anchor" href="#troubleshooting" aria-label="Anchor to Troubleshooting">#</a></h2>
+
+      <h3>Can't start execution / send button disabled</h3>
+      <p>That is the honest rendering of execution capability being unavailable. Check in order: is the Worker container healthy (fresh heartbeat)? → are provider credentials configured in <code>.env.local</code>? → is <code>EXECUTION_ENABLED=true</code>? The control plane is unaffected — configuration work continues as normal.</p>
+
+      <h3>A trigger didn't open a session</h3>
+      <p>Read the <strong>Events log</strong> first: did the event arrive, and did a filter stop it? Then <strong>Run history</strong>: did the per-minute rate cap hit, or is the trigger still disarmed? Schedule triggers are singletons — a still-running previous run makes the next one skip, by design.</p>
+
+      <h3>Default ports are taken</h3>
+      <p>Override both the API port and the Vite proxy target: <code>PORT=8790 VITE_API_PROXY_TARGET=http://127.0.0.1:8790 pnpm dev</code>.</p>
+
+      <h3>Cross-origin API requests rejected</h3>
+      <p>For split, cross-origin deployments set both <code>VITE_API_BASE_URL</code> and a comma-separated <code>VITE_API_ALLOWED_ORIGINS</code>; otherwise the browser refuses to send the Bearer token — protection against credential leakage, not a bug.</p>
+
+      <h3>Context Engine connection fails</h3>
+      <p>Staging/production require HTTPS endpoints. For local Compose, reach a host-machine plugin at <code>http://host.docker.internal:8790</code> and set <code>CONTEXT_ENGINE_ALLOW_INSECURE_HTTP=true</code> in local <code>.env.local</code> only. Also confirm the Space's active environment binds the target repository — the binding is the retrieval authorization boundary.</p>
+
+      <h3>Common questions</h3>
+      <ul>
+        <li><strong>Mistyped a secret and want to peek?</strong> You can't. Ciphertext is write-only — create a correct one and swap the reference.</li>
+        <li><strong>Does archiving lose data?</strong> No. Archived sessions, triggers, and catalog entries keep full history, and most can be restored.</li>
+        <li><strong>Why can't I add arbitrary models?</strong> The catalog is governed by shared contracts and everything outside it fails closed — in exchange you get per-family credential isolation and predictable behavior.</li>
+      </ul>
+
+      <div class="callout callout--info">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M12 11v5"/></svg>
+        <p><strong>Still stuck?</strong> The repository's <code>docs/</code> directory holds the product requirements, production architecture baseline, and three operations runbooks — deeper boundaries and recovery flows than this guide covers.</p>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<button class="docs-toggle" type="button" aria-expanded="false" aria-controls="docs-nav">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h16" /></svg>
+  Contents
+</button>
+
+<footer class="footer">
+  <div class="container">
+    <div class="footer__bottom" style="border-top:none;padding-top:0">
+      <span>© 2026 Cosmos Agent Platform</span>
+      <span class="spacer"></span>
+      <a href="index.html" style="color:var(--text-secondary)">Home</a>
+      <a href="product.html" style="color:var(--text-secondary)">Product</a>
+    </div>
+  </div>
+</footer>
+
+<script src="../assets/site.js"></script>
+</body>
+</html>

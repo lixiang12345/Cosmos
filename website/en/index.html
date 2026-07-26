@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cosmos — AI Software Delivery Orchestration for Engineering Organizations</title>
+<meta name="description" content="Cosmos turns individual AI leverage into an organizational delivery system: reusable Experts, reproducible Environments, event-driven Automations, and humans at every judgment point." />
+<link rel="icon" type="image/svg+xml" href="../assets/favicon.svg" />
+<link rel="stylesheet" href="../assets/site.css" />
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to main content</a>
+
+<header class="topbar">
+  <div class="topbar__inner">
+    <a class="brand" href="index.html" aria-label="Cosmos home">
+      <svg class="brand__mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <g transform="rotate(-24 12 12.8)"><ellipse class="orbit" cx="12" cy="12.8" rx="9.4" ry="4.1" stroke-width="1.4" /></g>
+        <circle cx="12" cy="12.8" r="3.9" fill="currentColor" />
+        <circle class="satellite" cx="19.2" cy="5.4" r="2" />
+      </svg>
+      Cosmos
+      <span class="brand__tag">Alpha</span>
+    </a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation">
+      <svg class="icon-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+      <svg class="icon-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+    </button>
+    <nav id="site-nav" class="topbar__nav" aria-label="Site navigation">
+      <a class="topbar__link" href="index.html" aria-current="page">Home</a>
+      <a class="topbar__link" href="product.html">Product</a>
+      <a class="topbar__link" href="manual.html">User Guide</a>
+      <a class="topbar__link" href="index.html#security">Security</a>
+      <a class="btn btn--primary topbar__cta" href="manual.html#quickstart">Get Started</a>
+    </nav>
+    <div class="lang-switch" role="group" aria-label="语言 / Language">
+      <a href="../index.html" data-lang-link lang="zh-CN" hreflang="zh-CN">中</a>
+      <a href="index.html" aria-current="true" lang="en">EN</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- ============================ Hero ============================ -->
+  <section class="hero">
+    <div class="hero__grid-bg" aria-hidden="true"></div>
+    <div class="container hero__inner">
+      <p class="hero__badge"><span class="dot" aria-hidden="true"></span>AI Software Delivery Orchestration</p>
+      <h1 class="hero__title">Your engineers have agents.<br />Your organization doesn't. <em>Cosmos closes that gap.</em></h1>
+      <p class="hero__sub">Cosmos is an AI software-delivery orchestration and governance platform for engineering organizations: codify team practices into reusable <strong>Experts</strong>, wake them with GitHub, Slack, or scheduled events, let them finish engineering work asynchronously in isolated <strong>Environments</strong> — and hand every high-risk action back to a human before it fires.</p>
+      <div class="hero__actions">
+        <a class="btn btn--primary btn--lg" href="manual.html#quickstart">Get started<span class="arrow" aria-hidden="true">→</span></a>
+        <a class="btn btn--ghost btn--lg" href="product.html">Explore the architecture</a>
+      </div>
+      <p class="hero__hint">pnpm install &amp;&amp; pnpm dev · full runtime via Docker Compose</p>
+
+      <!-- Session mock -->
+      <div class="session-window" role="img" aria-label="A Cosmos session timeline: a GitHub event triggers an Expert to review code, every tool call and check is visible, and the external write stops at an approval gate awaiting a human decision">
+        <div class="session-window__chrome">
+          <span class="session-window__dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="session-window__title">session / deep-review-payments · env: ci-sandbox · model: claude-sonnet-5</span>
+          <span class="session-window__status"><span class="dot"></span>RUNNING</span>
+        </div>
+        <div class="session-window__body">
+          <div class="timeline-row timeline-row--done">
+            <span class="timeline-row__rail" aria-hidden="true"><i></i></span>
+            <div>
+              <div class="timeline-row__head"><span class="timeline-row__label">Trigger event</span><span class="timeline-row__meta">github · pull_request.opened · 14:02:11</span></div>
+              <p class="timeline-row__detail"><code>acme/billing #482</code> “Split tax computation by country” → new session per trigger rule; the event payload becomes the first message.</p>
+            </div>
+          </div>
+          <div class="timeline-row timeline-row--done">
+            <span class="timeline-row__rail" aria-hidden="true"><i></i></span>
+            <div>
+              <div class="timeline-row__head"><span class="timeline-row__label">Plan</span><span class="timeline-row__meta">4 steps</span></div>
+              <p class="timeline-row__detail">Check out the diff → run tests and static checks → line-level review → summarize risks and suggested changes.</p>
+            </div>
+          </div>
+          <div class="timeline-row timeline-row--done">
+            <span class="timeline-row__rail" aria-hidden="true"><i></i></span>
+            <div>
+              <div class="timeline-row__head"><span class="timeline-row__label">Tool calls</span><span class="timeline-row__meta">3 completed</span></div>
+              <div>
+                <span class="timeline-chip"><span class="ok">✓</span> repo.checkout</span>
+                <span class="timeline-chip"><span class="ok">✓</span> pnpm test · 152 passed</span>
+                <span class="timeline-chip">git.diff <span class="add">+214</span> <span class="del">−38</span></span>
+              </div>
+            </div>
+          </div>
+          <div class="timeline-row timeline-row--active">
+            <span class="timeline-row__rail" aria-hidden="true"><i></i></span>
+            <div>
+              <div class="timeline-row__head"><span class="timeline-row__label">Line-level review</span><span class="timeline-row__meta">in progress</span></div>
+              <p class="timeline-row__detail">Found 2 boundary issues: rounding ignores the smallest currency unit; countries with <code>rate=0</code> skip the audit record.</p>
+            </div>
+          </div>
+          <div class="timeline-row timeline-row--gate">
+            <span class="timeline-row__rail" aria-hidden="true"><i></i></span>
+            <div>
+              <div class="timeline-row__head"><span class="timeline-row__label">Approval gate</span><span class="timeline-row__meta">external write</span></div>
+              <div class="gate-card">
+                <div class="gate-card__head">Awaiting Approval</div>
+                <div class="gate-card__body">The Expert requests to publish its review to GitHub <code>#482</code>: 3 line comments + 1 summary. Impact and evidence are shown; nothing reaches the external system until you approve.</div>
+                <div class="gate-card__actions">
+                  <span class="gate-btn gate-btn--approve">Approve &amp; publish</span>
+                  <span class="gate-btn">Request changes</span>
+                  <span class="gate-btn">Reject</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ Promises ============================ -->
+  <div class="ticker" aria-hidden="true">
+    <div class="ticker__track">
+      <span>COLLABORATE IN REAL TIME</span><i></i>
+      <span>STORE FILES ACROSS TEAMS</span><i></i>
+      <span>CUSTOM AGENTS</span><i></i>
+      <span>TOOLS TO GET REAL WORK DONE</span><i></i>
+      <span>SAFE BY DEFAULT</span><i></i>
+      <span>HUMAN AT JUDGMENT POINTS</span><i></i>
+      <span>COLLABORATE IN REAL TIME</span><i></i>
+      <span>STORE FILES ACROSS TEAMS</span><i></i>
+      <span>CUSTOM AGENTS</span><i></i>
+      <span>TOOLS TO GET REAL WORK DONE</span><i></i>
+      <span>SAFE BY DEFAULT</span><i></i>
+      <span>HUMAN AT JUDGMENT POINTS</span><i></i>
+    </div>
+  </div>
+
+  <!-- ============================ Stats ============================ -->
+  <section class="stats" aria-label="Key numbers">
+    <div class="container">
+      <div class="stats__grid">
+        <div class="stat"><div class="stat__num">62</div><div class="stat__label">Expert templates, 11 categories</div></div>
+        <div class="stat"><div class="stat__num">7</div><div class="stat__label">Trigger sources</div></div>
+        <div class="stat"><div class="stat__num">5</div><div class="stat__label">Governed models</div></div>
+        <div class="stat"><div class="stat__num">18</div><div class="stat__label">Production surfaces</div></div>
+        <div class="stat"><div class="stat__num">100<sup>%</sup></div><div class="stat__label">Control-plane writes audited</div></div>
+        <div class="stat"><div class="stat__num">0</div><div class="stat__label">Plaintext secrets in the browser</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ Why ============================ -->
+  <section class="section" id="why">
+    <div class="container">
+      <p class="eyebrow">Why Cosmos</p>
+      <h2 class="section__title">From chat window to operating system</h2>
+      <p class="section__lead">Cosmos's first-class objects are tasks, runs, events, artifacts, and approvals — not messages. Once individual agent leverage is captured as organizational Experts and Automations, it compounds with every delivery.</p>
+      <div class="card-grid">
+        <article class="card card--hover">
+          <span class="card__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4.1 13.2c-.4.5 0 1.3.7 1.3H11l-1 7.5L19 10.8c.4-.5 0-1.3-.7-1.3H13l1-7.5Z"/></svg></span>
+          <h3 class="card__title">Async by default</h3>
+          <p class="card__body">Submit a goal and walk away. Experts keep working in cloud sandboxes and pull you back through approvals and notifications when judgment is needed — no staring at a terminal.</p>
+        </article>
+        <article class="card card--hover">
+          <span class="card__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="M12 12 20 7.5M12 12v9M12 12 4 7.5"/></svg></span>
+          <h3 class="card__title">Reusable Experts</h3>
+          <p class="card__body">Freeze team conventions, tool permissions, trigger conditions, and execution steps into reusable Experts instead of everyone re-tuning prompts. One engineer's polished workflow works for the whole org, out of the box.</p>
+        </article>
+        <article class="card card--hover">
+          <span class="card__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.6"/><circle cx="18" cy="18" r="2.6"/><path d="M6 8.6V15a3 3 0 0 0 3 3h6.4M18 15.4V9a3 3 0 0 0-3-3H8.6"/></svg></span>
+          <h3 class="card__title">Closed loop across tools</h3>
+          <p class="card__body">Start from Slack or GitHub; move through code changes, checks, PRs, and review feedback to a merge recommendation. Status and results flow back to the original thread — no lost context, no tool hopping.</p>
+        </article>
+        <article class="card card--hover">
+          <span class="card__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 5 6v5c0 4.4 3 8.4 7 9.6 4-1.2 7-5.2 7-9.6V6l-7-3Z"/><path d="m9.2 12 2 2 3.6-4"/></svg></span>
+          <h3 class="card__title">Visible, controllable, auditable</h3>
+          <p class="card__body">Every plan, tool call, diff, approval, and external write has a status, a rationale, and an audit record. Low-risk steps advance on their own; high-risk steps must state their impact and wait for authorization.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ Blocks ============================ -->
+  <section class="section section--divide" id="blocks">
+    <div class="container">
+      <p class="eyebrow">Building Blocks</p>
+      <h2 class="section__title">Seven first-class citizens, one delivery OS</h2>
+      <p class="section__lead">Cosmos is neither a single agent nor a bare workflow engine. Experts, Environments, Sessions, Automations, Files, Workers, and Spaces are independent, configurable, shareable entities that compose into an orchestration system for the full SDLC.</p>
+      <div class="card-grid card-grid--3">
+        <a class="card" href="product.html#expert">
+          <span class="card__kicker">Expert</span>
+          <h3 class="card__title">Experts</h3>
+          <p class="card__body">A reusable workflow product surface: instructions, model, capabilities, environment, launch guidance, workers, and triggers packaged together — not a one-off prompt.</p>
+          <span class="card__link">About Experts →</span>
+        </a>
+        <a class="card" href="product.html#environment">
+          <span class="card__kicker">Environment</span>
+          <h3 class="card__title">Environments</h3>
+          <p class="card__body">Isolated runtimes where code and tools execute. Cloud sandboxes are reproducible and concurrent; self-hosted daemons reach private networks and regulated data.</p>
+          <span class="card__link">About Environments →</span>
+        </a>
+        <a class="card" href="product.html#session">
+          <span class="card__kicker">Session</span>
+          <h3 class="card__title">Sessions</h3>
+          <p class="card__body">Where an Expert meets an Environment — and where humans meet the work: timeline, tool calls, diffs, artifacts, workers, and files in one place.</p>
+          <span class="card__link">About Sessions →</span>
+        </a>
+        <a class="card" href="product.html#automation">
+          <span class="card__kicker">Automation</span>
+          <h3 class="card__title">Automations</h3>
+          <p class="card__body">Standing orders from events to Experts: 7 trigger sources including GitHub, Slack, schedules, and webhooks. New triggers ship disarmed until you enable them.</p>
+          <span class="card__link">About Automations →</span>
+        </a>
+        <a class="card" href="product.html#files">
+          <span class="card__kicker">Files</span>
+          <h3 class="card__title">Files</h3>
+          <p class="card__body">Organizational memory that outlives any session. Experts write it as a side effect of work, shared at User / Organization scope, every write immutably versioned and attributed.</p>
+          <span class="card__link">About Files →</span>
+        </a>
+        <a class="card" href="product.html#workers">
+          <span class="card__kicker">Workers</span>
+          <h3 class="card__title">Delegation</h3>
+          <p class="card__body">Workers, subagents, and Expert-to-Expert collaboration keep review, fixing, and verification in focused hands — instead of one super-agent doing everything.</p>
+          <span class="card__link">About Delegation →</span>
+        </a>
+      </div>
+      <p class="flow-caption">The seventh citizen, <a href="product.html#space">Space</a>, is the team boundary: Experts, Environments, Sessions, Secrets, MCP, and Webhooks are isolated per Space — switching Space switches the whole context.</p>
+    </div>
+  </section>
+
+  <!-- ============================ Scenario ============================ -->
+  <section class="section section--divide" id="scenario">
+    <div class="container">
+      <div class="split">
+        <div class="split__copy">
+          <p class="eyebrow">Flagship Workflow</p>
+          <h2 class="section__title">Code review pipeline: a specialized team, humans at judgment points</h2>
+          <p class="section__lead">When a PR opens, a Risk Analyzer routes it first: low risk auto-approves; high risk fans out to Deep Reviewer, Pair Reviewer, and Verifier in parallel, while a Memory Manager distills conclusions into organizational memory.</p>
+          <ul class="checklist">
+            <li><span class="tick" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="m4.5 12.5 5 5 10-11"/></svg></span><span><strong>Nobody reads every PR line by line anymore.</strong> Humans appear only at architecture, product, security, and release judgment points.</span></li>
+            <li><span class="tick" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="m4.5 12.5 5 5 10-11"/></svg></span><span><strong>Each Expert optimizes one intent.</strong> Reviewing and authoring pull in different directions; one giant prompt does neither well.</span></li>
+            <li><span class="tick" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="m4.5 12.5 5 5 10-11"/></svg></span><span><strong>Conclusions carry evidence.</strong> Line comments arrive with test results and runtime proof, not vague opinions.</span></li>
+          </ul>
+        </div>
+        <div>
+          <div class="code-panel">
+            <div class="code-panel__head">pipeline · code-review<span class="spacer"></span><span>7 experts</span></div>
+            <pre aria-label="Code review pipeline diagram"><code>Ticket ──▶ <span class="t">PR Author</span> ──▶ opens PR
+                        │
+                        │ <span class="c">trigger: pull_request.opened</span>
+                        ▼
+                 <span class="t">Risk Analyzer</span> ──── <span class="k">low risk</span> ──▶ auto-approve
+                        │
+                        │ <span class="w">high risk</span>
+          ┌─────────────┼─────────────┐
+          ▼             ▼             ▼
+   <span class="t">Deep Reviewer</span>  <span class="t">Pair Reviewer</span>   <span class="t">Verifier</span>
+   <span class="c">line-level</span>     <span class="c">human verdict</span>  <span class="c">runtime proof</span>
+          └─────────────┼─────────────┘
+                        ▼
+                 <span class="t">Memory Manager</span> ──▶ <span class="s">organization/pr-reviews/…</span>
+                 <span class="c">distills org memory from merges and human feedback</span></code></pre>
+          </div>
+          <p class="flow-caption">Seven review-related templates deploy as-is, or extend any of the 62 Expert templates with your repo scope and local conventions.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ Security ============================ -->
+  <section class="section section--divide" id="security">
+    <div class="container">
+      <p class="eyebrow">Safe by Default</p>
+      <h2 class="section__title">Nothing fires until you say so</h2>
+      <p class="section__lead">Agents get adopted at scale only when the security team can say yes. Cosmos builds the safety boundary into the product's foundation — quiet, not theatrical.</p>
+      <div class="card-grid card-grid--3">
+        <article class="card">
+          <h3 class="card__title">Triggers ship disarmed</h3>
+          <p class="card__body">New automations deploy off: dry-run once, confirm the behavior, then enable. Pausing never deletes configuration, and event filters run before a session is ever opened.</p>
+        </article>
+        <article class="card">
+          <h3 class="card__title">Approval gates on risk</h3>
+          <p class="card__body">External writes such as creating PRs or publishing comments must present impact, evidence, and rollback, then wait for approve / request-changes / reject — every decision recorded.</p>
+        </article>
+        <article class="card">
+          <h3 class="card__title">Secrets are write-only</h3>
+          <p class="card__body">Ciphertext can never be read back; queries return a last-four mask only. Provider credentials are injected server-side and never enter the browser bundle.</p>
+        </article>
+        <article class="card">
+          <h3 class="card__title">Isolation enforced in the database</h3>
+          <p class="card__body">Every tenant table runs PostgreSQL FORCE RLS; API and Worker use no-login runtime roles without table ownership, and refuse to start if the roles don't match.</p>
+        </article>
+        <article class="card">
+          <h3 class="card__title">OIDC + PKCE identity</h3>
+          <p class="card__body">Production Web uses Authorization Code + PKCE; access tokens live only in memory with a hard 300-second lifetime cap. 401, expiry, and logout clear identity immediately.</p>
+        </article>
+        <article class="card">
+          <h3 class="card__title">End-to-end audit</h3>
+          <p class="card__body">External events, user actions, agent writes, approvals, and results land in an append-only audit stream, searchable by type, source, status, and time.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ Models ============================ -->
+  <section class="section section--divide" id="models">
+    <div class="container">
+      <div class="split split--reverse">
+        <div>
+          <div class="model-list" role="list" aria-label="Governed model catalog">
+            <div class="model-row" role="listitem"><span class="model-row__id">claude-fable-5</span><span class="model-row__family">claude</span><span class="model-row__note">default for complex work</span></div>
+            <div class="model-row" role="listitem"><span class="model-row__id">claude-opus-4-8</span><span class="model-row__family">claude</span><span class="model-row__note">deep reasoning</span></div>
+            <div class="model-row" role="listitem"><span class="model-row__id">claude-sonnet-5</span><span class="model-row__family">claude</span><span class="model-row__note">quality / cost balance</span></div>
+            <div class="model-row" role="listitem"><span class="model-row__id">gpt-5.6-sol</span><span class="model-row__family">gpt</span><span class="model-row__note">cross-family option</span></div>
+            <div class="model-row" role="listitem"><span class="model-row__id">grok-4.5</span><span class="model-row__family">grok</span><span class="model-row__note">cross-family option</span></div>
+          </div>
+          <p class="flow-caption">The catalog is enforced by shared contracts in both the Expert editor and the Worker; a pinned model outside the catalog fails closed before any network request.</p>
+        </div>
+        <div class="split__copy">
+          <p class="eyebrow">Models &amp; Context</p>
+          <h2 class="section__title">A governed model catalog, structured context</h2>
+          <p class="section__lead">No single-vendor lock-in, and no uncontrolled sprawl either: five models governed through one catalog, with credentials selected per model family. With Context Engine connected, Experts get equal-quality codebase context with fewer tokens — retrieval is authorized per Space and repository binding, and plugin keys stay server-side.</p>
+          <a class="btn btn--ghost" href="manual.html#integrations">See integration setup →</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ Deploy ============================ -->
+  <section class="section section--divide" id="deploy">
+    <div class="container">
+      <p class="eyebrow">Run Anywhere</p>
+      <h2 class="section__title">A local runtime in five minutes, a documented path to production</h2>
+      <p class="section__lead">One command brings up the full Docker Compose runtime — PostgreSQL, API, Worker, and Web. Production ships with a standalone migration job, health probes, and runbooks for backup/recovery and observability.</p>
+      <div class="split">
+        <div>
+          <div class="code-panel">
+            <div class="code-panel__head">terminal<span class="spacer"></span>
+              <button class="copy-btn" type="button" data-copy-target="quickstart-code" aria-label="Copy commands"><span>Copy</span></button>
+            </div>
+            <pre id="quickstart-code"><code><span class="c"># Requires Node.js 22 · pnpm 11.7 · Docker</span>
+pnpm install
+pnpm dev
+
+<span class="c"># Web console</span>
+<span class="s">http://127.0.0.1:5173</span>
+<span class="c"># API health check</span>
+<span class="s">http://127.0.0.1:8787/api/health</span></code></pre>
+          </div>
+        </div>
+        <div class="split__copy">
+          <ul class="checklist">
+            <li><span class="tick" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="m4.5 12.5 5 5 10-11"/></svg></span><span><strong>Ordered startup.</strong> Compose waits for the database, starts the API, runs migrations, then brings up Worker and Web.</span></li>
+            <li><span class="tick" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="m4.5 12.5 5 5 10-11"/></svg></span><span><strong>Fails safely instead of pretending.</strong> Without provider credentials the Worker stays unavailable and health-flagged; the control plane remains fully usable.</span></li>
+            <li><span class="tick" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="m4.5 12.5 5 5 10-11"/></svg></span><span><strong>Production discipline built in.</strong> Startup migrations are forbidden in staging/production; backup-recovery, SLO alerting, and load drills each have a runbook.</span></li>
+          </ul>
+          <p style="margin-top:20px"><a class="btn btn--ghost" href="manual.html#deploy">Read the deployment guide →</a></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ CTA ============================ -->
+  <section class="cta-band">
+    <div class="container">
+      <h2 class="cta-band__title">Turn agents from personal tools into organizational capability.</h2>
+      <p class="cta-band__sub">Start with one Expert and one Automation. Safe by default, pausable anytime, audited end to end.</p>
+      <div class="cta-band__actions">
+        <a class="btn btn--primary btn--lg" href="manual.html#quickstart">Get started<span class="arrow" aria-hidden="true">→</span></a>
+        <a class="btn btn--ghost btn--lg" href="product.html">Read the product overview</a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <div class="container">
+    <div class="footer__grid">
+      <div class="footer__about">
+        <a class="brand" href="index.html" aria-label="Cosmos home">
+          <svg class="brand__mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <g transform="rotate(-24 12 12.8)"><ellipse class="orbit" cx="12" cy="12.8" rx="9.4" ry="4.1" stroke-width="1.4" /></g>
+            <circle cx="12" cy="12.8" r="3.9" fill="currentColor" />
+            <circle class="satellite" cx="19.2" cy="5.4" r="2" />
+          </svg>
+          Cosmos
+        </a>
+        <p>AI software-delivery orchestration and governance for engineering organizations. Currently in internal alpha, suited to controlled-environment evaluation.</p>
+      </div>
+      <div class="footer__col">
+        <h3>Product</h3>
+        <ul>
+          <li><a href="product.html">Product overview</a></li>
+          <li><a href="product.html#blocks">Building blocks</a></li>
+          <li><a href="product.html#philosophy">Interaction philosophy</a></li>
+          <li><a href="index.html#security">Security &amp; governance</a></li>
+        </ul>
+      </div>
+      <div class="footer__col">
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="manual.html#quickstart">Quickstart</a></li>
+          <li><a href="manual.html">User guide</a></li>
+          <li><a href="manual.html#deploy">Deployment &amp; operations</a></li>
+          <li><a href="manual.html#troubleshooting">Troubleshooting</a></li>
+        </ul>
+      </div>
+      <div class="footer__col">
+        <h3>Scenarios</h3>
+        <ul>
+          <li><a href="index.html#scenario">Code review pipeline</a></li>
+          <li><a href="product.html#templates">Expert template library</a></li>
+          <li><a href="manual.html#automations">Automations &amp; triggers</a></li>
+          <li><a href="manual.html#approvals">Approval workflow</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer__bottom">
+      <span>© 2026 Cosmos Agent Platform</span>
+      <span class="spacer"></span>
+      <span>Built for engineering organizations</span>
+    </div>
+  </div>
+</footer>
+
+<script src="../assets/site.js"></script>
+</body>
+</html>

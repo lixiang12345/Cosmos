@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>使用手册 — Cosmos</title>
+<meta name="description" content="Cosmos 使用手册：快速开始、核心概念、创建专家、配置环境、发起会话、自动化与触发器、审批、文件与 Skills、集成配置、部署运维与故障排查。" />
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body>
+<a class="skip-link" href="#main">跳到主要内容</a>
+
+<header class="topbar topbar--docs">
+  <div class="topbar__inner">
+    <a class="brand" href="index.html" aria-label="Cosmos 首页">
+      <svg class="brand__mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <g transform="rotate(-24 12 12.8)"><ellipse class="orbit" cx="12" cy="12.8" rx="9.4" ry="4.1" stroke-width="1.4" /></g>
+        <circle cx="12" cy="12.8" r="3.9" fill="currentColor" />
+        <circle class="satellite" cx="19.2" cy="5.4" r="2" />
+      </svg>
+      Cosmos
+      <span class="brand__tag">Docs</span>
+    </a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="切换导航菜单">
+      <svg class="icon-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+      <svg class="icon-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+    </button>
+    <nav id="site-nav" class="topbar__nav" aria-label="站点导航">
+      <a class="topbar__link" href="index.html">首页</a>
+      <a class="topbar__link" href="product.html">产品介绍</a>
+      <a class="topbar__link" href="manual.html" aria-current="page">使用手册</a>
+      <a class="btn btn--primary topbar__cta" href="#quickstart">快速开始</a>
+    </nav>
+    <div class="lang-switch" role="group" aria-label="语言 / Language">
+      <a href="manual.html" aria-current="true" lang="zh-CN">中</a>
+      <a href="en/manual.html" data-lang-link lang="en" hreflang="en">EN</a>
+    </div>
+  </div>
+</header>
+
+<div class="docs-shell">
+
+  <!-- ======================= 手册侧栏 ======================= -->
+  <nav id="docs-nav" class="docs-nav" aria-label="手册目录">
+    <div class="docs-nav__group">
+      <h3>开始使用</h3>
+      <ul>
+        <li><a href="#quickstart">快速开始</a></li>
+        <li><a href="#concepts">核心概念</a></li>
+        <li><a href="#ui-tour">界面导览</a></li>
+      </ul>
+    </div>
+    <div class="docs-nav__group">
+      <h3>核心工作流</h3>
+      <ul>
+        <li><a href="#experts">创建专家</a></li>
+        <li><a href="#environments">配置环境</a></li>
+        <li><a href="#sessions">发起会话</a></li>
+        <li><a href="#automations">自动化与触发器</a></li>
+        <li><a href="#approvals">处理审批</a></li>
+        <li><a href="#files">文件与 Skills</a></li>
+      </ul>
+    </div>
+    <div class="docs-nav__group">
+      <h3>平台配置</h3>
+      <ul>
+        <li><a href="#integrations">集成与凭据</a></li>
+      </ul>
+    </div>
+    <div class="docs-nav__group">
+      <h3>运维与参考</h3>
+      <ul>
+        <li><a href="#deploy">部署与运维</a></li>
+        <li><a href="#shortcuts">键盘快捷键</a></li>
+        <li><a href="#troubleshooting">故障排查</a></li>
+      </ul>
+    </div>
+  </nav>
+  <div class="docs-overlay" aria-hidden="true"></div>
+
+  <!-- ======================= 手册正文 ======================= -->
+  <main id="main" class="docs-main prose">
+
+    <section id="quickstart">
+      <p class="eyebrow">Getting Started</p>
+      <h2>快速开始<a class="anchor" href="#quickstart" aria-label="快速开始的锚点链接">#</a></h2>
+      <p>五分钟在本地拉起完整运行时：PostgreSQL、API、Worker 与 Web 控制台。</p>
+
+      <h3>环境要求</h3>
+      <ul>
+        <li><strong>Node.js 22</strong> 与 <strong>pnpm 11.7</strong></li>
+        <li><strong>Docker</strong>（含 Docker Compose）</li>
+        <li>可选：OpenAI 兼容的模型 Provider 凭据（用于真实执行）</li>
+      </ul>
+
+      <h3>安装与启动</h3>
+      <div class="code-panel">
+        <div class="code-panel__head">terminal<span class="spacer"></span><button class="copy-btn" type="button" data-copy-target="code-install" aria-label="复制命令"><span>复制</span></button></div>
+        <pre id="code-install"><code>pnpm install
+pnpm dev</code></pre>
+      </div>
+      <p><code>pnpm dev</code> 启动 Docker Compose 运行时。Compose 会等待 PostgreSQL 健康后启动 API，API 完成数据库迁移后才启动 Worker 与 Web；Web 通过同源 <code>/api/*</code> 反向代理访问 API。</p>
+      <div class="table-wrap"><table style="min-width:420px">
+        <thead><tr><th>入口</th><th>地址</th></tr></thead>
+        <tbody>
+          <tr><td>Web 控制台</td><td><code>http://127.0.0.1:5173</code></td></tr>
+          <tr><td>API 健康检查</td><td><code>http://127.0.0.1:8787/api/health</code></td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>配置 Provider 凭据</h3>
+      <p>首次使用从 <code>.env.example</code> 复制一份 <code>.env.local</code> 并填写 Provider 配置。敏感配置只注入 Worker，不会进入浏览器构建产物。</p>
+      <div class="callout callout--info">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M12 11v5"/></svg>
+        <p><strong>没有凭据也能跑控制台。</strong>Worker 会保持失败并被健康检查标记为不可用，此时无法启动执行，但全部控制面（专家、环境、自动化、目录配置）仍可访问。这是有意的安全失败，不是故障。</p>
+      </div>
+
+      <h3>只看前端演示</h3>
+      <div class="code-panel">
+        <div class="code-panel__head">terminal<span class="spacer"></span><button class="copy-btn" type="button" data-copy-target="code-demo" aria-label="复制命令"><span>复制</span></button></div>
+        <pre id="code-demo"><code><span class="c"># 带 seed 数据的前端原型，不代表真实运行时</span>
+pnpm dev:demo</code></pre>
+      </div>
+      <p>演示模式仅允许 loopback 本地身份，生产构建始终拒绝进入演示模式。</p>
+
+      <h3>端口被占用时</h3>
+      <div class="code-panel">
+        <div class="code-panel__head">terminal<span class="spacer"></span><button class="copy-btn" type="button" data-copy-target="code-port" aria-label="复制命令"><span>复制</span></button></div>
+        <pre id="code-port"><code>PORT=8790 VITE_API_PROXY_TARGET=http://127.0.0.1:8790 pnpm dev</code></pre>
+      </div>
+
+      <div class="next-cards">
+        <a class="card card--hover" href="#concepts"><span class="card__kicker">下一步</span><h3 class="card__title">理解核心概念</h3><p class="card__body">8 个术语，看懂整个产品。</p></a>
+        <a class="card card--hover" href="#experts"><span class="card__kicker">下一步</span><h3 class="card__title">创建第一个专家</h3><p class="card__body">从模板出发，五分钟发布。</p></a>
+      </div>
+    </section>
+
+    <section id="concepts">
+      <p class="eyebrow">Concepts</p>
+      <h2>核心概念<a class="anchor" href="#concepts" aria-label="核心概念的锚点链接">#</a></h2>
+      <p>Cosmos 的界面命名保持一致：中文界面统一用「专家」「会话」，不混用机器人、助手等称呼。</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>术语</th><th>定义</th></tr></thead>
+        <tbody>
+          <tr><td>Expert / 专家</td><td>可复用的 Agent 定义：职责、指令、模型、能力、环境与策略的打包，发布后修订不可变</td></tr>
+          <tr><td>Session / 会话</td><td>一次目标驱动的持续执行实例，可由人或事件创建；对话永久保存</td></tr>
+          <tr><td>Run / 运行</td><td>会话中的一次执行尝试；重试会产生新的运行</td></tr>
+          <tr><td>Trigger / 触发器</td><td>启动专家的手动或外部事件条件，挂在专家上，新建默认关闭</td></tr>
+          <tr><td>Environment / 环境</td><td>执行代码和工具的隔离运行空间：云端沙箱或自托管 Daemon</td></tr>
+          <tr><td>Approval / 审批</td><td>对高风险写操作的人工决策记录，展示风险、影响、证据与过期时间</td></tr>
+          <tr><td>Artifact / 产物</td><td>Diff、提交、PR、报告、测试结果等可交付结果，跨会话可检索</td></tr>
+          <tr><td>Space</td><td>团队边界：专家、环境、会话、凭据按 Space 隔离，切换即切换整套上下文</td></tr>
+        </tbody>
+      </table></div>
+      <p>更完整的概念阐述见<a href="product.html#blocks">产品介绍 · 七个一等公民</a>。</p>
+    </section>
+
+    <section id="ui-tour">
+      <p class="eyebrow">Tour</p>
+      <h2>界面导览<a class="anchor" href="#ui-tour" aria-label="界面导览的锚点链接">#</a></h2>
+      <p>左侧栏顶部是 <strong>Space 切换器</strong>；随后依次是做工区（新建会话、会话、产出物、审批）、自动化区、文件区与配置区。任何页面按 <kbd>⌘K</kbd> 打开命令面板，输入即可跳转界面或执行动作。</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>区域</th><th>包含界面</th><th>回答的问题</th></tr></thead>
+        <tbody>
+          <tr><td>做工</td><td>Home、会话、产出物、审批</td><td>「我现在要交付什么？」</td></tr>
+          <tr><td>自动化</td><td>自动化列表、Run history、Events log</td><td>「哪些值守指令在替我盯着？」</td></tr>
+          <tr><td>文件</td><td>Organization、User 两棵记忆树</td><td>「组织沉淀了什么经验？」</td></tr>
+          <tr><td>配置</td><td>专家、环境、Daemons、集成、MCP、Skills、Webhooks、Secrets、仓库、Spaces、设置</td><td>「这台系统如何被装配？」</td></tr>
+        </tbody>
+      </table></div>
+      <p>界面提供中文 / 英文与浅色 / 深色主题，在 <strong>配置 → 设置 → 外观</strong> 中切换，偏好保存在本地。</p>
+    </section>
+
+    <section id="experts">
+      <p class="eyebrow">Workflow</p>
+      <h2>创建专家<a class="anchor" href="#experts" aria-label="创建专家的锚点链接">#</a></h2>
+      <p>专家是团队工作流的产品表面。建议从内置模板起步（PR Author、Deep Reviewer、Pair Reviewer、Verifier、Ticket Dispatcher、Incident Investigator），再追加你的仓库范围与本地约定。</p>
+      <ol class="steps">
+        <li>
+          <h4>新建草稿</h4>
+          <p>进入 <strong>配置 → Experts</strong>，点击「创建专家」。可选空白开始，或选择模板预填指令与边界约定。</p>
+        </li>
+        <li>
+          <h4>写清职责与指令</h4>
+          <p>名称与描述说明专家「做什么、不做什么」；<strong>System Prompt</strong> 承载工作流步骤与验收规则；<strong>User Instructions</strong> 与输入引导告诉使用者如何描述任务。</p>
+        </li>
+        <li>
+          <h4>绑定环境与模型</h4>
+          <p>在 System 区选择运行环境与默认模型。模型来自受控目录（<code>claude-fable-5</code>、<code>claude-opus-4-8</code>、<code>claude-sonnet-5</code>、<code>gpt-5.6-sol</code>、<code>grok-4.5</code>），目录外模型会在任何网络请求前失败关闭。</p>
+        </li>
+        <li>
+          <h4>配置能力与委托</h4>
+          <p>以芯片形式添加工具、MCP 服务器与 Skills；在 <strong>Workers</strong> 区显式列出可委托的其他专家。能力越少越好——最小权限是默认姿势。</p>
+        </li>
+        <li>
+          <h4>设置可见性并发布</h4>
+          <p>私有专家只有自己可用；共享专家全 Space 可用。「保存草稿」随时可改；「发布」生成不可变修订——线上跑的永远是明确的某一版。危险区提供停用与归档，归档不删除历史。</p>
+        </li>
+      </ol>
+      <div class="callout callout--ok">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 5 6v5c0 4.4 3 8.4 7 9.6 4-1.2 7-5.2 7-9.6V6l-7-3Z"/><path d="m9.2 12 2 2 3.6-4"/></svg>
+        <p><strong>发布 ≠ 自动运行。</strong>专家自带的触发器发布后仍是关闭状态，去<a href="#automations">自动化</a>里显式启用才会响应事件。</p>
+      </div>
+    </section>
+
+    <section id="environments">
+      <p class="eyebrow">Workflow</p>
+      <h2>配置环境<a class="anchor" href="#environments" aria-label="配置环境的锚点链接">#</a></h2>
+      <p>在 <strong>配置 → Environments</strong> 点击「创建环境」，先选类型再进表单：</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>类型</th><th>说明</th><th>选它当</th></tr></thead>
+        <tbody>
+          <tr><td>Cloud 沙箱</td><td>每次会话从快照启动；可复现、相互隔离、可并发</td><td>团队默认路径</td></tr>
+          <tr><td>Daemon 池</td><td>自托管进程注册为执行节点，带能力标签与并发槽位，按心跳判定在线</td><td>需要内网资源、受监管数据或专用硬件</td></tr>
+        </tbody>
+      </table></div>
+      <p>环境配置包含：基础镜像、<strong>仓库绑定</strong>（决定专家能检出哪些代码库，也是 Context Engine 检索的授权边界）、环境变量、<strong>Secret 引用</strong>（从当前 Space 的 active Secret 中下拉选择）、Hook 与网络策略。</p>
+      <p>环境修订同样「激活即不可变」。供应失败可以重试；停用不影响历史会话的记录。Daemon 节点在 <strong>配置 → Daemons</strong> 中管理，可随时启停单个节点。</p>
+    </section>
+
+    <section id="sessions">
+      <p class="eyebrow">Workflow</p>
+      <h2>发起会话<a class="anchor" href="#sessions" aria-label="发起会话的锚点链接">#</a></h2>
+      <h3>从 Home 启动</h3>
+      <p>选择专家后，输入框的引导语会随专家的 launch guidance 变化。描述目标而不是步骤——步骤是专家的事。可在真实部署中先用 Context Engine 预检代码库证据，确认后作为「非可信仓库证据」附加到首条消息。</p>
+      <h3>读懂时间线</h3>
+      <p>会话时间线按回合展示计划、步骤、工具调用摘要、日志、文件差异与检查结果，默认折叠原始日志、突出结论与异常。SSE 实时推送更新，无需刷新。</p>
+      <h3>右栏三件事</h3>
+      <ul>
+        <li><strong>Artifacts：</strong>PR、分支、链接等耐久产出；也可手动补充链接。全局「产出物」页可跨会话检索。</li>
+        <li><strong>Workers：</strong>本会话委托出的 Worker 树，每个都是可打开的真实会话。</li>
+        <li><strong>Files：</strong>当前工作区与组织 / 个人记忆的预览。</li>
+      </ul>
+      <h3>生命周期控制</h3>
+      <p>会话可暂停、恢复、取消；失败回合可重试（产生新运行）。列表支持置顶与归档，归档可恢复。对话永久保存；环境闲置自动暂停，回来发消息即恢复。分享面板可按人授予查看权并复制链接。</p>
+      <div class="callout callout--warn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 4 2.8 19.5h18.4L12 4Z" stroke-linejoin="round"/><path d="M12 10v4M12 17h.01"/></svg>
+        <p><strong>看不到「启动执行」按钮？</strong>说明当前部署没有在线 Worker（或执行开关未开）。控制面照常可用，可以先保存草稿；Worker 恢复心跳后即可启动。系统不会把未运行的会话表示成执行成功。</p>
+      </div>
+    </section>
+
+    <section id="automations">
+      <p class="eyebrow">Workflow</p>
+      <h2>自动化与触发器<a class="anchor" href="#automations" aria-label="自动化与触发器的锚点链接">#</a></h2>
+      <p>自动化页是「带触发器的专家视图」：每行一个专家，展开即见它的触发器与启停开关。</p>
+      <h3>七类触发源</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>来源</th><th>典型用法</th></tr></thead>
+        <tbody>
+          <tr><td><code>github</code> / <code>gitlab</code></td><td>PR 打开即启动审查专家；CI 失败即启动修复专家</td></tr>
+          <tr><td><code>slack</code></td><td>频道内 @提及 即创建任务会话，结果回写原线程</td></tr>
+          <tr><td><code>linear</code> / <code>pagerduty</code></td><td>工单流转、告警触发根因分析</td></tr>
+          <tr><td><code>schedule</code></td><td>五段 cron + 时区；单例执行——上一跑未完成则跳过，不排队不回补</td></tr>
+          <tr><td><code>webhook</code></td><td>万能入口；JSONLogic 过滤在开会话之前执行，不匹配的事件零成本</td></tr>
+        </tbody>
+      </table></div>
+      <h3>安全默认</h3>
+      <ul>
+        <li><strong>新触发器默认关闭。</strong>部署 → 试跑一次 → 确认行为 → 启用。</li>
+        <li><strong>暂停不删除。</strong>停用只是拨下开关，配置与历史完整保留；移除触发器也不影响专家本身。</li>
+        <li><strong>限流兜底。</strong>每条触发器可设每分钟最大运行数，异常风暴不会打爆环境。</li>
+        <li><strong>阅后即焚可选。</strong>触发器启动的会话可自动归档，归档仍可打开审计。</li>
+      </ul>
+      <h3>两本账</h3>
+      <p><strong>Events log</strong> 记录全部入站事件与脱敏后的负载——「外面发生了什么」；<strong>Run history</strong> 记录专家实际被触发的运行——「我们做了什么」。排查「为什么没触发」永远先看前者，再看后者。</p>
+    </section>
+
+    <section id="approvals">
+      <p class="eyebrow">Workflow</p>
+      <h2>处理审批<a class="anchor" href="#approvals" aria-label="处理审批的锚点链接">#</a></h2>
+      <p>专家准备执行高风险动作（外部写操作、危险工具调用）时，运行会停在审批门。审批卡片展示<strong>动作内容、影响范围、依据证据与过期时间</strong>。</p>
+      <div class="table-wrap"><table style="min-width:480px">
+        <thead><tr><th>决策</th><th>效果</th></tr></thead>
+        <tbody>
+          <tr><td>批准</td><td>动作执行，决策与决策人进入审计流</td></tr>
+          <tr><td>要求修改</td><td>把意见退回给专家，专家调整后再次请求</td></tr>
+          <tr><td>拒绝</td><td>动作不执行，会话按专家策略继续或收尾</td></tr>
+        </tbody>
+      </table></div>
+      <p>处理入口有两个：<strong>审批</strong>页的统一收件箱（跨会话汇总，适合值班视角），或会话时间线内就地处理（上下文最全）。过期未处理的审批会失效，专家不会拿着过期授权执行动作。</p>
+    </section>
+
+    <section id="files">
+      <p class="eyebrow">Workflow</p>
+      <h2>文件与 Skills<a class="anchor" href="#files" aria-label="文件与 Skills 的锚点链接">#</a></h2>
+      <p>文件页有两棵树：<strong>Organization</strong>（全组织共享）与 <strong>User</strong>（仅自己会话可见）。它们不是上传箱——专家在工作中把审查结论、规范摘要、排查笔记写进去，下一个会话、另一个专家、你的队友都能读到。</p>
+      <ul>
+        <li>每次写入生成<strong>不可变版本</strong>并记录归因（哪个专家、哪个会话）；删除是墓碑，不是抹除。</li>
+        <li>会话内还有第三个作用域 <code>/workspace</code>：当前 VM 的活盘，只在会话内可见。</li>
+        <li>存储走 S3 兼容对象存储，带 SHA-256 完整性校验与组织级配额。</li>
+      </ul>
+      <h3>Skills：把方法论文件化</h3>
+      <p>在 <strong>配置 → Skills</strong> 维护技能条目（如「我们的迁移安全清单」）。专家绑定技能后，内容会按名称有序汇入其系统提示词——团队最佳实践从口口相传变成组织默认。</p>
+    </section>
+
+    <section id="integrations">
+      <p class="eyebrow">Configuration</p>
+      <h2>集成与凭据<a class="anchor" href="#integrations" aria-label="集成与凭据的锚点链接">#</a></h2>
+
+      <h3>Integrations 集成</h3>
+      <p>支持 <code>github</code>、<code>gitlab</code>、<code>slack</code>、<code>jira</code>、<code>pagerduty</code>、<code>linear</code>、<code>datadog</code> 与 <code>custom</code> 八类。一次连接，任意专家可听其事件。卡片显示连接状态与健康度；<code>action_required</code> 时提供修复入口，断开与归档是两个不同操作。</p>
+
+      <h3>MCP 服务器</h3>
+      <p>三种传输：<code>stdio</code>（填启动命令）、<code>sse</code> / <code>http</code>（填端点地址）。提供 Atlassian、Sentry、Stripe、Figma 等伙伴预设一键预填。注册后以能力芯片出现在专家编辑器中。</p>
+
+      <h3>Webhooks</h3>
+      <p>创建后获得专属投递地址（<code>POST …/webhooks/{id}</code> + Bearer 鉴权）与<strong>只显示一次</strong>的签名密钥（<code>whsec_…</code>）——请立即保存，之后任何界面只能看到末四位。界面提供可复制的 curl 测试命令。仅接受 HTTPS 目标。</p>
+
+      <h3>Secrets</h3>
+      <p>名称须符合 <code>^[A-Z][A-Z0-9_]*$</code>（如 <code>DEPLOY_TOKEN</code>）。密文<strong>写入后不可读回</strong>：数据库层面就不授予密文列的查询权限，任何查询只返回末四位掩码。环境通过引用使用 Secret，轮换时替换引用即可。</p>
+
+      <h3>Repositories 仓库</h3>
+      <p>登记 GitHub / GitLab 仓库与默认分支，是环境仓库绑定与 Context Engine 检索授权的基础。连接状态异常会显式标记为 <code>action_required</code>。</p>
+
+      <div class="callout callout--warn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 4 2.8 19.5h18.4L12 4Z" stroke-linejoin="round"/><path d="M12 10v4M12 17h.01"/></svg>
+        <p><strong>密钥纪律：</strong>Provider API Key 从 Secret Manager 注入 Worker 进程；浏览器构建产物、URL、localStorage、日志与截图中永远不应出现任何明文密钥。</p>
+      </div>
+    </section>
+
+    <section id="deploy">
+      <p class="eyebrow">Operations</p>
+      <h2>部署与运维<a class="anchor" href="#deploy" aria-label="部署与运维的锚点链接">#</a></h2>
+
+      <h3>构建生产镜像</h3>
+      <div class="code-panel">
+        <div class="code-panel__head">terminal<span class="spacer"></span><button class="copy-btn" type="button" data-copy-target="code-build" aria-label="复制命令"><span>复制</span></button></div>
+        <pre id="code-build"><code>docker build -f apps/api/Dockerfile -t cosmos-api .
+docker build -f apps/web/Dockerfile -t cosmos-web \
+  --build-arg VITE_OIDC_AUTHORITY=https://identity.example.com/ \
+  --build-arg VITE_OIDC_CLIENT_ID=cosmos-web \
+  --build-arg VITE_OIDC_AUDIENCE=cosmos-api \
+  --build-arg VITE_OIDC_REDIRECT_URI=https://cosmos.example.com/auth/callback \
+  --build-arg VITE_OIDC_POST_LOGOUT_REDIRECT_URI=https://cosmos.example.com/ \
+  --build-arg VITE_OIDC_SILENT_REDIRECT_URI=https://cosmos.example.com/auth/silent-callback .</code></pre>
+      </div>
+      <p>两个运行镜像都使用非 root 用户并内置健康检查。Web 容器启动时把同源 <code>/api/*</code> 反代到 <code>COSMOS_API_UPSTREAM</code>，并用 <code>COSMOS_CSP_CONNECT_SRC</code> 等变量显式列出 IdP / API 所需的 HTTPS origin。</p>
+
+      <h3>迁移是独立作业</h3>
+      <p>staging / production <strong>禁止 API 启动时迁移</strong>。发布流程先以同一镜像运行 <code>node dist/migrate.js</code> 迁移作业，成功后再滚动 API。迁移身份负责建表与运行角色加固；API / Worker 登录身份只获得对应角色 membership，无表所有权——角色不符即拒绝启动（fail closed）。</p>
+
+      <h3>生产必需配置</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>组件</th><th>关键变量</th></tr></thead>
+        <tbody>
+          <tr><td>API</td><td><code>NODE_ENV=production</code> · <code>AUTH_MODE=oidc</code> · <code>DATABASE_URL</code> · <code>CORS_ORIGIN</code> · <code>OIDC_ISSUER / OIDC_AUDIENCE / OIDC_JWKS_URI</code> · <code>SECURITY_AUDIT_HMAC_KEY</code>（配套稳定的 <code>…_KEY_ID</code>）</td></tr>
+          <tr><td>Worker</td><td>唯一且稳定的 <code>WORKER_ID</code> · <code>AGENT_PROVIDER_GPT_API_KEY / AGENT_PROVIDER_CLAUDE_API_KEY / AGENT_PROVIDER_GROK_API_KEY</code>（Secret Manager 注入）· <code>EXECUTION_ENABLED=true</code></td></tr>
+          <tr><td>Web</td><td><code>VITE_AUTH_MODE=oidc</code> 及 OIDC public client 配置；缺失身份配置时显示错误，而非静默进入演示模式</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>探针与指标</h3>
+      <ul>
+        <li><code>GET /api/health</code> —— 唯一公开的存活探针。</li>
+        <li><code>GET /api/ready</code> —— 受鉴权保护，校验数据库与迁移状态；同时拒绝 pending 与未知迁移历史。</li>
+        <li><code>GET /api/metrics</code> —— 仅在配置 <code>METRICS_SCRAPE_TOKEN</code> 时开放，输出低基数 HTTP / SSE 指标。</li>
+      </ul>
+      <p>Worker 周期性写数据库心跳；API 只有在存在新鲜心跳时才向 Web 宣告执行能力。Worker 下线时控制面保持可读，会话草稿可保存。</p>
+
+      <h3>质量门与 Runbook</h3>
+      <div class="code-panel">
+        <div class="code-panel__head">terminal<span class="spacer"></span><button class="copy-btn" type="button" data-copy-target="code-check" aria-label="复制命令"><span>复制</span></button></div>
+        <pre id="code-check"><code>pnpm check          <span class="c"># lint + typecheck + tests + build</span>
+pnpm openapi:lint   <span class="c"># API 契约校验</span></code></pre>
+      </div>
+      <p>仓库随附三本运维 Runbook：<strong>PostgreSQL 备份与恢复</strong>（含 PITR 预检与季度演练）、<strong>Observability 与 SLO 告警</strong>、<strong>负载 / 依赖故障演练</strong>。CI 强制执行冻结锁文件安装、集成测试、备份恢复验证、镜像扫描与脱敏密钥扫描。</p>
+    </section>
+
+    <section id="shortcuts">
+      <p class="eyebrow">Reference</p>
+      <h2>键盘快捷键<a class="anchor" href="#shortcuts" aria-label="键盘快捷键的锚点链接">#</a></h2>
+      <div class="kv-list">
+        <div class="kv-row">打开命令面板<span class="keys"><kbd>⌘</kbd><kbd>K</kbd></span></div>
+        <div class="kv-row">新建会话<span class="keys"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>O</kbd></span></div>
+        <div class="kv-row">前往会话列表<span class="keys"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>L</kbd></span></div>
+        <div class="kv-row">前往文件<span class="keys"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>E</kbd></span></div>
+        <div class="kv-row">收起 / 展开左侧栏<span class="keys"><kbd>⌘</kbd><kbd>.</kbd></span></div>
+        <div class="kv-row">查看快捷键面板<span class="keys"><kbd>⌘</kbd><kbd>/</kbd></span></div>
+      </div>
+      <p>Windows / Linux 使用 <kbd>Ctrl</kbd> 替代 <kbd>⌘</kbd>。</p>
+    </section>
+
+    <section id="troubleshooting">
+      <p class="eyebrow">Reference</p>
+      <h2>故障排查<a class="anchor" href="#troubleshooting" aria-label="故障排查的锚点链接">#</a></h2>
+
+      <h3>无法启动执行 / 发送消息按钮不可用</h3>
+      <p>这是执行能力未就绪的诚实呈现，按顺序检查：Worker 容器是否健康（心跳是否新鲜）→ <code>.env.local</code> 是否配置了 Provider 凭据 → <code>EXECUTION_ENABLED</code> 是否为 <code>true</code>。控制面不受影响，配置工作可以照常进行。</p>
+
+      <h3>触发器没有开出会话</h3>
+      <p>先看 <strong>Events log</strong>：事件是否到达、是否被过滤条件挡下；再看 <strong>Run history</strong>：是否命中每分钟限流或触发器仍处于关闭状态。日程触发器是单例执行——上一跑未完成时会跳过本次，属预期行为。</p>
+
+      <h3>默认端口被占用</h3>
+      <p>用 <code>PORT=8790 VITE_API_PROXY_TARGET=http://127.0.0.1:8790 pnpm dev</code> 同时覆盖 API 监听端口与 Vite 代理目标。</p>
+
+      <h3>跨域访问 API 被拒绝</h3>
+      <p>分离部署且跨域时，需同时设置 <code>VITE_API_BASE_URL</code> 与逗号分隔的 <code>VITE_API_ALLOWED_ORIGINS</code>，否则浏览器会在发送 Bearer token 前拒绝请求——这是防止凭据误发的保护。</p>
+
+      <h3>Context Engine 连接失败</h3>
+      <p>staging / production 始终要求 HTTPS 端点。本地 Compose 访问宿主机插件可用 <code>http://host.docker.internal:8790</code>，并仅在本地 <code>.env.local</code> 设置 <code>CONTEXT_ENGINE_ALLOW_INSECURE_HTTP=true</code>。同时确认当前 Space 的激活环境已绑定目标仓库——绑定是检索的授权边界。</p>
+
+      <h3>常见疑问</h3>
+      <ul>
+        <li><strong>Secret 填错了想看一眼？</strong>看不了。密文写入后不可读回，重新创建一个正确的并更新引用。</li>
+        <li><strong>归档会丢数据吗？</strong>不会。会话、触发器、目录条目的归档都保留完整历史，多数可恢复。</li>
+        <li><strong>为什么模型列表不能自定义？</strong>目录由共享契约治理，目录外模型直接失败关闭——这换来的是凭据按模型族隔离与行为可预期。</li>
+      </ul>
+
+      <div class="callout callout--info">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M12 11v5"/></svg>
+        <p><strong>还没解决？</strong>仓库 <code>docs/</code> 目录包含产品需求、生产架构基线与三本运维 Runbook，覆盖比本手册更深的边界与恢复流程。</p>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<button class="docs-toggle" type="button" aria-expanded="false" aria-controls="docs-nav">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h16" /></svg>
+  目录
+</button>
+
+<footer class="footer">
+  <div class="container">
+    <div class="footer__bottom" style="border-top:none;padding-top:0">
+      <span>© 2026 Cosmos Agent Platform</span>
+      <span class="spacer"></span>
+      <a href="index.html" style="color:var(--text-secondary)">首页</a>
+      <a href="product.html" style="color:var(--text-secondary)">产品介绍</a>
+    </div>
+  </div>
+</footer>
+
+<script src="assets/site.js"></script>
+</body>
+</html>

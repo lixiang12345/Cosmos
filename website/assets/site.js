@@ -77,6 +77,15 @@
     sections.forEach(function (section) { observer.observe(section); });
   }
 
+  /* —— 语言切换：保持当前锚点 —— */
+  document.querySelectorAll('.lang-switch a[data-lang-link]').forEach(function (link) {
+    link.addEventListener('click', function () {
+      if (window.location.hash) {
+        link.href = link.href.split('#')[0] + window.location.hash;
+      }
+    });
+  });
+
   /* —— 代码复制按钮 —— */
   document.querySelectorAll('.copy-btn[data-copy-target]').forEach(function (button) {
     button.addEventListener('click', function () {
