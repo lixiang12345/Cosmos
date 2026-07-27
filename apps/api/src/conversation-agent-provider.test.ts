@@ -283,6 +283,67 @@ describe('OpenAI-compatible conversation provider', () => {
     },
   )
 
+  it('tolerates proxy quirks: omitted content on tool turns and a leading empty-object argument chunk', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(completionResponse('', {
+      choices: [{
+        index: 0,
+        message: {
+          role: 'assistant',
+          // No content key at all — some proxies omit it on tool-call turns.
+          tool_calls: [{
+            id: 'provider-tool-quirk',
+            type: 'function',
+            // Streamed deltas concatenated behind an empty-object chunk.
+            function: { name: 'workspace_files_list', arguments: '{}{"limit":3}' },
+          }],
+        },
+        finish_reason: 'tool_calls',
+      }],
+    }))
+    const provider = providerWith(fetchMock as unknown as typeof fetch)
+
+    const result = await provider.execute({ ...input, tools: [workspaceListTool] })
+
+    expect(result.text).toBe('')
+    expect(result.toolCall).toEqual({
+      providerToolCallId: 'provider-tool-quirk',
+      name: 'workspace_files_list',
+      input: { limit: 3 },
+    })
+  })
+
+  it('keeps the omitted-content exception bound to tool-call turns', async () => {
+    const provider = providerWith(vi.fn(async () => completionResponse('', {
+      choices: [{
+        index: 0,
+        message: { role: 'assistant' },
+        finish_reason: 'stop',
+      }],
+    })) as unknown as typeof fetch)
+
+    await expect(provider.execute(input)).rejects.toMatchObject({
+      classification: 'terminal', code: 'provider_response_invalid',
+    })
+  })
+
+  it('accepts bounded JSON behind a generic content type and rejects HTML eagerly', async () => {
+    const generic = providerWith(vi.fn(async () => new Response(
+      await completionResponse().text(),
+      { headers: { 'content-type': 'application/octet-stream' } },
+    )) as unknown as typeof fetch)
+    await expect(generic.execute(input)).resolves.toMatchObject({
+      text: 'The analysis is complete.',
+    })
+
+    const html = providerWith(vi.fn(async () => new Response(
+      await completionResponse().text(),
+      { headers: { 'content-type': 'text/html; charset=utf-8' } },
+    )) as unknown as typeof fetch)
+    await expect(html.execute(input)).rejects.toMatchObject({
+      classification: 'terminal', code: 'provider_response_invalid',
+    })
+  })
+
   it('does not follow a native fetch redirect or forward the bearer credential', async () => {
     const requests: Array<{ authorization?: string, url?: string }> = []
     const server = createServer((request, response) => {

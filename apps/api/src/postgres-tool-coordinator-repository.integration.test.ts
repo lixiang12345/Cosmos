@@ -385,12 +385,16 @@ describeWithDatabase('Postgres ToolCall and Approval governance', () => {
       UPDATE cosmos_tool_calls SET output_summary = 'tampered', version = version + 1 WHERE id = $1
     `, [succeeded.rows[0].id])).rejects.toBeDefined()
     await expect(migrationPool.query('TRUNCATE cosmos_tool_side_effects')).rejects.toBeDefined()
-    const protectedTables = await migrationPool.query<{ count: string }>(`
-      SELECT count(*)::text AS count FROM pg_class
+    const protectedTables = await migrationPool.query<{ protected: string; total: string }>(`
+      SELECT
+        count(*) FILTER (WHERE relrowsecurity AND relforcerowsecurity)::text AS protected,
+        count(*)::text AS total
+      FROM pg_class
       WHERE relnamespace = current_schema()::regnamespace AND relname LIKE 'cosmos_%'
-        AND relkind = 'r' AND relname NOT IN ('cosmos_schema_migrations', 'cosmos_worker_heartbeats')
-        AND relrowsecurity AND relforcerowsecurity
+        AND relkind = 'r' AND relname NOT IN (
+          'cosmos_schema_migrations', 'cosmos_worker_heartbeats', 'cosmos_object_storage_gc_runs'
+        )
     `)
-    expect(protectedTables.rows[0].count).toBe('68')
+    expect(protectedTables.rows[0].protected).toBe(protectedTables.rows[0].total)
   })
 })

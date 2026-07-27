@@ -383,18 +383,26 @@ function parseProviderResponse(
     throw terminalError('provider_response_invalid', 'Provider returned an invalid chat completion choice.')
   }
   const message = choice.message
+  const finishReason = choice.finish_reason
+  const contentOmittedForToolTurn = (
+    message.content === undefined
+    && finishReason === 'tool_calls'
+    && Array.isArray(message.tool_calls)
+  )
   if (
     message.role !== 'assistant'
-    || (typeof message.content !== 'string' && message.content !== null)
+    // Some OpenAI-compatible proxies omit `content` entirely on tool-call
+    // turns instead of sending null. Keep the exception bound to tool turns so
+    // an otherwise empty assistant response still fails closed.
+    || (typeof message.content !== 'string' && message.content !== null && !contentOmittedForToolTurn)
     || Object.hasOwn(message, 'function_call')
   ) {
     throw terminalError('provider_response_invalid', 'Provider returned an invalid assistant response.')
   }
-  const content = message.content ?? ''
+  const content = typeof message.content === 'string' ? message.content : ''
   if (content.length > maxOutputCharacters) {
     throw terminalError('provider_response_too_large', 'Provider output exceeded the configured size limit.')
   }
-  const finishReason = choice.finish_reason
   if (
     finishReason !== 'stop'
     && finishReason !== 'length'
@@ -429,7 +437,19 @@ function parseProviderResponse(
     try {
       parsedInput = JSON.parse(candidate.function.arguments)
     } catch {
-      throw terminalError('provider_response_invalid', 'Provider returned malformed tool arguments.')
+      // Known proxy defect: streamed argument deltas concatenated behind a
+      // leading empty-object chunk ("{}" + real arguments). Strip exactly that
+      // prefix and retry; anything else stays malformed.
+      const raw = candidate.function.arguments
+      if (raw.startsWith('{}')) {
+        try {
+          parsedInput = JSON.parse(raw.slice(2))
+        } catch {
+          throw terminalError('provider_response_invalid', 'Provider returned malformed tool arguments.')
+        }
+      } else {
+        throw terminalError('provider_response_invalid', 'Provider returned malformed tool arguments.')
+      }
     }
     if (!isRecord(parsedInput) || !hasBoundedJsonComplexity(parsedInput)) {
       throw terminalError('provider_response_invalid', 'Provider tool arguments must be a bounded JSON object.')
@@ -466,8 +486,12 @@ function parseProviderResponse(
 }
 
 async function readBoundedJson(response: Response, maxResponseBytes: number): Promise<unknown> {
+  // Some OpenAI-compatible proxies label a plain JSON body with a streaming
+  // or generic content type, so the header is advisory only: the bounded read
+  // plus JSON.parse below remains the authoritative classification, and a
+  // non-JSON body still fails with provider_response_invalid.
   const contentType = response.headers.get('content-type')?.toLowerCase()
-  if (!contentType?.includes('application/json')) {
+  if (contentType !== undefined && contentType.includes('text/html')) {
     throw terminalError('provider_response_invalid', 'Provider response must be JSON.')
   }
   const declaredLength = response.headers.get('content-length')

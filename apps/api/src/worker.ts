@@ -31,14 +31,18 @@ const pool = createRuntimePool('cosmos_worker_runtime', {
   statement_timeout: config.databaseStatementTimeoutMs,
 }, () => logger.error('worker_database_client_error'))
 const shutdown = new AbortController()
+let workerStage = 'database_role_check'
 
 process.once('SIGINT', () => shutdown.abort())
 process.once('SIGTERM', () => shutdown.abort())
 
 try {
   await assertRuntimeDatabaseRole(pool, 'cosmos_worker_runtime')
+  workerStage = 'migration_check'
   await assertMigrationsCurrent(pool)
+  workerStage = 'provider_initialization'
   const provider = new OpenAiCompatibleChatCompletionsProvider(config.provider)
+  workerStage = 'object_store_initialization'
   const objectStore = config.objectStorage ? new S3ObjectStore(config.objectStorage) : undefined
   const repository = new PostgresExecutionRepository(pool)
   const environmentProvisioningWorker = new EnvironmentProvisioningWorker({
@@ -74,6 +78,7 @@ try {
     intervalMs: config.heartbeatIntervalMs,
     logger,
   }, shutdown.signal)
+  workerStage = 'runtime'
   logger.info('execution_worker_started', { workerId: config.workerId })
   try {
     await Promise.all([
@@ -85,8 +90,11 @@ try {
     await readinessHeartbeat
   }
   logger.info('execution_worker_stopped', { workerId: config.workerId })
-} catch {
-  logger.error('execution_worker_startup_failed')
+} catch (error) {
+  logger.error('execution_worker_startup_failed', {
+    stage: workerStage,
+    errorType: error instanceof Error ? error.name : typeof error,
+  })
   process.exitCode = 1
 } finally {
   await pool.end()
