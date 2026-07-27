@@ -415,8 +415,8 @@ export function CosmosHomePage({
             setAttachments((items) => [...new Set([...items, ...names])].slice(0, 10))
             event.target.value = ''
           }} />
-          <button type="button" className="c-plus" title={prototypeTools ? 'Attach' : localize(locale, '生产 API 暂不支持附件', 'Attachments are not available through the production API')} aria-label={localize(locale, '添加附件', 'Attach files')} disabled={!prototypeTools} onClick={() => fileInputRef.current?.click()}>+</button>
-          <button type="button" className="c-toolcount" title={`${toolCount} tools / integrations`} aria-label={`${toolCount} tools / integrations`} aria-disabled="true">
+          <button type="button" className="c-plus" title={prototypeTools ? localize(locale, '添加附件', 'Attach') : localize(locale, '生产 API 暂不支持附件', 'Attachments are not available through the production API')} aria-label={localize(locale, '添加附件', 'Attach files')} disabled={!prototypeTools} onClick={() => fileInputRef.current?.click()}>+</button>
+          <button type="button" className="c-toolcount" title={localize(locale, `${toolCount} 个工具 / 集成`, `${toolCount} tools / integrations`)} aria-label={localize(locale, `${toolCount} 个工具 / 集成`, `${toolCount} tools / integrations`)} aria-disabled="true">
             <span className="tools-stack" aria-hidden="true">
               <span className="tools-stack-ico"><PrototypeToolsIcon /></span>
               <span className="tools-stack-ico"><PrototypeHexIcon /></span>
@@ -429,8 +429,8 @@ export function CosmosHomePage({
             <span className="c-model-name">Prism</span>
             <span className="c-tools-chev"><PrototypeChevronDownLargeIcon /></span>
           </button>
-          <button type="button" className="c-sparkle" title="Enhance (⌘E)" aria-label={localize(locale, '增强提示词', 'Enhance prompt')} disabled={!prompt.trim()} onClick={enhancePrompt}>✦</button>
-          <button type="submit" className={`c-send${prompt.trim() ? ' ready' : ''}`} title={executionEnabled ? 'Send' : 'Save draft'} aria-label={executionEnabled ? localize(locale, '开始会话', 'Start session') : localize(locale, '保存草稿', 'Save draft')} aria-busy={submitting || contextState === 'loading'} disabled={!prompt.trim() || !selectedExpert || submitting || contextState === 'loading' || !sessionCreationEnabled}>↑</button>
+          <button type="button" className="c-sparkle" title={localize(locale, '增强提示词（⌘E）', 'Enhance (⌘E)')} aria-label={localize(locale, '增强提示词', 'Enhance prompt')} disabled={!prompt.trim()} onClick={enhancePrompt}>✦</button>
+          <button type="submit" className={`c-send${prompt.trim() ? ' ready' : ''}`} title={executionEnabled ? localize(locale, '发送', 'Send') : localize(locale, '保存草稿', 'Save draft')} aria-label={executionEnabled ? localize(locale, '开始会话', 'Start session') : localize(locale, '保存草稿', 'Save draft')} aria-busy={submitting || contextState === 'loading'} disabled={!prompt.trim() || !selectedExpert || submitting || contextState === 'loading' || !sessionCreationEnabled}>↑</button>
         </div>
       </div>
       <div className="composer-meta">
@@ -452,15 +452,15 @@ export function CosmosHomePage({
     <main className="cosmos-home prototype-home">
       <header className="prototype-topbar">
         <div className="prototype-topbar-left">
-          {navigationCollapsed ? <button ref={showSidebarTriggerRef} type="button" className="icon-btn" aria-label={localize(locale, '显示导航', 'Show sidebar')} title="Show sidebar (⌘.)" onClick={onOpenNavigation}><PrototypeSidebarIcon aria-hidden="true" /></button> : null}
+          {navigationCollapsed ? <button ref={showSidebarTriggerRef} type="button" className="icon-btn" aria-label={localize(locale, '显示导航', 'Show sidebar')} title={localize(locale, '显示导航（⌘.）', 'Show sidebar (⌘.)')} onClick={onOpenNavigation}><PrototypeSidebarIcon aria-hidden="true" /></button> : null}
           <span className="prototype-crumb">{localize(locale, '首页 · 新建会话', 'Home · New Session')}</span>
         </div>
         <div className="prototype-topbar-right">
-          <button type="button" className="pill-btn" disabled title={localize(locale, '设计文档未在生产控制面发布', 'Design documentation is not published in the production console')}>Philosophy</button>
-          <button type="button" className="pill-btn" disabled title={localize(locale, '展示模式仅存在于原型', 'Showcase mode is prototype-only')}>Showcase</button>
-          <button type="button" className="pill-btn" aria-label={localize(locale, '搜索 Cosmos', 'Search Cosmos')} title="Command palette (⌘K)" onClick={onOpenCommand}><PrototypeTopbarSearchIcon aria-hidden="true" />Search <kbd>⌘K</kbd></button>
-          <button type="button" className="icon-btn" aria-label={theme === 'dark' ? localize(locale, '切换到浅色模式', 'Switch to light mode') : localize(locale, '切换到深色模式', 'Switch to dark mode')} title="Theme" onClick={toggleTheme}>{theme === 'dark' ? <PrototypeSunIcon aria-hidden="true" /> : <PrototypeMoonIcon aria-hidden="true" />}</button>
-          <button ref={shortcutsTriggerRef} type="button" className="icon-btn" aria-label={localize(locale, '键盘快捷键', 'Keyboard shortcuts')} title="Shortcuts (⌘/)" onClick={() => setShortcutsOpen(true)}><PrototypeKeyboardIcon aria-hidden="true" /></button>
+          <button type="button" className="pill-btn" disabled title={localize(locale, '设计文档未在生产控制面发布', 'Design documentation is not published in the production console')}>{localize(locale, '设计理念', 'Philosophy')}</button>
+          <button type="button" className="pill-btn" disabled title={localize(locale, '展示模式仅存在于原型', 'Showcase mode is prototype-only')}>{localize(locale, '展示', 'Showcase')}</button>
+          <button type="button" className="pill-btn" aria-label={localize(locale, '搜索 Cosmos', 'Search Cosmos')} title={localize(locale, '命令面板（⌘K）', 'Command palette (⌘K)')} onClick={onOpenCommand}><PrototypeTopbarSearchIcon aria-hidden="true" />{localize(locale, '搜索', 'Search')} <kbd>⌘K</kbd></button>
+          <button type="button" className="icon-btn" aria-label={theme === 'dark' ? localize(locale, '切换到浅色模式', 'Switch to light mode') : localize(locale, '切换到深色模式', 'Switch to dark mode')} title={localize(locale, '主题', 'Theme')} onClick={toggleTheme}>{theme === 'dark' ? <PrototypeSunIcon aria-hidden="true" /> : <PrototypeMoonIcon aria-hidden="true" />}</button>
+          <button ref={shortcutsTriggerRef} type="button" className="icon-btn" aria-label={localize(locale, '键盘快捷键', 'Keyboard shortcuts')} title={localize(locale, '快捷键（⌘/）', 'Shortcuts (⌘/)')} onClick={() => setShortcutsOpen(true)}><PrototypeKeyboardIcon aria-hidden="true" /></button>
         </div>
       </header>
       <div className="prototype-home-viewport">
@@ -518,9 +518,9 @@ export function CosmosHomePage({
                       <div className="prototype-home-state" role="status"><strong>{localize(locale, '当前 Space 没有可用 Expert', 'No Experts are available in this Space')}</strong><span>{localize(locale, '请先发布一个绑定了就绪环境的 Expert。', 'Publish an Expert bound to a ready Environment first.')}</span></div>
                     )}
                   </div>
-                  <aside className="home-rail" aria-label="Expert filters">
-                    <button type="button" className={`home-rail-btn${searchOpen ? ' on' : ''}`} title="Search experts" aria-label={localize(locale, '搜索 Expert', 'Search Experts')} aria-pressed={searchOpen} onClick={() => setSearchOpen((value) => !value)}><PrototypeSearchIcon aria-hidden="true" /></button>
-                    <button type="button" className={`home-rail-btn${starredOnly ? ' on' : ''}`} title="Starred only" aria-label={localize(locale, '仅收藏', 'Starred only')} aria-pressed={starredOnly} onClick={() => setStarredOnly((value) => !value)}>★</button>
+                  <aside className="home-rail" aria-label={localize(locale, 'Expert 筛选', 'Expert filters')}>
+                    <button type="button" className={`home-rail-btn${searchOpen ? ' on' : ''}`} title={localize(locale, '搜索 Expert', 'Search Experts')} aria-label={localize(locale, '搜索 Expert', 'Search Experts')} aria-pressed={searchOpen} onClick={() => setSearchOpen((value) => !value)}><PrototypeSearchIcon aria-hidden="true" /></button>
+                    <button type="button" className={`home-rail-btn${starredOnly ? ' on' : ''}`} title={localize(locale, '仅收藏', 'Starred only')} aria-label={localize(locale, '仅收藏', 'Starred only')} aria-pressed={starredOnly} onClick={() => setStarredOnly((value) => !value)}>★</button>
                     <div className="home-vscroll" aria-hidden="true"><div className="home-vscroll-track"><div className="home-vscroll-thumb" /></div><span className="home-scroll-down"><PrototypeScrollDownIcon /></span></div>
                   </aside>
                 </div>
@@ -559,8 +559,8 @@ export function CosmosHomePage({
       {shortcutsOpen ? (
         <div className="prototype-shortcuts-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeShortcuts() }}>
           <section ref={shortcutsDialogRef} className="prototype-shortcuts" role="dialog" aria-modal="true" aria-labelledby="prototype-shortcuts-title">
-            <header><h2 id="prototype-shortcuts-title">Keyboard shortcuts</h2><button ref={shortcutsCloseRef} type="button" className="icon-btn" aria-label={localize(locale, '关闭', 'Close')} onClick={closeShortcuts}>×</button></header>
-            <div><span>Open command palette</span><kbd>⌘K</kbd><span>New session</span><kbd>⌘⇧O</kbd><span>Go to sessions</span><kbd>⌘⇧L</kbd><span>Go to files</span><kbd>⌘⇧E</kbd><span>Toggle left sidebar</span><kbd>⌘.</kbd><span>Keyboard shortcuts</span><kbd>⌘/</kbd></div>
+            <header><h2 id="prototype-shortcuts-title">{localize(locale, '键盘快捷键', 'Keyboard shortcuts')}</h2><button ref={shortcutsCloseRef} type="button" className="icon-btn" aria-label={localize(locale, '关闭', 'Close')} onClick={closeShortcuts}>×</button></header>
+            <div><span>{localize(locale, '打开命令面板', 'Open command palette')}</span><kbd>⌘K</kbd><span>{localize(locale, '新建会话', 'New session')}</span><kbd>⌘⇧O</kbd><span>{localize(locale, '前往会话', 'Go to sessions')}</span><kbd>⌘⇧L</kbd><span>{localize(locale, '前往文件', 'Go to files')}</span><kbd>⌘⇧E</kbd><span>{localize(locale, '切换左侧边栏', 'Toggle left sidebar')}</span><kbd>⌘.</kbd><span>{localize(locale, '键盘快捷键', 'Keyboard shortcuts')}</span><kbd>⌘/</kbd></div>
           </section>
         </div>
       ) : null}

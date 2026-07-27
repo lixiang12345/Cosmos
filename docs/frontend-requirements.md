@@ -412,3 +412,11 @@ AppShell
 - 新增 locale contract 测试：恢复、切换、`html[lang]`、持久化。
 - 修复 CommandPalette 不稳定 memo dependency 与 Space migration effect dependency。
 - 下一阶段只实施上述 P1 双语与页面文案修复，不做无关 CSS 重写。
+
+### 14.5 Phase 2 实施与验收证据
+
+- Sidebar header 已增加始终可见、键盘可达的 `中` / `EN` 切换；账户菜单入口继续保留。Topbar、快捷键 Dialog、Home composer、Session workbench、Artifacts、Experts、Environments、Repositories、Secrets、MCP、Daemon、Integrations 与 Skills 的高置信固定文案已接入 locale，proper noun、API 枚举和服务端用户数据继续保留原值。
+- 自动化门禁：相关 Web 用例 92 个通过；完整 `pnpm check` 通过（Web 222、API 234、Contracts 62、ESLint 0 warnings/errors）；`pnpm openapi:lint` 通过；PostgreSQL integration 156/156 通过。
+- 生产 bundle 已通过 `docker compose up -d --build --wait web` 重建，PostgreSQL、API 与 Web health check 均为 healthy；构建仅保留既有 Vite chunk-size warning。
+- 运行态在 390×844 与 1440×900 验证英文→中文→英文、刷新持久化、`html[lang]`、Light/Dark、快捷键 Dialog Escape/焦点恢复，以及 Home、Artifacts、Experts、Environments、MCP、Integrations、Sessions；受检 route 的 document 宽度均等于 viewport，无页面级水平溢出。
+- 该阶段状态为 code-complete、locally verified、runtime-verified；未包含外部环境验证。完整视觉/交互状态矩阵由独立 Phase 3 audit 收口。

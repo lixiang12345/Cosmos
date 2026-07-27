@@ -451,9 +451,9 @@ export function RemoteSessionWorkbench({
 
           <nav className="prototype-session-tabs" aria-label={text(locale, '会话视图', 'Session views')}>
             <button type="button" role="tab" className={activeTab === 'agent' ? 'active' : undefined} aria-selected={activeTab === 'agent'} onClick={() => setActiveTab('agent')}><PrototypeAgentIcon aria-hidden="true" />Agent</button>
-            <button type="button" role="tab" className={activeTab === 'terminal' ? 'active' : undefined} aria-selected={activeTab === 'terminal'} onClick={() => setActiveTab('terminal')}><PrototypeTerminalIcon aria-hidden="true" />Terminal</button>
-            <button type="button" role="tab" className={activeTab === 'files' ? 'active' : undefined} aria-selected={activeTab === 'files'} onClick={() => { if (onOpenFiles) onOpenFiles(); else setActiveTab('files') }}><PrototypeFolderIcon aria-hidden="true" />Files</button>
-            <button type="button" role="tab" className={activeTab === 'subscriptions' ? 'active' : undefined} aria-selected={activeTab === 'subscriptions'} onClick={() => setActiveTab('subscriptions')}><PrototypeSubscriptionsIcon aria-hidden="true" />Subscriptions</button>
+            <button type="button" role="tab" className={activeTab === 'terminal' ? 'active' : undefined} aria-selected={activeTab === 'terminal'} onClick={() => setActiveTab('terminal')}><PrototypeTerminalIcon aria-hidden="true" />{text(locale, '终端', 'Terminal')}</button>
+            <button type="button" role="tab" className={activeTab === 'files' ? 'active' : undefined} aria-selected={activeTab === 'files'} onClick={() => { if (onOpenFiles) onOpenFiles(); else setActiveTab('files') }}><PrototypeFolderIcon aria-hidden="true" />{text(locale, '文件', 'Files')}</button>
+            <button type="button" role="tab" className={activeTab === 'subscriptions' ? 'active' : undefined} aria-selected={activeTab === 'subscriptions'} onClick={() => setActiveTab('subscriptions')}><PrototypeSubscriptionsIcon aria-hidden="true" />{text(locale, '订阅', 'Subscriptions')}</button>
           </nav>
 
           <div className="prototype-session-body">
@@ -515,9 +515,9 @@ export function RemoteSessionWorkbench({
               </footer> : null}
             </div> : null}
 
-            {activeTab === 'terminal' ? <section className="prototype-session-pane" aria-label="Terminal"><div className="prototype-terminal-window"><header>session events · read only</header><pre>{terminalLines.length ? terminalLines.join('\n') : events.length ? events.map((event) => `${shortTime(event.occurredAt, locale)}  ${eventLabel(event, locale)}`).join('\n') : text(locale, '当前没有执行输出。', 'No execution output is available.')}</pre></div>{onOpenWorkers ? <button type="button" className="prototype-pane-action" onClick={onOpenWorkers}>{text(locale, '打开 Worker 详情', 'Open Worker details')}</button> : null}</section> : null}
+            {activeTab === 'terminal' ? <section className="prototype-session-pane" aria-label={text(locale, '终端', 'Terminal')}><div className="prototype-terminal-window"><header>{text(locale, '会话事件 · 只读', 'session events · read only')}</header><pre>{terminalLines.length ? terminalLines.join('\n') : events.length ? events.map((event) => `${shortTime(event.occurredAt, locale)}  ${eventLabel(event, locale)}`).join('\n') : text(locale, '当前没有执行输出。', 'No execution output is available.')}</pre></div>{onOpenWorkers ? <button type="button" className="prototype-pane-action" onClick={onOpenWorkers}>{text(locale, '打开 Worker 详情', 'Open Worker details')}</button> : null}</section> : null}
 
-            {activeTab === 'files' ? <section className="prototype-session-pane" aria-label="Files"><table className="prototype-sessions-table"><thead><tr><th>{text(locale, '名称', 'Name')}</th><th>{text(locale, '变更', 'Change')}</th></tr></thead><tbody>{localFiles.length ? localFiles.map((file) => <tr key={file.path}><td>{file.path}</td><td className="muted">{file.detail}</td></tr>) : <tr><td colSpan={2} className="prototype-sessions-state">{text(locale, '当前没有文件。', 'No files yet.')}</td></tr>}</tbody></table></section> : null}
+            {activeTab === 'files' ? <section className="prototype-session-pane" aria-label={text(locale, '文件', 'Files')}><table className="prototype-sessions-table"><thead><tr><th>{text(locale, '名称', 'Name')}</th><th>{text(locale, '变更', 'Change')}</th></tr></thead><tbody>{localFiles.length ? localFiles.map((file) => <tr key={file.path}><td>{file.path}</td><td className="muted">{file.detail}</td></tr>) : <tr><td colSpan={2} className="prototype-sessions-state">{text(locale, '当前没有文件。', 'No files yet.')}</td></tr>}</tbody></table></section> : null}
 
             {activeTab === 'subscriptions' ? <section className="prototype-session-pane prototype-subscriptions" aria-label={text(locale, '执行动态', 'Execution activity')}><h2>{events.length ? text(locale, '会话事件', 'Session events') : text(locale, '没有订阅', 'No subscriptions')}</h2>{events.length ? <ol>{events.map((event) => <li key={event.eventId}><strong>{eventLabel(event, locale)}</strong><span>#{event.sequence}</span><time dateTime={event.occurredAt}>{shortTime(event.occurredAt, locale)}</time></li>)}</ol> : <p>{text(locale, '当前会话尚无实时事件。', 'No live events are available for this Session.')}</p>}</section> : null}
           </div>
@@ -526,11 +526,11 @@ export function RemoteSessionWorkbench({
       </div>
 
       {inspectorOpen ? <aside className="prototype-session-inspector" aria-label={text(locale, '会话详情', 'Session details')}>
-        <header><span>SESSION</span><div><button type="button" onClick={() => { void copyLink() }}>↗ {text(locale, '复制链接', 'Copy link')}</button><button type="button" onClick={onBack}>← {text(locale, '返回', 'Back')}</button></div></header>
+        <header><span>{text(locale, '会话', 'SESSION')}</span><div><button type="button" onClick={() => { void copyLink() }}>↗ {text(locale, '复制链接', 'Copy link')}</button><button type="button" onClick={onBack}>← {text(locale, '返回', 'Back')}</button></div></header>
         <div className="prototype-inspector-scroll">
           <dl className="prototype-inspector-facts">
             <div><dt>{text(locale, '会话名称', 'Session name')}</dt><dd>{session.title}</dd></div>
-            <div><dt>Session ID</dt><dd><code>{session.id}</code><button type="button" className="prototype-icon-button" aria-label={text(locale, '复制会话 ID', 'Copy Session ID')} onClick={() => { void navigator.clipboard?.writeText(session.id) }}><PrototypeCopyIcon aria-hidden="true" /></button></dd></div>
+            <div><dt>{text(locale, '会话 ID', 'Session ID')}</dt><dd><code>{session.id}</code><button type="button" className="prototype-icon-button" aria-label={text(locale, '复制会话 ID', 'Copy Session ID')} onClick={() => { void navigator.clipboard?.writeText(session.id) }}><PrototypeCopyIcon aria-hidden="true" /></button></dd></div>
             <div><dt>{text(locale, '最近活动', 'Last active')}</dt><dd><time dateTime={session.lastActivityAt}>{formatDate(session.lastActivityAt, locale)}</time></dd></div>
             <div><dt>{text(locale, '创建时间', 'Created')}</dt><dd><time dateTime={session.createdAt}>{formatDate(session.createdAt, locale)}</time></dd></div>
             <div><dt>{text(locale, '更新时间', 'Updated')}</dt><dd><time dateTime={session.updatedAt}>{formatDate(session.updatedAt, locale)}</time></dd></div>

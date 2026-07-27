@@ -76,7 +76,7 @@ export function PrototypePageTopbar({
       <header className="prototype-topbar">
         <div className="prototype-topbar-left">
           {navigationCollapsed && onOpenNavigation ? (
-            <button type="button" className="icon-btn" aria-label={copy(locale, '显示导航', 'Show sidebar')} title="Show sidebar (⌘.)" onClick={onOpenNavigation}>
+            <button type="button" className="icon-btn" aria-label={copy(locale, '显示导航', 'Show sidebar')} title={copy(locale, '显示导航（⌘.）', 'Show sidebar (⌘.)')} onClick={onOpenNavigation}>
               <PrototypeSidebarIcon aria-hidden="true" />
             </button>
           ) : null}
@@ -84,21 +84,21 @@ export function PrototypePageTopbar({
         </div>
         <div className="prototype-topbar-right">
           {!compact ? <>
-            <button type="button" className="pill-btn" disabled title={copy(locale, '设计文档未在生产控制面发布', 'Design documentation is not published in the production console')}>Philosophy</button>
-            <button type="button" className="pill-btn" disabled title={copy(locale, '展示模式仅存在于原型', 'Showcase mode is prototype-only')}>Showcase</button>
-            {onOpenCommand ? <button type="button" className="pill-btn" aria-label={copy(locale, '搜索 Cosmos', 'Search Cosmos')} title="Command palette (⌘K)" onClick={onOpenCommand}><PrototypeTopbarSearchIcon aria-hidden="true" />Search <kbd>⌘K</kbd></button> : null}
+            <button type="button" className="pill-btn" disabled title={copy(locale, '设计文档未在生产控制面发布', 'Design documentation is not published in the production console')}>{copy(locale, '设计理念', 'Philosophy')}</button>
+            <button type="button" className="pill-btn" disabled title={copy(locale, '展示模式仅存在于原型', 'Showcase mode is prototype-only')}>{copy(locale, '展示', 'Showcase')}</button>
+            {onOpenCommand ? <button type="button" className="pill-btn" aria-label={copy(locale, '搜索 Cosmos', 'Search Cosmos')} title={copy(locale, '命令面板（⌘K）', 'Command palette (⌘K)')} onClick={onOpenCommand}><PrototypeTopbarSearchIcon aria-hidden="true" />{copy(locale, '搜索', 'Search')} <kbd>⌘K</kbd></button> : null}
           </> : null}
-          <button type="button" className="icon-btn" aria-label={theme === 'dark' ? copy(locale, '切换到浅色模式', 'Switch to light mode') : copy(locale, '切换到深色模式', 'Switch to dark mode')} title="Theme" onClick={toggleTheme}>
+          <button type="button" className="icon-btn" aria-label={theme === 'dark' ? copy(locale, '切换到浅色模式', 'Switch to light mode') : copy(locale, '切换到深色模式', 'Switch to dark mode')} title={copy(locale, '主题', 'Theme')} onClick={toggleTheme}>
             {theme === 'dark' ? <PrototypeSunIcon aria-hidden="true" /> : <PrototypeMoonIcon aria-hidden="true" />}
           </button>
-          <button ref={shortcutsTriggerRef} type="button" className="icon-btn" aria-label={copy(locale, '键盘快捷键', 'Keyboard shortcuts')} title="Shortcuts (⌘/)" onClick={() => setShortcutsOpen(true)}><PrototypeKeyboardIcon aria-hidden="true" /></button>
+          <button ref={shortcutsTriggerRef} type="button" className="icon-btn" aria-label={copy(locale, '键盘快捷键', 'Keyboard shortcuts')} title={copy(locale, '快捷键（⌘/）', 'Shortcuts (⌘/)')} onClick={() => setShortcutsOpen(true)}><PrototypeKeyboardIcon aria-hidden="true" /></button>
         </div>
       </header>
       {shortcutsOpen ? (
         <div className="prototype-shortcuts-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeShortcuts() }}>
           <section ref={shortcutsDialogRef} className="prototype-shortcuts" role="dialog" aria-modal="true" aria-labelledby="prototype-page-shortcuts-title">
-            <header><h2 id="prototype-page-shortcuts-title">Keyboard shortcuts</h2><button ref={shortcutsCloseRef} type="button" className="icon-btn" aria-label={copy(locale, '关闭', 'Close')} onClick={closeShortcuts}>×</button></header>
-            <div><span>Open command palette</span><kbd>⌘K</kbd><span>New session</span><kbd>⌘⇧O</kbd><span>Go to sessions</span><kbd>⌘⇧L</kbd><span>Go to files</span><kbd>⌘⇧E</kbd><span>Toggle left sidebar</span><kbd>⌘.</kbd><span>Keyboard shortcuts</span><kbd>⌘/</kbd></div>
+            <header><h2 id="prototype-page-shortcuts-title">{copy(locale, '键盘快捷键', 'Keyboard shortcuts')}</h2><button ref={shortcutsCloseRef} type="button" className="icon-btn" aria-label={copy(locale, '关闭', 'Close')} onClick={closeShortcuts}>×</button></header>
+            <div><span>{copy(locale, '打开命令面板', 'Open command palette')}</span><kbd>⌘K</kbd><span>{copy(locale, '新建会话', 'New session')}</span><kbd>⌘⇧O</kbd><span>{copy(locale, '前往会话', 'Go to sessions')}</span><kbd>⌘⇧L</kbd><span>{copy(locale, '前往文件', 'Go to files')}</span><kbd>⌘⇧E</kbd><span>{copy(locale, '切换左侧边栏', 'Toggle left sidebar')}</span><kbd>⌘.</kbd><span>{copy(locale, '键盘快捷键', 'Keyboard shortcuts')}</span><kbd>⌘/</kbd></div>
           </section>
         </div>
       ) : null}

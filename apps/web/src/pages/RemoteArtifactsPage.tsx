@@ -117,7 +117,7 @@ export function RemoteArtifactsPage({
       <div className="prototype-automation-content prototype-expert-content">
         <div className="prototype-automation-header">
           <div>
-            <h1>Artifacts</h1>
+            <h1>{text(locale, '产出物', 'Artifacts')}</h1>
             <p>{text(locale,
               '会话产生的持久产出物——PR、分支、工单与自定义链接——跨会话检索，并可跳回来源会话。',
               'Durable outputs your sessions produce — pull requests, branches, issues, and custom links — searchable across sessions, each linking back to its source session.')}</p>

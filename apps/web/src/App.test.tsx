@@ -406,6 +406,24 @@ describe('Cosmos prototype', () => {
     expect(screen.queryByRole('link', { name: '首页' })).not.toBeInTheDocument()
   })
 
+  it('keeps the language switch visible and applies it across the shell and Topbar', async () => {
+    const user = userEvent.setup()
+    renderApp('/home')
+
+    expect(await screen.findByRole('heading', { level: 1, name: '选择 Expert，开始一个会话' })).toBeInTheDocument()
+    const switchToEnglish = screen.getByRole('button', { name: '切换到英文' })
+    expect(switchToEnglish).toBeVisible()
+    expect(screen.getByRole('button', { name: '搜索 Cosmos' })).toHaveTextContent('搜索')
+
+    await user.click(switchToEnglish)
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Choose an Expert and start a session' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Switch to Chinese' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Search Cosmos' })).toHaveTextContent('Search')
+    expect(document.documentElement).toHaveAttribute('lang', 'en')
+    expect(window.localStorage.getItem(PREFERENCE_STORAGE_KEYS.locale)).toBe('en')
+  })
+
   it('matches the prototype navigation information architecture', async () => {
     renderAuthenticatedApp('/context')
 
@@ -479,11 +497,11 @@ describe('Cosmos prototype', () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: '升级支付服务重试策略' })).toBeInTheDocument()
     const sessionViews = screen.getByRole('navigation', { name: '会话视图' })
-    expect(within(sessionViews).getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Agent', 'Terminal', 'Files', 'Subscriptions'])
-    await user.click(within(sessionViews).getByRole('tab', { name: 'Files' }))
-    expect(screen.getByRole('region', { name: 'Files' })).toHaveTextContent('src/retry/retry-policy.ts')
-    await user.click(within(sessionViews).getByRole('tab', { name: 'Terminal' }))
-    expect(screen.getByRole('region', { name: 'Terminal' })).toHaveTextContent('pnpm test payment-retry --runInBand')
+    expect(within(sessionViews).getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Agent', '终端', '文件', '订阅'])
+    await user.click(within(sessionViews).getByRole('tab', { name: '文件' }))
+    expect(screen.getByRole('region', { name: '文件' })).toHaveTextContent('src/retry/retry-policy.ts')
+    await user.click(within(sessionViews).getByRole('tab', { name: '终端' }))
+    expect(screen.getByRole('region', { name: '终端' })).toHaveTextContent('pnpm test payment-retry --runInBand')
   })
 
   it('records an approval decision and continues the run', async () => {
@@ -599,7 +617,7 @@ describe('Cosmos prototype', () => {
     expect(screen.queryByText('gpt-5.6-sol')).not.toBeInTheDocument()
     expect(screen.queryByText('38.2k')).not.toBeInTheDocument()
     expect(screen.queryByText('￥4.82')).not.toBeInTheDocument()
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Agent', 'Terminal', 'Files', 'Subscriptions'])
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Agent', '终端', '文件', '订阅'])
     expect(screen.getByRole('button', { name: '停止' })).toBeEnabled()
     await userEvent.setup().click(screen.getByRole('button', { name: '更多' }))
     expect(screen.getByRole('menuitem', { name: '暂停' })).toBeEnabled()
@@ -629,7 +647,7 @@ describe('Cosmos prototype', () => {
     renderAuthenticatedApp(`/sessions/${detail.id}`)
 
     await screen.findByRole('heading', { name: detail.title })
-    await user.click(screen.getByRole('tab', { name: 'Files' }))
+    await user.click(screen.getByRole('tab', { name: '文件' }))
     expect(await screen.findByRole('heading', { name: '会话工作区文件' })).toBeInTheDocument()
     await waitFor(() => {
       expect(listFiles).toHaveBeenCalledWith(
@@ -656,7 +674,7 @@ describe('Cosmos prototype', () => {
     renderAuthenticatedApp(`/sessions/${detail.id}`)
 
     await screen.findByRole('heading', { name: detail.title })
-    await user.click(screen.getByRole('tab', { name: 'Terminal' }))
+    await user.click(screen.getByRole('tab', { name: '终端' }))
     await user.click(screen.getByRole('button', { name: '打开 Worker 详情' }))
     expect(await screen.findByRole('heading', { name: 'Worker 树' })).toBeInTheDocument()
     await waitFor(() => expect(listSessionWorkers).toHaveBeenCalledWith(
@@ -1834,8 +1852,9 @@ describe('Cosmos prototype', () => {
     expect(window.localStorage.getItem(PREFERENCE_STORAGE_KEYS.theme)).toBe('light')
 
     await user.click(within(sessionsPage).getByRole('button', { name: '键盘快捷键' }))
-    expect(screen.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument()
-    expect(within(screen.getByRole('dialog', { name: 'Keyboard shortcuts' })).getByRole('button', { name: '关闭' })).toHaveFocus()
+    expect(screen.getByRole('dialog', { name: '键盘快捷键' })).toBeInTheDocument()
+    expect(screen.getByText('打开命令面板')).toBeInTheDocument()
+    expect(within(screen.getByRole('dialog', { name: '键盘快捷键' })).getByRole('button', { name: '关闭' })).toHaveFocus()
   })
 
   it('renames and archives a managed session', async () => {

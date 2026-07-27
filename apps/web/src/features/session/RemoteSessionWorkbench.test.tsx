@@ -56,7 +56,7 @@ describe('RemoteSessionWorkbench', () => {
     renderWorkbench({}, { executionEnabled: true, onSend: vi.fn().mockResolvedValue(undefined), onOpenFiles: vi.fn() })
 
     expect(screen.getByRole('heading', { level: 1, name: session.title })).toBeInTheDocument()
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Agent', 'Terminal', 'Files', 'Subscriptions'])
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Agent', '终端', '文件', '订阅'])
     expect(document.querySelector('.prototype-session-tabs path[d="M8 1.75l5.4 3.1v6.3L8 14.25 2.6 11.15v-6.3L8 1.75z"]')).toBeInTheDocument()
     expect(document.querySelector('.prototype-session-composer path[d="M5.5 8.5l4.2-4.2a2 2 0 012.8 2.8L6.2 13.4a3.2 3.2 0 01-4.5-4.5l6.4-6.4"]')).toBeInTheDocument()
     expect(screen.getByRole('complementary', { name: '会话详情' })).toHaveClass('prototype-session-inspector')
@@ -136,12 +136,12 @@ describe('RemoteSessionWorkbench', () => {
     const onOpenFiles = vi.fn()
     const onOpenWorkers = vi.fn()
     renderWorkbench({}, { onOpenFiles, onOpenWorkers, events: [attemptEvent(1, 'running')] })
-    await user.click(screen.getByRole('tab', { name: 'Files' }))
+    await user.click(screen.getByRole('tab', { name: '文件' }))
     expect(onOpenFiles).toHaveBeenCalledOnce()
-    await user.click(screen.getByRole('tab', { name: 'Terminal' }))
+    await user.click(screen.getByRole('tab', { name: '终端' }))
     await user.click(screen.getByRole('button', { name: '打开 Worker 详情' }))
     expect(onOpenWorkers).toHaveBeenCalledOnce()
-    await user.click(screen.getByRole('tab', { name: 'Subscriptions' }))
+    await user.click(screen.getByRole('tab', { name: '订阅' }))
     expect(screen.getByRole('region', { name: '执行动态' })).toHaveTextContent('#4')
   })
 
@@ -183,7 +183,7 @@ describe('RemoteSessionWorkbench', () => {
     await user.click(screen.getByRole('button', { name: '切换到浅色模式' }))
     expect(document.documentElement).toHaveAttribute('data-theme', 'light')
     await user.click(screen.getByRole('button', { name: '键盘快捷键' }))
-    expect(screen.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: '键盘快捷键' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '关闭' })).toHaveFocus()
   })
 

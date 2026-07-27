@@ -119,7 +119,7 @@ describe('Cosmos home navigation', () => {
 
     const trigger = screen.getByRole('button', { name: '键盘快捷键' })
     await user.click(trigger)
-    const dialog = screen.getByRole('dialog', { name: 'Keyboard shortcuts' })
+    const dialog = screen.getByRole('dialog', { name: '键盘快捷键' })
     expect(dialog).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '关闭' })).toHaveFocus()
 

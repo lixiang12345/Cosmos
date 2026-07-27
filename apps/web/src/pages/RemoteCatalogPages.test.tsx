@@ -537,7 +537,7 @@ describe('remote Catalog pages', () => {
     const initialProps = environmentPageProps()
     const view = render(withPreferences(<RemoteEnvironmentsPage {...initialProps} />))
 
-    expect(screen.getByRole('heading', { level: 1, name: 'Environments' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1, name: '环境' })).toBeInTheDocument()
     expect(screen.getByText('2 environments')).toBeInTheDocument()
     await waitFor(() => expect(getEnvironment).toHaveBeenCalledTimes(1))
     const firstSignal = vi.mocked(getEnvironment).mock.calls[0]?.[4]

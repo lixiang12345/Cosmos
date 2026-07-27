@@ -447,7 +447,7 @@ export function RemoteExpertsPage({
       <div className="prototype-automation-content prototype-expert-content">
         <div className="prototype-automation-header">
           <div>
-            <h1>Experts</h1>
+            <h1>{text(locale, '专家', 'Experts')}</h1>
             <p>{text(locale,
               'Expert 是可复用的 AI Agent 配置。用系统提示词定义它的角色，选择运行方式，随时从它发起会话。',
               'An Expert is a reusable AI agent configuration. Define its role with a system prompt, choose how it runs, and start sessions from it anytime.')}</p>
@@ -631,7 +631,7 @@ export function RemoteExpertDetailPage({
           {revision ? <>
             <div className="prototype-expert-section">
               <div className="prototype-expert-section-intro">
-                <h2>System</h2>
+                <h2>{text(locale, '系统', 'System')}</h2>
                 <p>{text(locale, 'Agent 如何思考、在哪里运行、由哪个模型驱动。', 'How the agent thinks, where it runs, and which model powers it.')}</p>
               </div>
               <div className="prototype-expert-section-fields">
@@ -1049,7 +1049,7 @@ export function RemoteExpertEditorPage({
 
     <div className="prototype-expert-section">
       <div className="prototype-expert-section-intro">
-        <h2>System</h2>
+        <h2>{text(locale, '系统', 'System')}</h2>
         <p>{text(locale, 'Agent 如何思考、在哪里运行、由哪个模型驱动。', 'How the agent thinks, where it runs, and which model powers it.')}</p>
       </div>
       <div className="prototype-expert-section-fields">
@@ -1113,7 +1113,7 @@ export function RemoteExpertEditorPage({
 
     <div className="prototype-expert-section">
       <div className="prototype-expert-section-intro">
-        <h2>Skills</h2>
+        <h2>{text(locale, '技能', 'Skills')}</h2>
         <p>{text(locale, '该 Expert 固定的知识包。发布时快照，Inline 技能内容会注入会话系统提示词。', 'Knowledge packages pinned to this expert. Snapshotted on publish; inline skill content is injected into the session system prompt.')}</p>
       </div>
       <div className="prototype-expert-section-fields">
@@ -1139,7 +1139,7 @@ export function RemoteExpertEditorPage({
 
     <div className="prototype-expert-section">
       <div className="prototype-expert-section-intro">
-        <h2>Workers</h2>
+        <h2>{text(locale, 'Workers', 'Workers')}</h2>
         <p>{text(locale, '该 Expert 可异步启动处理子任务的下游 Expert。仅可引用已发布的 Expert。', 'Experts this agent can launch asynchronously to handle sub-tasks. Only published Experts can be referenced.')}</p>
       </div>
       <div className="prototype-expert-section-fields">
@@ -1375,7 +1375,7 @@ export function RemoteEnvironmentsPage({
       <div className="prototype-automation-content prototype-expert-content">
         <div className="prototype-automation-header">
           <div>
-            <h1>Environments</h1>
+            <h1>{text(locale, '环境', 'Environments')}</h1>
             <p>{text(locale,
               'Environment 是带有预装工具、依赖和仓库的可复用运行环境快照，每个会话都在其中运行。Daemon pool 将本地运行的 daemon 分组，会话可以指向特定 daemon。',
               'An environment is a reusable VM snapshot with pre-installed tools, packages, and repositories. Each session runs inside one. Daemon pools group locally-running daemons so sessions can target a specific daemon.')}</p>
@@ -1839,7 +1839,7 @@ export function RemoteRepositoriesPage({
       <div className="prototype-automation-content prototype-expert-content">
         <div className="prototype-automation-header">
           <div>
-            <h1>Repositories</h1>
+            <h1>{text(locale, '代码仓库', 'Repositories')}</h1>
             <p>{text(locale, '当前 Space 中由服务端管理的仓库连接。通过 Integrations 连接 GitHub 或 GitLab 后，仓库会显示在这里。', 'Server-managed repository connections in this Space. Connect GitHub or GitLab from Integrations and repositories appear here.')}</p>
           </div>
         </div>
@@ -1973,7 +1973,7 @@ export function RemoteSecretsPage({
       <div className="prototype-automation-content prototype-expert-content">
         <div className="prototype-automation-header">
           <div>
-            <h1>Secrets</h1>
+            <h1>{text(locale, '密钥', 'Secrets')}</h1>
             <p>{text(locale,
               'Cosmos Secrets Manager。密钥值仅写入一次即只写——通过重建轮换。作用域内的密钥会以大写下划线环境变量自动注入每个 Expert VM（openai-api-key → $OPENAI_API_KEY）。',
               'Cosmos Secrets Manager. Value pasted once, then write-only — rotate by recreating. In-scope secrets auto-export into each Expert VM as upper-snake-case env vars (openai-api-key → $OPENAI_API_KEY).')}</p>
@@ -2143,7 +2143,7 @@ export function RemoteWebhooksPage({
       <div className="prototype-automation-content prototype-expert-content">
         <div className="prototype-automation-header">
           <div>
-            <h1>Webhooks</h1>
+            <h1>{text(locale, 'Webhooks', 'Webhooks')}</h1>
             <p>{text(locale, '面向 Datadog、CircleCI 等的自定义 HTTPS 端点，在 Automations 中作为 Webhook 触发器接入（Capabilities / Webhooks）。', 'Custom HTTPS endpoints for Datadog, CircleCI, etc. Wire from Automations as a Webhook trigger. Under Capabilities / Webhooks.')}</p>
           </div>
           {canManage ? <button type="button" className="prototype-primary-button" onClick={() => setFormOpen(true)}>{text(locale, '创建 Webhook', 'Create webhook')}</button> : null}
@@ -2330,7 +2330,7 @@ export function RemoteMcpServersPage({
       <div className="prototype-automation-content prototype-expert-content">
         <div className="prototype-automation-header">
           <div>
-            <h1>MCP Registry</h1>
+            <h1>{text(locale, 'MCP 注册表', 'MCP Registry')}</h1>
             <p>{text(locale, '添加合作伙伴或自定义 MCP servers，为 Expert 扩展外部工具与服务（docs/config-mcp）。', 'Add partner or custom MCP servers to extend Experts with external tools and services (docs/config-mcp).')}</p>
           </div>
           {canManage ? <button type="button" className="prototype-primary-button" onClick={() => setFormOpen(true)}>{text(locale, '新增 Server', 'Add server')}</button> : null}
@@ -2340,8 +2340,8 @@ export function RemoteMcpServersPage({
           <table className="prototype-automation-table prototype-mcp-table">
             <thead><tr>
               <th>{text(locale, '名称', 'Name')}</th>
-              <th>Transport</th>
-              <th>Endpoint</th>
+              <th>{text(locale, '传输方式', 'Transport')}</th>
+              <th>{text(locale, '端点', 'Endpoint')}</th>
               <th>{text(locale, '工具数', 'Tools')}</th>
               <th>{text(locale, '状态', 'Status')}</th>
               {canManage ? <th className="col-menu"><span className="sr-only">{text(locale, '操作', 'Actions')}</span></th> : null}
@@ -2386,7 +2386,7 @@ export function RemoteMcpServersPage({
           </> : null}
           <label className="prototype-field-label" htmlFor="mcp-name">{text(locale, '名称', 'Name')}</label>
           <input id="mcp-name" className="prototype-field" autoFocus={!editing} required disabled={Boolean(editing)} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Internal Docs MCP" />
-          <label className="prototype-field-label" htmlFor="mcp-transport">Transport</label>
+          <label className="prototype-field-label" htmlFor="mcp-transport">{text(locale, '传输方式', 'Transport')}</label>
           <select id="mcp-transport" className="prototype-field-select" disabled={Boolean(editing)} value={draft.transport} onChange={(event) => setDraft({ ...draft, transport: event.target.value as McpServerDto['transport'] })}>
             <option value="http">HTTP</option>
             <option value="sse">SSE</option>
@@ -2396,7 +2396,7 @@ export function RemoteMcpServersPage({
             <label className="prototype-field-label" htmlFor="mcp-command">{text(locale, '启动命令', 'Launch command')}</label>
             <input id="mcp-command" className="prototype-field prototype-mono-field" required value={draft.command} onChange={(event) => setDraft({ ...draft, command: event.target.value })} placeholder="npx @company/mcp-server" />
           </> : <>
-            <label className="prototype-field-label" htmlFor="mcp-endpoint">Endpoint</label>
+            <label className="prototype-field-label" htmlFor="mcp-endpoint">{text(locale, '端点', 'Endpoint')}</label>
             <input id="mcp-endpoint" className="prototype-field prototype-mono-field" type="url" required value={draft.endpoint} onChange={(event) => setDraft({ ...draft, endpoint: event.target.value })} placeholder="https://mcp.example.com/api" />
           </>}
           {mutationError ? <p className="prototype-automation-error" role="alert">{mutationError.message}</p> : null}
@@ -2515,7 +2515,7 @@ export function RemoteDaemonsPage({
       <div className="prototype-automation-content prototype-expert-content">
         <div className="prototype-automation-header">
           <div>
-            <h1>Daemon pools</h1>
+            <h1>{text(locale, 'Daemon 池', 'Daemon pools')}</h1>
             <p>{text(locale, '管理自托管执行机器与容量。Daemon pool 将本地运行的 daemon 分组，调度器据此分配 Session 运行。', 'Manage self-hosted execution machines and capacity. Daemon pools group locally-running daemons so the scheduler can assign Session runs.')}</p>
           </div>
           {canManage ? <button type="button" className="prototype-primary-button" disabled={!environments.length} onClick={() => setFormOpen(true)}>{text(locale, '注册机器', 'Register machine')}</button> : null}
@@ -2525,7 +2525,7 @@ export function RemoteDaemonsPage({
           <table className="prototype-automation-table prototype-environment-table">
             <thead><tr>
               <th>{text(locale, '名称', 'Name')}</th>
-              <th>Environment</th>
+              <th>{text(locale, '环境', 'Environment')}</th>
               <th>{text(locale, '能力', 'Capabilities')}</th>
               <th>{text(locale, '并发', 'Slots')}</th>
               <th className="col-status">{text(locale, '状态', 'Status')}</th>
@@ -2573,7 +2573,7 @@ export function RemoteDaemonsPage({
         <div className="prototype-drawer-body">
           <label className="prototype-field-label" htmlFor="daemon-name">{text(locale, '名称', 'Name')}</label>
           <input id="daemon-name" className="prototype-field" autoFocus required value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="build-runner-1" />
-          <label className="prototype-field-label" htmlFor="daemon-environment">Environment</label>
+          <label className="prototype-field-label" htmlFor="daemon-environment">{text(locale, '环境', 'Environment')}</label>
           <select id="daemon-environment" className="prototype-field-select" required value={draft.environmentId || environments[0]?.id || ''} onChange={(event) => setDraft({ ...draft, environmentId: event.target.value })}>
             {environments.map((environment) => <option key={environment.id} value={environment.id}>{environment.name}</option>)}
           </select>
@@ -2732,7 +2732,7 @@ export function RemoteIntegrationsPage({
       <div className="prototype-automation-content prototype-expert-content">
         <div className="prototype-automation-header">
           <div>
-            <h1>Integrations</h1>
+            <h1>{text(locale, '集成', 'Integrations')}</h1>
             <p>{text(locale, 'Team Apps 驱动组织级触发器，Personal Apps 附加到你的会话。在工作发生的地方连接工作。', 'Team Apps power org-wide triggers. Personal Apps attach to your sessions. Meet the work where it happens.')}</p>
           </div>
           {canManage ? <button type="button" className="prototype-primary-button" onClick={() => setFormOpen(true)}>{text(locale, '添加集成', 'Add integration')}</button> : null}
@@ -2917,7 +2917,7 @@ export function RemoteSkillsPage({
       <div className="prototype-automation-content prototype-expert-content">
         <div className="prototype-automation-header">
           <div>
-            <h1>Skills</h1>
+            <h1>{text(locale, '技能', 'Skills')}</h1>
             <p>{text(locale,
               'Skill 是遵循 agentskills.io 规范的可复用知识包，为 Expert 提供领域专长。Inline 技能直接携带说明；URL 技能引用外部包，会话启动时加载。',
               'A Skill is a reusable knowledge package (following the agentskills.io spec) that gives Experts domain expertise. Inline skills carry their instructions; url skills reference an external package loaded at session boot.')}</p>

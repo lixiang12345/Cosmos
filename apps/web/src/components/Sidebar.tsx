@@ -131,9 +131,20 @@ export function Sidebar({
             <span>Cosmos</span>
             <PrototypeChevronDownIcon className="chev" aria-hidden="true" />
           </button>
-          <button ref={sidebarToggleRef} type="button" className="icon-btn" title={locale === 'zh' ? '收起导航' : 'Toggle sidebar'} aria-label={locale === 'zh' ? '收起导航' : 'Toggle sidebar'} onClick={onToggleCollapsed}>
-            <PrototypeSidebarIcon aria-hidden="true" />
-          </button>
+          <div className="sb-header-actions">
+            <button
+              type="button"
+              className="icon-btn sb-locale-btn"
+              title={locale === 'zh' ? 'Switch to English' : '切换到中文'}
+              aria-label={locale === 'zh' ? '切换到英文' : 'Switch to Chinese'}
+              onClick={toggleLocale}
+            >
+              {locale === 'zh' ? 'EN' : '中'}
+            </button>
+            <button ref={sidebarToggleRef} type="button" className="icon-btn" title={locale === 'zh' ? '收起导航' : 'Toggle sidebar'} aria-label={locale === 'zh' ? '收起导航' : 'Toggle sidebar'} onClick={onToggleCollapsed}>
+              <PrototypeSidebarIcon aria-hidden="true" />
+            </button>
+          </div>
           {spaceSwitcherOpen ? (
             <ul className="prototype-space-menu">
               {workspace.me.organizations.map((organization) => (
@@ -205,7 +216,7 @@ export function Sidebar({
         </nav>
 
         <div className="sb-section-label">{locale === 'zh' ? '收藏' : 'Favorites'}</div>
-        <div className="sb-fav-drop" title="Pinned sessions appear here">
+        <div className="sb-fav-drop" title={locale === 'zh' ? '收藏的会话会显示在这里' : 'Pinned sessions appear here'}>
           {pinnedRuns.length ? pinnedRuns.map((run) => (
             <NavLink key={run.id} to={`/sessions/${run.id}`} className="sb-fav-item" onClick={onClose}>★ {run.title}</NavLink>
           )) : <span className="sb-fav-hint">{locale === 'zh' ? '拖入会话以收藏' : 'Drag sessions here to pin'}</span>}
