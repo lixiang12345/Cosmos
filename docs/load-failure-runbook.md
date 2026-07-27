@@ -45,11 +45,15 @@ pnpm soak:session
 
 默认转换等待上限 60 秒，可用 `DRILL_TRANSITION_TIMEOUT_SECONDS` 在 5-300 秒内调整。非 development 身份可从 Secret Manager 临时注入 `DRILL_AUTH_TOKEN`，但脚本仍拒绝非 loopback 目标，避免误停生产 Worker。
 
+脚本对所有 loopback `curl` 请求显式使用 `--noproxy '*'`，避免开发机的 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` 把 readiness 探测送出本机或造成错误的恢复结论。
+
 ## PostgreSQL readiness 故障演练
 
 `pnpm drill:database-readiness` 仅作用于本地 Compose。它先确认 health/ready 均为 200，再停止 PostgreSQL，验证进程 health 继续 200 而依赖 ready 在有界时间内 fail-closed 为 503；随后重启 PostgreSQL并等待 ready 恢复 200。EXIT/signal trap 会尽力恢复数据库容器。
 
 该演练不等同于生产连接池耗尽、主备切换或跨区故障。目标环境必须通过编排平台执行等价但受变更窗口保护的演练，并保留发布、时间线、告警、RTO 和数据完整性证据。
+
+与 Worker 演练相同，数据库 readiness 探测显式绕过环境代理，只访问已经校验为 loopback 的 `DRILL_BASE_URL`。
 
 ## 2026-07-22 本地基线
 
@@ -60,3 +64,7 @@ pnpm soak:session
 - Compose API、Worker、Web、PostgreSQL 在演练结束后均为 healthy。
 
 这些数字只描述当次开发机与合成 fixture，不可外推生产客户数、写吞吐、数据库规格或 SLO 达成。目标 staging/production 还必须覆盖 Session create/send、SSE 连接/撤权、queue backlog、provider 429/timeout、对象存储 5xx、数据库连接耗尽、Worker lease fencing、滚动升级和至少数小时 soak。
+
+## 2026-07-27 本地恢复演练与 No-Go
+
+最新一轮有界负载、真实 Provider/ToolCall、依赖故障、逻辑备份/隔离恢复、archive-mode PITR 与 Observer 指标证据，以及明确的 Staging No-Go 阻断项，见 [Staging Go / No-Go Evidence — 2026-07-27](./staging-go-no-go-2026-07-27.md)。该报告刻意区分本地运行态证据与尚未提供的外部环境证据。

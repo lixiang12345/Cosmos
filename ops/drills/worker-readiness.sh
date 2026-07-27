@@ -10,9 +10,9 @@ require_command() {
 
 api_get() {
   if [ -n "${DRILL_AUTH_TOKEN:-}" ]; then
-    curl --fail --silent --oauth2-bearer "$DRILL_AUTH_TOKEN" "${DRILL_BASE_URL}$1"
+    curl --noproxy '*' --fail --silent --oauth2-bearer "$DRILL_AUTH_TOKEN" "${DRILL_BASE_URL}$1"
   else
-    curl --fail --silent "${DRILL_BASE_URL}$1"
+    curl --noproxy '*' --fail --silent "${DRILL_BASE_URL}$1"
   fi
 }
 
@@ -67,7 +67,7 @@ docker compose up --detach worker >/dev/null
 wait_for_state true
 docker compose stop --timeout 10 worker >/dev/null
 wait_for_state false
-curl --fail --silent "${DRILL_BASE_URL}/api/health" >/dev/null
+curl --noproxy '*' --fail --silent "${DRILL_BASE_URL}/api/health" >/dev/null
 api_get /api/ready >/dev/null
 docker compose up --detach worker >/dev/null
 wait_for_state true

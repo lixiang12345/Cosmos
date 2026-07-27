@@ -19,7 +19,7 @@ restore_runtime() {
 trap restore_runtime EXIT HUP INT TERM
 
 status() {
-  curl --max-time 5 --silent --output /dev/null --write-out '%{http_code}' "$BASE_URL$1"
+  curl --noproxy '*' --max-time 5 --silent --output /dev/null --write-out '%{http_code}' "$BASE_URL$1"
 }
 
 wait_for_status() {
