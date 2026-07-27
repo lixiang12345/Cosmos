@@ -104,10 +104,10 @@ export function RemoteSpacesPage(props: Props) {
       setSpaces((items) => items.map((item) => item.id === next.id ? next : { ...item, isDefault: false })); setNotice(copy(locale, 'Default Space 已切换。', 'Default Space changed.')); props.onWorkspaceRefresh()
     } catch (cause) { setError(cause instanceof Error ? cause : new Error('Unable to change the Default Space.')) } finally { setBusy(false) }
   }
-  const refreshMigrations = () => {
+  const refreshMigrations = useCallback(() => {
     void listSpaceMigrations(props.organizationId, props.activeSpaceId, props.auth)
       .then((response) => setMigrations(response.items), () => undefined)
-  }
+  }, [props.activeSpaceId, props.auth, props.organizationId])
 
   const runMigration = () => {
     if (!preview || !preview.canMigrate) return
@@ -129,8 +129,7 @@ export function RemoteSpacesPage(props: Props) {
     }).finally(() => setMigrating(false))
   }
 
-  useEffect(() => { refreshMigrations() // eslint-disable-line react-hooks/exhaustive-deps
-  }, [props.activeSpaceId])
+  useEffect(() => { refreshMigrations() }, [refreshMigrations])
 
   const runPreview = () => {
     if (!previewTarget || previewTarget === props.activeSpaceId) return

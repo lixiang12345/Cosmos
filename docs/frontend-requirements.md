@@ -372,3 +372,43 @@ AppShell
 | FE-GA08 | 观测与隐私 | 前端错误和旅程指标含 release/request ID；采集 allowlist 经隐私审查，不上报 prompt、Secret、附件和私密 payload |
 
 生产发布还必须同时满足 [产品 GA 门槛](./product-requirements.md#122-生产发布ga)、[生产架构基线](./production-architecture.md) 和 [数据/权限/Session 生命周期](./data-model-permissions-session-lifecycle.md)。
+
+## 14. 2026-07-27 Fable 后原型一致性与双语复审基线
+
+本轮从 `bdd033f` 重新采集生产 Web 与 `cosmos-prototype` 证据，不沿用 2026-07-26 的“已对齐”结论。原型继续定义 App Shell、几何、排版、控件密度、图标和交互；生产服务端事实、权限和 capability 优先于原型模拟。
+
+### 14.1 Route / surface 映射
+
+| 生产 route | 原型 surface | 复审判定 |
+| --- | --- | --- |
+| `/home` | Home / New Session | Shell、Topbar、Expert rail、composer 与 Environment row 同构；生产数据量和 capability-gated 控件按服务端事实显示 |
+| `/sessions`、`/sessions/:id` | Sessions / Session workbench | 同构；生产只显示 canonical timeline、Files、Workers 和可用执行控制 |
+| `/files/user`、`/files/organization` | Files scopes | 同构；生产使用服务端分页、版本、预览和下载 |
+| `/experts`、详情、编辑 | Experts catalog/detail/editor | 同构；生产保留 immutable revision 与权限边界 |
+| `/environments` | Environments | 同构；生产保留 provisioning、Secret reference 与 capability |
+| `/integrations`、`/mcp`、`/webhooks`、`/secrets` | Configuration catalogs | 同构；生产操作使用真实 API 和结构化错误 |
+| `/automations`、events、history | Automations panels | 同构；生产 trigger/event/run 使用真实状态 |
+| `/artifacts`、`/skills`、`/workers`、`/approvals`、`/context`、`/spaces`、`/settings`、`/daemons`、`/repositories` | Cosmos extensions / partial prototype | 保留产品扩展，不为视觉一比一删除真实能力；统一使用 prototype shell/tokens/states |
+
+### 14.2 实测基线
+
+- 1440×900：生产与原型均为 220px Sidebar、36px Topbar、同一 Home max-width / composer / rail 结构；生产仅有 2 个服务端 Expert，原型有 12 个演示 Expert，此差异是数据事实而非布局缺口。
+- 390×844：两者均保留 220px Sidebar 与 170px 可见主区，document 宽度等于 viewport；无页面级水平溢出。该裁剪策略沿用 FE-SH04，不在本轮擅自改为 drawer。
+- `html[lang]` 已随 locale 变更为 `en` / `zh-CN`，locale 与 theme 偏好使用独立 key 持久化；此前缺少直接回归测试。
+
+### 14.3 问题分级与实施决策
+
+| 级别 | 问题 | 决策 |
+| --- | --- | --- |
+| P1 | 语言切换仅藏在账户菜单，首次使用不可发现，390px 无直接入口 | 在原型 Sidebar header 增加紧凑、始终可见、键盘可达的 `中` / `EN` 切换；账户菜单入口保留 |
+| P1 | `PrototypePageTopbar` 的 Philosophy、Showcase、Search 与快捷键 Dialog 固定英文 | 全部接入 locale，并为切换入口、Dialog title/rows 和 aria-label 增加中英文测试 |
+| P1 | 部分页面仍有固定英文 section/status/error fallback | 以生产 route inventory 分批收敛；proper noun、API 枚举和用户数据不强制翻译，周边标签必须翻译 |
+| P1 | CommandPalette 与 Space migration hooks 有 3 条既有 lint warning | Phase 1 清零，后续门禁要求 0 lint warning |
+| P2 | 生产比原型多 Artifacts、Skills 等已交付能力 | 作为 Cosmos extension 保留；后续在原型增加入口时再同步，不从生产删除真实能力 |
+| P2 | 原型固定 12 个 Expert，生产由服务端返回当前 Space 可用 Expert | 保持生产事实，不注入演示卡片；以组件几何和状态对齐验收 |
+
+### 14.4 Phase 1 验收证据
+
+- 新增 locale contract 测试：恢复、切换、`html[lang]`、持久化。
+- 修复 CommandPalette 不稳定 memo dependency 与 Space migration effect dependency。
+- 下一阶段只实施上述 P1 双语与页面文案修复，不做无关 CSS 重写。

@@ -140,11 +140,19 @@ export function CommandPalette({
   })), [go, runs])
 
   const normalizedQuery = query.trim().toLocaleLowerCase()
-  const matches = (command: Command) => !normalizedQuery || `${command.label} ${command.detail} ${command.keywords}`.toLocaleLowerCase().includes(normalizedQuery)
-  const filteredNavigation = navigationCommands.filter(matches)
-  const filteredSessions = sessionCommands.filter(matches)
-  const filteredArtifacts = normalizedQuery.length >= 2 ? artifactCommands : []
-  const commands = useMemo(() => [...filteredNavigation, ...filteredSessions, ...filteredArtifacts], [filteredArtifacts, filteredNavigation, filteredSessions])
+  const { filteredNavigation, filteredSessions, filteredArtifacts } = useMemo(() => {
+    const matches = (command: Command) => !normalizedQuery
+      || `${command.label} ${command.detail} ${command.keywords}`.toLocaleLowerCase().includes(normalizedQuery)
+    return {
+      filteredNavigation: navigationCommands.filter(matches),
+      filteredSessions: sessionCommands.filter(matches),
+      filteredArtifacts: normalizedQuery.length >= 2 ? artifactCommands.filter(matches) : [],
+    }
+  }, [artifactCommands, navigationCommands, normalizedQuery, sessionCommands])
+  const commands = useMemo(
+    () => [...filteredNavigation, ...filteredSessions, ...filteredArtifacts],
+    [filteredArtifacts, filteredNavigation, filteredSessions],
+  )
   const safeActiveIndex = Math.min(activeIndex, Math.max(0, commands.length - 1))
 
   useEffect(() => {
