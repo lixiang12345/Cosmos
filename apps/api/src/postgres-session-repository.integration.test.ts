@@ -71,6 +71,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
       ALTER TABLE cosmos_session_workers DISABLE TRIGGER cosmos_session_workers_reject_truncate;
       ALTER TABLE cosmos_automation_audit_events DISABLE TRIGGER cosmos_automation_audit_events_reject_truncate;
       ALTER TABLE cosmos_space_audit_events DISABLE TRIGGER cosmos_space_audit_events_reject_truncate;
+      ALTER TABLE cosmos_outbox_delivery_audit_events DISABLE TRIGGER cosmos_outbox_delivery_audit_reject_truncate;
     `)
     try {
       await pool.query(`
@@ -93,6 +94,7 @@ describeWithDatabase('PostgresSessionRepository', () => {
         ALTER TABLE cosmos_session_workers ENABLE TRIGGER cosmos_session_workers_reject_truncate;
         ALTER TABLE cosmos_automation_audit_events ENABLE TRIGGER cosmos_automation_audit_events_reject_truncate;
         ALTER TABLE cosmos_space_audit_events ENABLE TRIGGER cosmos_space_audit_events_reject_truncate;
+        ALTER TABLE cosmos_outbox_delivery_audit_events ENABLE TRIGGER cosmos_outbox_delivery_audit_reject_truncate;
       `)
     }
     const spaces = [

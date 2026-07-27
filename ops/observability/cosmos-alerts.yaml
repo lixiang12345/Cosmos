@@ -77,6 +77,16 @@ groups:
         annotations:
           summary: Cosmos has unpublished Outbox work older than five minutes
           runbook: docs/observability-slo-runbook.md#cosmosoutboxlaghigh
+      - alert: CosmosOutboxDeadLetterPresent
+        expr: sum by (cluster, environment, service) (cosmos_observer_outbox_dead_letter_total{stream=~"session|environment|automation|space"}) > 0
+        for: 5m
+        labels:
+          severity: ticket
+          service: cosmos-worker
+          slo: outbox-delivery
+        annotations:
+          summary: Cosmos has Outbox deliveries requiring explicit operator replay
+          runbook: docs/observability-slo-runbook.md#cosmosoutboxdeadletterpresent
       - alert: CosmosObserverWorkerHeartbeatStale
         expr: sum by (cluster, environment, service) (cosmos_observer_workers_total{state="fresh"}) == 0 and sum by (cluster, environment, service) (cosmos_observer_workers_total{state="stale"}) > 0
         for: 5m

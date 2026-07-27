@@ -152,6 +152,23 @@ export {
   type HttpApprovedWebhookClientOptions,
 } from './approved-webhook-client.js'
 export {
+  type OutboxDeadLetter,
+  type OutboxDeliveryClaim,
+  type OutboxDeliveryErrorCode,
+  type OutboxDeliveryRepository,
+  type OutboxReplayReason,
+  type OutboxStream,
+} from './outbox-delivery-repository.js'
+export { PostgresOutboxDeliveryRepository } from './postgres-outbox-delivery-repository.js'
+export { OutboxDispatcher, type OutboxDispatcherOptions } from './outbox-dispatcher.js'
+export {
+  HttpOutboxReceiverClient,
+  outboxDeliveryId,
+  type HttpOutboxReceiverClientOptions,
+  type OutboxReceiverClient,
+  type OutboxReceiverResult,
+} from './outbox-receiver-client.js'
+export {
   AgentProviderError,
   DeterministicConversationAgentProvider,
   OpenAiCompatibleChatCompletionsProvider,

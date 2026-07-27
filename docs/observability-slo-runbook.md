@@ -21,13 +21,13 @@ curl --fail --silent --oauth2-bearer "$METRICS_SCRAPE_TOKEN" https://cosmos.inte
 
 ## 独立数据库运维指标
 
-跨租户 queue、lease、heartbeat 和 Outbox 统计不能由普通 API/Worker tenant role 查询。migration `074_observer_runtime_metrics.sql` 创建 `cosmos_observer_runtime` NOLOGIN、NOINHERIT、NOBYPASSRLS 角色，仅授予状态/时间列的 SELECT；它没有 payload、actor、tenant ID、resource ID 或写权限。部署平台从 Secret Manager 注入 `OBSERVABILITY_DATABASE_URL`，以该角色执行：
+跨租户 queue、lease、heartbeat 和 Outbox 统计不能由普通 API tenant role 查询。migration `074_observer_runtime_metrics.sql` 创建 `cosmos_observer_runtime` NOLOGIN、NOINHERIT、NOBYPASSRLS 角色；`090_outbox_delivery_dispatch.sql` 仅追加 delivery 状态/时间列权限。observer 没有 source payload、credential、actor、tenant ID、resource ID 或写权限。部署平台从 Secret Manager 注入 `OBSERVABILITY_DATABASE_URL`，以该角色执行：
 
 ```bash
 pnpm metrics:database
 ```
 
-采集器只输出固定低基数系列：命令 `accepted|queued|running`、Environment provisioning `queued|running`、Outbox `session|environment|automation|space`，以及 Worker `fresh|stale`；`OBSERVABILITY_WORKER_FRESHNESS_SECONDS` 默认 30 秒且限制在 5-300 秒。推荐将 stdout 接入独立 Prometheus textfile/sidecar 链路，不把结果转发到 tenant API。采集器查询失败必须让采集任务失败，不输出部分或伪造的零值。
+采集器只输出固定低基数系列：命令 `accepted|queued|running`、Environment provisioning `queued|running`、Outbox `session|environment|automation|space` 的 pending/oldest/dead-letter，以及 Worker `fresh|stale`；`OBSERVABILITY_WORKER_FRESHNESS_SECONDS` 默认 30 秒且限制在 5-300 秒。推荐将 stdout 接入独立 Prometheus textfile/sidecar 链路，不把结果转发到 tenant API。采集器查询失败必须让采集任务失败，不输出部分或伪造的零值。
 
 ## SLO 与规则
 
@@ -87,9 +87,15 @@ pnpm metrics:database
 
 ## CosmosOutboxLagHigh
 
-1. 按固定 stream 定位 unpublished backlog，检查发布器权限、数据库锁、网络和下游 receiver；禁止读取或打印 payload。
-2. 重启/重放必须保持 event ID 幂等，先在隔离批次验证再扩容；不得直接 UPDATE/DELETE append-only ledger。
+1. 按固定 stream 定位 pending/retrying/delivering backlog，检查 dispatcher 配置、数据库 lease、网络和固定 receiver；禁止读取或打印 source payload。
+2. 重启会按稳定 `Idempotency-Key` 恢复过期 lease；下游必须保留幂等 ledger。不得直接 UPDATE/DELETE source Outbox 或 delivery audit ledger。
 3. 恢复后确认每个 stream 的 oldest age 和 pending count 回落，并保存不含正文的 event/时间线证据。
+
+## CosmosOutboxDeadLetterPresent
+
+1. 使用 `OUTBOX_OPERATOR_ID=<短期运维身份> pnpm outbox:dead-letter list` 查看 metadata-only dead-letter；输出包含 tenant/resource ID，必须在受控终端处理，禁止粘贴到公开工单。
+2. 先在 receiver 侧按稳定 delivery/idempotency ID 核对是否已接受；修复后使用 `replay <stream> <organization-id> <space-id> <source-id> <version> <reason-code>`。reason code 仅允许 `receiver_policy_fixed`、`receiver_recovered` 或 `operator_reconciled`，CLI 不接受任意正文。
+3. replay 受 status/version fencing 保护并写 append-only operational audit；不得直接清空表或修改 source `published_at`。确认 delivery 成功、source published timestamp 写入且 dead-letter gauge 回零后再关闭事件。
 
 ## CosmosObserverWorkerHeartbeatStale
 

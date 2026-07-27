@@ -25,6 +25,16 @@ export type WorkerConfig = {
     approvalTtlMs: number
     requestTimeoutMs: number
   }
+  outboxDispatcher?: {
+    url: string
+    bearerToken: string
+    leaseDurationMs: number
+    pollIntervalMs: number
+    maxAttempts: number
+    retryBaseDelayMs: number
+    retryMaxDelayMs: number
+    requestTimeoutMs: number
+  }
   provider: {
     baseUrl: string
     apiKey?: string
@@ -134,6 +144,54 @@ function approvedWebhookConfig(env: NodeJS.ProcessEnv) {
   }
 }
 
+function outboxDispatcherConfig(env: NodeJS.ProcessEnv) {
+  const urlValue = optional(env, 'OUTBOX_RECEIVER_URL')
+  const bearerToken = optional(env, 'OUTBOX_RECEIVER_BEARER_TOKEN')
+  const configured = [urlValue, bearerToken].filter(Boolean).length
+  if (configured === 0) return undefined
+  if (configured !== 2) {
+    throw new Error('OUTBOX_RECEIVER_URL and OUTBOX_RECEIVER_BEARER_TOKEN must be configured together.')
+  }
+
+  let url: URL
+  try {
+    url = new URL(urlValue!)
+  } catch {
+    throw new Error('OUTBOX_RECEIVER_URL must be a valid HTTPS URL.')
+  }
+  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) {
+    throw new Error('OUTBOX_RECEIVER_URL must be HTTPS and cannot contain credentials, query parameters, or a fragment.')
+  }
+  if (bearerToken!.length < 16 || bearerToken!.length > 4_096 || /\s/.test(bearerToken!)) {
+    throw new Error('OUTBOX_RECEIVER_BEARER_TOKEN must contain 16 to 4096 non-whitespace characters.')
+  }
+  const leaseDurationMs = boundedInteger(
+    env, 'OUTBOX_DELIVERY_LEASE_DURATION_MS', 30_000, 1_000, 300_000,
+  )
+  const requestTimeoutMs = boundedInteger(
+    env, 'OUTBOX_RECEIVER_REQUEST_TIMEOUT_MS', 10_000, 100, 60_000,
+  )
+  if (requestTimeoutMs >= leaseDurationMs) {
+    throw new Error('OUTBOX_RECEIVER_REQUEST_TIMEOUT_MS must be shorter than OUTBOX_DELIVERY_LEASE_DURATION_MS.')
+  }
+  const retryBaseDelayMs = boundedInteger(
+    env, 'OUTBOX_RETRY_BASE_DELAY_MS', 1_000, 100, 60_000,
+  )
+  const retryMaxDelayMs = boundedInteger(
+    env, 'OUTBOX_RETRY_MAX_DELAY_MS', 60_000, retryBaseDelayMs, 3_600_000,
+  )
+  return {
+    url: url.toString(),
+    bearerToken: bearerToken!,
+    leaseDurationMs,
+    pollIntervalMs: boundedInteger(env, 'OUTBOX_POLL_INTERVAL_MS', 500, 50, 60_000),
+    maxAttempts: boundedInteger(env, 'OUTBOX_MAX_ATTEMPTS', 5, 1, 20),
+    retryBaseDelayMs,
+    retryMaxDelayMs,
+    requestTimeoutMs,
+  }
+}
+
 export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerConfig {
   const leaseDurationMs = boundedInteger(env, 'WORKER_LEASE_DURATION_MS', 30_000, 3_000, 300_000)
   const heartbeatIntervalMs = boundedInteger(
@@ -168,6 +226,7 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
   }
   const credentials = providerCredentials(env)
   const approvedWebhook = approvedWebhookConfig(env)
+  const outboxDispatcher = outboxDispatcherConfig(env)
 
   return {
     databaseUrl: required(env, 'DATABASE_URL'),
@@ -188,6 +247,7 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
     recoveryBatchSize: boundedInteger(env, 'WORKER_RECOVERY_BATCH_SIZE', 20, 1, 100),
     objectStorage: loadObjectStorageConfig(env, env.NODE_ENV?.trim() || 'development'),
     ...(approvedWebhook ? { approvedWebhook } : {}),
+    ...(outboxDispatcher ? { outboxDispatcher } : {}),
     provider: {
       baseUrl: required(env, 'AGENT_PROVIDER_BASE_URL'),
       apiKey: credentials.fallback,

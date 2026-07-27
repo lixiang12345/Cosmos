@@ -39,24 +39,25 @@ export async function renderDatabaseMetrics(client, options = {}) {
       FROM cosmos_worker_heartbeats
     `, [workerFreshnessSeconds]),
     client.query(`
-      SELECT stream, count::bigint, oldest_age_seconds
-      FROM (
-        SELECT 'session' AS stream, count(*)::bigint,
-          COALESCE(EXTRACT(EPOCH FROM (clock_timestamp() - min(occurred_at))), 0) AS oldest_age_seconds
-          FROM cosmos_outbox_events WHERE published_at IS NULL
-        UNION ALL
-        SELECT 'environment', count(*)::bigint,
-          COALESCE(EXTRACT(EPOCH FROM (clock_timestamp() - min(occurred_at))), 0)
-          FROM cosmos_environment_outbox_events WHERE published_at IS NULL
-        UNION ALL
-        SELECT 'automation', count(*)::bigint,
-          COALESCE(EXTRACT(EPOCH FROM (clock_timestamp() - min(occurred_at))), 0)
-          FROM cosmos_automation_outbox_events WHERE published_at IS NULL
-        UNION ALL
-        SELECT 'space', count(*)::bigint,
-          COALESCE(EXTRACT(EPOCH FROM (clock_timestamp() - min(occurred_at))), 0)
-          FROM cosmos_space_outbox_events WHERE published_at IS NULL
-      ) pending
+      WITH streams(stream) AS (
+        VALUES ('session'), ('environment'), ('automation'), ('space')
+      )
+      SELECT streams.stream,
+        count(delivery.stream) FILTER (
+          WHERE delivery.status IN ('pending', 'retrying', 'delivering')
+        )::bigint AS count,
+        count(delivery.stream) FILTER (
+          WHERE delivery.status = 'dead_letter'
+        )::bigint AS dead_letter_count,
+        COALESCE(EXTRACT(EPOCH FROM (
+          clock_timestamp() - min(delivery.occurred_at) FILTER (
+            WHERE delivery.status IN ('pending', 'retrying', 'delivering')
+          )
+        )), 0) AS oldest_age_seconds
+      FROM streams
+      LEFT JOIN cosmos_outbox_deliveries delivery ON delivery.stream = streams.stream
+      GROUP BY streams.stream
+      ORDER BY streams.stream
     `),
   ])
 
@@ -95,6 +96,9 @@ export async function renderDatabaseMetrics(client, options = {}) {
     '# HELP cosmos_observer_outbox_oldest_age_seconds Age of the oldest unpublished Outbox row by stream.',
     '# TYPE cosmos_observer_outbox_oldest_age_seconds gauge',
     ...outbox.rows.map((row) => metric('cosmos_observer_outbox_oldest_age_seconds', { stream: row.stream }, Number(row.oldest_age_seconds))),
+    '# HELP cosmos_observer_outbox_dead_letter_total Outbox deliveries awaiting explicit operator replay.',
+    '# TYPE cosmos_observer_outbox_dead_letter_total gauge',
+    ...outbox.rows.map((row) => metric('cosmos_observer_outbox_dead_letter_total', { stream: row.stream }, row.dead_letter_count)),
     '',
   ]
   return `${lines.join('\n')}\n`

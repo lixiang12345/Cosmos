@@ -23,6 +23,7 @@
     "db:restore": "sh ops/postgres/restore.sh",
     "db:pitr-preflight": "sh ops/postgres/pitr-preflight.sh",
     "object-storage:gc": "pnpm --filter @cosmos/api object-storage:gc",
+    "outbox:dead-letter": "pnpm --filter @cosmos/api outbox:dead-letter",
     "load:smoke": "node ops/load/http-smoke.mjs",
     "soak:session": "node ops/load/session-journey.mjs",
     "drill:worker-readiness": "sh ops/drills/worker-readiness.sh",

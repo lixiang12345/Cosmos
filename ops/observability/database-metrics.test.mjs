@@ -8,7 +8,7 @@ describe('database observer metrics', () => {
       { rows: [{ status: 'queued', count: '3', oldest_age_seconds: '12.5', heartbeat_age_seconds: '0', expired_leases: '0' }] },
       { rows: [{ status: 'running', count: '1', oldest_age_seconds: '4.25', expired_leases: '1' }] },
       { rows: [{ fresh_count: '2', stale_count: '1', newest_age_seconds: '3.5' }] },
-      { rows: [{ stream: 'session', count: '5', oldest_age_seconds: '7.75' }] },
+      { rows: [{ stream: 'session', count: '5', dead_letter_count: '2', oldest_age_seconds: '7.75' }] },
     ]
     let index = 0
     const rendered = await renderDatabaseMetrics({ query: async () => results[index++] })
@@ -19,6 +19,7 @@ describe('database observer metrics', () => {
     assert.match(rendered, /cosmos_observer_workers_total\{state="fresh"\} 2/)
     assert.match(rendered, /cosmos_observer_workers_total\{state="stale"\} 1/)
     assert.match(rendered, /cosmos_observer_outbox_pending_total\{stream="session"\} 5/)
+    assert.match(rendered, /cosmos_observer_outbox_dead_letter_total\{stream="session"\} 2/)
     assert.equal(rendered.includes('organization'), false)
     assert.equal(rendered.includes('payload'), false)
   })

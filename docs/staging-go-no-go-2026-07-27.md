@@ -141,6 +141,12 @@ Promotion remains blocked until all of the following have external evidence:
 8. Multi-hour execution soak covering Session start/send, SSE, provider 429/timeout, object-store
    5xx, database exhaustion, lease fencing, and rolling deployment.
 
+Repository follow-up now provides bounded core Outbox delivery state, lease/fencing,
+metadata-only HTTPS dispatch, dead-letter alerting, and versioned replay. This removes
+the repository implementation gap but does not satisfy item 5 until a controlled
+external receiver demonstrates idempotency, retry/dead-letter/replay, lag recovery,
+and alert acknowledgement in the target environment.
+
 ## Go criteria and rollback conditions
 
 Re-evaluation may return **GO** only when every promotion gate has an attached external artifact and

@@ -13,6 +13,9 @@ import { assertRuntimeDatabaseRole, createRuntimePool } from './postgres-runtime
 import { PostgresToolCoordinatorRepository } from './postgres-tool-coordinator-repository.js'
 import { PostgresWorkerReadinessRepository } from './postgres-worker-readiness-repository.js'
 import { S3ObjectStore } from './object-storage.js'
+import { OutboxDispatcher } from './outbox-dispatcher.js'
+import { HttpOutboxReceiverClient } from './outbox-receiver-client.js'
+import { PostgresOutboxDeliveryRepository } from './postgres-outbox-delivery-repository.js'
 import { loadWorkerConfig } from './worker-config.js'
 import { maintainWorkerReadiness } from './worker-readiness-heartbeat.js'
 
@@ -71,6 +74,21 @@ try {
     } : undefined,
   )
   const readinessRepository = new PostgresWorkerReadinessRepository(pool)
+  const outboxDispatcher = config.outboxDispatcher ? new OutboxDispatcher({
+    repository: new PostgresOutboxDeliveryRepository(pool),
+    client: new HttpOutboxReceiverClient({
+      url: config.outboxDispatcher.url,
+      bearerToken: config.outboxDispatcher.bearerToken,
+      requestTimeoutMs: config.outboxDispatcher.requestTimeoutMs,
+    }),
+    workerId: config.workerId,
+    leaseDurationMs: config.outboxDispatcher.leaseDurationMs,
+    pollIntervalMs: config.outboxDispatcher.pollIntervalMs,
+    maxAttempts: config.outboxDispatcher.maxAttempts,
+    retryBaseDelayMs: config.outboxDispatcher.retryBaseDelayMs,
+    retryMaxDelayMs: config.outboxDispatcher.retryMaxDelayMs,
+    logger,
+  }) : undefined
   const worker = new ExecutionWorker({
     repository,
     provider,
@@ -94,6 +112,7 @@ try {
     await Promise.all([
       worker.run(shutdown.signal),
       environmentProvisioningWorker.run(shutdown.signal),
+      ...(outboxDispatcher ? [outboxDispatcher.run(shutdown.signal)] : []),
     ])
   } finally {
     shutdown.abort()

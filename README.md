@@ -63,6 +63,8 @@ pnpm --filter @cosmos/api start:worker
 
 可选的 `approved_webhook_delivery` 工具只有在 Worker 同时获得 `APPROVED_WEBHOOK_URL`、`APPROVED_WEBHOOK_BEARER_TOKEN` 与 `APPROVED_WEBHOOK_APPROVER_IDS` 时才进入 Provider catalog。模型只能提供 1–64 位安全 verification label，不能选择 URL、Header、Token 或任意正文；独立人类 Approval 绑定精确 input hash 后，Worker 才向固定 HTTPS receiver 发送一次带 `Idempotency-Key` 的 POST。2xx 记为成功、4xx 记为确定拒绝、5xx/网络/重定向记为 unknown 并阻止 Session 伪成功。详细部署、审批、过期和核验步骤见 [Approval 门控 Webhook 工具 Runbook](./docs/approved-webhook-tool-runbook.md)。
 
+可选的核心 Outbox dispatcher 仅在 Worker 同时获得 `OUTBOX_RECEIVER_URL` 与 `OUTBOX_RECEIVER_BEARER_TOKEN` 时启动。它对 Session/Environment/Automation/Space 事件使用 PostgreSQL lease/fencing、稳定幂等键、有界指数退避和显式 dead-letter；外发 envelope 不含 source payload 或 receiver body。运维通过 metadata-only `pnpm outbox:dead-letter` list/replay，replay 受 status/version fence 和固定 reason code 约束。完整配置与处置边界见 [Core Outbox Delivery Runbook](./docs/outbox-delivery-runbook.md)。
+
 当前模型目录固定为 `gpt-5.6-sol`、`claude-fable-5`、`claude-opus-4-8`、`claude-sonnet-5` 和 `grok-4.5`。目录由 `@cosmos/contracts` 共享给 Expert 编辑器与 Worker；不在目录中的 pinned model 会在任何 Provider 网络请求之前失败关闭。
 
 生产容器从仓库根目录构建：

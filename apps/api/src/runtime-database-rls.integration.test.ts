@@ -154,6 +154,25 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
       },
     ])
 
+    const workerPrivileges = await workerPool.query<{
+      delivery_status_update: boolean
+      delivery_event_type_update: boolean
+      source_payload_select: boolean
+    }>(`
+      SELECT
+        has_column_privilege(current_user, 'cosmos_outbox_deliveries', 'status', 'UPDATE')
+          AS delivery_status_update,
+        has_column_privilege(current_user, 'cosmos_outbox_deliveries', 'event_type', 'UPDATE')
+          AS delivery_event_type_update,
+        has_column_privilege(current_user, 'cosmos_outbox_events', 'payload', 'SELECT')
+          AS source_payload_select
+    `)
+    expect(workerPrivileges.rows[0]).toEqual({
+      delivery_status_update: true,
+      delivery_event_type_update: false,
+      source_payload_select: false,
+    })
+
     const protection = await migrationPool.query<{
       protected_tables: string
       rls_tables: string
@@ -170,9 +189,9 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
         AND relname NOT IN ('cosmos_schema_migrations', 'cosmos_worker_heartbeats', 'cosmos_object_storage_gc_runs')
     `)
     expect(protection.rows[0]).toEqual({
-      protected_tables: '72',
-      rls_tables: '72',
-      forced_tables: '72',
+      protected_tables: '74',
+      rls_tables: '74',
+      forced_tables: '74',
     })
   })
 
@@ -184,6 +203,8 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
       heartbeat_id: boolean
       job_created_at: boolean
       job_updated_at: boolean
+      delivery_status: boolean
+      delivery_source_id: boolean
     }>(`
       SELECT
         has_column_privilege(current_user, 'cosmos_commands', 'status', 'SELECT') AS command_status,
@@ -191,7 +212,9 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
         has_column_privilege(current_user, 'cosmos_worker_heartbeats', 'last_seen_at', 'SELECT') AS heartbeat_time,
         has_column_privilege(current_user, 'cosmos_worker_heartbeats', 'worker_id', 'SELECT') AS heartbeat_id,
         has_column_privilege(current_user, 'cosmos_environment_provisioning_jobs', 'created_at', 'SELECT') AS job_created_at,
-        has_column_privilege(current_user, 'cosmos_environment_provisioning_jobs', 'updated_at', 'SELECT') AS job_updated_at
+        has_column_privilege(current_user, 'cosmos_environment_provisioning_jobs', 'updated_at', 'SELECT') AS job_updated_at,
+        has_column_privilege(current_user, 'cosmos_outbox_deliveries', 'status', 'SELECT') AS delivery_status,
+        has_column_privilege(current_user, 'cosmos_outbox_deliveries', 'source_id', 'SELECT') AS delivery_source_id
     `)
     expect(privileges.rows[0]).toEqual({
       command_status: true,
@@ -200,6 +223,8 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
       heartbeat_id: false,
       job_created_at: true,
       job_updated_at: false,
+      delivery_status: true,
+      delivery_source_id: false,
     })
     const commands = await observerPool.query<{ status: string; count: string }>(`
       SELECT status, count(*)::text AS count
@@ -213,9 +238,16 @@ describeWithDatabase('restricted runtime roles and tenant RLS', () => {
       'SELECT count(*)::text AS count FROM cosmos_outbox_events WHERE published_at IS NULL',
     )
     expect(outbox.rows[0]).toEqual({ count: '2' })
+    const deliveries = await observerPool.query<{ count: string }>(`
+      SELECT count(*)::text AS count FROM cosmos_outbox_deliveries
+      WHERE status IN ('pending', 'retrying', 'delivering')
+    `)
+    expect(deliveries.rows[0]).toEqual({ count: '2' })
     await expect(observerPool.query('SELECT organization_id FROM cosmos_commands'))
       .rejects.toMatchObject({ code: '42501' })
     await expect(observerPool.query('SELECT payload FROM cosmos_outbox_events'))
+      .rejects.toMatchObject({ code: '42501' })
+    await expect(observerPool.query('SELECT source_id FROM cosmos_outbox_deliveries'))
       .rejects.toMatchObject({ code: '42501' })
     await expect(observerPool.query('UPDATE cosmos_commands SET status = status'))
       .rejects.toMatchObject({ code: '42501' })

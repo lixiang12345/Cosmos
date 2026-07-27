@@ -172,4 +172,64 @@ describe('execution worker configuration', () => {
       APPROVED_WEBHOOK_APPROVER_IDS: 'system:reviewer',
     })).toThrow('distinct safe actor')
   })
+
+  it('enables the core Outbox dispatcher only with complete bounded receiver authority', () => {
+    const config = loadWorkerConfig({
+      ...required,
+      OUTBOX_RECEIVER_URL: 'https://receiver.example/outbox',
+      OUTBOX_RECEIVER_BEARER_TOKEN: 'outbox-receiver-token',
+      OUTBOX_DELIVERY_LEASE_DURATION_MS: '45000',
+      OUTBOX_RECEIVER_REQUEST_TIMEOUT_MS: '5000',
+      OUTBOX_POLL_INTERVAL_MS: '250',
+      OUTBOX_MAX_ATTEMPTS: '6',
+      OUTBOX_RETRY_BASE_DELAY_MS: '2000',
+      OUTBOX_RETRY_MAX_DELAY_MS: '120000',
+    })
+    expect(config.outboxDispatcher).toEqual({
+      url: 'https://receiver.example/outbox',
+      bearerToken: 'outbox-receiver-token',
+      leaseDurationMs: 45_000,
+      requestTimeoutMs: 5_000,
+      pollIntervalMs: 250,
+      maxAttempts: 6,
+      retryBaseDelayMs: 2_000,
+      retryMaxDelayMs: 120_000,
+    })
+  })
+
+  it('rejects partial, unsafe, or unfenced Outbox receiver configuration', () => {
+    expect(() => loadWorkerConfig({
+      ...required,
+      OUTBOX_RECEIVER_URL: 'https://receiver.example/outbox',
+    })).toThrow('must be configured together')
+    expect(() => loadWorkerConfig({
+      ...required,
+      OUTBOX_RECEIVER_URL: 'http://receiver.example/outbox',
+      OUTBOX_RECEIVER_BEARER_TOKEN: 'outbox-receiver-token',
+    })).toThrow('must be HTTPS')
+    expect(() => loadWorkerConfig({
+      ...required,
+      OUTBOX_RECEIVER_URL: 'https://receiver.example/outbox?token=unsafe',
+      OUTBOX_RECEIVER_BEARER_TOKEN: 'outbox-receiver-token',
+    })).toThrow('query parameters')
+    expect(() => loadWorkerConfig({
+      ...required,
+      OUTBOX_RECEIVER_URL: 'https://receiver.example/outbox',
+      OUTBOX_RECEIVER_BEARER_TOKEN: 'short',
+    })).toThrow('16 to 4096')
+    expect(() => loadWorkerConfig({
+      ...required,
+      OUTBOX_RECEIVER_URL: 'https://receiver.example/outbox',
+      OUTBOX_RECEIVER_BEARER_TOKEN: 'outbox-receiver-token',
+      OUTBOX_DELIVERY_LEASE_DURATION_MS: '5000',
+      OUTBOX_RECEIVER_REQUEST_TIMEOUT_MS: '5000',
+    })).toThrow('must be shorter')
+    expect(() => loadWorkerConfig({
+      ...required,
+      OUTBOX_RECEIVER_URL: 'https://receiver.example/outbox',
+      OUTBOX_RECEIVER_BEARER_TOKEN: 'outbox-receiver-token',
+      OUTBOX_RETRY_BASE_DELAY_MS: '5000',
+      OUTBOX_RETRY_MAX_DELAY_MS: '1000',
+    })).toThrow('OUTBOX_RETRY_MAX_DELAY_MS')
+  })
 })
