@@ -108,7 +108,7 @@ export function RemoteArtifactsPage({
 
   return <main className="prototype-automation-page">
     <PrototypePageTopbar
-      crumb={text(locale, '会话 · Artifacts', 'Sessions · Artifacts')}
+      crumb={text(locale, '会话 · 产出物', 'Sessions · Artifacts')}
       navigationCollapsed={navigationCollapsed}
       onOpenNavigation={onOpenNavigation}
       onOpenCommand={onOpenCommand}
@@ -163,7 +163,7 @@ export function RemoteArtifactsPage({
         </div>
 
         {status === 'ready' ? <div className="prototype-automation-footer">
-          <span>{rows.length} {rows.length === 1 ? 'artifact' : 'artifacts'}</span>
+          <span>{text(locale, `${rows.length} 个产出物`, `${rows.length} ${rows.length === 1 ? 'artifact' : 'artifacts'}`)}</span>
           <div>{cursor ? <button type="button" className="prototype-ghost-button" onClick={loadMore}>{text(locale, '加载更多', 'Load more')}</button> : null}</div>
         </div> : null}
       </div>

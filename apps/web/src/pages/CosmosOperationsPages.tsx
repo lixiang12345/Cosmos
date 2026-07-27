@@ -905,8 +905,12 @@ export function CosmosFilesPage({
     setNotice(localize(locale, '文件下载已开始', 'File download started'))
   }
 
-  const title = initialScope === 'organization' ? 'Organization VFS' : 'User VFS'
-  const scopeLabel = initialScope === 'organization' ? 'Organization' : 'User'
+  const title = initialScope === 'organization'
+    ? localize(locale, '组织 VFS', 'Organization VFS')
+    : localize(locale, '个人 VFS', 'User VFS')
+  const scopeLabel = initialScope === 'organization'
+    ? localize(locale, '组织', 'Organization')
+    : localize(locale, '个人', 'User')
 
   return (
     <main className="prototype-files-page">
@@ -927,8 +931,8 @@ export function CosmosFilesPage({
                 {title}<PrototypeChevronDownLargeIcon aria-hidden="true" />
               </button>
               {scopeMenuOpen ? <div ref={scopeMenuRef} className="prototype-vfs-scope-menu" role="menu">
-                <button type="button" role="menuitem" className={initialScope === 'user' ? 'active' : undefined} onClick={() => navigate('/files/user')}>User VFS</button>
-                <button type="button" role="menuitem" className={initialScope === 'organization' ? 'active' : undefined} onClick={() => navigate('/files/organization')}>Organization VFS</button>
+                <button type="button" role="menuitem" className={initialScope === 'user' ? 'active' : undefined} onClick={() => navigate('/files/user')}>{localize(locale, '个人 VFS', 'User VFS')}</button>
+                <button type="button" role="menuitem" className={initialScope === 'organization' ? 'active' : undefined} onClick={() => navigate('/files/organization')}>{localize(locale, '组织 VFS', 'Organization VFS')}</button>
               </div> : null}
 
               <div className="prototype-vfs-tree" role="tree">

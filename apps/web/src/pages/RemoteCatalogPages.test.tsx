@@ -28,6 +28,7 @@ import {
   RemoteExpertDetailPage,
   RemoteExpertEditorPage,
   RemoteExpertsPage,
+  RemoteMcpServersPage,
   RemoteSkillsPage,
   type RemoteEnvironmentsPageProps,
   type RemoteExpertDetailPageProps,
@@ -538,7 +539,8 @@ describe('remote Catalog pages', () => {
     const view = render(withPreferences(<RemoteEnvironmentsPage {...initialProps} />))
 
     expect(screen.getByRole('heading', { level: 1, name: '环境' })).toBeInTheDocument()
-    expect(screen.getByText('2 environments')).toBeInTheDocument()
+    expect(screen.getByText('2 个环境')).toBeInTheDocument()
+    expect(screen.getByText('配置 · 环境')).toBeInTheDocument()
     await waitFor(() => expect(getEnvironment).toHaveBeenCalledTimes(1))
     const firstSignal = vi.mocked(getEnvironment).mock.calls[0]?.[4]
     await user.click(screen.getByRole('button', { name: '查看 Environment B' }))
@@ -798,6 +800,33 @@ describe('remote Catalog pages', () => {
       expect.objectContaining({ accessToken: 'token-a' }),
     )
     expect(onRetry).toHaveBeenCalledTimes(1)
+  })
+
+  it('returns focus to the MCP drawer trigger after Escape', async () => {
+    const user = userEvent.setup()
+    render(withPreferences(
+      <RemoteMcpServersPage
+        items={[]}
+        loading={false}
+        ready
+        error={null}
+        onRetry={vi.fn()}
+        organizationId="organization-a"
+        spaceId="space-a"
+        auth={auth}
+        credentialVersion={1}
+        canManage
+      />,
+    ))
+
+    const trigger = screen.getByRole('button', { name: '新增 Server' })
+    await user.click(trigger)
+    expect(screen.getByRole('dialog', { name: '新增 MCP Server' })).toBeInTheDocument()
+
+    await user.keyboard('{Escape}')
+
+    expect(screen.queryByRole('dialog', { name: '新增 MCP Server' })).not.toBeInTheDocument()
+    await waitFor(() => expect(trigger).toHaveFocus())
   })
 
   it('hides Skill management from non-managers and surfaces list errors', async () => {

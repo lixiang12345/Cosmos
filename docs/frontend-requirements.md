@@ -420,3 +420,12 @@ AppShell
 - 生产 bundle 已通过 `docker compose up -d --build --wait web` 重建，PostgreSQL、API 与 Web health check 均为 healthy；构建仅保留既有 Vite chunk-size warning。
 - 运行态在 390×844 与 1440×900 验证英文→中文→英文、刷新持久化、`html[lang]`、Light/Dark、快捷键 Dialog Escape/焦点恢复，以及 Home、Artifacts、Experts、Environments、MCP、Integrations、Sessions；受检 route 的 document 宽度均等于 viewport，无页面级水平溢出。
 - 该阶段状态为 code-complete、locally verified、runtime-verified；未包含外部环境验证。完整视觉/交互状态矩阵由独立 Phase 3 audit 收口。
+
+### 14.6 Phase 3 独立视觉与交互终审
+
+- 视觉层级、字体、间距、对齐与单色 token：在 1440×900 对比生产与 `cosmos-prototype`，在 390×844 复核中文 Dark / 英文 Light；Sidebar、Topbar、Home Expert rail、composer 与核心 Catalog 保持原型几何，未发现 P0/P1 重叠、跳动或页面级横向溢出。
+- 双语终审修复了中文 route crumb、列表计数/标签、Files VFS scope、Settings 与 Command Palette 中的高置信混合语言；proper noun、API 枚举和服务端数据仍按产品约束保留。
+- 键盘/焦点终审修复 Secret、Webhook、MCP、Daemon、Integration、Skill 与 Automation 抽屉的 Escape 焦点返回；命令面板、快捷键 Dialog、Files search、Session destructive confirmation 与 Environment editor 已有焦点圈、trap、Escape 和返回契约。运行态焦点圈为 2px solid；reduced-motion 模拟命中且动画/过渡时长降为近零。
+- 状态矩阵：运行态观察 Workspace loading、Artifacts/MCP/Integrations/Sessions empty、Home disabled/selected、MCP native validation；自动化测试覆盖 recoverable error、403/permission、busy/disabled、hover/focus/selected、validation 和 destructive confirmation。所有生产写操作继续由真实 API/RBAC/capability 控制。
+- 响应式：390×844 下 Sidebar 展开保持原型 220px/170px 分栏，收起后 main 扩至 390px，恢复后焦点回到收起按钮；受检 Home、Artifacts、Environments、Files、Settings、MCP 与 Automations 均无 document overflow。
+- P0/P1：终审结束时为 0。P2：既有 Vite >500kB chunk warning；390px 展开 Sidebar 的原型裁剪策略；外部环境/人工设计签字不在本地交付范围内。

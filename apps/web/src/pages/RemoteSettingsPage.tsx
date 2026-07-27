@@ -65,7 +65,7 @@ export function RemoteSettingsPage({ me, organization, activeSpaceId, onOpenNavi
 
   return (
     <main className="prototype-automation-page">
-      <PrototypePageTopbar crumb={copy(locale, '配置 · Settings', 'Configuration · Settings')} navigationCollapsed={navigationCollapsed} onOpenNavigation={onOpenNavigation} onOpenCommand={onOpenCommand} />
+      <PrototypePageTopbar crumb={copy(locale, '配置 · 设置', 'Configuration · Settings')} navigationCollapsed={navigationCollapsed} onOpenNavigation={onOpenNavigation} onOpenCommand={onOpenCommand} />
       <div className="prototype-automation-viewport">
         <div className="prototype-automation-content prototype-expert-content">
         <div className="prototype-automation-header"><div><h1>{copy(locale, '设置', 'Settings')}</h1><p>{copy(locale, '账号身份、组织成员关系与界面偏好。', 'Account identity, organization membership, and interface preferences.')}</p></div></div>

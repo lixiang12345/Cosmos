@@ -83,16 +83,16 @@ function text(locale: Locale, zh: string, en: string) {
   return locale === 'zh' ? zh : en
 }
 
-function scopeTitle(scope: FileScope) {
-  if (scope === 'organization') return 'Organization VFS'
-  if (scope === 'user') return 'User VFS'
-  return 'Workspace VFS'
+function scopeTitle(scope: FileScope, locale: Locale) {
+  if (scope === 'organization') return text(locale, '组织 VFS', 'Organization VFS')
+  if (scope === 'user') return text(locale, '个人 VFS', 'User VFS')
+  return text(locale, '会话工作区 VFS', 'Workspace VFS')
 }
 
-function scopeLabel(scope: FileScope) {
-  if (scope === 'organization') return 'Organization'
-  if (scope === 'user') return 'User'
-  return 'Workspace'
+function scopeLabel(scope: FileScope, locale: Locale) {
+  if (scope === 'organization') return text(locale, '组织', 'Organization')
+  if (scope === 'user') return text(locale, '个人', 'User')
+  return text(locale, '会话工作区', 'Workspace')
 }
 
 function formatDate(value: string, locale: Locale) {
@@ -529,7 +529,7 @@ export function RemoteFilesPage({
     else selectFile(entry.file)
   }
 
-  const title = scopeTitle(scope)
+  const title = scopeTitle(scope, locale)
   const selectedPath = selectedFile ? `${scope}/${selectedFile.path}` : ''
 
   return (
@@ -560,8 +560,8 @@ export function RemoteFilesPage({
                 {title}{scope !== 'workspace' ? <PrototypeChevronDownLargeIcon aria-hidden="true" /> : null}
               </button>
               {scopeMenuOpen && scope !== 'workspace' ? <div ref={scopeMenuRef} className="prototype-vfs-scope-menu" role="menu">
-                <button type="button" role="menuitem" className={scope === 'user' ? 'active' : undefined} onClick={() => navigate('/files/user')}>User VFS</button>
-                <button type="button" role="menuitem" className={scope === 'organization' ? 'active' : undefined} onClick={() => navigate('/files/organization')}>Organization VFS</button>
+                <button type="button" role="menuitem" className={scope === 'user' ? 'active' : undefined} onClick={() => navigate('/files/user')}>{scopeTitle('user', locale)}</button>
+                <button type="button" role="menuitem" className={scope === 'organization' ? 'active' : undefined} onClick={() => navigate('/files/organization')}>{scopeTitle('organization', locale)}</button>
               </div> : null}
 
               <div className="prototype-vfs-tree" role="tree">
@@ -593,7 +593,7 @@ export function RemoteFilesPage({
 
             <section className="prototype-vfs-main" aria-label={text(locale, '文件浏览器', 'Files browser')}>
               <div className="prototype-vfs-main-head">
-                <div className="prototype-vfs-crumb"><span className="prototype-vfs-ico"><PrototypeFolderIcon aria-hidden="true" /></span>{currentFolder ? baseName(currentFolder) : scopeLabel(scope)}</div>
+                <div className="prototype-vfs-crumb"><span className="prototype-vfs-ico"><PrototypeFolderIcon aria-hidden="true" /></span>{currentFolder ? baseName(currentFolder) : scopeLabel(scope, locale)}</div>
                 <div className="prototype-vfs-actions">
                   {scope === 'workspace' && onBackToSession ? <button type="button" className="prototype-vfs-back" onClick={onBackToSession}>{text(locale, '返回会话', 'Back')}</button> : null}
                   <button type="button" aria-label={text(locale, '上传不可用', 'Upload unavailable')} title={text(locale, '当前 API 不支持直接上传', 'Direct upload is unavailable in the current API')} disabled>↑</button>

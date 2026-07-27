@@ -219,6 +219,20 @@ describe('Remote Automation pages', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Automation service unavailable.')
   })
 
+  it('returns focus to the create trigger after Escape closes the drawer', async () => {
+    const user = userEvent.setup()
+    renderPage(<RemoteAutomationsPage {...commonProps} canManage />)
+
+    const trigger = await screen.findByRole('button', { name: '创建自动化' })
+    await user.click(trigger)
+    expect(screen.getByRole('dialog', { name: '创建自动化' })).toBeInTheDocument()
+
+    await user.keyboard('{Escape}')
+
+    expect(screen.queryByRole('dialog', { name: '创建自动化' })).not.toBeInTheDocument()
+    await waitFor(() => expect(trigger).toHaveFocus())
+  })
+
   it('creates a paused Automation with a published Expert', async () => {
     const user = userEvent.setup()
     vi.mocked(listAutomations).mockResolvedValueOnce({ items: [], projectionUpdatedAt: null })

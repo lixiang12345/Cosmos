@@ -224,6 +224,20 @@ function catalogDialogKeyDown(event: ReactKeyboardEvent<HTMLElement>, onClose: (
   }
 }
 
+function useCatalogDialogFocusReturn() {
+  const returnFocusRef = useRef<HTMLElement | null>(null)
+  const captureDialogTrigger = useCallback(() => {
+    returnFocusRef.current = document.activeElement as HTMLElement | null
+  }, [])
+  const restoreDialogTrigger = useCallback(() => {
+    const target = returnFocusRef.current
+    window.requestAnimationFrame(() => {
+      if (target?.isConnected) target.focus()
+    })
+  }, [])
+  return { captureDialogTrigger, restoreDialogTrigger }
+}
+
 function text(locale: Locale, zh: string, en: string) {
   return locale === 'zh' ? zh : en
 }
@@ -438,7 +452,7 @@ export function RemoteExpertsPage({
 
   return <main className="prototype-automation-page">
     <PrototypePageTopbar
-      crumb={text(locale, '配置 · Experts', 'Configuration · Experts')}
+      crumb={text(locale, '配置 · 专家', 'Configuration · Experts')}
       navigationCollapsed={navigationCollapsed}
       onOpenNavigation={onOpenNavigation}
       onOpenCommand={onOpenCommand}
@@ -493,7 +507,7 @@ export function RemoteExpertsPage({
               <th className="col-check"><input type="checkbox" checked={allChecked} disabled={!rows.length} aria-label={text(locale, '选择全部 Expert', 'Select all experts')} onChange={toggleAllChecked} /></th>
               <th className="col-star"><span className="sr-only">{text(locale, '固定', 'Pinned')}</span></th>
               <th>{text(locale, '名称', 'Name')}</th>
-              <th className="col-auto">Automations</th>
+              <th className="col-auto">{text(locale, '自动化', 'Automations')}</th>
               <th className="col-integ">{text(locale, '集成', 'Integrations')}</th>
               <th>{text(locale, '更新时间', 'Updated')} <span className="sort-icon">↓</span></th>
               <th className="col-menu"><span className="sr-only">{text(locale, '操作', 'Actions')}</span></th>
@@ -520,7 +534,7 @@ export function RemoteExpertsPage({
                       <div className="prototype-expert-name-body">
                         <div className="prototype-expert-name-line">
                           <strong>{expert.name}</strong>
-                          {expert.visibility === 'space' ? <span className="prototype-expert-tag">shared</span> : null}
+                          {expert.visibility === 'space' ? <span className="prototype-expert-tag">{text(locale, '共享', 'shared')}</span> : null}
                           {expert.status !== 'published' ? <span className="prototype-expert-tag">{expert.status === 'draft' ? text(locale, '草稿', 'draft') : text(locale, '已归档', 'archived')}</span> : null}
                         </div>
                         <div className="prototype-expert-desc-line">{expert.description || text(locale, '暂无说明', 'No description')}</div>
@@ -546,7 +560,7 @@ export function RemoteExpertsPage({
           </table>
         </div>
 
-        {state === 'ready' ? <div className="prototype-automation-footer"><span>{rows.length} {rows.length === 1 ? 'expert' : 'experts'}</span><div><button type="button" disabled>‹</button><span>{text(locale, '第 1 页，共 1 页', 'Page 1 of 1')}</span><button type="button" disabled>›</button><span>{text(locale, '行数', 'Rows')}</span><select disabled aria-label={text(locale, '每页行数', 'Rows per page')}><option>25</option></select></div></div> : null}
+        {state === 'ready' ? <div className="prototype-automation-footer"><span>{text(locale, `${rows.length} 个 Expert`, `${rows.length} ${rows.length === 1 ? 'expert' : 'experts'}`)}</span><div><button type="button" disabled>‹</button><span>{text(locale, '第 1 页，共 1 页', 'Page 1 of 1')}</span><button type="button" disabled>›</button><span>{text(locale, '行数', 'Rows')}</span><select disabled aria-label={text(locale, '每页行数', 'Rows per page')}><option>25</option></select></div></div> : null}
       </div>
     </div>
   </main>
@@ -595,7 +609,7 @@ export function RemoteExpertDetailPage({
 
   return <main className="prototype-automation-page">
     <PrototypePageTopbar
-      crumb={expert ? `Experts · ${expert.name}` : 'Experts'}
+      crumb={expert ? text(locale, `专家 · ${expert.name}`, `Experts · ${expert.name}`) : text(locale, '专家', 'Experts')}
       navigationCollapsed={navigationCollapsed}
       onOpenNavigation={onOpenNavigation}
       onOpenCommand={onOpenCommand}
@@ -637,7 +651,7 @@ export function RemoteExpertDetailPage({
               <div className="prototype-expert-section-fields">
                 <div className="prototype-expert-field-pair">
                   <div>
-                    <span className="prototype-field-label">Environment</span>
+                    <span className="prototype-field-label">{text(locale, '环境', 'Environment')}</span>
                     <p className="prototype-expert-detail-value"><code>{revision.environmentId}</code></p>
                     <p className="prototype-expert-hint">{text(locale, '版本', 'Revision')} <code>{revision.environmentRevisionId}</code></p>
                   </div>
@@ -663,7 +677,7 @@ export function RemoteExpertDetailPage({
                   </span>) : <span className="prototype-expert-chip-empty">{text(locale, '未开放任何能力', 'No capabilities granted')}</span>}
                 </div>
                 {revision.skillIds.length ? <>
-                  <span className="prototype-field-label" style={{ marginTop: 14, display: 'block' }}>Skills</span>
+                  <span className="prototype-field-label" style={{ marginTop: 14, display: 'block' }}>{text(locale, '技能', 'Skills')}</span>
                   <div className="prototype-expert-chip-box">
                     {revision.skillIds.map((skillId) => <span className="prototype-expert-chip" key={skillId}>
                       <span className="prototype-expert-chip-icon"><PrototypeHexIcon aria-hidden="true" /></span>{skillId}
@@ -972,7 +986,7 @@ export function RemoteExpertEditorPage({
 
   const editorShell = (children: ReactNode) => <main className="prototype-automation-page">
     <PrototypePageTopbar
-      crumb={expert ? text(locale, `Experts · ${expert.name}`, `Experts · ${expert.name}`) : text(locale, 'Experts · 新建', 'Experts · New')}
+      crumb={expert ? text(locale, `专家 · ${expert.name}`, `Experts · ${expert.name}`) : text(locale, '专家 · 新建', 'Experts · New')}
       navigationCollapsed={navigationCollapsed}
       onOpenNavigation={onOpenNavigation}
       onOpenCommand={onOpenCommand}
@@ -1055,9 +1069,9 @@ export function RemoteExpertEditorPage({
       <div className="prototype-expert-section-fields">
         <div className="prototype-expert-field-pair">
           <div>
-            <label className="prototype-field-label" htmlFor="expert-environment">Environment</label>
+            <label className="prototype-field-label" htmlFor="expert-environment">{text(locale, '环境', 'Environment')}</label>
             <p className="prototype-expert-hint">{text(locale, 'Cloud 沙箱或已连接的 Daemon 进程。', 'Cloud sandbox or a connected daemon process.')}</p>
-            <select id="expert-environment" className="prototype-field-select" aria-label="Environment" value={form.environmentId} onChange={(event) => field('environmentId', event.target.value)}>
+            <select id="expert-environment" className="prototype-field-select" aria-label={text(locale, '环境', 'Environment')} value={form.environmentId} onChange={(event) => field('environmentId', event.target.value)}>
               <option value="" disabled>{text(locale, '选择运行环境', 'Select Environment')}</option>
               {readyEnvironments.map((environment) => <option value={environment.id} key={environment.id}>{environment.name}</option>)}
             </select>
@@ -1366,7 +1380,7 @@ export function RemoteEnvironmentsPage({
 
   return <main className="prototype-automation-page">
     <PrototypePageTopbar
-      crumb={text(locale, '配置 · Environments', 'Configuration · Environments')}
+      crumb={text(locale, '配置 · 环境', 'Configuration · Environments')}
       navigationCollapsed={navigationCollapsed}
       onOpenNavigation={onOpenNavigation}
       onOpenCommand={onOpenCommand}
@@ -1428,7 +1442,7 @@ export function RemoteEnvironmentsPage({
                       <div className="prototype-expert-name-body">
                         <div className="prototype-expert-name-line">
                           <strong>{item.name}</strong>
-                          {item.visibility === 'space' ? <span className="prototype-expert-tag">shared</span> : null}
+                          {item.visibility === 'space' ? <span className="prototype-expert-tag">{text(locale, '共享', 'shared')}</span> : null}
                         </div>
                         {item.description ? <div className="prototype-expert-desc-line">{item.description}</div> : null}
                       </div>
@@ -1446,7 +1460,7 @@ export function RemoteEnvironmentsPage({
           </table>
         </div>
 
-        {state === 'ready' ? <div className="prototype-automation-footer"><span>{rows.length} {rows.length === 1 ? 'environment' : 'environments'}</span><div><button type="button" disabled>‹</button><span>{text(locale, '第 1 页，共 1 页', 'Page 1 of 1')}</span><button type="button" disabled>›</button><span>{text(locale, '行数', 'Rows')}</span><select disabled aria-label={text(locale, '每页行数', 'Rows per page')}><option>25</option></select></div></div> : null}
+        {state === 'ready' ? <div className="prototype-automation-footer"><span>{text(locale, `${rows.length} 个环境`, `${rows.length} ${rows.length === 1 ? 'environment' : 'environments'}`)}</span><div><button type="button" disabled>‹</button><span>{text(locale, '第 1 页，共 1 页', 'Page 1 of 1')}</span><button type="button" disabled>›</button><span>{text(locale, '行数', 'Rows')}</span><select disabled aria-label={text(locale, '每页行数', 'Rows per page')}><option>25</option></select></div></div> : null}
 
         {state === 'ready' && (items.length > 0 || editorOpen) ? <section className="prototype-environment-detail-panel" aria-label={text(locale, '运行环境详情', 'Environment detail')}>
           {editorOpen ? <EnvironmentEditor
@@ -1830,7 +1844,7 @@ export function RemoteRepositoriesPage({
 
   return <main className="prototype-automation-page">
     <PrototypePageTopbar
-      crumb={text(locale, '配置 · Repositories', 'Configuration · Repositories')}
+      crumb={text(locale, '配置 · 代码仓库', 'Configuration · Repositories')}
       navigationCollapsed={navigationCollapsed}
       onOpenNavigation={onOpenNavigation}
       onOpenCommand={onOpenCommand}
@@ -1881,7 +1895,7 @@ export function RemoteRepositoriesPage({
         </div>
 
         {mutationError ? <p className="prototype-automation-error" role="alert">{mutationError.message}</p> : null}
-        {state === 'ready' ? <div className="prototype-automation-footer"><span>{items.length} {items.length === 1 ? 'repository' : 'repositories'}</span><div /></div> : null}
+        {state === 'ready' ? <div className="prototype-automation-footer"><span>{text(locale, `${items.length} 个代码仓库`, `${items.length} ${items.length === 1 ? 'repository' : 'repositories'}`)}</span><div /></div> : null}
       </div>
     </div>
   </main>
@@ -1912,6 +1926,7 @@ export function RemoteSecretsPage({
   const [mutating, setMutating] = useState(false)
   const [mutationError, setMutationError] = useState<Error | null>(null)
   const [confirmArchiveId, setConfirmArchiveId] = useState<string>()
+  const { captureDialogTrigger, restoreDialogTrigger } = useCatalogDialogFocusReturn()
   const state = listState(loading, ready, error)
   const requestAuth = useMemo<CosmosApiAuthContext>(() => ({
     accessToken: auth.accessToken,
@@ -1920,7 +1935,8 @@ export function RemoteSecretsPage({
   }), [auth.accessToken, auth.onUnauthorized, auth.requestIdentity])
   void credentialVersion
 
-  const closeForm = useCallback(() => { setDraft(initialSecretDraft); setMutationError(null); setFormOpen(false) }, [])
+  const openForm = useCallback(() => { captureDialogTrigger(); setFormOpen(true) }, [captureDialogTrigger])
+  const closeForm = useCallback(() => { setDraft(initialSecretDraft); setMutationError(null); setFormOpen(false); restoreDialogTrigger() }, [restoreDialogTrigger])
 
   const submitSecret = useCallback(async () => {
     const name = draft.name.trim()
@@ -1964,7 +1980,7 @@ export function RemoteSecretsPage({
 
   return <main className="prototype-automation-page">
     <PrototypePageTopbar
-      crumb={text(locale, '配置 · Secrets', 'Configuration · Secrets')}
+      crumb={text(locale, '配置 · 密钥', 'Configuration · Secrets')}
       navigationCollapsed={navigationCollapsed}
       onOpenNavigation={onOpenNavigation}
       onOpenCommand={onOpenCommand}
@@ -1978,7 +1994,7 @@ export function RemoteSecretsPage({
               'Cosmos Secrets Manager。密钥值仅写入一次即只写——通过重建轮换。作用域内的密钥会以大写下划线环境变量自动注入每个 Expert VM（openai-api-key → $OPENAI_API_KEY）。',
               'Cosmos Secrets Manager. Value pasted once, then write-only — rotate by recreating. In-scope secrets auto-export into each Expert VM as upper-snake-case env vars (openai-api-key → $OPENAI_API_KEY).')}</p>
           </div>
-          {canManage ? <button type="button" className="prototype-primary-button" onClick={() => setFormOpen(true)}>{text(locale, '添加密钥', 'Add secret')}</button> : null}
+          {canManage ? <button type="button" className="prototype-primary-button" onClick={openForm}>{text(locale, '添加密钥', 'Add secret')}</button> : null}
         </div>
 
         <div className="prototype-automation-table-wrap">
@@ -2075,6 +2091,7 @@ export function RemoteWebhooksPage({
   const [revealedSecret, setRevealedSecret] = useState<string>()
   const [copied, setCopied] = useState(false)
   const [confirmArchiveId, setConfirmArchiveId] = useState<string>()
+  const { captureDialogTrigger, restoreDialogTrigger } = useCatalogDialogFocusReturn()
   const state = listState(loading, ready, error)
   const requestAuth = useMemo<CosmosApiAuthContext>(() => ({
     accessToken: auth.accessToken,
@@ -2083,7 +2100,8 @@ export function RemoteWebhooksPage({
   }), [auth.accessToken, auth.onUnauthorized, auth.requestIdentity])
   void credentialVersion
 
-  const closeForm = useCallback(() => { setDraft(initialWebhookDraft); setMutationError(null); setFormOpen(false) }, [])
+  const openForm = useCallback(() => { captureDialogTrigger(); setFormOpen(true) }, [captureDialogTrigger])
+  const closeForm = useCallback(() => { setDraft(initialWebhookDraft); setMutationError(null); setFormOpen(false); restoreDialogTrigger() }, [restoreDialogTrigger])
 
   const submitWebhook = useCallback(async () => {
     const name = draft.name.trim()
@@ -2146,7 +2164,7 @@ export function RemoteWebhooksPage({
             <h1>{text(locale, 'Webhooks', 'Webhooks')}</h1>
             <p>{text(locale, '面向 Datadog、CircleCI 等的自定义 HTTPS 端点，在 Automations 中作为 Webhook 触发器接入（Capabilities / Webhooks）。', 'Custom HTTPS endpoints for Datadog, CircleCI, etc. Wire from Automations as a Webhook trigger. Under Capabilities / Webhooks.')}</p>
           </div>
-          {canManage ? <button type="button" className="prototype-primary-button" onClick={() => setFormOpen(true)}>{text(locale, '创建 Webhook', 'Create webhook')}</button> : null}
+          {canManage ? <button type="button" className="prototype-primary-button" onClick={openForm}>{text(locale, '创建 Webhook', 'Create webhook')}</button> : null}
         </div>
 
         <div className="prototype-webhook-callout">
@@ -2254,6 +2272,7 @@ export function RemoteMcpServersPage({
   const [mutating, setMutating] = useState(false)
   const [mutationError, setMutationError] = useState<Error | null>(null)
   const [confirmArchiveId, setConfirmArchiveId] = useState<string>()
+  const { captureDialogTrigger, restoreDialogTrigger } = useCatalogDialogFocusReturn()
   const state = listState(loading, ready, error)
   const requestAuth = useMemo<CosmosApiAuthContext>(() => ({
     accessToken: auth.accessToken,
@@ -2262,14 +2281,15 @@ export function RemoteMcpServersPage({
   }), [auth.accessToken, auth.onUnauthorized, auth.requestIdentity])
   void credentialVersion
 
-  const closeForm = useCallback(() => { setDraft(initialMcpDraft); setMutationError(null); setFormOpen(false); setEditing(undefined) }, [])
+  const openForm = useCallback(() => { captureDialogTrigger(); setFormOpen(true) }, [captureDialogTrigger])
+  const closeForm = useCallback(() => { setDraft(initialMcpDraft); setMutationError(null); setFormOpen(false); setEditing(undefined); restoreDialogTrigger() }, [restoreDialogTrigger])
 
   const openEdit = useCallback((item: McpServerDto) => {
     setEditing(item)
     setDraft({ name: item.name, transport: item.transport, endpoint: item.endpoint ?? '', command: item.command ?? '' })
     setMutationError(null)
-    setFormOpen(true)
-  }, [])
+    openForm()
+  }, [openForm])
 
   const submitServer = useCallback(async () => {
     const name = draft.name.trim()
@@ -2321,7 +2341,7 @@ export function RemoteMcpServersPage({
 
   return <main className="prototype-automation-page">
     <PrototypePageTopbar
-      crumb={text(locale, '配置 · MCP Registry', 'Configuration · MCP Registry')}
+      crumb={text(locale, '配置 · MCP 注册表', 'Configuration · MCP Registry')}
       navigationCollapsed={navigationCollapsed}
       onOpenNavigation={onOpenNavigation}
       onOpenCommand={onOpenCommand}
@@ -2333,7 +2353,7 @@ export function RemoteMcpServersPage({
             <h1>{text(locale, 'MCP 注册表', 'MCP Registry')}</h1>
             <p>{text(locale, '添加合作伙伴或自定义 MCP servers，为 Expert 扩展外部工具与服务（docs/config-mcp）。', 'Add partner or custom MCP servers to extend Experts with external tools and services (docs/config-mcp).')}</p>
           </div>
-          {canManage ? <button type="button" className="prototype-primary-button" onClick={() => setFormOpen(true)}>{text(locale, '新增 Server', 'Add server')}</button> : null}
+          {canManage ? <button type="button" className="prototype-primary-button" onClick={openForm}>{text(locale, '新增 Server', 'Add server')}</button> : null}
         </div>
 
         <div className="prototype-automation-table-wrap">
@@ -2436,6 +2456,7 @@ export function RemoteDaemonsPage({
   const [mutating, setMutating] = useState(false)
   const [mutationError, setMutationError] = useState<Error | null>(null)
   const [confirmArchiveId, setConfirmArchiveId] = useState<string>()
+  const { captureDialogTrigger, restoreDialogTrigger } = useCatalogDialogFocusReturn()
   const state = listState(loading, ready, error)
   const requestAuth = useMemo<CosmosApiAuthContext>(() => ({
     accessToken: auth.accessToken,
@@ -2448,7 +2469,8 @@ export function RemoteDaemonsPage({
     environments.find((environment) => environment.id === environmentId)?.name ?? environmentId
   ), [environments])
 
-  const closeForm = useCallback(() => { setDraft(initialDaemonDraft); setMutationError(null); setFormOpen(false) }, [])
+  const openForm = useCallback(() => { captureDialogTrigger(); setFormOpen(true) }, [captureDialogTrigger])
+  const closeForm = useCallback(() => { setDraft(initialDaemonDraft); setMutationError(null); setFormOpen(false); restoreDialogTrigger() }, [restoreDialogTrigger])
 
   const submitDaemon = useCallback(async () => {
     const name = draft.name.trim()
@@ -2506,7 +2528,7 @@ export function RemoteDaemonsPage({
 
   return <main className="prototype-automation-page">
     <PrototypePageTopbar
-      crumb={text(locale, '配置 · Daemons', 'Configuration · Daemons')}
+      crumb={text(locale, '配置 · Daemon 池', 'Configuration · Daemon pools')}
       navigationCollapsed={navigationCollapsed}
       onOpenNavigation={onOpenNavigation}
       onOpenCommand={onOpenCommand}
@@ -2518,7 +2540,7 @@ export function RemoteDaemonsPage({
             <h1>{text(locale, 'Daemon 池', 'Daemon pools')}</h1>
             <p>{text(locale, '管理自托管执行机器与容量。Daemon pool 将本地运行的 daemon 分组，调度器据此分配 Session 运行。', 'Manage self-hosted execution machines and capacity. Daemon pools group locally-running daemons so the scheduler can assign Session runs.')}</p>
           </div>
-          {canManage ? <button type="button" className="prototype-primary-button" disabled={!environments.length} onClick={() => setFormOpen(true)}>{text(locale, '注册机器', 'Register machine')}</button> : null}
+          {canManage ? <button type="button" className="prototype-primary-button" disabled={!environments.length} onClick={openForm}>{text(locale, '注册机器', 'Register machine')}</button> : null}
         </div>
 
         <div className="prototype-automation-table-wrap">
@@ -2563,7 +2585,7 @@ export function RemoteDaemonsPage({
         </div>
 
         {mutationError && !formOpen ? <p className="prototype-automation-error" role="alert">{mutationError.message}</p> : null}
-        {state === 'ready' ? <div className="prototype-automation-footer"><span>{items.length} {items.length === 1 ? 'machine' : 'machines'}</span><div /></div> : null}
+        {state === 'ready' ? <div className="prototype-automation-footer"><span>{text(locale, `${items.length} 台机器`, `${items.length} ${items.length === 1 ? 'machine' : 'machines'}`)}</span><div /></div> : null}
       </div>
     </div>
 
@@ -2640,6 +2662,7 @@ export function RemoteIntegrationsPage({
   const [draft, setDraft] = useState<IntegrationDraft>(initialIntegrationDraft)
   const [workingId, setWorkingId] = useState<string>()
   const [mutationError, setMutationError] = useState<Error | null>(null)
+  const { captureDialogTrigger, restoreDialogTrigger } = useCatalogDialogFocusReturn()
   const state = listState(loading, ready, error)
   const requestAuth = useMemo<CosmosApiAuthContext>(() => ({
     accessToken: auth.accessToken,
@@ -2647,7 +2670,8 @@ export function RemoteIntegrationsPage({
     onUnauthorized: auth.onUnauthorized,
   }), [auth.accessToken, auth.onUnauthorized, auth.requestIdentity])
 
-  const closeForm = useCallback(() => { setDraft(initialIntegrationDraft); setMutationError(null); setFormOpen(false) }, [])
+  const openForm = useCallback(() => { captureDialogTrigger(); setFormOpen(true) }, [captureDialogTrigger])
+  const closeForm = useCallback(() => { setDraft(initialIntegrationDraft); setMutationError(null); setFormOpen(false); restoreDialogTrigger() }, [restoreDialogTrigger])
 
   const submitIntegration = useCallback(async () => {
     const name = draft.name.trim()
@@ -2723,7 +2747,7 @@ export function RemoteIntegrationsPage({
 
   return <main className="prototype-automation-page">
     <PrototypePageTopbar
-      crumb={text(locale, '配置 · Integrations', 'Configuration · Integrations')}
+      crumb={text(locale, '配置 · 集成', 'Configuration · Integrations')}
       navigationCollapsed={navigationCollapsed}
       onOpenNavigation={onOpenNavigation}
       onOpenCommand={onOpenCommand}
@@ -2735,7 +2759,7 @@ export function RemoteIntegrationsPage({
             <h1>{text(locale, '集成', 'Integrations')}</h1>
             <p>{text(locale, 'Team Apps 驱动组织级触发器，Personal Apps 附加到你的会话。在工作发生的地方连接工作。', 'Team Apps power org-wide triggers. Personal Apps attach to your sessions. Meet the work where it happens.')}</p>
           </div>
-          {canManage ? <button type="button" className="prototype-primary-button" onClick={() => setFormOpen(true)}>{text(locale, '添加集成', 'Add integration')}</button> : null}
+          {canManage ? <button type="button" className="prototype-primary-button" onClick={openForm}>{text(locale, '添加集成', 'Add integration')}</button> : null}
         </div>
 
         {state === 'loading' ? <div className="prototype-automation-state"><LoaderCircle className="spin" aria-hidden="true" />{text(locale, '加载中…', 'Loading…')}</div> : null}
@@ -2830,6 +2854,7 @@ export function RemoteSkillsPage({
   const [mutating, setMutating] = useState(false)
   const [mutationError, setMutationError] = useState<Error | null>(null)
   const [confirmArchiveId, setConfirmArchiveId] = useState<string>()
+  const { captureDialogTrigger, restoreDialogTrigger } = useCatalogDialogFocusReturn()
   const state = listState(loading, ready, error)
   const requestAuth = useMemo<CosmosApiAuthContext>(() => ({
     accessToken: auth.accessToken,
@@ -2838,7 +2863,8 @@ export function RemoteSkillsPage({
   }), [auth.accessToken, auth.onUnauthorized, auth.requestIdentity])
   void credentialVersion
 
-  const closeForm = useCallback(() => { setDraft(initialSkillDraft); setMutationError(null); setFormOpen(false); setEditing(undefined) }, [])
+  const openForm = useCallback(() => { captureDialogTrigger(); setFormOpen(true) }, [captureDialogTrigger])
+  const closeForm = useCallback(() => { setDraft(initialSkillDraft); setMutationError(null); setFormOpen(false); setEditing(undefined); restoreDialogTrigger() }, [restoreDialogTrigger])
 
   const openEdit = useCallback((item: SkillDto) => {
     setEditing(item)
@@ -2851,8 +2877,8 @@ export function RemoteSkillsPage({
       tags: item.tags.join(', '),
     })
     setMutationError(null)
-    setFormOpen(true)
-  }, [])
+    openForm()
+  }, [openForm])
 
   const submitSkill = useCallback(async () => {
     const name = draft.name.trim()
@@ -2908,7 +2934,7 @@ export function RemoteSkillsPage({
 
   return <main className="prototype-automation-page">
     <PrototypePageTopbar
-      crumb={text(locale, '配置 · Skills', 'Configuration · Skills')}
+      crumb={text(locale, '配置 · 技能', 'Configuration · Skills')}
       navigationCollapsed={navigationCollapsed}
       onOpenNavigation={onOpenNavigation}
       onOpenCommand={onOpenCommand}
@@ -2922,7 +2948,7 @@ export function RemoteSkillsPage({
               'Skill 是遵循 agentskills.io 规范的可复用知识包，为 Expert 提供领域专长。Inline 技能直接携带说明；URL 技能引用外部包，会话启动时加载。',
               'A Skill is a reusable knowledge package (following the agentskills.io spec) that gives Experts domain expertise. Inline skills carry their instructions; url skills reference an external package loaded at session boot.')}</p>
           </div>
-          {canManage ? <button type="button" className="prototype-primary-button" onClick={() => setFormOpen(true)}>{text(locale, '添加 Skill', 'Add skill')}</button> : null}
+          {canManage ? <button type="button" className="prototype-primary-button" onClick={openForm}>{text(locale, '添加 Skill', 'Add skill')}</button> : null}
         </div>
 
         <div className="prototype-automation-table-wrap">
@@ -2962,7 +2988,7 @@ export function RemoteSkillsPage({
         </div>
 
         {mutationError && !formOpen ? <p className="prototype-automation-error" role="alert">{mutationError.message}</p> : null}
-        {state === 'ready' ? <div className="prototype-automation-footer"><span>{items.length} {items.length === 1 ? 'skill' : 'skills'}</span><div /></div> : null}
+        {state === 'ready' ? <div className="prototype-automation-footer"><span>{text(locale, `${items.length} 个 Skill`, `${items.length} ${items.length === 1 ? 'skill' : 'skills'}`)}</span><div /></div> : null}
       </div>
     </div>
 

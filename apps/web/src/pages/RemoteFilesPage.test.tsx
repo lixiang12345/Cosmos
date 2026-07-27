@@ -156,7 +156,7 @@ describe('Remote Files page', () => {
     ))
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('dialog', { name: '搜索文件' })).not.toBeInTheDocument()
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Organization VFS' })).toHaveFocus())
+    await waitFor(() => expect(screen.getByRole('button', { name: '组织 VFS' })).toHaveFocus())
   })
 
   it('loads the exact Session Workspace scope and returns governed changes to the conversation', async () => {
@@ -195,7 +195,7 @@ describe('Remote Files page', () => {
     })
 
     expect(await screen.findByRole('heading', { name: '会话工作区文件' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Workspace VFS' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '会话工作区 VFS' })).toBeInTheDocument()
     expect(listFiles).toHaveBeenCalledWith(
       file.organizationId,
       'space-a',

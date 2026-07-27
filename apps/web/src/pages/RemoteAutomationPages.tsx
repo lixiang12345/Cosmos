@@ -506,6 +506,7 @@ export function RemoteAutomationsPage(props: CommonProps) {
   const { automations, setAutomations, experts, loading, error, reload } = useAutomationData(props)
   const [form, setForm] = useState<AutomationFormState | null>(null)
   const [editing, setEditing] = useState<AutomationDto>()
+  const formReturnFocusRef = useRef<HTMLElement | null>(null)
   const [busyId, setBusyId] = useState<string>()
   const [notice, setNotice] = useState('')
   const [confirmArchiveId, setConfirmArchiveId] = useState<string>()
@@ -535,6 +536,7 @@ export function RemoteAutomationsPage(props: CommonProps) {
   }, [automations, experts, query, scope])
 
   const openCreate = (expertId?: string) => {
+    formReturnFocusRef.current = document.activeElement as HTMLElement | null
     setMenuId(undefined)
     setEditing(undefined)
     setForm(emptyForm(experts, expertId))
@@ -542,6 +544,7 @@ export function RemoteAutomationsPage(props: CommonProps) {
 
   const openEdit = (automation: AutomationDto) => {
     if (!props.canManage || automation.status === 'archived') return
+    formReturnFocusRef.current = document.activeElement as HTMLElement | null
     setEditing(automation)
     setForm({
       expertId: automation.expertId,
@@ -554,6 +557,15 @@ export function RemoteAutomationsPage(props: CommonProps) {
       serviceAccountId: automation.serviceAccountId,
       maxRunsPerMinute: automation.maxRunsPerMinute,
       autoArchive: automation.autoArchive,
+    })
+  }
+
+  const closeForm = () => {
+    setForm(null)
+    setEditing(undefined)
+    const target = formReturnFocusRef.current
+    window.requestAnimationFrame(() => {
+      if (target?.isConnected) target.focus()
     })
   }
 
@@ -579,8 +591,7 @@ export function RemoteAutomationsPage(props: CommonProps) {
         setExpandedIds((ids) => new Set(ids).add(next.expertId))
         setNotice(label(locale, 'Automation 已创建并保持暂停。', 'Automation created and remains paused.'))
       }
-      setForm(null)
-      setEditing(undefined)
+      closeForm()
     } finally {
       setBusyId(undefined)
     }
@@ -726,7 +737,7 @@ export function RemoteAutomationsPage(props: CommonProps) {
     {!loading && !error ? <div className="prototype-automation-footer"><span>{rows.length} {rows.length === 1 ? label(locale, '个自动化', 'automation') : label(locale, '个自动化', 'automations')}</span><div><button type="button" disabled>‹</button><span>{label(locale, '第 1 页，共 1 页', 'Page 1 of 1')}</span><button type="button" disabled>›</button><span>{label(locale, '行数', 'Rows')}</span><select disabled aria-label={label(locale, '每页行数', 'Rows per page')}><option>25</option></select></div></div> : null}
 
     {notice ? <div className="prototype-automation-toast" role="status">{notice}</div> : null}
-    {form ? <AutomationForm key={editing?.id ?? 'create'} experts={experts} initial={form} editing={editing} busy={busyId === 'form' || Boolean(editing && busyId === editing.id)} onCancel={() => { if (!busyId) { setForm(null); setEditing(undefined) } }} onSave={save} onTest={editing ? () => runTest(editing) : undefined} /> : null}
+    {form ? <AutomationForm key={editing?.id ?? 'create'} experts={experts} initial={form} editing={editing} busy={busyId === 'form' || Boolean(editing && busyId === editing.id)} onCancel={() => { if (!busyId) closeForm() }} onSave={save} onTest={editing ? () => runTest(editing) : undefined} /> : null}
   </AutomationShell>
 }
 
