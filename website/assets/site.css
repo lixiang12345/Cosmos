@@ -121,6 +121,18 @@ p { margin: 0 0 14px; }
 }
 .skip-link:focus-visible { top: 12px; }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ==========================================================================
    顶栏
    ========================================================================== */
@@ -967,6 +979,8 @@ a.card:hover, .card--hover:hover {
   align-items: start;
 }
 
+.split > * { min-width: 0; }
+
 .split--reverse { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
 
 .split__copy .section__lead { margin-bottom: 22px; }
@@ -1004,7 +1018,7 @@ a.card:hover, .card--hover:hover {
 .checklist .tick svg { width: 10px; height: 10px; }
 
 @media (max-width: 900px) {
-  .split, .split--reverse { grid-template-columns: 1fr; gap: 28px; }
+  .split, .split--reverse { grid-template-columns: minmax(0, 1fr); gap: 28px; }
 }
 
 /* ==========================================================================

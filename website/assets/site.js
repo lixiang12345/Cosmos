@@ -5,15 +5,26 @@
   /* —— 顶栏移动端导航 —— */
   var navToggle = document.querySelector('.nav-toggle');
   var topNav = document.getElementById('site-nav');
+
+  function setTopNav(open, returnFocus) {
+    if (!topNav) return;
+    topNav.classList.toggle('is-open', open);
+    if (navToggle) navToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (!open && returnFocus && navToggle) navToggle.focus();
+  }
+
   if (navToggle && topNav) {
     navToggle.addEventListener('click', function () {
-      var open = topNav.classList.toggle('is-open');
-      navToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      setTopNav(!topNav.classList.contains('is-open'), false);
     });
     topNav.addEventListener('click', function (event) {
       if (event.target.closest('a')) {
-        topNav.classList.remove('is-open');
-        navToggle.setAttribute('aria-expanded', 'false');
+        setTopNav(false, false);
+      }
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape' && topNav.classList.contains('is-open')) {
+        setTopNav(false, true);
       }
     });
   }

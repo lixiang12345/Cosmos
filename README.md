@@ -11,7 +11,10 @@ apps/
 packages/
   contracts/    前后端共享的 Zod DTO 与运行时校验
 docs/           产品、前端、后端、API 契约和交付计划
+website/        中英文产品网站（GitHub Pages）
 ```
+
+产品网站作为独立的零构建静态站点发布到 <https://lixiang12345.github.io/Cosmos/>。`main` 分支中的 `website/` 或 Pages 工作流发生变更时，`.github/workflows/pages.yml` 会校验中英文页面和核心资源，并仅将 `website/` 上传到受保护的 `github-pages` 环境；它不会替换 Docker Compose 中的正式 Web 应用。
 
 ## 本地运行
 
