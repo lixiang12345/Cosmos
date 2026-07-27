@@ -2,6 +2,7 @@ import { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { runMigrations } from './migrations.js'
 import { PostgresExecutionRepository } from './postgres-execution-repository.js'
+import type { ExecutionClaim } from './execution-repository.js'
 import { PostgresSessionRepository } from './postgres-session-repository.js'
 import { PostgresSessionTimelineRepository } from './postgres-session-timeline-repository.js'
 import { PostgresToolApprovalRepository } from './postgres-tool-approval-repository.js'
@@ -41,6 +42,7 @@ describeWithDatabase('Postgres ToolCall and Approval governance', () => {
   let sessionId = ''
   let turnId = ''
   let attemptId = ''
+  let executionClaim: ExecutionClaim
 
   beforeAll(async () => {
     await adminPool.query(`CREATE SCHEMA ${schema}`)
@@ -85,9 +87,10 @@ describeWithDatabase('Postgres ToolCall and Approval governance', () => {
     const claim = await new PostgresExecutionRepository(workerPool).claimNext({
       leaseOwner: 'tool-worker',
       leaseDurationMs: 60_000,
-      now: new Date('2026-07-13T02:00:01.000Z'),
+      now: new Date('2026-07-13T03:00:30.000Z'),
     })
     if (!claim) throw new Error('Tool fixture requires a running Attempt.')
+    executionClaim = claim
     sessionId = claim.sessionId
     turnId = claim.turnId
     attemptId = claim.attemptId
@@ -239,6 +242,11 @@ describeWithDatabase('Postgres ToolCall and Approval governance', () => {
       toolCall: { status: 'approval_required', version: 2 },
       approval: { status: 'pending', requiredApprovals: 2, assignedTo: ['tool-reviewer-1', 'tool-reviewer-2'] },
     })
+    await expect(new PostgresExecutionRepository(workerPool).heartbeat({
+      claim: executionClaim,
+      leaseDurationMs: 60_000,
+      now: new Date('2026-07-13T03:01:01.000Z'),
+    })).resolves.toBe(true)
 
     const first = await approvals.decideApproval({
       organizationId: 'tool-org',
@@ -361,6 +369,57 @@ describeWithDatabase('Postgres ToolCall and Approval governance', () => {
     await expect(migrationPool.query(`
       UPDATE cosmos_approval_decisions SET note = 'tampered' WHERE approval_id = $1
     `, [requested.approval.id])).rejects.toBeDefined()
+  })
+
+  it('expires an undecided Approval under the Worker role and resumes the parent safely', async () => {
+    now = new Date('2026-07-13T03:20:00.000Z')
+    const queued = await coordinator.createToolCall(createRecord('approved_webhook_delivery'))
+    const requested = await coordinator.requestApproval({
+      organizationId: 'tool-org', spaceId: 'tool-space', sessionId,
+      toolCallId: queued.id, expectedVersion: queued.version,
+      requestedBy: 'tool-requester', requestedByKind: 'user',
+      assignedTo: ['tool-reviewer-1'], requiredApprovals: 1,
+      action: 'Emit approved Webhook event', reasons: ['External network write'],
+      evidence: [{ type: 'input', label: 'Verification label', value: 'expiry-smoke' }],
+      expiresAt: '2026-07-13T03:21:00.000Z', requestId: 'expiry-approval-request',
+    })
+    now = new Date('2026-07-13T03:22:00.000Z')
+    await expect(coordinator.reapExpiredApprovals()).resolves.toBe(1)
+    await expect(coordinator.getToolCall({
+      organizationId: 'tool-org', spaceId: 'tool-space', sessionId,
+      toolCallId: queued.id, workerId: 'tool-worker',
+    })).resolves.toMatchObject({ status: 'canceled' })
+
+    const state = await migrationPool.query<{
+      approval_status: string
+      session_status: string
+      turn_status: string
+      attempt_status: string
+      decision_events: string
+      decision_audits: string
+      decision_outbox: string
+    }>(`
+      SELECT
+        (SELECT status FROM cosmos_approvals WHERE id = $1) AS approval_status,
+        (SELECT status FROM cosmos_sessions WHERE id = $2) AS session_status,
+        (SELECT status FROM cosmos_turns WHERE id = $3) AS turn_status,
+        (SELECT status FROM cosmos_attempts WHERE id = $4) AS attempt_status,
+        (SELECT count(*)::text FROM cosmos_session_events
+          WHERE approval_id = $1 AND event_type = 'approval.decided') AS decision_events,
+        (SELECT count(*)::text FROM cosmos_audit_events
+          WHERE target_id = $1 AND action = 'approval.decision') AS decision_audits,
+        (SELECT count(*)::text FROM cosmos_outbox_events
+          WHERE aggregate_id = $1 AND event_type = 'approval.decided') AS decision_outbox
+    `, [requested.approval.id, sessionId, turnId, attemptId])
+    expect(state.rows[0]).toEqual({
+      approval_status: 'expired',
+      session_status: 'active',
+      turn_status: 'running',
+      attempt_status: 'running',
+      decision_events: '1',
+      decision_audits: '1',
+      decision_outbox: '1',
+    })
   })
 
   it('conceals unassigned approvals while privileged reviewers retain policy visibility', async () => {

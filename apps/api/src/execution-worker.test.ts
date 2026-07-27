@@ -7,6 +7,7 @@ import {
   type ConversationAgentProvider,
 } from './conversation-agent-provider.js'
 import type { ConversationToolBroker } from './conversation-tool-broker.js'
+import { ConversationToolExecutionError } from './conversation-tool-broker.js'
 import type { ExecutionClaim, ExecutionRepository } from './execution-repository.js'
 import { ExecutionWorker } from './execution-worker.js'
 
@@ -158,6 +159,19 @@ describe('ExecutionWorker', () => {
     })
   })
 
+  it('expires overdue Approvals before reaping execution leases', async () => {
+    const repo = repository()
+    const broker = toolBroker()
+    broker.reapExpiredApprovals = vi.fn().mockResolvedValue(1)
+    const provider = new DeterministicConversationAgentProvider('Recovered after approval expiry.')
+
+    await worker(repo, provider, 5, broker).runOnce()
+
+    expect(broker.reapExpiredApprovals).toHaveBeenCalledWith(20)
+    expect(vi.mocked(broker.reapExpiredApprovals).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(repo.reapExpired).mock.invocationCallOrder[0]!)
+  })
+
   it('fails the Attempt when the Provider exceeds the bounded tool iteration limit', async () => {
     const repo = repository()
     const broker = toolBroker()
@@ -179,6 +193,34 @@ describe('ExecutionWorker', () => {
       claim,
       classification: 'terminal',
       code: 'tool_iteration_limit',
+    }))
+    expect(repo.complete).not.toHaveBeenCalled()
+  })
+
+  it('fails closed when an approved external side effect has an unknown outcome', async () => {
+    const repo = repository()
+    const broker = toolBroker()
+    vi.mocked(broker.execute).mockRejectedValue(new ConversationToolExecutionError(
+      'tool_side_effect_unknown',
+      'The external write outcome is unknown and requires operator reconciliation.',
+    ))
+    const provider = new DeterministicConversationAgentProvider(() => ({
+      text: '',
+      finishReason: 'tool_calls',
+      toolCall: {
+        providerToolCallId: 'provider-tool-unknown',
+        name: 'workspace_files_list',
+        input: {},
+      },
+    }))
+
+    await worker(repo, provider, 5, broker).runOnce()
+
+    expect(repo.fail).toHaveBeenCalledWith(expect.objectContaining({
+      claim,
+      classification: 'terminal',
+      code: 'tool_side_effect_unknown',
+      message: 'The external write outcome is unknown and requires operator reconciliation.',
     }))
     expect(repo.complete).not.toHaveBeenCalled()
   })

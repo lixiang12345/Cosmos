@@ -39,7 +39,7 @@ services:
       CORS_ORIGIN: http://127.0.0.1:5173
       WORKER_READINESS_MAX_AGE_MS: ${WORKER_READINESS_MAX_AGE_MS:-30000}
     ports:
-      - "127.0.0.1:8787:8787"
+      - "127.0.0.1:${COSMOS_API_HOST_PORT:-8787}:8787"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

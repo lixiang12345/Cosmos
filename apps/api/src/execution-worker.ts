@@ -4,7 +4,10 @@ import {
   type ConversationAgentProvider,
   type ConversationAgentToolExchange,
 } from './conversation-agent-provider.js'
-import type { ConversationToolBroker } from './conversation-tool-broker.js'
+import {
+  ConversationToolExecutionError,
+  type ConversationToolBroker,
+} from './conversation-tool-broker.js'
 import type { ExecutionClaim, ExecutionRepository } from './execution-repository.js'
 
 export type ExecutionWorkerLogger = {
@@ -88,6 +91,8 @@ export class ExecutionWorker {
 
   async runOnce(signal: AbortSignal = new AbortController().signal): Promise<boolean> {
     if (signal.aborted) return false
+    const expiredApprovals = await this.toolBroker?.reapExpiredApprovals?.(this.recoveryBatchSize) ?? 0
+    if (expiredApprovals) this.logger.info('tool_approvals_expired', { expired: expiredApprovals })
     const recovered = await this.repository.reapExpired({
       limit: this.recoveryBatchSize,
       retryDelayMs: this.retryDelayMs,
@@ -172,6 +177,7 @@ export class ExecutionWorker {
           requestedBy: claim.requestedBy,
           requestedByKind: claim.requestedByKind,
           requestId: claim.requestId,
+          signal: providerSignal,
         }, result.toolCall, toolExchanges.length + 1)
         toolExchanges.push({
           call: result.toolCall,
@@ -227,6 +233,15 @@ export class ExecutionWorker {
           code: error.code,
           message: error.message,
           retryDelayMs: this.retryDelayMs,
+        })
+        return
+      }
+      if (error instanceof ConversationToolExecutionError) {
+        await this.repository.fail({
+          claim,
+          classification: 'terminal',
+          code: error.code,
+          message: error.message,
         })
         return
       }

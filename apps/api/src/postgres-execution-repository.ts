@@ -466,9 +466,15 @@ export class PostgresExecutionRepository implements ExecutionRepository {
           AND command_record.lease_owner = $8
           AND attempt.number = $7
           AND attempt.runtime_id = $8
-          AND attempt.status = 'running'
-          AND turn_record.status = 'running'
-          AND session_record.status = 'active'
+          AND (
+            (attempt.status = 'running'
+              AND turn_record.status = 'running'
+              AND session_record.status = 'active')
+            OR
+            (attempt.status = 'waiting'
+              AND turn_record.status = 'waiting_approval'
+              AND session_record.status = 'waiting')
+          )
         FOR UPDATE OF command_record, session_record, turn_record, attempt
       `, [
         input.claim.organizationId,
@@ -530,7 +536,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
         SET heartbeat_at = GREATEST(heartbeat_at, $8::timestamptz)
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
           AND turn_id = $4 AND id = $5 AND number = $6
-          AND runtime_id = $7 AND status = 'running'
+          AND runtime_id = $7 AND status IN ('running', 'waiting')
       `, [
         input.claim.organizationId,
         input.claim.spaceId,
@@ -547,7 +553,7 @@ export class PostgresExecutionRepository implements ExecutionRepository {
         UPDATE cosmos_turns
         SET heartbeat_at = GREATEST(heartbeat_at, $5::timestamptz)
         WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
-          AND status = 'running'
+          AND status IN ('running', 'waiting_approval')
       `, [
         input.claim.organizationId,
         input.claim.spaceId,

@@ -494,7 +494,7 @@ export class PostgresToolApprovalRepository implements ToolApprovalRepository {
   ) {
     await client.query(`
       UPDATE cosmos_attempts
-      SET status = 'running', heartbeat_at = $6
+      SET status = 'running', heartbeat_at = GREATEST(heartbeat_at, $6::timestamptz)
       WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
         AND turn_id = $4 AND id = $5 AND status = 'waiting'
     `, [
@@ -503,7 +503,8 @@ export class PostgresToolApprovalRepository implements ToolApprovalRepository {
     ])
     await client.query(`
       UPDATE cosmos_turns
-      SET status = 'running', heartbeat_at = $5, version = version + 1
+      SET status = 'running', heartbeat_at = GREATEST(heartbeat_at, $5::timestamptz),
+        version = version + 1
       WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
         AND id = $4 AND status = 'waiting_approval'
     `, [

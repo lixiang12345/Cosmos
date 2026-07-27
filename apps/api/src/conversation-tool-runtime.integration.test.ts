@@ -1,5 +1,6 @@
 import { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import type { ApprovedWebhookClient } from './approved-webhook-client.js'
 import { DeterministicConversationAgentProvider } from './conversation-agent-provider.js'
 import { GovernedConversationToolBroker } from './conversation-tool-broker.js'
 import { ExecutionWorker } from './execution-worker.js'
@@ -8,6 +9,7 @@ import { PostgresExecutionRepository } from './postgres-execution-repository.js'
 import { PostgresFileRepository, PostgresFileWriterRepository } from './postgres-file-repository.js'
 import { PostgresSessionRepository } from './postgres-session-repository.js'
 import { PostgresToolCoordinatorRepository } from './postgres-tool-coordinator-repository.js'
+import { PostgresToolApprovalRepository } from './postgres-tool-approval-repository.js'
 import { seedSessionConfiguration } from './session-configuration-test-fixture.js'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
@@ -38,9 +40,13 @@ describeWithDatabase('governed conversation tool runtime', () => {
       INSERT INTO cosmos_spaces (organization_id, id, name)
       VALUES ('conversation-tool-org', 'conversation-tool-space', 'Conversation Tool Space');
       INSERT INTO cosmos_organization_memberships (organization_id, actor_id, role)
-      VALUES ('conversation-tool-org', 'conversation-tool-user', 'member');
+      VALUES
+        ('conversation-tool-org', 'conversation-tool-user', 'member'),
+        ('conversation-tool-org', 'conversation-tool-reviewer', 'member');
       INSERT INTO cosmos_space_memberships (organization_id, space_id, actor_id, role)
-      VALUES ('conversation-tool-org', 'conversation-tool-space', 'conversation-tool-user', 'member');
+      VALUES
+        ('conversation-tool-org', 'conversation-tool-space', 'conversation-tool-user', 'member'),
+        ('conversation-tool-org', 'conversation-tool-space', 'conversation-tool-reviewer', 'member');
     `)
     await seedSessionConfiguration(migrationPool, 'conversation-tool-org', 'conversation-tool-space')
     const created = await new PostgresSessionRepository(apiPool, {
@@ -195,4 +201,114 @@ describeWithDatabase('governed conversation tool runtime', () => {
       leaked_content: false,
     })
   })
+
+  it('keeps the execution lease while Approval gates one real side-effect ledger transition', async () => {
+    const created = await new PostgresSessionRepository(apiPool, {
+      createId: () => `approved-webhook-${++sequence}`,
+    }).create({
+      organizationId: 'conversation-tool-org',
+      spaceId: 'conversation-tool-space',
+      actorId: 'conversation-tool-user',
+      actorKind: 'user',
+      requestId: 'approved-webhook-session-request',
+      idempotencyKey: 'approved-webhook-session-key',
+      request: {
+        expertId: 'expert-pr-author',
+        title: 'Approved Webhook Runtime',
+        visibility: 'private',
+        start: true,
+        message: { content: 'Emit the approved staging verification event.', attachments: [] },
+      },
+    })
+    const client: ApprovedWebhookClient = {
+      deliver: async () => ({ status: 'succeeded', statusCode: 202 }),
+    }
+    const provider = new DeterministicConversationAgentProvider((_input, invocation) => (
+      invocation === 1
+        ? {
+            text: '',
+            finishReason: 'tool_calls',
+            toolCall: {
+              providerToolCallId: 'provider-approved-webhook',
+              name: 'approved_webhook_delivery',
+              input: { label: 'integration-smoke' },
+            },
+          }
+        : { text: 'The approved verification event was accepted.', finishReason: 'stop' }
+    ))
+    const worker = new ExecutionWorker({
+      repository: new PostgresExecutionRepository(workerPool),
+      provider,
+      toolBroker: new GovernedConversationToolBroker(
+        new PostgresToolCoordinatorRepository(workerPool),
+        new PostgresFileRepository(workerPool),
+        undefined,
+        {
+          client,
+          approverIds: ['conversation-tool-reviewer'],
+          approvalTtlMs: 60_000,
+          approvalPollIntervalMs: 10,
+        },
+      ),
+      workerId: 'approved-webhook-worker',
+      leaseDurationMs: 30_000,
+      heartbeatIntervalMs: 25,
+      pollIntervalMs: 10,
+      recoveryBatchSize: 20,
+    })
+
+    const execution = worker.runOnce()
+    const approval = await waitForPendingApproval(created.session.id)
+    await new PostgresToolApprovalRepository(apiPool).decideApproval({
+      organizationId: 'conversation-tool-org',
+      spaceId: 'conversation-tool-space',
+      approvalId: approval.id,
+      actorId: 'conversation-tool-reviewer',
+      requestId: 'approved-webhook-decision',
+      idempotencyKey: 'approved-webhook-decision-key',
+      expectedVersion: approval.version,
+      request: { decision: 'approved', note: 'Staging receiver and rollback boundary verified.' },
+    })
+    await expect(execution).resolves.toBe(true)
+
+    const runtime = await migrationPool.query<{
+      tool_status: string
+      approval_status: string
+      side_effect_status: string
+      session_status: string
+      agent_messages: string
+      unknown_side_effects: string
+    }>(`
+      SELECT
+        (SELECT status FROM cosmos_tool_calls WHERE session_id = $1
+          AND tool_name = 'approved_webhook_delivery') AS tool_status,
+        (SELECT status FROM cosmos_approvals WHERE session_id = $1) AS approval_status,
+        (SELECT status FROM cosmos_tool_side_effects WHERE session_id = $1) AS side_effect_status,
+        (SELECT status FROM cosmos_sessions WHERE id = $1) AS session_status,
+        (SELECT count(*)::text FROM cosmos_messages WHERE session_id = $1 AND role = 'agent') AS agent_messages,
+        (SELECT count(*)::text FROM cosmos_tool_side_effects
+          WHERE session_id = $1 AND status IN ('prepared', 'unknown')) AS unknown_side_effects
+    `, [created.session.id])
+    expect(runtime.rows[0]).toEqual({
+      tool_status: 'succeeded',
+      approval_status: 'approved',
+      side_effect_status: 'succeeded',
+      session_status: 'completed',
+      agent_messages: '1',
+      unknown_side_effects: '0',
+    })
+  })
+
+  async function waitForPendingApproval(targetSessionId: string) {
+    const deadline = Date.now() + 5_000
+    while (Date.now() < deadline) {
+      const result = await migrationPool.query<{ id: string; version: number }>(`
+        SELECT id, version FROM cosmos_approvals
+        WHERE session_id = $1 AND status = 'pending'
+      `, [targetSessionId])
+      if (result.rows[0]) return result.rows[0]
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    throw new Error('Timed out waiting for the runtime Approval.')
+  }
 })

@@ -117,4 +117,59 @@ describe('execution worker configuration', () => {
       AGENT_PROVIDER_TOTAL_TIMEOUT_MS: '1000',
     })).toThrow('must not exceed')
   })
+
+  it('enables the approved Webhook tool only with a complete server-side policy', () => {
+    const config = loadWorkerConfig({
+      ...required,
+      APPROVED_WEBHOOK_URL: 'https://receiver.example/cosmos',
+      APPROVED_WEBHOOK_BEARER_TOKEN: 'receiver-secret-token',
+      APPROVED_WEBHOOK_APPROVER_IDS: 'reviewer-a,reviewer-b',
+      APPROVED_WEBHOOK_APPROVAL_TTL_MS: '120000',
+      APPROVED_WEBHOOK_REQUEST_TIMEOUT_MS: '2500',
+    })
+    expect(config.approvedWebhook).toEqual({
+      url: 'https://receiver.example/cosmos',
+      bearerToken: 'receiver-secret-token',
+      approverIds: ['reviewer-a', 'reviewer-b'],
+      approvalTtlMs: 120_000,
+      requestTimeoutMs: 2_500,
+    })
+  })
+
+  it('rejects partial or unsafe approved Webhook authority', () => {
+    expect(() => loadWorkerConfig({
+      ...required,
+      APPROVED_WEBHOOK_URL: 'https://receiver.example/cosmos',
+    })).toThrow('must be configured together')
+    expect(() => loadWorkerConfig({
+      ...required,
+      APPROVED_WEBHOOK_URL: 'http://receiver.example/cosmos',
+      APPROVED_WEBHOOK_BEARER_TOKEN: 'receiver-secret-token',
+      APPROVED_WEBHOOK_APPROVER_IDS: 'reviewer-a',
+    })).toThrow('must be HTTPS')
+    expect(() => loadWorkerConfig({
+      ...required,
+      APPROVED_WEBHOOK_URL: 'https://receiver.example/cosmos?token=secret',
+      APPROVED_WEBHOOK_BEARER_TOKEN: 'receiver-secret-token',
+      APPROVED_WEBHOOK_APPROVER_IDS: 'reviewer-a',
+    })).toThrow('query parameters')
+    expect(() => loadWorkerConfig({
+      ...required,
+      APPROVED_WEBHOOK_URL: 'https://receiver.example/cosmos',
+      APPROVED_WEBHOOK_BEARER_TOKEN: 'receiver-secret-token',
+      APPROVED_WEBHOOK_APPROVER_IDS: 'reviewer-a,reviewer-a',
+    })).toThrow('distinct safe actor')
+    expect(() => loadWorkerConfig({
+      ...required,
+      APPROVED_WEBHOOK_URL: 'https://receiver.example/cosmos',
+      APPROVED_WEBHOOK_BEARER_TOKEN: 'receiver secret token',
+      APPROVED_WEBHOOK_APPROVER_IDS: 'reviewer-a',
+    })).toThrow('non-whitespace')
+    expect(() => loadWorkerConfig({
+      ...required,
+      APPROVED_WEBHOOK_URL: 'https://receiver.example/cosmos',
+      APPROVED_WEBHOOK_BEARER_TOKEN: 'receiver-secret-token',
+      APPROVED_WEBHOOK_APPROVER_IDS: 'system:reviewer',
+    })).toThrow('distinct safe actor')
+  })
 })

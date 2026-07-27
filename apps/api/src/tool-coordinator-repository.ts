@@ -40,6 +40,19 @@ export type RequestToolApprovalRecord = {
   requestId: string
 }
 
+export type GetToolCallRecord = {
+  organizationId: string
+  spaceId: string
+  sessionId: string
+  toolCallId: string
+  workerId: string
+}
+
+export type ExpireToolApprovalRecord = GetToolCallRecord & {
+  approvalId: string
+  requestId: string
+}
+
 export type StartToolCallRecord = {
   organizationId: string
   spaceId: string
@@ -132,6 +145,9 @@ export class ToolCoordinatorValidationError extends Error {
 
 export interface ToolCoordinatorRepository {
   createToolCall(record: CreateToolCallRecord): Promise<ToolCallDto>
+  getToolCall(record: GetToolCallRecord): Promise<ToolCallDto | null>
+  expireApproval(record: ExpireToolApprovalRecord): Promise<ToolCallDto | null>
+  reapExpiredApprovals(limit?: number): Promise<number>
   requestApproval(record: RequestToolApprovalRecord): Promise<{
     toolCall: ToolCallDto
     approval: ApprovalDto

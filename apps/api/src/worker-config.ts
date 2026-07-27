@@ -18,6 +18,13 @@ export type WorkerConfig = {
   pollIntervalMs: number
   recoveryBatchSize: number
   objectStorage?: ObjectStorageConfig
+  approvedWebhook?: {
+    url: string
+    bearerToken: string
+    approverIds: readonly string[]
+    approvalTtlMs: number
+    requestTimeoutMs: number
+  }
   provider: {
     baseUrl: string
     apiKey?: string
@@ -85,6 +92,48 @@ function workerIdentifier(value: string) {
   return value
 }
 
+function approvedWebhookConfig(env: NodeJS.ProcessEnv) {
+  const urlValue = optional(env, 'APPROVED_WEBHOOK_URL')
+  const bearerToken = optional(env, 'APPROVED_WEBHOOK_BEARER_TOKEN')
+  const approverIdsValue = optional(env, 'APPROVED_WEBHOOK_APPROVER_IDS')
+  const configured = [urlValue, bearerToken, approverIdsValue].filter(Boolean).length
+  if (configured === 0) return undefined
+  if (configured !== 3) {
+    throw new Error('APPROVED_WEBHOOK_URL, APPROVED_WEBHOOK_BEARER_TOKEN, and APPROVED_WEBHOOK_APPROVER_IDS must be configured together.')
+  }
+
+  let url: URL
+  try {
+    url = new URL(urlValue!)
+  } catch {
+    throw new Error('APPROVED_WEBHOOK_URL must be a valid HTTPS URL.')
+  }
+  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) {
+    throw new Error('APPROVED_WEBHOOK_URL must be HTTPS and cannot contain credentials, query parameters, or a fragment.')
+  }
+  if (bearerToken!.length < 16 || bearerToken!.length > 4_096 || /\s/.test(bearerToken!)) {
+    throw new Error('APPROVED_WEBHOOK_BEARER_TOKEN must contain 16 to 4096 non-whitespace characters.')
+  }
+  const approverIds = approverIdsValue!.split(',').map((value) => value.trim())
+  if (approverIds.length < 1 || approverIds.length > 20
+    || approverIds.some((value) => value.startsWith('system:')
+      || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value))
+    || new Set(approverIds).size !== approverIds.length) {
+    throw new Error('APPROVED_WEBHOOK_APPROVER_IDS must contain 1 to 20 distinct safe actor identifiers.')
+  }
+  return {
+    url: url.toString(),
+    bearerToken: bearerToken!,
+    approverIds,
+    approvalTtlMs: boundedInteger(
+      env, 'APPROVED_WEBHOOK_APPROVAL_TTL_MS', 10 * 60_000, 60_000, 60 * 60_000,
+    ),
+    requestTimeoutMs: boundedInteger(
+      env, 'APPROVED_WEBHOOK_REQUEST_TIMEOUT_MS', 10_000, 100, 60_000,
+    ),
+  }
+}
+
 export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerConfig {
   const leaseDurationMs = boundedInteger(env, 'WORKER_LEASE_DURATION_MS', 30_000, 3_000, 300_000)
   const heartbeatIntervalMs = boundedInteger(
@@ -118,6 +167,7 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
     throw new Error('AGENT_PROVIDER_CONNECTION_TIMEOUT_MS must not exceed the total timeout.')
   }
   const credentials = providerCredentials(env)
+  const approvedWebhook = approvedWebhookConfig(env)
 
   return {
     databaseUrl: required(env, 'DATABASE_URL'),
@@ -137,6 +187,7 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
     pollIntervalMs: boundedInteger(env, 'WORKER_POLL_INTERVAL_MS', 500, 50, 60_000),
     recoveryBatchSize: boundedInteger(env, 'WORKER_RECOVERY_BATCH_SIZE', 20, 1, 100),
     objectStorage: loadObjectStorageConfig(env, env.NODE_ENV?.trim() || 'development'),
+    ...(approvedWebhook ? { approvedWebhook } : {}),
     provider: {
       baseUrl: required(env, 'AGENT_PROVIDER_BASE_URL'),
       apiKey: credentials.fallback,

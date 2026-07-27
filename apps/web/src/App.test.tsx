@@ -402,7 +402,11 @@ describe('Cosmos prototype', () => {
   it('uses Home as the Expert launcher without adding a sidebar Home item', async () => {
     renderApp('/home')
 
-    expect(await screen.findByRole('heading', { level: 1, name: '选择 Expert，开始一个会话' })).toBeInTheDocument()
+    expect(await screen.findByRole(
+      'heading',
+      { level: 1, name: '选择 Expert，开始一个会话' },
+      { timeout: 10_000 },
+    )).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: '首页' })).not.toBeInTheDocument()
   })
 

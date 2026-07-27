@@ -1,4 +1,5 @@
-import { AdvisorPlanProposalSchema, FilePrefixSchema, type FileDto } from '@cosmos/contracts'
+import { AdvisorPlanProposalSchema, FilePrefixSchema, type FileDto, type ToolCallDto } from '@cosmos/contracts'
+import type { ApprovedWebhookClient } from './approved-webhook-client.js'
 import type { AdvisorPlanRepository } from './advisor-plan-repository.js'
 import type {
   ConversationAgentToolCall,
@@ -17,6 +18,7 @@ export type ConversationToolContext = Readonly<{
   requestedBy: string
   requestedByKind: 'user' | 'service_account'
   requestId: string
+  signal?: AbortSignal
 }>
 
 export type ConversationToolExecutionResult = Readonly<{
@@ -25,12 +27,31 @@ export type ConversationToolExecutionResult = Readonly<{
 
 export interface ConversationToolBroker {
   readonly definitions: readonly ConversationAgentToolDefinition[]
+  reapExpiredApprovals?(limit?: number): Promise<number>
   execute(
     context: ConversationToolContext,
     call: ConversationAgentToolCall,
     invocation: number,
   ): Promise<ConversationToolExecutionResult>
 }
+
+export class ConversationToolExecutionError extends Error {
+  constructor(
+    readonly code: 'tool_approval_unavailable' | 'tool_side_effect_unknown',
+    message: string,
+  ) {
+    super(message)
+    this.name = 'ConversationToolExecutionError'
+  }
+}
+
+export type ApprovedWebhookToolOptions = Readonly<{
+  client: ApprovedWebhookClient
+  approverIds: readonly string[]
+  approvalTtlMs: number
+  approvalPollIntervalMs?: number
+  now?: () => Date
+}>
 
 const MAX_WORKSPACE_FILE_BYTES = 65_536
 const MAX_TOOL_RESULT_CHARACTERS = 95_000
@@ -119,6 +140,23 @@ const advisorDefinition = {
   },
 } as const satisfies ConversationAgentToolDefinition
 
+const approvedWebhookDefinition = {
+  name: 'approved_webhook_delivery',
+  description: 'Emit one bounded verification event to the operator-configured HTTPS receiver. This is a high-risk external write and always pauses for independent human approval. The destination, credentials, headers, and payload shape are fixed by the Worker and cannot be supplied by the model.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      label: {
+        type: 'string',
+        pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$',
+        description: 'A non-sensitive verification label containing only safe identifier characters.',
+      },
+    },
+    required: ['label'],
+    additionalProperties: false,
+  },
+} as const satisfies ConversationAgentToolDefinition
+
 type ToolOutcome = {
   status: 'succeeded' | 'failed'
   output: unknown
@@ -200,6 +238,19 @@ function failure(code: string, message: string): ToolOutcome {
   }
 }
 
+function delay(durationMs: number, signal: AbortSignal) {
+  if (signal.aborted) return Promise.resolve()
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(done, durationMs)
+    function done() {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', done)
+      resolve()
+    }
+    signal.addEventListener('abort', done, { once: true })
+  })
+}
+
 export class GovernedConversationToolBroker implements ConversationToolBroker {
   readonly definitions: readonly ConversationAgentToolDefinition[]
 
@@ -207,10 +258,17 @@ export class GovernedConversationToolBroker implements ConversationToolBroker {
     private readonly coordinator: ToolCoordinatorRepository,
     private readonly files: FileRepository,
     private readonly advisorPlans?: AdvisorPlanRepository,
+    private readonly approvedWebhook?: ApprovedWebhookToolOptions,
   ) {
-    this.definitions = advisorPlans
-      ? [...workspaceDefinitions, advisorDefinition]
-      : workspaceDefinitions
+    this.definitions = [
+      ...workspaceDefinitions,
+      ...(advisorPlans ? [advisorDefinition] : []),
+      ...(approvedWebhook ? [approvedWebhookDefinition] : []),
+    ]
+  }
+
+  reapExpiredApprovals(limit = 20) {
+    return this.coordinator.reapExpiredApprovals(limit)
   }
 
   async execute(
@@ -222,6 +280,7 @@ export class GovernedConversationToolBroker implements ConversationToolBroker {
       throw new Error('The Provider requested a tool outside the governed catalog.')
     }
     const requestPrefix = `${context.requestId}:tool:${invocation}`
+    const isApprovedWebhook = call.name === approvedWebhookDefinition.name
     const created = await this.coordinator.createToolCall({
       organizationId: context.organizationId,
       spaceId: context.spaceId,
@@ -237,25 +296,73 @@ export class GovernedConversationToolBroker implements ConversationToolBroker {
         ? 'list'
         : call.name === 'workspace_file_read'
           ? 'read'
-          : 'propose',
-      riskLevel: 'low',
+          : call.name === 'advisor_plan_propose'
+            ? 'propose'
+            : 'deliver',
+      riskLevel: isApprovedWebhook ? 'high' : 'low',
       input: call.input,
       inputSummary: call.name === 'workspace_files_list'
         ? 'List files in the current Session workspace.'
         : call.name === 'workspace_file_read'
           ? 'Read a text file from the current Session workspace.'
-          : 'Propose a bounded Advisor control-plane plan for explicit confirmation.',
+          : call.name === 'advisor_plan_propose'
+            ? 'Propose a bounded Advisor control-plane plan for explicit confirmation.'
+            : 'Emit one bounded event to the operator-configured Webhook after independent approval.',
     })
-    const started = await this.coordinator.startToolCall({
-      organizationId: context.organizationId,
-      spaceId: context.spaceId,
-      sessionId: context.sessionId,
-      toolCallId: created.id,
-      expectedVersion: created.version,
-      workerId: context.workerId,
-      requestId: `${requestPrefix}:start`,
-      providerIdempotencyKey: `${context.attemptId}:${call.providerToolCallId}`,
-    })
+
+    let approvedLabel: string | undefined
+    let startCandidate = created
+    if (isApprovedWebhook) {
+      try {
+        approvedLabel = this.approvedWebhookLabel(call.input)
+      } catch (error) {
+        const started = await this.startToolCall(context, call, requestPrefix, created)
+        return this.finishToolCall(
+          context,
+          requestPrefix,
+          started,
+          error instanceof ToolInputError
+            ? failure('invalid_input', error.message)
+            : failure('invalid_input', 'The approved Webhook input is invalid.'),
+        )
+      }
+      try {
+        startCandidate = await this.requestAndWaitForApproval(
+          context, requestPrefix, created, approvedLabel,
+        )
+      } catch (error) {
+        if (context.signal?.aborted) throw error
+        const current = await this.coordinator.getToolCall({
+          organizationId: context.organizationId,
+          spaceId: context.spaceId,
+          sessionId: context.sessionId,
+          toolCallId: created.id,
+          workerId: context.workerId,
+        })
+        if (current?.status === 'queued') {
+          const started = await this.startToolCall(context, call, requestPrefix, current)
+          return this.finishToolCall(
+            context,
+            requestPrefix,
+            started,
+            failure(
+              'approval_unavailable',
+              'Independent Approval is unavailable for this requester; no external request was sent.',
+            ),
+          )
+        }
+        throw error
+      }
+      if (startCandidate.status === 'canceled') {
+        return {
+          content: JSON.stringify(failure(
+            'approval_not_granted',
+            'The external write was not approved and no request was sent.',
+          ).output),
+        }
+      }
+    }
+    const started = await this.startToolCall(context, call, requestPrefix, startCandidate)
 
     let outcome: ToolOutcome
     try {
@@ -263,13 +370,43 @@ export class GovernedConversationToolBroker implements ConversationToolBroker {
         ? await this.listFiles(context, call.input)
         : call.name === 'workspace_file_read'
           ? await this.readFile(context, call.input)
-          : await this.proposeAdvisorPlan(context, call)
+          : call.name === 'advisor_plan_propose'
+            ? await this.proposeAdvisorPlan(context, call)
+            : await this.deliverApprovedWebhook(context, call, started, approvedLabel!)
     } catch (error) {
+      if (error instanceof ConversationToolExecutionError) throw error
       outcome = error instanceof ToolInputError
         ? failure('invalid_input', error.message)
         : failure('tool_unavailable', 'The workspace tool is temporarily unavailable.')
     }
 
+    return this.finishToolCall(context, requestPrefix, started, outcome)
+  }
+
+  private startToolCall(
+    context: ConversationToolContext,
+    call: ConversationAgentToolCall,
+    requestPrefix: string,
+    toolCall: ToolCallDto,
+  ) {
+    return this.coordinator.startToolCall({
+      organizationId: context.organizationId,
+      spaceId: context.spaceId,
+      sessionId: context.sessionId,
+      toolCallId: toolCall.id,
+      expectedVersion: toolCall.version,
+      workerId: context.workerId,
+      requestId: `${requestPrefix}:start`,
+      providerIdempotencyKey: `${context.attemptId}:${call.providerToolCallId}`,
+    })
+  }
+
+  private async finishToolCall(
+    context: ConversationToolContext,
+    requestPrefix: string,
+    started: ToolCallDto,
+    outcome: ToolOutcome,
+  ): Promise<ConversationToolExecutionResult> {
     let content = JSON.stringify(outcome.output)
     if (content.length > MAX_TOOL_RESULT_CHARACTERS) {
       outcome = failure('content_too_large', 'The workspace tool result exceeds the model-read limit.')
@@ -288,6 +425,185 @@ export class GovernedConversationToolBroker implements ConversationToolBroker {
       outputSummary: outcome.summary,
     })
     return { content }
+  }
+
+  private approvedWebhookLabel(input: Readonly<Record<string, unknown>>) {
+    if (!isRecord(input)) throw new ToolInputError('Tool arguments must be an object.')
+    exactKeys(input, ['label'])
+    const label = input.label
+    if (typeof label !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(label)) {
+      throw new ToolInputError('label must contain 1 to 64 safe identifier characters.')
+    }
+    return label
+  }
+
+  private async requestAndWaitForApproval(
+    context: ConversationToolContext,
+    requestPrefix: string,
+    created: ToolCallDto,
+    label: string,
+  ) {
+    if (!this.approvedWebhook) {
+      throw new ConversationToolExecutionError(
+        'tool_approval_unavailable',
+        'Approved external writes are not configured for this Worker.',
+      )
+    }
+    const requested = await this.coordinator.requestApproval({
+      organizationId: context.organizationId,
+      spaceId: context.spaceId,
+      sessionId: context.sessionId,
+      toolCallId: created.id,
+      expectedVersion: created.version,
+      requestedBy: context.requestedBy,
+      requestedByKind: context.requestedByKind,
+      assignedTo: [...this.approvedWebhook.approverIds],
+      requiredApprovals: 1,
+      action: 'Emit an operator-configured Webhook verification event',
+      reasons: [
+        'This operation performs an external network write.',
+        'The exact destination and credential are controlled by Worker configuration.',
+      ],
+      evidence: [
+        { type: 'tool', label: 'Tool', value: approvedWebhookDefinition.name },
+        { type: 'input', label: 'Verification label', value: label },
+      ],
+      expiresAt: new Date((this.approvedWebhook.now?.() ?? new Date()).getTime()
+        + this.approvedWebhook.approvalTtlMs).toISOString(),
+      requestId: `${requestPrefix}:approval`,
+    })
+    const signal = context.signal ?? new AbortController().signal
+    const pollIntervalMs = this.approvedWebhook.approvalPollIntervalMs ?? 500
+    const expiresAt = Date.parse(requested.approval.expiresAt)
+    while (!signal.aborted) {
+      const current = await this.coordinator.getToolCall({
+        organizationId: context.organizationId,
+        spaceId: context.spaceId,
+        sessionId: context.sessionId,
+        toolCallId: requested.toolCall.id,
+        workerId: context.workerId,
+      })
+      if (!current) {
+        throw new ConversationToolExecutionError(
+          'tool_approval_unavailable',
+          'The approved ToolCall is no longer accessible to the Worker.',
+        )
+      }
+      if (current.status === 'queued' || current.status === 'canceled') return current
+      if (current.status !== 'approval_required') {
+        throw new ConversationToolExecutionError(
+          'tool_approval_unavailable',
+          'The approved ToolCall entered an invalid state.',
+        )
+      }
+      if (Number.isFinite(expiresAt)
+        && (this.approvedWebhook.now?.() ?? new Date()).getTime() >= expiresAt) {
+        const expired = await this.coordinator.expireApproval({
+          organizationId: context.organizationId,
+          spaceId: context.spaceId,
+          sessionId: context.sessionId,
+          toolCallId: requested.toolCall.id,
+          approvalId: requested.approval.id,
+          workerId: context.workerId,
+          requestId: `${requestPrefix}:approval-expired`,
+        })
+        if (!expired) {
+          throw new ConversationToolExecutionError(
+            'tool_approval_unavailable',
+            'The expired ToolCall is no longer accessible to the Worker.',
+          )
+        }
+        if (expired.status === 'queued' || expired.status === 'canceled') return expired
+      }
+      await delay(pollIntervalMs, signal)
+    }
+    throw new ConversationToolExecutionError(
+      'tool_approval_unavailable',
+      'Approval waiting was interrupted before a decision.',
+    )
+  }
+
+  private async deliverApprovedWebhook(
+    context: ConversationToolContext,
+    call: ConversationAgentToolCall,
+    started: ToolCallDto,
+    label: string,
+  ): Promise<ToolOutcome> {
+    if (!this.approvedWebhook) {
+      throw new ConversationToolExecutionError(
+        'tool_approval_unavailable',
+        'Approved external writes are not configured for this Worker.',
+      )
+    }
+    const idempotencyKey = `${context.attemptId}:${call.providerToolCallId}`
+    const sideEffect = await this.coordinator.prepareSideEffect({
+      organizationId: context.organizationId,
+      spaceId: context.spaceId,
+      sessionId: context.sessionId,
+      toolCallId: started.id,
+      provider: 'configured_webhook',
+      operation: 'deliver_verification_event',
+      idempotencyKey,
+      request: { type: 'cosmos.approved_webhook_delivery', label },
+      requestId: `${context.requestId}:tool:side-effect:prepare`,
+    })
+    if (sideEffect.status === 'unknown') {
+      throw new ConversationToolExecutionError(
+        'tool_side_effect_unknown',
+        'The external write outcome is unknown and requires operator reconciliation.',
+      )
+    }
+    if (sideEffect.status === 'succeeded') {
+      return {
+        status: 'succeeded',
+        output: { ok: true, status: 'accepted', replayed: true },
+        summary: 'The approved Webhook delivery was already accepted.',
+      }
+    }
+    if (sideEffect.status === 'failed') {
+      return failure('external_write_rejected', 'The configured receiver rejected the approved write.')
+    }
+
+    let delivered: Awaited<ReturnType<ApprovedWebhookClient['deliver']>>
+    try {
+      delivered = await this.approvedWebhook.client.deliver({
+        label,
+        idempotencyKey,
+        signal: context.signal ?? new AbortController().signal,
+      })
+    } catch {
+      delivered = { status: 'unknown', statusCode: null }
+    }
+    const resolved = await this.coordinator.resolveSideEffect({
+      organizationId: context.organizationId,
+      spaceId: context.spaceId,
+      sessionId: context.sessionId,
+      toolCallId: started.id,
+      sideEffectId: sideEffect.id,
+      expectedVersion: sideEffect.version,
+      status: delivered.status,
+      ...(delivered.status === 'unknown' ? {} : {
+        result: { statusCode: delivered.statusCode },
+        resultSummary: delivered.status === 'succeeded'
+          ? `Configured receiver accepted the write with HTTP ${delivered.statusCode}.`
+          : `Configured receiver rejected the write with HTTP ${delivered.statusCode}.`,
+      }),
+      requestId: `${context.requestId}:tool:side-effect:resolve`,
+    })
+    if (resolved.status === 'unknown') {
+      throw new ConversationToolExecutionError(
+        'tool_side_effect_unknown',
+        'The external write outcome is unknown and requires operator reconciliation.',
+      )
+    }
+    if (resolved.status === 'failed') {
+      return failure('external_write_rejected', 'The configured receiver rejected the approved write.')
+    }
+    return {
+      status: 'succeeded',
+      output: { ok: true, status: 'accepted', statusCode: delivered.statusCode, replayed: false },
+      summary: `Configured receiver accepted the approved write with HTTP ${delivered.statusCode}.`,
+    }
   }
 
   private async proposeAdvisorPlan(

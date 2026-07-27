@@ -1,4 +1,5 @@
 import { OpenAiCompatibleChatCompletionsProvider } from './conversation-agent-provider.js'
+import { HttpApprovedWebhookClient } from './approved-webhook-client.js'
 import { GovernedConversationToolBroker } from './conversation-tool-broker.js'
 import { ExecutionWorker, type ExecutionWorkerLogger } from './execution-worker.js'
 import { UnavailableEnvironmentProvisioner } from './environment-provisioning-repository.js'
@@ -59,6 +60,15 @@ try {
     new PostgresToolCoordinatorRepository(pool),
     new PostgresFileRepository(pool, objectStore),
     new PostgresAdvisorPlanRepository(pool),
+    config.approvedWebhook ? {
+      client: new HttpApprovedWebhookClient({
+        url: config.approvedWebhook.url,
+        bearerToken: config.approvedWebhook.bearerToken,
+        requestTimeoutMs: config.approvedWebhook.requestTimeoutMs,
+      }),
+      approverIds: config.approvedWebhook.approverIds,
+      approvalTtlMs: config.approvedWebhook.approvalTtlMs,
+    } : undefined,
   )
   const readinessRepository = new PostgresWorkerReadinessRepository(pool)
   const worker = new ExecutionWorker({

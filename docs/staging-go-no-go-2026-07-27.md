@@ -44,9 +44,27 @@ no value was printed or copied.
   `queued → active → completed`.
 - The Session produced one successful low-risk `workspace_files_list` ToolCall and one associated
   `test_report` Artifact. No model response text or workspace path was captured.
-- No Approval was produced. The current production Worker exposes low-risk workspace read tools and
-  Advisor plan proposal, but no approval-gated external-write tool. Injecting a database fixture
-  would not constitute a real approval flow and was not used.
+- The evaluated rehearsal produced no Approval because its Worker exposed only low-risk workspace
+  reads and Advisor plan proposal. A follow-up repository slice now adds the capability-gated
+  `approved_webhook_delivery` path described below; it is not counted as external Staging evidence
+  until deployed with a real receiver, Secret Manager configuration and distinct OIDC identities.
+
+### Repository unblock after the rehearsal
+
+- `approved_webhook_delivery` appears in the Provider catalog only when the Worker receives a fixed
+  HTTPS URL, server-side Bearer credential and 1–20 independent human approver IDs together.
+- The model can provide only a 1–64 character safe label. It cannot choose a URL, Header, Token,
+  arbitrary body, Shell command or code write.
+- A high-risk ToolCall enters pending Approval before any network request. Approval binds the exact
+  input hash; requester self-approval, viewer/non-member review, rejection and expiry fail closed.
+- Approved execution writes a prepared SideEffect before one idempotent POST. HTTP 2xx resolves it
+  succeeded, 4xx failed, and redirect/5xx/network/timeout unknown; unknown prevents Session success
+  until an operator reconciles the receiver ledger.
+- Approval waiting maintains the Command lease. Each Worker loop expires overdue Approvals before
+  execution lease recovery, so restart/crash does not leave an Approval permanently waiting.
+- Verification passed 250 API tests, 224 Web tests, 62 Contracts tests, 7 Ops tests and 158
+  PostgreSQL integration tests. Docker PostgreSQL/API/Worker/Web rebuilt healthy. These are code and
+  local runtime facts, not the missing external receiver/OIDC evidence.
 
 ### Dependency failure injection
 
@@ -114,8 +132,8 @@ Promotion remains blocked until all of the following have external evidence:
 2. Scoped S3-compatible bucket with versioning, encryption, public-access block, retention, and a
    successful object-backed FileVersion read/checksum drill.
 3. Connected Daemon pool or Cloud provider with readiness, retry, and failure-injection controls.
-4. A production Worker tool that creates an Approval for a real external write, followed by approve,
-   reject, expiry, idempotent side effect, and Artifact evidence.
+4. Deploy and configure `approved_webhook_delivery` against a controlled receiver, then capture real
+   approve, reject, expiry, idempotent SideEffect and Artifact evidence using distinct OIDC actors.
 5. Outbox delivery with bounded retry/dead-letter behavior and no item older than the alert threshold.
 6. Prometheus rule evaluation, Alertmanager page/ticket delivery, and on-call acknowledgement.
 7. Managed PITR retention and an actual point-in-time restore into an isolated instance, including

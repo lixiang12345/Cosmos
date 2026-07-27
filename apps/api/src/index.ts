@@ -59,7 +59,9 @@ export {
   ToolCoordinatorConflictError,
   ToolCoordinatorValidationError,
   type CreateToolCallRecord,
+  type ExpireToolApprovalRecord,
   type FinishToolCallRecord,
+  type GetToolCallRecord,
   type PrepareToolSideEffectRecord,
   type RequestToolApprovalRecord,
   type ResolveToolSideEffectRecord,
@@ -142,6 +144,13 @@ export {
 } from './advisor-plan-repository.js'
 export { PostgresAdvisorPlanRepository } from './postgres-advisor-plan-repository.js'
 export { loadWorkerConfig, type WorkerConfig } from './worker-config.js'
+export {
+  HttpApprovedWebhookClient,
+  type ApprovedWebhookClient,
+  type ApprovedWebhookDelivery,
+  type ApprovedWebhookDeliveryResult,
+  type HttpApprovedWebhookClientOptions,
+} from './approved-webhook-client.js'
 export {
   AgentProviderError,
   DeterministicConversationAgentProvider,

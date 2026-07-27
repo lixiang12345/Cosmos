@@ -11,7 +11,9 @@ import {
   ToolCoordinatorConflictError,
   ToolCoordinatorValidationError,
   type CreateToolCallRecord,
+  type ExpireToolApprovalRecord,
   type FinishToolCallRecord,
+  type GetToolCallRecord,
   type PrepareToolSideEffectRecord,
   type RequestToolApprovalRecord,
   type ResolveToolSideEffectRecord,
@@ -275,6 +277,235 @@ export class PostgresToolCoordinatorRepository implements ToolCoordinatorReposit
       })
       return toolCall
     })
+  }
+
+  async getToolCall(record: GetToolCallRecord): Promise<ToolCallDto | null> {
+    const result = await this.pool.query<ToolCallRow>(`
+      SELECT ${toolColumns} FROM cosmos_tool_calls
+      WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
+        AND id = $4 AND worker_id = $5
+    `, [
+      record.organizationId,
+      record.spaceId,
+      record.sessionId,
+      record.toolCallId,
+      record.workerId,
+    ])
+    return result.rows[0] ? mapToolCall(result.rows[0]) : null
+  }
+
+  async expireApproval(record: ExpireToolApprovalRecord): Promise<ToolCallDto | null> {
+    const occurredAt = this.now().toISOString()
+    return transaction(this.pool, async (client) => {
+      const approval = await client.query<{
+        status: string
+        expires_at: TimestampValue
+        version: number
+      }>(`
+        SELECT status, expires_at, version FROM cosmos_approvals
+        WHERE organization_id = $1 AND space_id = $2 AND id = $3
+          AND session_id = $4 AND tool_call_id = $5
+        FOR UPDATE
+      `, [
+        record.organizationId, record.spaceId, record.approvalId,
+        record.sessionId, record.toolCallId,
+      ])
+      const beforeApproval = approval.rows[0]
+      if (!beforeApproval) {
+        throw new ToolCoordinatorConflictError('invalid_state', 'The ToolCall Approval was not found.')
+      }
+      const selected = await client.query<ToolCallRow>(`
+        SELECT ${toolColumns} FROM cosmos_tool_calls
+        WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
+          AND id = $4 AND worker_id = $5
+        FOR UPDATE
+      `, [
+        record.organizationId, record.spaceId, record.sessionId,
+        record.toolCallId, record.workerId,
+      ])
+      if (!selected.rows[0]) return null
+      const beforeTool = mapToolCall(selected.rows[0])
+      if (beforeTool.status !== 'approval_required' || beforeTool.approvalId !== record.approvalId) {
+        return beforeTool
+      }
+      if (beforeApproval.status !== 'pending'
+        || new Date(beforeApproval.expires_at).getTime() > new Date(occurredAt).getTime()) {
+        return beforeTool
+      }
+
+      const expired = await client.query<{ version: number }>(`
+        UPDATE cosmos_approvals
+        SET status = 'expired', decided_at = $4, updated_at = $4, version = version + 1
+        WHERE organization_id = $1 AND space_id = $2 AND id = $3 AND status = 'pending'
+        RETURNING version
+      `, [record.organizationId, record.spaceId, record.approvalId, occurredAt])
+      if (!expired.rows[0]) {
+        throw new ToolCoordinatorConflictError('invalid_state', 'The ToolCall Approval could not be expired.')
+      }
+      const canceled = await client.query<ToolCallRow>(`
+        UPDATE cosmos_tool_calls
+        SET status = 'canceled', completed_at = $6, version = version + 1
+        WHERE organization_id = $1 AND space_id = $2 AND session_id = $3 AND id = $4
+          AND approval_id = $5 AND status = 'approval_required'
+        RETURNING ${toolColumns}
+      `, [
+        record.organizationId, record.spaceId, record.sessionId,
+        record.toolCallId, record.approvalId, occurredAt,
+      ])
+      if (!canceled.rows[0]) {
+        throw new ToolCoordinatorConflictError('invalid_state', 'The expired Approval no longer gates its ToolCall.')
+      }
+      const toolCall = mapToolCall(canceled.rows[0])
+      const attempt = await client.query(`
+        UPDATE cosmos_attempts
+        SET status = 'running', heartbeat_at = GREATEST(heartbeat_at, $6::timestamptz)
+        WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
+          AND turn_id = $4 AND id = $5 AND status = 'waiting'
+      `, [
+        toolCall.organizationId, toolCall.spaceId, toolCall.sessionId,
+        toolCall.turnId, toolCall.attemptId, occurredAt,
+      ])
+      if (attempt.rowCount !== 1) throw new Error('The expired Approval Attempt could not resume.')
+      const turn = await client.query(`
+        UPDATE cosmos_turns
+        SET status = 'running', heartbeat_at = GREATEST(heartbeat_at, $5::timestamptz),
+          version = version + 1
+        WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
+          AND id = $4 AND status = 'waiting_approval'
+      `, [
+        toolCall.organizationId, toolCall.spaceId, toolCall.sessionId,
+        toolCall.turnId, occurredAt,
+      ])
+      if (turn.rowCount !== 1) throw new Error('The expired Approval Turn could not resume.')
+      const session = await client.query<{ version: number; last_sequence: string }>(`
+        UPDATE cosmos_sessions
+        SET status = 'active', updated_at = $4, last_activity_at = $4,
+          version = version + 1, last_event_sequence = last_event_sequence + 3
+        WHERE organization_id = $1 AND space_id = $2 AND id = $3 AND status = 'waiting'
+        RETURNING version, last_event_sequence AS last_sequence
+      `, [toolCall.organizationId, toolCall.spaceId, toolCall.sessionId, occurredAt])
+      const resumed = session.rows[0]
+      const lastSequence = Number(resumed?.last_sequence)
+      if (!resumed || !Number.isSafeInteger(lastSequence)) {
+        throw new Error('The expired Approval Session could not resume.')
+      }
+      const firstSequence = lastSequence - 2
+      await client.query(`
+        INSERT INTO cosmos_session_events (
+          organization_id, space_id, session_id, event_id, sequence, event_type,
+          resource_type, resource_id, payload, actor_id, actor_kind, turn_id,
+          tool_call_id, approval_id, request_id, occurred_at
+        ) VALUES ($1, $2, $3, $4, $5, 'approval.decided', 'approval', $6,
+          $7::jsonb, $8, 'service_account', $9, $10, $6, $11, $12)
+      `, [
+        toolCall.organizationId, toolCall.spaceId, toolCall.sessionId, this.createId(),
+        firstSequence, record.approvalId, JSON.stringify({
+          approvalId: record.approvalId,
+          toolCallId: toolCall.id,
+          recordedDecision: 'expired',
+          status: 'expired',
+          version: expired.rows[0].version,
+        }), record.workerId, toolCall.turnId, toolCall.id, record.requestId, occurredAt,
+      ])
+      await client.query(`
+        INSERT INTO cosmos_session_events (
+          organization_id, space_id, session_id, event_id, sequence, event_type,
+          resource_type, resource_id, payload, actor_id, actor_kind, turn_id,
+          attempt_id, tool_call_id, approval_id, request_id, occurred_at
+        ) VALUES ($1, $2, $3, $4, $5, 'tool_call.updated', 'tool_call', $6,
+          $7::jsonb, $8, 'service_account', $9, $10, $6, $11, $12, $13)
+      `, [
+        toolCall.organizationId, toolCall.spaceId, toolCall.sessionId, this.createId(),
+        firstSequence + 1, toolCall.id, JSON.stringify({
+          toolCallId: toolCall.id, turnId: toolCall.turnId, attemptId: toolCall.attemptId,
+          toolName: toolCall.toolName, operation: toolCall.operation,
+          riskLevel: toolCall.riskLevel, status: toolCall.status,
+          approvalId: record.approvalId, version: toolCall.version,
+        }), record.workerId, toolCall.turnId, toolCall.attemptId, record.approvalId,
+        record.requestId, occurredAt,
+      ])
+      await client.query(`
+        INSERT INTO cosmos_session_events (
+          organization_id, space_id, session_id, event_id, sequence, event_type,
+          resource_type, resource_id, payload, actor_id, actor_kind, request_id, occurred_at
+        ) VALUES ($1, $2, $3, $4, $5, 'session.updated', 'session', $3,
+          $6::jsonb, $7, 'service_account', $8, $9)
+      `, [
+        toolCall.organizationId, toolCall.spaceId, toolCall.sessionId, this.createId(),
+        lastSequence, JSON.stringify({ status: 'active', version: resumed.version }),
+        record.workerId, record.requestId, occurredAt,
+      ])
+      await this.appendAudit(client, {
+        toolCall,
+        actorId: record.workerId,
+        actorKind: 'service_account',
+        requestId: record.requestId,
+        action: 'approval.decision',
+        targetType: 'approval',
+        targetId: record.approvalId,
+        before: { status: 'pending', version: beforeApproval.version },
+        after: { status: 'expired', version: expired.rows[0].version },
+        policyReason: 'approval_expired_before_external_write',
+        occurredAt,
+      })
+      await client.query(`
+        INSERT INTO cosmos_outbox_events (
+          id, organization_id, space_id, session_id, aggregate_type,
+          aggregate_id, event_type, payload, occurred_at
+        ) VALUES ($1, $2, $3, $4, 'approval', $5, 'approval.decided', $6::jsonb, $7)
+      `, [
+        this.createId(), toolCall.organizationId, toolCall.spaceId, toolCall.sessionId,
+        record.approvalId, JSON.stringify({
+          sessionId: toolCall.sessionId,
+          toolCallId: toolCall.id,
+          status: 'expired',
+          version: expired.rows[0].version,
+        }), occurredAt,
+      ])
+      return toolCall
+    })
+  }
+
+  async reapExpiredApprovals(limit = 20): Promise<number> {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+      throw new RangeError('Expired Approval reap limit must be an integer between 1 and 100.')
+    }
+    const due = await this.pool.query<{
+      organization_id: string
+      space_id: string
+      session_id: string
+      tool_call_id: string
+      approval_id: string
+      worker_id: string
+    }>(`
+      SELECT approval.organization_id, approval.space_id, approval.session_id,
+        approval.tool_call_id, approval.id AS approval_id, tool_call.worker_id
+      FROM cosmos_approvals approval
+      JOIN cosmos_tool_calls tool_call
+        ON tool_call.organization_id = approval.organization_id
+        AND tool_call.space_id = approval.space_id
+        AND tool_call.session_id = approval.session_id
+        AND tool_call.id = approval.tool_call_id
+        AND tool_call.approval_id = approval.id
+      WHERE approval.status = 'pending' AND approval.expires_at <= $1
+        AND tool_call.status = 'approval_required' AND tool_call.worker_id IS NOT NULL
+      ORDER BY approval.expires_at, approval.id
+      LIMIT $2
+    `, [this.now().toISOString(), limit])
+    let expired = 0
+    for (const row of due.rows) {
+      const toolCall = await this.expireApproval({
+        organizationId: row.organization_id,
+        spaceId: row.space_id,
+        sessionId: row.session_id,
+        toolCallId: row.tool_call_id,
+        approvalId: row.approval_id,
+        workerId: row.worker_id,
+        requestId: `system:approval-expiry:${row.approval_id}`,
+      })
+      if (toolCall?.status === 'canceled') expired += 1
+    }
+    return expired
   }
 
   async requestApproval(record: RequestToolApprovalRecord) {
@@ -701,7 +932,7 @@ export class PostgresToolCoordinatorRepository implements ToolCoordinatorReposit
     actorId: string
     actorKind: 'user' | 'service_account'
     requestId: string
-    action: 'tool_call.create' | 'tool_call.update' | 'approval.request'
+    action: 'tool_call.create' | 'tool_call.update' | 'approval.request' | 'approval.decision'
     targetType: 'tool_call' | 'approval'
     targetId: string
     before: unknown | null

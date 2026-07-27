@@ -1,5 +1,6 @@
 import type { AdvisorPlanDto, FileDto, FileVersionDto, ToolCallDto } from '@cosmos/contracts'
 import { describe, expect, it, vi } from 'vitest'
+import type { ApprovedWebhookClient } from './approved-webhook-client.js'
 import type { FileRepository } from './file-repository.js'
 import type { AdvisorPlanRepository } from './advisor-plan-repository.js'
 import {
@@ -20,7 +21,11 @@ const context: ConversationToolContext = {
   requestId: 'request-a',
 }
 
-const toolCall = (status: ToolCallDto['status'], version: number): ToolCallDto => ({
+const toolCall = (
+  status: ToolCallDto['status'],
+  version: number,
+  overrides: Partial<ToolCallDto> = {},
+): ToolCallDto => ({
   organizationId: context.organizationId,
   spaceId: context.spaceId,
   sessionId: context.sessionId,
@@ -41,6 +46,7 @@ const toolCall = (status: ToolCallDto['status'], version: number): ToolCallDto =
     ? '2026-07-13T08:00:02.000Z'
     : null,
   version,
+  ...overrides,
 })
 
 const file: FileDto = {
@@ -103,6 +109,9 @@ function advisorPlans(): AdvisorPlanRepository {
 function coordinator(): ToolCoordinatorRepository {
   return {
     createToolCall: vi.fn().mockResolvedValue(toolCall('queued', 1)),
+    getToolCall: vi.fn(),
+    expireApproval: vi.fn(),
+    reapExpiredApprovals: vi.fn().mockResolvedValue(0),
     requestApproval: vi.fn(),
     startToolCall: vi.fn().mockResolvedValue(toolCall('running', 2)),
     finishToolCall: vi.fn().mockImplementation(async (record) => (
@@ -278,5 +287,211 @@ describe('GovernedConversationToolBroker', () => {
       expect(JSON.parse(result.content)).toMatchObject({ ok: false, error: { code } })
       expect(result.content).not.toContain('database secret')
     }
+  })
+
+  it('waits for independent Approval before one idempotent configured Webhook write', async () => {
+    const toolCoordinator = coordinator()
+    const approved = toolCall('queued', 3, {
+      toolName: 'approved_webhook_delivery',
+      operation: 'deliver',
+      riskLevel: 'high',
+      approvalId: 'approval-a',
+    })
+    vi.mocked(toolCoordinator.requestApproval).mockResolvedValue({
+      toolCall: toolCall('approval_required', 2, {
+        toolName: 'approved_webhook_delivery', operation: 'deliver', riskLevel: 'high', approvalId: 'approval-a',
+      }),
+      approval: {} as never,
+    })
+    vi.mocked(toolCoordinator.getToolCall).mockResolvedValue(approved)
+    vi.mocked(toolCoordinator.startToolCall).mockResolvedValue(toolCall('running', 4, {
+      toolName: 'approved_webhook_delivery', operation: 'deliver', riskLevel: 'high', approvalId: 'approval-a',
+    }))
+    vi.mocked(toolCoordinator.prepareSideEffect).mockResolvedValue({
+      organizationId: context.organizationId, spaceId: context.spaceId, sessionId: context.sessionId,
+      toolCallId: 'tool-call-a', id: 'side-effect-a', provider: 'configured_webhook',
+      operation: 'deliver_verification_event', status: 'prepared', providerOperationId: null,
+      resultSummary: null, createdAt: '2026-07-13T08:00:00.000Z',
+      updatedAt: '2026-07-13T08:00:00.000Z', version: 1,
+    })
+    vi.mocked(toolCoordinator.resolveSideEffect).mockImplementation(async (record) => ({
+      organizationId: context.organizationId, spaceId: context.spaceId, sessionId: context.sessionId,
+      toolCallId: 'tool-call-a', id: 'side-effect-a', provider: 'configured_webhook',
+      operation: 'deliver_verification_event', status: record.status, providerOperationId: null,
+      resultSummary: record.resultSummary ?? null, createdAt: '2026-07-13T08:00:00.000Z',
+      updatedAt: '2026-07-13T08:00:01.000Z', version: 2,
+    }))
+    const client: ApprovedWebhookClient = {
+      deliver: vi.fn().mockResolvedValue({ status: 'succeeded', statusCode: 202 }),
+    }
+    const broker = new GovernedConversationToolBroker(
+      toolCoordinator,
+      files(),
+      undefined,
+      {
+        client,
+        approverIds: ['reviewer-a'],
+        approvalTtlMs: 60_000,
+        approvalPollIntervalMs: 1,
+        now: () => new Date('2026-07-13T08:00:00.000Z'),
+      },
+    )
+
+    const result = await broker.execute(context, {
+      providerToolCallId: 'provider-approved-webhook',
+      name: 'approved_webhook_delivery',
+      input: { label: 'staging-smoke-1' },
+    }, 1)
+
+    expect(broker.definitions.map(({ name }) => name)).toContain('approved_webhook_delivery')
+    expect(toolCoordinator.createToolCall).toHaveBeenCalledWith(expect.objectContaining({
+      riskLevel: 'high', operation: 'deliver', input: { label: 'staging-smoke-1' },
+    }))
+    expect(toolCoordinator.requestApproval).toHaveBeenCalledWith(expect.objectContaining({
+      assignedTo: ['reviewer-a'], requiredApprovals: 1,
+      evidence: expect.arrayContaining([
+        { type: 'input', label: 'Verification label', value: 'staging-smoke-1' },
+      ]),
+    }))
+    expect(client.deliver).toHaveBeenCalledWith({
+      label: 'staging-smoke-1',
+      idempotencyKey: 'attempt-a:provider-approved-webhook',
+      signal: expect.any(AbortSignal),
+    })
+    expect(vi.mocked(toolCoordinator.prepareSideEffect).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(client.deliver).mock.invocationCallOrder[0]!)
+    expect(toolCoordinator.finishToolCall).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'succeeded', expectedVersion: 4,
+    }))
+    expect(JSON.parse(result.content)).toEqual({
+      ok: true, status: 'accepted', statusCode: 202, replayed: false,
+    })
+  })
+
+  it('does not send when Approval is rejected', async () => {
+    const toolCoordinator = coordinator()
+    vi.mocked(toolCoordinator.requestApproval).mockResolvedValue({
+      toolCall: toolCall('approval_required', 2, { approvalId: 'approval-a' }),
+      approval: {} as never,
+    })
+    vi.mocked(toolCoordinator.getToolCall).mockResolvedValue(toolCall('canceled', 3, {
+      approvalId: 'approval-a',
+    }))
+    const client: ApprovedWebhookClient = { deliver: vi.fn() }
+    const broker = new GovernedConversationToolBroker(toolCoordinator, files(), undefined, {
+      client, approverIds: ['reviewer-a'], approvalTtlMs: 60_000, approvalPollIntervalMs: 1,
+    })
+
+    const result = await broker.execute(context, {
+      providerToolCallId: 'provider-rejected', name: 'approved_webhook_delivery', input: { label: 'smoke' },
+    }, 1)
+
+    expect(client.deliver).not.toHaveBeenCalled()
+    expect(toolCoordinator.prepareSideEffect).not.toHaveBeenCalled()
+    expect(toolCoordinator.finishToolCall).not.toHaveBeenCalled()
+    expect(JSON.parse(result.content)).toMatchObject({
+      ok: false, error: { code: 'approval_not_granted' },
+    })
+  })
+
+  it('expires an undecided Approval and resumes without sending', async () => {
+    const toolCoordinator = coordinator()
+    vi.mocked(toolCoordinator.requestApproval).mockResolvedValue({
+      toolCall: toolCall('approval_required', 2, { approvalId: 'approval-a' }),
+      approval: {
+        id: 'approval-a',
+        expiresAt: '2026-07-13T08:00:01.000Z',
+      } as never,
+    })
+    vi.mocked(toolCoordinator.getToolCall).mockResolvedValue(toolCall('approval_required', 2, {
+      approvalId: 'approval-a',
+    }))
+    vi.mocked(toolCoordinator.expireApproval).mockResolvedValue(toolCall('canceled', 3, {
+      approvalId: 'approval-a',
+    }))
+    const client: ApprovedWebhookClient = { deliver: vi.fn() }
+    const broker = new GovernedConversationToolBroker(toolCoordinator, files(), undefined, {
+      client,
+      approverIds: ['reviewer-a'],
+      approvalTtlMs: 1_000,
+      approvalPollIntervalMs: 1,
+      now: () => new Date('2026-07-13T08:00:02.000Z'),
+    })
+
+    const result = await broker.execute(context, {
+      providerToolCallId: 'provider-expired', name: 'approved_webhook_delivery', input: { label: 'smoke' },
+    }, 1)
+
+    expect(toolCoordinator.expireApproval).toHaveBeenCalledWith(expect.objectContaining({
+      approvalId: 'approval-a', workerId: context.workerId,
+    }))
+    expect(client.deliver).not.toHaveBeenCalled()
+    expect(JSON.parse(result.content)).toMatchObject({
+      ok: false, error: { code: 'approval_not_granted' },
+    })
+  })
+
+  it('records a failed ToolCall when independent Approval policy is unavailable', async () => {
+    const toolCoordinator = coordinator()
+    vi.mocked(toolCoordinator.requestApproval).mockRejectedValue(new Error('requester cannot approve'))
+    vi.mocked(toolCoordinator.getToolCall).mockResolvedValue(toolCall('queued', 1))
+    const client: ApprovedWebhookClient = { deliver: vi.fn() }
+    const broker = new GovernedConversationToolBroker(toolCoordinator, files(), undefined, {
+      client, approverIds: [context.requestedBy], approvalTtlMs: 60_000,
+    })
+
+    const result = await broker.execute(context, {
+      providerToolCallId: 'provider-self-approval',
+      name: 'approved_webhook_delivery',
+      input: { label: 'smoke' },
+    }, 1)
+
+    expect(client.deliver).not.toHaveBeenCalled()
+    expect(toolCoordinator.finishToolCall).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'failed',
+      output: expect.objectContaining({
+        ok: false, error: expect.objectContaining({ code: 'approval_unavailable' }),
+      }),
+    }))
+    expect(result.content).not.toContain('requester cannot approve')
+  })
+
+  it('fails the execution instead of claiming success for an unknown external side effect', async () => {
+    const toolCoordinator = coordinator()
+    vi.mocked(toolCoordinator.requestApproval).mockResolvedValue({
+      toolCall: toolCall('approval_required', 2, { approvalId: 'approval-a' }),
+      approval: {} as never,
+    })
+    vi.mocked(toolCoordinator.getToolCall).mockResolvedValue(toolCall('queued', 3, {
+      approvalId: 'approval-a',
+    }))
+    vi.mocked(toolCoordinator.startToolCall).mockResolvedValue(toolCall('running', 4, {
+      approvalId: 'approval-a',
+    }))
+    vi.mocked(toolCoordinator.prepareSideEffect).mockResolvedValue({
+      organizationId: context.organizationId, spaceId: context.spaceId, sessionId: context.sessionId,
+      toolCallId: 'tool-call-a', id: 'side-effect-a', provider: 'configured_webhook',
+      operation: 'deliver_verification_event', status: 'prepared', providerOperationId: null,
+      resultSummary: null, createdAt: '2026-07-13T08:00:00.000Z',
+      updatedAt: '2026-07-13T08:00:00.000Z', version: 1,
+    })
+    vi.mocked(toolCoordinator.resolveSideEffect).mockResolvedValue({
+      organizationId: context.organizationId, spaceId: context.spaceId, sessionId: context.sessionId,
+      toolCallId: 'tool-call-a', id: 'side-effect-a', provider: 'configured_webhook',
+      operation: 'deliver_verification_event', status: 'unknown', providerOperationId: null,
+      resultSummary: null, createdAt: '2026-07-13T08:00:00.000Z',
+      updatedAt: '2026-07-13T08:00:01.000Z', version: 2,
+    })
+    const client: ApprovedWebhookClient = {
+      deliver: vi.fn().mockResolvedValue({ status: 'unknown', statusCode: 503 }),
+    }
+    const broker = new GovernedConversationToolBroker(toolCoordinator, files(), undefined, {
+      client, approverIds: ['reviewer-a'], approvalTtlMs: 60_000, approvalPollIntervalMs: 1,
+    })
+
+    await expect(broker.execute(context, {
+      providerToolCallId: 'provider-unknown', name: 'approved_webhook_delivery', input: { label: 'smoke' },
+    }, 1)).rejects.toMatchObject({ code: 'tool_side_effect_unknown' })
+    expect(toolCoordinator.finishToolCall).not.toHaveBeenCalled()
   })
 })
