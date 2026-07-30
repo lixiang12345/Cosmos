@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import cors from '@fastify/cors'
 import helmet from '@fastify/helmet'
 import { timingSafeEqual } from 'node:crypto'
@@ -48,6 +48,8 @@ import {
   ReceiveAutomationEventRequestSchema,
   RetryTurnResponseSchema,
   RuntimeCapabilitiesSchema,
+  SearchResponseDtoSchema,
+  type SearchResultItemDto,
   SessionDtoSchema,
   SessionControlResponseSchema,
   SessionEventPageSchema,
@@ -752,6 +754,7 @@ function abortableDelay(durationMs: number, signal: AbortSignal) {
 export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   const app = Fastify({
     logger: options.logger ?? false,
+    genReqId: () => randomUUID(),
     bodyLimit: options.bodyLimit ?? 1_048_576,
     trustProxy: options.trustProxy ?? false,
     connectionTimeout: options.connectionTimeoutMs ?? 10_000,
@@ -1484,6 +1487,106 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     })
   })
 
+  app.get<{ Params: SpaceParams; Querystring: { q?: string; limit?: string } }>(
+    '/api/v1/organizations/:organizationId/spaces/:spaceId/search',
+    async (request, reply) => {
+      const actor = actorsByRequest.get(request)
+      if (!actor) throw new AuthenticationError()
+      const organizationId = parseSpaceId(request.params.organizationId)
+      const spaceId = parseSpaceId(request.params.spaceId)
+      if (!organizationId || !spaceId) return sendResourceNotFound(reply, request)
+
+      const rawQuery = typeof request.query.q === 'string' ? request.query.q.trim() : ''
+      if (rawQuery.length < 2) {
+        return SearchResponseDtoSchema.parse({ query: rawQuery, items: [] })
+      }
+
+      const q = rawQuery.toLowerCase()
+      const rawLimit = request.query.limit ? Number(request.query.limit) : 10
+      const limit = Number.isSafeInteger(rawLimit) && rawLimit >= 1 && rawLimit <= 50 ? rawLimit : 10
+
+      const [sessionsPage, expertsPage, environmentsPage, artifactsPage, automationsPage] = await Promise.all([
+        sessionRepository.listBySpace(organizationId, spaceId, actor.id, { limit: 20 }),
+        configurationCatalogRepository.listExperts(organizationId, spaceId, actor.id),
+        configurationCatalogRepository.listEnvironments(organizationId, spaceId, actor.id),
+        artifactRepository.listSpace(organizationId, spaceId, actor.id, { limit: 20 }),
+        automationRepository.listAutomations(organizationId, spaceId, actor.id),
+      ])
+
+      const items: SearchResultItemDto[] = []
+
+      for (const session of sessionsPage.items) {
+        if (session.title.toLowerCase().includes(q) || session.summary?.toLowerCase().includes(q) || session.repository.toLowerCase().includes(q)) {
+          items.push({
+            id: session.id,
+            type: 'session',
+            title: session.title,
+            subtitle: `${session.repository} · ${session.expertName}`,
+            url: `/sessions/${session.id}`,
+            spaceId: session.spaceId,
+          })
+        }
+      }
+
+      for (const expert of expertsPage?.items ?? []) {
+        if (expert.name.toLowerCase().includes(q) || expert.description.toLowerCase().includes(q)) {
+          items.push({
+            id: expert.id,
+            type: 'expert',
+            title: expert.name,
+            subtitle: expert.description,
+            url: `/experts/${expert.id}`,
+            spaceId: expert.spaceId,
+          })
+        }
+      }
+
+      for (const artifact of artifactsPage.items) {
+        if (artifact.label.toLowerCase().includes(q) || artifact.url.toLowerCase().includes(q) || artifact.type.toLowerCase().includes(q)) {
+          items.push({
+            id: artifact.id,
+            type: 'artifact',
+            title: artifact.label,
+            subtitle: `${artifact.type} · ${artifact.url}`,
+            url: `/sessions/${artifact.sessionId}`,
+            spaceId,
+          })
+        }
+      }
+
+      for (const environment of environmentsPage?.items ?? []) {
+        if (environment.name.toLowerCase().includes(q) || environment.description?.toLowerCase().includes(q)) {
+          items.push({
+            id: environment.id,
+            type: 'environment',
+            title: environment.name,
+            subtitle: environment.description || environment.type,
+            url: `/environments`,
+            spaceId: environment.spaceId,
+          })
+        }
+      }
+
+      for (const automation of automationsPage) {
+        if (automation.name.toLowerCase().includes(q) || automation.eventType.toLowerCase().includes(q)) {
+          items.push({
+            id: automation.id,
+            type: 'automation',
+            title: automation.name,
+            subtitle: `${automation.source} · ${automation.eventType}`,
+            url: `/automations`,
+            spaceId: automation.spaceId,
+          })
+        }
+      }
+
+      return SearchResponseDtoSchema.parse({
+        query: rawQuery,
+        items: items.slice(0, limit),
+      })
+    },
+  )
+
   app.get<{ Params: OrganizationParams }>('/api/v1/organizations/:organizationId/spaces', async (request, reply) => {
     const actor = actorsByRequest.get(request)
     if (!actor) throw new AuthenticationError()
@@ -1525,7 +1628,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
 
   app.get<{ Params: SpaceParams }>('/api/v1/organizations/:organizationId/spaces/:spaceId', async (request, reply) => {
     const authorization = await authorizeSpace(request, reply, request.params)
-    if (!authorization) return
+    if (!authorization) return reply
     const space = await spaceRepository.getSpace(
       authorization.organizationId, authorization.spaceId, authorization.actor.id,
     )
@@ -1536,10 +1639,10 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
 
   app.patch<{ Params: SpaceParams }>('/api/v1/organizations/:organizationId/spaces/:spaceId', async (request, reply) => {
     const authorization = await authorizeSpace(request, reply, request.params)
-    if (!authorization) return
+    if (!authorization) return reply
     if (!canManageExperts(authorization.access)) return denySpaceMutation(request, reply)
     const expectedVersion = requireIfMatchVersion(request, reply, 'Space')
-    if (expectedVersion === null) return
+    if (expectedVersion === null) return reply
     const idempotencyKey = readIdempotencyKey(request)
     if (!idempotencyKey) return sendApiError(reply, 400, request, {
       code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
@@ -1564,11 +1667,11 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
 
   app.post<{ Params: SpaceParams }>('/api/v1/organizations/:organizationId/spaces/:spaceId/default', async (request, reply) => {
     const authorization = await authorizeSpace(request, reply, request.params)
-    if (!authorization) return
+    if (!authorization) return reply
     if (authorization.access.organizationRole !== 'organization_owner'
       && authorization.access.organizationRole !== 'organization_admin') return denySpaceMutation(request, reply)
     const expectedVersion = requireIfMatchVersion(request, reply, 'Space')
-    if (expectedVersion === null) return
+    if (expectedVersion === null) return reply
     const idempotencyKey = readIdempotencyKey(request)
     if (!idempotencyKey) return sendApiError(reply, 400, request, {
       code: 'IDEMPOTENCY_KEY_REQUIRED', message: 'A valid Idempotency-Key header is required.', retryable: false,
@@ -1588,7 +1691,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
   app.get<{ Params: SpaceParams; Querystring: SpaceMigrationQuery }>(
     '/api/v1/organizations/:organizationId/spaces/:spaceId/migration-preview', async (request, reply) => {
       const authorization = await authorizeSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageExperts(authorization.access)) return denySpaceMutation(request, reply)
       const targetSpaceId = parseSpaceId(request.query.targetSpaceId ?? '')
       if (!targetSpaceId) return sendApiError(reply, 400, request, {
@@ -1607,7 +1710,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/migrations',
     async (request, reply) => {
       const authorization = await authorizeSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const items = await spaceRepository.listMigrations(
         authorization.organizationId, authorization.spaceId, authorization.actor.id,
       )
@@ -1619,7 +1722,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/migrations',
     async (request, reply) => {
       const authorization = await authorizeSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageExperts(authorization.access)) return denySpaceMutation(request, reply)
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) {
@@ -1665,7 +1768,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/advisor/plans',
     async (request, reply) => {
       const authorization = await authorizeSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const sessionId = parseSpaceId(request.params.sessionId)
       if (!sessionId) return sendResourceNotFound(reply, request)
       const items = await advisorPlanRepository.listPlans(
@@ -1688,7 +1791,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/advisor/plans/:planId',
     async (request, reply) => {
       const authorization = await authorizeSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const sessionId = parseSpaceId(request.params.sessionId)
       const planId = parseSpaceId(request.params.planId)
       if (!sessionId || !planId) return sendResourceNotFound(reply, request)
@@ -1709,13 +1812,13 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/advisor/plans/:planId/decision',
     async (request, reply) => {
       const authorization = await authorizeSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageExperts(authorization.access)) return denySpaceMutation(request, reply)
       const sessionId = parseSpaceId(request.params.sessionId)
       const planId = parseSpaceId(request.params.planId)
       if (!sessionId || !planId) return sendResourceNotFound(reply, request)
       const expectedVersion = requireIfMatchVersion(request, reply, 'Advisor plan')
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) return sendApiError(reply, 400, request, {
         code: 'IDEMPOTENCY_KEY_REQUIRED',
@@ -1761,13 +1864,13 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/advisor/plans/:planId/retry',
     async (request, reply) => {
       const authorization = await authorizeSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageExperts(authorization.access)) return denySpaceMutation(request, reply)
       const sessionId = parseSpaceId(request.params.sessionId)
       const planId = parseSpaceId(request.params.planId)
       if (!sessionId || !planId) return sendResourceNotFound(reply, request)
       const expectedVersion = requireIfMatchVersion(request, reply, 'Advisor plan')
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) return sendApiError(reply, 400, request, {
         code: 'IDEMPOTENCY_KEY_REQUIRED',
@@ -2035,7 +2138,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/context-engine/status',
     async (request, reply) => {
       const authorization = await authorizeContextSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!contextEngineGateway) {
         return sendApiError(reply, 503, request, {
           code: 'DEPENDENCY_UNAVAILABLE',
@@ -2058,7 +2161,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         authorization,
         parsed.data.repository,
       )
-      if (!repositoryAllowed) return
+      if (!repositoryAllowed) return reply
       try {
         reply.header('Cache-Control', 'no-store')
         return await contextEngineGateway.status(parsed.data.repository)
@@ -2073,7 +2176,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/context-engine/search',
     async (request, reply) => {
       const authorization = await authorizeContextSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!contextEngineGateway) {
         return sendApiError(reply, 503, request, {
           code: 'DEPENDENCY_UNAVAILABLE',
@@ -2096,7 +2199,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         authorization,
         parsed.data.repository,
       )
-      if (!repositoryAllowed) return
+      if (!repositoryAllowed) return reply
       try {
         reply.header('Cache-Control', 'no-store')
         return await contextEngineGateway.search(parsed.data)
@@ -2111,7 +2214,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/context-engine/context',
     async (request, reply) => {
       const authorization = await authorizeContextSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!contextEngineGateway) {
         return sendApiError(reply, 503, request, {
           code: 'DEPENDENCY_UNAVAILABLE',
@@ -2134,7 +2237,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         authorization,
         parsed.data.repository,
       )
-      if (!repositoryAllowed) return
+      if (!repositoryAllowed) return reply
       try {
         reply.header('Cache-Control', 'no-store')
         return await contextEngineGateway.pack(parsed.data)
@@ -2260,7 +2363,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/experts',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const pagination = parseCatalogPagination(
         request.query,
         'experts',
@@ -2287,7 +2390,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/experts',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageExperts(authorization.access)) return denyExpertMutation(request, reply)
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) {
@@ -2352,7 +2455,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/experts/:expertId',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const expertId = parseSpaceId(request.params.expertId)
       if (!expertId) return sendResourceNotFound(reply, request)
       const candidate = await configurationCatalogRepository.getExpert(
@@ -2372,12 +2475,12 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/experts/:expertId',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageExperts(authorization.access)) return denyExpertMutation(request, reply)
       const expertId = parseSpaceId(request.params.expertId)
       if (!expertId) return sendResourceNotFound(reply, request)
       const expectedVersion = requireIfMatchVersion(request, reply, 'Expert')
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       const parsed = UpdateExpertRequestSchema.safeParse(request.body)
       if (!parsed.success) {
         return sendApiError(reply, 400, request, {
@@ -2434,12 +2537,12 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/experts/:expertId/publish',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageExperts(authorization.access)) return denyExpertMutation(request, reply)
       const expertId = parseSpaceId(request.params.expertId)
       if (!expertId) return sendResourceNotFound(reply, request)
       const expectedVersion = requireIfMatchVersion(request, reply, 'Expert')
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) {
         return sendApiError(reply, 400, request, {
@@ -2477,12 +2580,12 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/experts/:expertId/disable',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageExperts(authorization.access)) return denyExpertMutation(request, reply)
       const expertId = parseSpaceId(request.params.expertId)
       if (!expertId) return sendResourceNotFound(reply, request)
       const expectedVersion = requireIfMatchVersion(request, reply, 'Expert')
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       if (request.body !== undefined) {
         return sendApiError(reply, 400, request, {
           code: 'VALIDATION_FAILED',
@@ -2509,12 +2612,12 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/experts/:expertId',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageExperts(authorization.access)) return denyExpertMutation(request, reply)
       const expertId = parseSpaceId(request.params.expertId)
       if (!expertId) return sendResourceNotFound(reply, request)
       const expectedVersion = requireIfMatchVersion(request, reply, 'Expert')
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       if (request.body !== undefined) {
         return sendApiError(reply, 400, request, {
           code: 'VALIDATION_FAILED',
@@ -2540,7 +2643,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/experts/:expertId/revisions',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const expertId = parseSpaceId(request.params.expertId)
       if (!expertId) return sendResourceNotFound(reply, request)
       const items = await configurationCatalogRepository.listExpertRevisions(
@@ -2558,7 +2661,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/environments',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const pagination = parseCatalogPagination(
         request.query,
         'environments',
@@ -2585,7 +2688,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/environments/:environmentId',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const environmentId = parseSpaceId(request.params.environmentId)
       if (!environmentId) return sendResourceNotFound(reply, request)
       const candidate = await configurationCatalogRepository.getEnvironment(
@@ -2605,7 +2708,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/environments',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageEnvironments(authorization.access)) return denyEnvironmentMutation(request, reply)
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) {
@@ -2644,12 +2747,12 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/environments/:environmentId',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageEnvironments(authorization.access)) return denyEnvironmentMutation(request, reply)
       const environmentId = parseSpaceId(request.params.environmentId)
       if (!environmentId) return sendResourceNotFound(reply, request)
       const expectedVersion = requireIfMatchVersion(request, reply, 'Environment')
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) {
         return sendApiError(reply, 400, request, {
@@ -2686,12 +2789,12 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       `/api/v1/organizations/:organizationId/spaces/:spaceId/environments/:environmentId/${action}`,
       async (request, reply) => {
         const authorization = await authorizeCatalogSpace(request, reply, request.params)
-        if (!authorization) return
+        if (!authorization) return reply
         if (!canManageEnvironments(authorization.access)) return denyEnvironmentMutation(request, reply)
         const environmentId = parseSpaceId(request.params.environmentId)
         if (!environmentId) return sendResourceNotFound(reply, request)
         const expectedVersion = requireIfMatchVersion(request, reply, 'Environment')
-        if (expectedVersion === null) return
+        if (expectedVersion === null) return reply
         const idempotencyKey = readIdempotencyKey(request)
         if (!idempotencyKey) {
           return sendApiError(reply, 400, request, {
@@ -2729,12 +2832,12 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/environments/:environmentId',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageEnvironments(authorization.access)) return denyEnvironmentMutation(request, reply)
       const environmentId = parseSpaceId(request.params.environmentId)
       if (!environmentId) return sendResourceNotFound(reply, request)
       const expectedVersion = requireIfMatchVersion(request, reply, 'Environment')
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) {
         return sendApiError(reply, 400, request, {
@@ -2768,7 +2871,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/environments/:environmentId/revisions',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const environmentId = parseSpaceId(request.params.environmentId)
       if (!environmentId) return sendResourceNotFound(reply, request)
       const items = await configurationCatalogRepository.listEnvironmentRevisions(
@@ -2786,7 +2889,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/automations',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const items = await automationRepository.listAutomations(
         authorization.organizationId, authorization.spaceId, authorization.actor.id,
       )
@@ -2801,7 +2904,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/automations',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageAutomations(authorization.access)) return denyAutomationMutation(request, reply)
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) {
@@ -2837,12 +2940,12 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/automations/:automationId',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageAutomations(authorization.access)) return denyAutomationMutation(request, reply)
       const automationId = parseSpaceId(request.params.automationId)
       if (!automationId) return sendResourceNotFound(reply, request)
       const expectedVersion = requireIfMatchVersion(request, reply, 'Automation')
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) {
         return sendApiError(reply, 400, request, {
@@ -2879,12 +2982,12 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/automations/:automationId',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageAutomations(authorization.access)) return denyAutomationMutation(request, reply)
       const automationId = parseSpaceId(request.params.automationId)
       if (!automationId) return sendResourceNotFound(reply, request)
       const expectedVersion = requireIfMatchVersion(request, reply, 'Automation')
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) {
         return sendApiError(reply, 400, request, {
@@ -2919,12 +3022,12 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/automations/:automationId/test',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageAutomations(authorization.access)) return denyAutomationMutation(request, reply)
       const automationId = parseSpaceId(request.params.automationId)
       if (!automationId) return sendResourceNotFound(reply, request)
       const expectedVersion = requireIfMatchVersion(request, reply, 'Automation')
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) {
         return sendApiError(reply, 400, request, {
@@ -2961,12 +3064,12 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       `/api/v1/organizations/:organizationId/spaces/:spaceId/automations/:automationId/${action}`,
       async (request, reply) => {
         const authorization = await authorizeCatalogSpace(request, reply, request.params)
-        if (!authorization) return
+        if (!authorization) return reply
         if (!canManageAutomations(authorization.access)) return denyAutomationMutation(request, reply)
         const automationId = parseSpaceId(request.params.automationId)
         if (!automationId) return sendResourceNotFound(reply, request)
         const expectedVersion = requireIfMatchVersion(request, reply, 'Automation')
-        if (expectedVersion === null) return
+        if (expectedVersion === null) return reply
         const idempotencyKey = readIdempotencyKey(request)
         if (!idempotencyKey) {
           return sendApiError(reply, 400, request, {
@@ -3003,7 +3106,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/automation-events',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageAutomations(authorization.access)) return denyAutomationMutation(request, reply)
       const items = await automationRepository.listEvents(
         authorization.organizationId, authorization.spaceId, authorization.actor.id,
@@ -3226,7 +3329,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/automation-events',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageAutomations(authorization.access)) return denyAutomationMutation(request, reply)
       const parsed = ReceiveAutomationEventRequestSchema.safeParse(request.body)
       if (!parsed.success) {
@@ -3260,7 +3363,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/automation-runs',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const items = await automationRepository.listRuns(
         authorization.organizationId, authorization.spaceId, authorization.actor.id,
       )
@@ -3275,7 +3378,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions',
     async (request, reply) => {
       const authorization = await authorizeSessionSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
 
       const options = parseSessionListPagination(
         request.query,
@@ -3308,7 +3411,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
 
   app.get<{ Params: SessionParams }>('/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId', async (request, reply) => {
     const authorization = await authorizeSessionSpace(request, reply, request.params)
-    if (!authorization) return
+    if (!authorization) return reply
     const sessionId = parseSpaceId(request.params.sessionId)
     if (!sessionId) return sendResourceNotFound(reply, request)
 
@@ -3331,7 +3434,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/shares',
     async (request, reply) => {
       const authorization = await authorizeSessionSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const sessionId = parseSpaceId(request.params.sessionId)
       if (!sessionId) return sendResourceNotFound(reply, request)
       const options = parseSessionSharePagination(
@@ -3370,7 +3473,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/shares',
     async (request, reply) => {
       const authorization = await authorizeSessionSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const sessionId = parseSpaceId(request.params.sessionId)
       if (!sessionId) return sendResourceNotFound(reply, request)
       if (!canWriteSpace(authorization.access)) {
@@ -3421,7 +3524,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/shares/:shareId',
     async (request, reply) => {
       const authorization = await authorizeSessionSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const sessionId = parseSpaceId(request.params.sessionId)
       const shareId = parseSpaceId(request.params.shareId)
       if (!sessionId || !shareId) return sendResourceNotFound(reply, request)
@@ -3442,7 +3545,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         })
       }
       const expectedVersion = requireIfMatchVersion(request, reply, 'ShareGrant')
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       if (request.body !== undefined) {
         return sendApiError(reply, 400, request, {
           code: 'VALIDATION_FAILED',
@@ -3474,7 +3577,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/files',
     async (request, reply) => {
       const authorization = await authorizeFileSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const pagination = parseFilePagination(
         request.query,
         authorization.organizationId,
@@ -3514,7 +3617,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/files/:fileId',
     async (request, reply) => {
       const authorization = await authorizeFileSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const fileId = parseSpaceId(request.params.fileId)
       if (!fileId) return sendResourceNotFound(reply, request)
       const file = await fileRepository.get(
@@ -3534,7 +3637,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/files/:fileId/content',
     async (request, reply) => {
       const authorization = await authorizeFileSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const fileId = parseSpaceId(request.params.fileId)
       if (!fileId) return sendResourceNotFound(reply, request)
       const version = parseFileContentVersion(request.query.version)
@@ -3562,7 +3665,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/files/:fileId/versions',
     async (request, reply) => {
       const authorization = await authorizeFileSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const fileId = parseSpaceId(request.params.fileId)
       if (!fileId) return sendResourceNotFound(reply, request)
       const pagination = parseFileVersionPagination(
@@ -3603,7 +3706,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/artifacts',
     async (request, reply) => {
       const authorization = await authorizeSessionSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const sessionId = parseSpaceId(request.params.sessionId)
       if (!sessionId) return sendResourceNotFound(reply, request)
       const options = parseArtifactPagination(
@@ -3645,7 +3748,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/artifacts',
     async (request, reply) => {
       const authorization = await authorizeSessionSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const sessionId = parseSpaceId(request.params.sessionId)
       if (!sessionId) return sendResourceNotFound(reply, request)
       if (!canWriteSpace(authorization.access)) {
@@ -3697,7 +3800,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/artifacts/:artifactId',
     async (request, reply) => {
       const authorization = await authorizeSessionSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const sessionId = parseSpaceId(request.params.sessionId)
       const artifactId = parseSpaceId(request.params.artifactId)
       if (!sessionId || !artifactId) return sendResourceNotFound(reply, request)
@@ -3709,7 +3812,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         })
       }
       const expectedVersion = requireIfMatchVersion(request, reply, 'Artifact')
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       const parsed = UpdateArtifactRequestSchema.safeParse(request.body)
       if (!parsed.success) {
         return sendApiError(reply, 400, request, {
@@ -3741,7 +3844,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/artifacts/:artifactId',
     async (request, reply) => {
       const authorization = await authorizeSessionSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const sessionId = parseSpaceId(request.params.sessionId)
       const artifactId = parseSpaceId(request.params.artifactId)
       if (!sessionId || !artifactId) return sendResourceNotFound(reply, request)
@@ -3762,7 +3865,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         })
       }
       const expectedVersion = requireIfMatchVersion(request, reply, 'Artifact')
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       if (request.body !== undefined) {
         return sendApiError(reply, 400, request, {
           code: 'VALIDATION_FAILED',
@@ -3793,7 +3896,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/workers',
     async (request, reply) => {
       const authorization = await authorizeSessionSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const sessionId = parseSpaceId(request.params.sessionId)
       if (!sessionId) return sendResourceNotFound(reply, request)
       const pagination = parseSessionWorkerPagination(
@@ -3834,7 +3937,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/tool-calls',
     async (request, reply) => {
       const authorization = await authorizeSessionSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const sessionId = parseSpaceId(request.params.sessionId)
       if (!sessionId) return sendResourceNotFound(reply, request)
       const pagination = parseToolCallPagination(
@@ -3876,7 +3979,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/approvals',
     async (request, reply) => {
       const authorization = await authorizeApprovalSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const pagination = parseApprovalPagination(
         request.query,
         authorization.organizationId,
@@ -3911,7 +4014,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/approvals/:approvalId',
     async (request, reply) => {
       const authorization = await authorizeApprovalSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const approvalId = parseSpaceId(request.params.approvalId)
       if (!approvalId) return sendResourceNotFound(reply, request)
       const candidate = await toolApprovalRepository.getApproval(
@@ -3931,7 +4034,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/approvals/:approvalId/decision',
     async (request, reply) => {
       const authorization = await authorizeApprovalSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const approvalId = parseSpaceId(request.params.approvalId)
       if (!approvalId) return sendResourceNotFound(reply, request)
       const idempotencyKey = readIdempotencyKey(request)
@@ -3944,7 +4047,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         })
       }
       const expectedVersion = requireIfMatchVersion(request, reply, 'Approval')
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       const parsed = ApprovalDecisionRequestSchema.safeParse(request.body)
       if (!parsed.success) {
         return sendApiError(reply, 400, request, {
@@ -3976,7 +4079,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId',
     async (request, reply) => {
       const authorization = await authorizeSessionSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const sessionId = parseSpaceId(request.params.sessionId)
       if (!sessionId) return sendResourceNotFound(reply, request)
       if (!canWriteSpace(authorization.access)) {
@@ -3987,7 +4090,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         })
       }
       const expectedVersion = requireIfMatchVersion(request, reply)
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       const parsed = RenameSessionRequestSchema.safeParse(request.body)
       if (!parsed.success) {
         return sendApiError(reply, 400, request, {
@@ -4026,7 +4129,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
             ? { scope: 'session.archive', resourceType: 'session', resourceId: request.params.sessionId }
             : undefined,
         )
-        if (!authorization) return
+        if (!authorization) return reply
         const sessionId = parseSpaceId(request.params.sessionId)
         if (!sessionId) return sendResourceNotFound(reply, request)
         if (!canWriteSpace(authorization.access)) {
@@ -4048,7 +4151,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
           })
         }
         const expectedVersion = requireIfMatchVersion(request, reply)
-        if (expectedVersion === null) return
+        if (expectedVersion === null) return reply
         if (request.body !== undefined) {
           return sendApiError(reply, 400, request, {
             code: 'VALIDATION_FAILED',
@@ -4083,7 +4186,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       `/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/${action}`,
       async (request, reply) => {
         const authorization = await authorizeSessionSpace(request, reply, request.params)
-        if (!authorization) return
+        if (!authorization) return reply
         const sessionId = parseSpaceId(request.params.sessionId)
         if (!sessionId) return sendResourceNotFound(reply, request)
         if (!canWriteSpace(authorization.access)) {
@@ -4103,7 +4206,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
           })
         }
         const expectedVersion = requireIfMatchVersion(request, reply)
-        if (expectedVersion === null) return
+        if (expectedVersion === null) return reply
         const parsed = CancelSessionRequestSchema.safeParse(
           action === 'cancel' ? (request.body ?? {}) : request.body === undefined ? {} : request.body,
         )
@@ -4146,7 +4249,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/turns/:turnId/retry',
     async (request, reply) => {
       const authorization = await authorizeSessionSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const sessionId = parseSpaceId(request.params.sessionId)
       const turnId = parseSpaceId(request.params.turnId)
       if (!sessionId || !turnId) return sendResourceNotFound(reply, request)
@@ -4167,7 +4270,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         })
       }
       const expectedVersion = requireIfMatchVersion(request, reply)
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       if (request.body !== undefined) {
         return sendApiError(reply, 400, request, {
           code: 'VALIDATION_FAILED',
@@ -4204,7 +4307,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/messages',
     async (request, reply) => {
       const authorization = await authorizeSessionSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const sessionId = parseSpaceId(request.params.sessionId)
       if (!sessionId || !sessionTimelineRepository) return sendResourceNotFound(reply, request)
       const scope = {
@@ -4242,7 +4345,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         resourceType: 'session',
         resourceId: request.params.sessionId,
       })
-      if (!authorization) return
+      if (!authorization) return reply
       const sessionId = parseSpaceId(request.params.sessionId)
       if (!sessionId) return sendResourceNotFound(reply, request)
       if (!canWriteSpace(authorization.access)) {
@@ -4310,7 +4413,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/events',
     async (request, reply) => {
       const authorization = await authorizeSessionSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const sessionId = parseSpaceId(request.params.sessionId)
       if (!sessionId || !sessionTimelineRepository) return sendResourceNotFound(reply, request)
       const scope = {
@@ -4343,7 +4446,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/events/stream',
     async (request, reply) => {
       const authorization = await authorizeSessionSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const sessionId = parseSpaceId(request.params.sessionId)
       if (!sessionId || !sessionTimelineRepository) return sendResourceNotFound(reply, request)
       const scope = {
@@ -4477,7 +4580,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
 
   app.post<{ Params: SpaceParams }>('/api/v1/organizations/:organizationId/spaces/:spaceId/sessions', async (request, reply) => {
     const authorization = await authorizeSpace(request, reply, request.params)
-    if (!authorization) return
+    if (!authorization) return reply
 
     if (!canWriteSpace(authorization.access)) {
       return sendApiError(reply, 403, request, {
@@ -4516,7 +4619,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       authorization.organizationId,
       authorization.spaceId,
       { scope: 'session.create', resourceType: 'expert', resourceId: parsed.data.expertId },
-    )) return
+    )) return reply
 
     let executionAvailability: 'available' | 'disabled' | 'worker_unavailable' = 'available'
     if (parsed.data.start) {
@@ -4555,7 +4658,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/sessions/:sessionId/start',
     async (request, reply) => {
       const authorization = await authorizeSessionSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const sessionId = parseSpaceId(request.params.sessionId)
       if (!sessionId) return sendResourceNotFound(reply, request)
 
@@ -4580,7 +4683,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
       }
 
       const expectedVersion = requireIfMatchVersion(request, reply)
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       if (request.body !== undefined) {
         return sendApiError(reply, 400, request, {
           code: 'VALIDATION_FAILED',
@@ -4629,7 +4732,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/repositories',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const { organizationId, spaceId } = authorization
       const { items, nextCursor, hasMore } = await repositoryRepository.listRepositories(
         organizationId, spaceId, authorization.actor.id,
@@ -4642,7 +4745,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/repositories/:repositoryId',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const { organizationId, spaceId } = authorization
       const repository = await repositoryRepository.getRepository(
         organizationId, spaceId, request.params.repositoryId, authorization.actor.id,
@@ -4656,7 +4759,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/repositories',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageRepositories(authorization.access)) return denyAutomationMutation(request, reply)
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) {
@@ -4701,7 +4804,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/repositories/:repositoryId',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageRepositories(authorization.access)) return denyAutomationMutation(request, reply)
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) {
@@ -4711,7 +4814,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         })
       }
       const expectedVersion = requireIfMatchVersion(request, reply, 'Repository')
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       const parsed = UpdateRepositoryRequestSchema.safeParse(request.body)
       if (!parsed.success) {
         return sendApiError(reply, 400, request, {
@@ -4756,7 +4859,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/repositories/:repositoryId',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageRepositories(authorization.access)) return denyAutomationMutation(request, reply)
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) {
@@ -4766,7 +4869,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         })
       }
       const expectedVersion = requireIfMatchVersion(request, reply, 'Repository')
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       if (request.body !== undefined) {
         return sendApiError(reply, 400, request, {
           code: 'VALIDATION_FAILED', message: 'Archiving a Repository does not accept a request body.', retryable: false,
@@ -4814,7 +4917,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/secrets',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const { organizationId, spaceId } = authorization
       const { items, nextCursor, hasMore } = await secretRepository.listSecrets(
         organizationId, spaceId, authorization.actor.id,
@@ -4827,7 +4930,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/secrets/:secretId',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const { organizationId, spaceId } = authorization
       const secret = await secretRepository.getSecret(
         organizationId, spaceId, request.params.secretId, authorization.actor.id,
@@ -4841,7 +4944,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/secrets',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageSecrets(authorization.access)) return denySecretMutation(request, reply)
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) {
@@ -4891,7 +4994,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/secrets/:secretId',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageSecrets(authorization.access)) return denySecretMutation(request, reply)
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) {
@@ -4901,7 +5004,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         })
       }
       const expectedVersion = requireIfMatchVersion(request, reply, 'Secret')
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       if (request.body !== undefined) {
         return sendApiError(reply, 400, request, {
           code: 'VALIDATION_FAILED', message: 'Archiving a Secret does not accept a request body.', retryable: false,
@@ -4949,7 +5052,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/webhooks',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const { organizationId, spaceId } = authorization
       const { items, nextCursor, hasMore } = await webhookRepository.listWebhooks(
         organizationId, spaceId, authorization.actor.id,
@@ -4962,7 +5065,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/webhooks/:webhookId',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const { organizationId, spaceId } = authorization
       const webhook = await webhookRepository.getWebhook(
         organizationId, spaceId, request.params.webhookId, authorization.actor.id,
@@ -4976,7 +5079,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/webhooks',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageWebhooks(authorization.access)) return denyWebhookMutation(request, reply)
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) {
@@ -5026,7 +5129,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/webhooks/:webhookId',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageWebhooks(authorization.access)) return denyWebhookMutation(request, reply)
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) {
@@ -5036,7 +5139,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         })
       }
       const expectedVersion = requireIfMatchVersion(request, reply, 'Webhook')
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       if (request.body !== undefined) {
         return sendApiError(reply, 400, request, {
           code: 'VALIDATION_FAILED', message: 'Archiving a Webhook does not accept a request body.', retryable: false,
@@ -5084,7 +5187,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/mcp-servers',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const { organizationId, spaceId } = authorization
       const { items, nextCursor, hasMore } = await mcpServerRepository.listMcpServers(
         organizationId, spaceId, authorization.actor.id,
@@ -5097,7 +5200,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/mcp-servers/:mcpServerId',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const { organizationId, spaceId } = authorization
       const server = await mcpServerRepository.getMcpServer(
         organizationId, spaceId, request.params.mcpServerId, authorization.actor.id,
@@ -5111,7 +5214,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/mcp-servers',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageMcpServers(authorization.access)) return denyMcpServerMutation(request, reply)
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) {
@@ -5156,7 +5259,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/mcp-servers/:mcpServerId',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageMcpServers(authorization.access)) return denyMcpServerMutation(request, reply)
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) {
@@ -5166,7 +5269,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         })
       }
       const expectedVersion = requireIfMatchVersion(request, reply, 'MCP server')
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       const parsed = UpdateMcpServerRequestSchema.safeParse(request.body)
       if (!parsed.success) {
         return sendApiError(reply, 400, request, {
@@ -5211,7 +5314,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/mcp-servers/:mcpServerId',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageMcpServers(authorization.access)) return denyMcpServerMutation(request, reply)
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) {
@@ -5221,7 +5324,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         })
       }
       const expectedVersion = requireIfMatchVersion(request, reply, 'MCP server')
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       if (request.body !== undefined) {
         return sendApiError(reply, 400, request, {
           code: 'VALIDATION_FAILED', message: 'Archiving an MCP server does not accept a request body.', retryable: false,
@@ -5267,7 +5370,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/artifacts',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       let options
       try {
         options = parseArtifactPagination(
@@ -5322,7 +5425,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/skills',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const { organizationId, spaceId } = authorization
       const { items, nextCursor, hasMore } = await skillRepository.listSkills(
         organizationId, spaceId, authorization.actor.id,
@@ -5335,7 +5438,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/skills/:skillId',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const { organizationId, spaceId } = authorization
       const skill = await skillRepository.getSkill(
         organizationId, spaceId, request.params.skillId, authorization.actor.id,
@@ -5349,7 +5452,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/skills',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageSkills(authorization.access)) return denySkillMutation(request, reply)
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) {
@@ -5395,7 +5498,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/skills/:skillId',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageSkills(authorization.access)) return denySkillMutation(request, reply)
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) {
@@ -5405,7 +5508,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         })
       }
       const expectedVersion = requireIfMatchVersion(request, reply, 'Skill')
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       const parsed = UpdateSkillRequestSchema.safeParse(request.body)
       if (!parsed.success) {
         return sendApiError(reply, 400, request, {
@@ -5451,7 +5554,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/skills/:skillId',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageSkills(authorization.access)) return denySkillMutation(request, reply)
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) {
@@ -5461,7 +5564,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         })
       }
       const expectedVersion = requireIfMatchVersion(request, reply, 'Skill')
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       if (request.body !== undefined) {
         return sendApiError(reply, 400, request, {
           code: 'VALIDATION_FAILED',
@@ -5506,7 +5609,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/daemons',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const { organizationId, spaceId } = authorization
       const { items, nextCursor, hasMore } = await daemonRepository.listDaemons(
         organizationId, spaceId, authorization.actor.id,
@@ -5519,7 +5622,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/daemons/:daemonId',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const { organizationId, spaceId } = authorization
       const daemon = await daemonRepository.getDaemon(
         organizationId, spaceId, request.params.daemonId, authorization.actor.id,
@@ -5533,7 +5636,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/daemons',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageDaemons(authorization.access)) return denyDaemonMutation(request, reply)
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) {
@@ -5584,7 +5687,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/daemons/:daemonId',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageDaemons(authorization.access)) return denyDaemonMutation(request, reply)
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) {
@@ -5594,7 +5697,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         })
       }
       const expectedVersion = requireIfMatchVersion(request, reply, 'daemon')
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       const parsed = UpdateDaemonRequestSchema.safeParse(request.body)
       if (!parsed.success) {
         return sendApiError(reply, 400, request, {
@@ -5639,7 +5742,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/daemons/:daemonId',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageDaemons(authorization.access)) return denyDaemonMutation(request, reply)
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) {
@@ -5649,7 +5752,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         })
       }
       const expectedVersion = requireIfMatchVersion(request, reply, 'daemon')
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       if (request.body !== undefined) {
         return sendApiError(reply, 400, request, {
           code: 'VALIDATION_FAILED', message: 'Archiving a daemon does not accept a request body.', retryable: false,
@@ -5697,7 +5800,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/integrations',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const { organizationId, spaceId } = authorization
       const { items, nextCursor, hasMore } = await integrationRepository.listIntegrations(
         organizationId, spaceId, authorization.actor.id,
@@ -5710,7 +5813,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/integrations/:integrationId',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       const { organizationId, spaceId } = authorization
       const integration = await integrationRepository.getIntegration(
         organizationId, spaceId, request.params.integrationId, authorization.actor.id,
@@ -5724,7 +5827,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/integrations',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageIntegrations(authorization.access)) return denyIntegrationMutation(request, reply)
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) {
@@ -5769,7 +5872,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/integrations/:integrationId',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageIntegrations(authorization.access)) return denyIntegrationMutation(request, reply)
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) {
@@ -5779,7 +5882,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         })
       }
       const expectedVersion = requireIfMatchVersion(request, reply, 'integration')
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       const parsed = UpdateIntegrationRequestSchema.safeParse(request.body)
       if (!parsed.success) {
         return sendApiError(reply, 400, request, {
@@ -5824,7 +5927,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
     '/api/v1/organizations/:organizationId/spaces/:spaceId/integrations/:integrationId',
     async (request, reply) => {
       const authorization = await authorizeCatalogSpace(request, reply, request.params)
-      if (!authorization) return
+      if (!authorization) return reply
       if (!canManageIntegrations(authorization.access)) return denyIntegrationMutation(request, reply)
       const idempotencyKey = readIdempotencyKey(request)
       if (!idempotencyKey) {
@@ -5834,7 +5937,7 @@ export function createApp(options: CreateAppOptions = {}): FastifyInstance {
         })
       }
       const expectedVersion = requireIfMatchVersion(request, reply, 'integration')
-      if (expectedVersion === null) return
+      if (expectedVersion === null) return reply
       if (request.body !== undefined) {
         return sendApiError(reply, 400, request, {
           code: 'VALIDATION_FAILED', message: 'Archiving an integration does not accept a request body.', retryable: false,

@@ -235,6 +235,43 @@ paths:
         '500':
           $ref: '#/components/responses/RuntimeInternalError'
 
+  /organizations/{organizationId}/spaces/{spaceId}/search:
+    parameters:
+      - $ref: '#/components/parameters/RuntimeOrganizationId'
+      - $ref: '#/components/parameters/RuntimeSpaceId'
+    get:
+      tags: [Search]
+      operationId: searchCosmosSpace
+      x-cosmos-implementation-status: implemented
+      summary: Search across Sessions, Experts, Artifacts, Environments, and Automations in a Space
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeSearchResponse'
+        '401':
+          $ref: '#/components/responses/RuntimeUnauthorized'
+        '403':
+          $ref: '#/components/responses/RuntimeForbidden'
+        '404':
+          $ref: '#/components/responses/RuntimeNotFound'
+        '500':
+          $ref: '#/components/responses/RuntimeInternalError'
+
   /organizations/{organizationId}:
     parameters:
       - $ref: '#/components/parameters/RuntimeOrganizationId'
@@ -4800,6 +4837,33 @@ components:
           oneOf:
             - $ref: '#/components/schemas/Timestamp'
             - type: 'null'
+      additionalProperties: false
+
+    RuntimeSearchResponse:
+      type: object
+      required: [query, items]
+      properties:
+        query:
+          type: string
+        items:
+          type: array
+          items:
+            type: object
+            required: [id, type, title, url]
+            properties:
+              id:
+                type: string
+              type:
+                type: string
+                enum: [session, expert, artifact, environment, automation]
+              title:
+                type: string
+              subtitle:
+                type: string
+              url:
+                type: string
+              spaceId:
+                type: string
       additionalProperties: false
 
     RuntimeExpertPublishedRevisionSummary:

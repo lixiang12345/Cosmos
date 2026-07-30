@@ -438,7 +438,14 @@ describe('Cosmos API', () => {
       'x-content-type-options': 'nosniff',
       'x-frame-options': 'DENY',
     })
-    expect(developmentResponse.headers['x-request-id']).toBeTruthy()
+    expect(developmentResponse.headers['x-request-id']).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    )
+    expect(productionResponse.headers['x-request-id']).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    )
+    expect(developmentResponse.headers['x-request-id'])
+      .not.toBe(productionResponse.headers['x-request-id'])
     expect(developmentResponse.headers['strict-transport-security']).toBeUndefined()
     expect(productionResponse.headers['strict-transport-security']).toContain('max-age=31536000')
   })
@@ -567,6 +574,31 @@ describe('Cosmos API', () => {
 
     expect(response.statusCode).toBe(404)
     expect(ApiErrorSchema.parse(response.json())).toMatchObject({ code: 'RESOURCE_NOT_FOUND' })
+  })
+
+  it('finishes concealed authorization responses before an async audit hook completes', async () => {
+    const append = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    })
+    const app = createApp({
+      authenticate: createDevelopmentAuthenticator('user-local-admin'),
+      sessionRepository: testRepository({ actorOrganizations: {} }),
+      securityAuditRepository: { append },
+    })
+    openApps.push(app)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/organizations/cosmos/spaces/platform/sessions',
+      headers: { 'idempotency-key': 'concealed-session-create' },
+      payload: sessionRequest,
+    })
+    const health = await app.inject({ method: 'GET', url: '/api/health' })
+
+    expect(response.statusCode).toBe(404)
+    expect(ApiErrorSchema.parse(response.json())).toMatchObject({ code: 'RESOURCE_NOT_FOUND' })
+    expect(append).toHaveBeenCalledOnce()
+    expect(health.statusCode).toBe(200)
   })
 
   it('ignores forwarded client addresses unless the immediate proxy is explicitly trusted', async () => {
@@ -2278,5 +2310,27 @@ describe('Cosmos API', () => {
     const events = await app.inject({ method: 'GET', url: '/api/v1/organizations/cosmos/spaces/platform/automation-events' })
     expect(events.statusCode).toBe(200)
     expect(events.json().items).toHaveLength(1)
+  })
+
+  it('serves global search across sessions, experts, artifacts, environments, and automations', async () => {
+    const app = createApp({
+      sessionRepository: testRepository(),
+      authenticate: createDevelopmentAuthenticator('user-local-admin'),
+    })
+    openApps.push(app)
+    const shortSearch = await app.inject({
+      method: 'GET',
+      url: '/api/v1/organizations/cosmos/spaces/platform/search?q=a',
+    })
+    expect(shortSearch.statusCode).toBe(200)
+    expect(shortSearch.json()).toEqual({ query: 'a', items: [] })
+
+    const searchResult = await app.inject({
+      method: 'GET',
+      url: '/api/v1/organizations/cosmos/spaces/platform/search?q=expert',
+    })
+    expect(searchResult.statusCode).toBe(200)
+    expect(searchResult.json().query).toBe('expert')
+    expect(Array.isArray(searchResult.json().items)).toBe(true)
   })
 })

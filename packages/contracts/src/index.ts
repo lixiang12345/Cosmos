@@ -484,3 +484,13 @@ export {
   type SkillStatus,
   type UpdateSkillRequest,
 } from './skill.js'
+
+export {
+  SearchResponseDtoSchema,
+  SearchResultItemDtoSchema,
+  SearchResultTypeSchema,
+  type SearchResponseDto,
+  type SearchResultItemDto,
+  type SearchResultType,
+} from './search.js'
+

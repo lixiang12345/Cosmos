@@ -29,6 +29,8 @@ import {
   RepositoryMutationResponseSchema,
   RepositoryListResponseSchema,
   RuntimeCapabilitiesSchema,
+  SearchResponseDtoSchema,
+  type SearchResultItemDto,
   RetryTurnResponseSchema,
   SecretDtoSchema,
   SecretListResponseSchema,
@@ -592,6 +594,10 @@ function contextEnginePath(organizationId: string, spaceId: string) {
 
 function filesPath(organizationId: string, spaceId: string) {
   return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/files`
+}
+
+function searchPath(organizationId: string, spaceId: string) {
+  return `/v1/organizations/${encodeURIComponent(organizationId)}/spaces/${encodeURIComponent(spaceId)}/search`
 }
 
 function approvalsPath(organizationId: string, spaceId: string) {
@@ -2853,4 +2859,17 @@ export function packContextEngine(
     body: JSON.stringify(input),
     signal,
   }, ContextPackResponseSchema, auth)
+}
+
+export async function searchCosmos(
+  organizationId: string,
+  spaceId: string,
+  query: string,
+  auth?: CosmosApiAuthContext,
+  signal?: AbortSignal,
+): Promise<SearchResultItemDto[]> {
+  if (query.trim().length < 2) return []
+  const url = `${searchPath(organizationId, spaceId)}?q=${encodeURIComponent(query.trim())}`
+  const response = await request(url, { signal }, SearchResponseDtoSchema, auth)
+  return response.items
 }
