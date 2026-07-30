@@ -169,6 +169,84 @@ export async function bootstrapDevelopmentDatabase(pool: Pool, actorId: string) 
           AND status = 'draft'
           AND published_revision_id IS NULL
       `, [space.id, expertId, expertRevisionId])
+      const officialBuiltInExperts = [
+        {
+          idSuffix: 'delivery',
+          name: 'Software Delivery Expert',
+          description: 'General-purpose software engineering Expert for full-stack feature delivery, refactoring, and code review.',
+          instructions: 'Plan the work, inspect repository evidence, implement carefully across contracts, API, and Web, and verify with automated checks.',
+        },
+        {
+          idSuffix: 'debugger',
+          name: 'Bug & Incident Debugger',
+          description: 'Specialized Expert for analyzing log tracebacks, isolating root causes, and applying regression fixes.',
+          instructions: 'Always read raw failure tracebacks first. Identify the precise root cause before touching code. Do not patch symptoms without fixing underlying contracts.',
+        },
+        {
+          idSuffix: 'architect',
+          name: 'Architecture & Refactoring Expert',
+          description: 'Focuses on codebase structure, API contracts, domain isolation, and large-scale refactoring.',
+          instructions: 'Audit existing decoupling before writing custom helpers. Preserve API contracts, tenant isolation, and optimistic concurrency.',
+        },
+        {
+          idSuffix: 'qa',
+          name: 'Quality & Test Automation Expert',
+          description: 'Specialized Expert for writing comprehensive unit, integration, and end-to-end tests.',
+          instructions: 'Cover positive paths, edge cases, error conditions, and RLS tenant boundaries. Verify test coverage with pnpm check.',
+        },
+        {
+          idSuffix: 'devops',
+          name: 'DevOps & Infrastructure Expert',
+          description: 'Specialized Expert for CI/CD automation, Docker runtime setup, environment configuration, and database migrations.',
+          instructions: 'Ensure non-destructive zero-downtime database migrations, idempotent scripts, and secure secret injection via environment variables.',
+        },
+      ]
+
+      for (const builtin of officialBuiltInExperts) {
+        const builtinId = `expert-builtin-${builtin.idSuffix}-${space.id}`
+        const builtinRevisionId = `${builtinId}-revision-1`
+        await client.query(`
+          INSERT INTO cosmos_experts (
+            organization_id, space_id, id, kind, name, description, visibility, status, created_by
+          ) VALUES (
+            'cosmos', $1, $2, 'built_in', $3, $4, 'space', 'draft', $5
+          )
+          ON CONFLICT (organization_id, space_id, id) DO NOTHING
+        `, [space.id, builtinId, builtin.name, builtin.description, actorId])
+        await client.query(`
+          INSERT INTO cosmos_expert_revisions (
+            organization_id, space_id, expert_id, id, revision, status,
+            environment_id, environment_revision_id,
+            allow_repository_override, allow_base_branch_override,
+            instructions, model, configuration, created_by
+          ) VALUES (
+            'cosmos', $1, $2, $3, 1, 'draft', $4, $5, true, true,
+            $6, 'gpt-5.6-sol', '{}', $7
+          )
+          ON CONFLICT (organization_id, space_id, expert_id, id) DO NOTHING
+        `, [
+          space.id,
+          builtinId,
+          builtinRevisionId,
+          environmentId,
+          environmentRevisionId,
+          builtin.instructions,
+          actorId,
+        ])
+        await client.query(`
+          UPDATE cosmos_expert_revisions
+          SET status = 'published'
+          WHERE organization_id = 'cosmos' AND space_id = $1 AND expert_id = $2
+            AND id = $3 AND status = 'draft'
+        `, [space.id, builtinId, builtinRevisionId])
+        await client.query(`
+          UPDATE cosmos_experts
+          SET status = 'published', published_revision_id = $3
+          WHERE organization_id = 'cosmos' AND space_id = $1 AND id = $2
+            AND status = 'draft' AND published_revision_id IS NULL
+        `, [space.id, builtinId, builtinRevisionId])
+      }
+
       await client.query(`
         INSERT INTO cosmos_experts (
           organization_id, space_id, id, kind, name, description, visibility, status, created_by
