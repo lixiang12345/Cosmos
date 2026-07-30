@@ -306,6 +306,9 @@ export function RemoteSessionWorkbench({
   const [shareDraft, setShareDraft] = useState<{ principalType: 'user' | 'group'; principalId: string; role: 'viewer' | 'collaborator' }>({ principalType: 'user', principalId: '', role: 'viewer' })
   const [shareBusy, setShareBusy] = useState(false)
   const [shareError, setShareError] = useState('')
+  const [autoScrollTerminal, setAutoScrollTerminal] = useState(true)
+  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null)
+  const [clearedTerminal, setClearedTerminal] = useState(false)
 
   const submitArtifactLink = async () => {
     if (!onAddArtifactLink) return
@@ -515,11 +518,121 @@ export function RemoteSessionWorkbench({
               </footer> : null}
             </div> : null}
 
-            {activeTab === 'terminal' ? <section className="prototype-session-pane" aria-label={text(locale, '终端', 'Terminal')}><div className="prototype-terminal-window"><header>{text(locale, '会话事件 · 只读', 'session events · read only')}</header><pre>{terminalLines.length ? terminalLines.join('\n') : events.length ? events.map((event) => `${shortTime(event.occurredAt, locale)}  ${eventLabel(event, locale)}`).join('\n') : text(locale, '当前没有执行输出。', 'No execution output is available.')}</pre></div>{onOpenWorkers ? <button type="button" className="prototype-pane-action" onClick={onOpenWorkers}>{text(locale, '打开 Worker 详情', 'Open Worker details')}</button> : null}</section> : null}
+            {activeTab === 'terminal' ? (
+              <section className="prototype-session-pane" aria-label={text(locale, '终端', 'Terminal')}>
+                <div className="prototype-terminal-window">
+                  <header>
+                    <span>{text(locale, '会话日志终端 · 实时流', 'Session Terminal · Live Stream')}</span>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <button
+                        type="button"
+                        className="prototype-ghost-button"
+                        style={{ padding: '2px 8px', fontSize: '11px' }}
+                        onClick={() => setClearedTerminal((val) => !val)}
+                      >
+                        {clearedTerminal ? text(locale, '恢复视图', 'Restore') : text(locale, '清屏', 'Clear')}
+                      </button>
+                      <button
+                        type="button"
+                        className="prototype-ghost-button"
+                        style={{ padding: '2px 8px', fontSize: '11px' }}
+                        onClick={() => setAutoScrollTerminal((val) => !val)}
+                      >
+                        {autoScrollTerminal ? text(locale, '已开启自动滚动', 'Auto-scroll ON') : text(locale, '已暂停自动滚动', 'Auto-scroll OFF')}
+                      </button>
+                    </div>
+                  </header>
+                  <pre style={{ overflowX: 'auto', fontFamily: 'var(--font-mono)', fontSize: '13px', lineHeight: '1.6' }}>
+                    {clearedTerminal ? (
+                      text(locale, '终端输出已清除。', 'Terminal output cleared.')
+                    ) : terminalLines.length ? (
+                      terminalLines.map((line, idx) => `${String(idx + 1).padStart(3, ' ')} │ ${line}`).join('\n')
+                    ) : events.length ? (
+                      events.map((event, idx) => `${String(idx + 1).padStart(3, ' ')} │ ${shortTime(event.occurredAt, locale)}  [${event.type}] ${eventLabel(event, locale)}`).join('\n')
+                    ) : (
+                      text(locale, '当前没有执行输出。', 'No execution output is available.')
+                    )}
+                  </pre>
+                </div>
+                {onOpenWorkers ? <button type="button" className="prototype-pane-action" onClick={onOpenWorkers}>{text(locale, '打开 Worker 详情', 'Open Worker details')}</button> : null}
+              </section>
+            ) : null}
 
-            {activeTab === 'files' ? <section className="prototype-session-pane" aria-label={text(locale, '文件', 'Files')}><table className="prototype-sessions-table"><thead><tr><th>{text(locale, '名称', 'Name')}</th><th>{text(locale, '变更', 'Change')}</th></tr></thead><tbody>{localFiles.length ? localFiles.map((file) => <tr key={file.path}><td>{file.path}</td><td className="muted">{file.detail}</td></tr>) : <tr><td colSpan={2} className="prototype-sessions-state">{text(locale, '当前没有文件。', 'No files yet.')}</td></tr>}</tbody></table></section> : null}
+            {activeTab === 'files' ? (
+              <section className="prototype-session-pane" aria-label={text(locale, '文件', 'Files')}>
+                <div style={{ display: 'grid', gridTemplateColumns: localFiles.length ? '260px 1fr' : '1fr', gap: '16px', minHeight: '320px' }}>
+                  <div style={{ borderRight: localFiles.length ? '1px solid var(--color-border)' : 'none', paddingRight: '12px' }}>
+                    <h3 style={{ fontSize: '12px', textTransform: 'uppercase', color: 'var(--color-muted)', marginBottom: '8px' }}>
+                      {text(locale, '改动文件列表', 'Modified Files')} ({localFiles.length})
+                    </h3>
+                    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                      {localFiles.length ? localFiles.map((file) => (
+                        <li key={file.path} style={{ marginBottom: '4px' }}>
+                          <button
+                            type="button"
+                            style={{
+                              width: '100%',
+                              textAlign: 'left',
+                              padding: '6px 8px',
+                              borderRadius: '4px',
+                              border: 'none',
+                              background: selectedFilePath === file.path ? 'var(--color-surface-hover)' : 'transparent',
+                              cursor: 'pointer',
+                              fontFamily: 'var(--font-mono)',
+                              fontSize: '12px',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                            }}
+                            onClick={() => setSelectedFilePath(file.path)}
+                          >
+                            <span>{file.path}</span>
+                            <span style={{ color: 'var(--color-muted)', fontSize: '11px' }}>{file.detail}</span>
+                          </button>
+                        </li>
+                      )) : (
+                        <p style={{ color: 'var(--color-muted)', fontSize: '13px' }}>{text(locale, '暂无变更文件', 'No modified files')}</p>
+                      )}
+                    </ul>
+                  </div>
+                  <div style={{ background: 'var(--color-surface-card)', padding: '12px', borderRadius: '6px' }}>
+                    <h3 style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', marginBottom: '8px', color: 'var(--color-text-secondary)' }}>
+                      {selectedFilePath ? `${text(locale, '正在预览', 'Previewing')}: ${selectedFilePath}` : text(locale, '选择文件以查看 Diff 代码对比', 'Select a file to inspect code diff')}
+                    </h3>
+                    <pre style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', lineHeight: '1.5', overflowX: 'auto' }}>
+                      {selectedFilePath ? (
+                        localFiles.find((f) => f.path === selectedFilePath)?.detail ?? text(locale, '文件未修改', 'Unmodified file')
+                      ) : (
+                        text(locale, '点击左侧文件查看详细修改行与变更快照。', 'Click a file on the left to inspect detailed line changes.')
+                      )}
+                    </pre>
+                  </div>
+                </div>
+              </section>
+            ) : null}
 
-            {activeTab === 'subscriptions' ? <section className="prototype-session-pane prototype-subscriptions" aria-label={text(locale, '执行动态', 'Execution activity')}><h2>{events.length ? text(locale, '会话事件', 'Session events') : text(locale, '没有订阅', 'No subscriptions')}</h2>{events.length ? <ol>{events.map((event) => <li key={event.eventId}><strong>{eventLabel(event, locale)}</strong><span>#{event.sequence}</span><time dateTime={event.occurredAt}>{shortTime(event.occurredAt, locale)}</time></li>)}</ol> : <p>{text(locale, '当前会话尚无实时事件。', 'No live events are available for this Session.')}</p>}</section> : null}
+            {activeTab === 'subscriptions' ? (
+              <section className="prototype-session-pane prototype-subscriptions" aria-label={text(locale, '执行动态', 'Execution activity')}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                  <h2>{events.length ? text(locale, '会话事件与订阅路由', 'Session Events & Triggers') : text(locale, '没有订阅', 'No subscriptions')}</h2>
+                  <span className="prototype-expert-pill">{events.length} {text(locale, '条记录', 'records')}</span>
+                </div>
+                {events.length ? (
+                  <ol style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                    {events.map((event) => (
+                      <li key={event.eventId} style={{ padding: '8px 12px', borderBottom: '1px solid var(--color-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <strong>{eventLabel(event, locale)}</strong>
+                          <span style={{ marginLeft: '8px', fontSize: '11px', color: 'var(--color-muted)', fontFamily: 'var(--font-mono)' }}>#{event.sequence}</span>
+                        </div>
+                        <time dateTime={event.occurredAt} style={{ fontSize: '12px', color: 'var(--color-muted)' }}>{shortTime(event.occurredAt, locale)}</time>
+                      </li>
+                    ))}
+                  </ol>
+                ) : (
+                  <p>{text(locale, '当前会话尚无实时订阅事件。', 'No live events are available for this Session.')}</p>
+                )}
+              </section>
+            ) : null}
           </div>
         </div>
         {copyNotice ? <div className="prototype-session-toast" role="status">{copyNotice}</div> : null}

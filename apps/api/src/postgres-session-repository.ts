@@ -397,7 +397,6 @@ export class PostgresSessionRepository implements SessionRepository {
       clauses.push(`(
         session.title ILIKE $${parameters.length} ESCAPE '\\'
         OR session.summary ILIKE $${parameters.length} ESCAPE '\\'
-        OR session.expert_name ILIKE $${parameters.length} ESCAPE '\\'
         OR session.repository ILIKE $${parameters.length} ESCAPE '\\'
       )`)
     }
@@ -1490,6 +1489,65 @@ export class PostgresSessionRepository implements SessionRepository {
 
     const occurredAt = idempotency.now.toISOString()
     let canceledAttempts: Array<{ id: string; turn_id: string; number: number }> = []
+    let canceledApprovals: Array<{
+      id: string
+      tool_call_id: string
+      turn_id: string
+      version: number
+    }> = []
+    let canceledToolCalls: Array<{
+      id: string
+      turn_id: string
+      attempt_id: string
+      approval_id: string | null
+      tool_name: string
+      operation: string
+      risk_level: string
+      status: string
+      version: number
+    }> = []
+    if (record.action === 'pause' || record.action === 'cancel') {
+      const approvals = await client.query<{
+        id: string
+        tool_call_id: string
+        turn_id: string
+        version: number
+      }>(`
+        UPDATE cosmos_approvals approval
+        SET status = 'canceled', decided_by = $4, decided_at = $5,
+            updated_at = $5, version = approval.version + 1
+        FROM cosmos_tool_calls tool_call
+        WHERE approval.organization_id = $1 AND approval.space_id = $2
+          AND approval.session_id = $3 AND approval.status = 'pending'
+          AND tool_call.organization_id = approval.organization_id
+          AND tool_call.space_id = approval.space_id
+          AND tool_call.session_id = approval.session_id
+          AND tool_call.id = approval.tool_call_id
+          AND tool_call.status = 'approval_required'
+        RETURNING approval.id, approval.tool_call_id, approval.turn_id, approval.version
+      `, [record.organizationId, record.spaceId, record.sessionId, record.actorId, occurredAt])
+      canceledApprovals = approvals.rows
+
+      const toolCalls = await client.query<{
+        id: string
+        turn_id: string
+        attempt_id: string
+        approval_id: string | null
+        tool_name: string
+        operation: string
+        risk_level: string
+        status: string
+        version: number
+      }>(`
+        UPDATE cosmos_tool_calls
+        SET status = 'canceled', completed_at = $4, version = version + 1
+        WHERE organization_id = $1 AND space_id = $2 AND session_id = $3
+          AND status IN ('queued', 'approval_required', 'running')
+        RETURNING id, turn_id, attempt_id, approval_id, tool_name, operation,
+          risk_level, status, version
+      `, [record.organizationId, record.spaceId, record.sessionId, occurredAt])
+      canceledToolCalls = toolCalls.rows
+    }
     if (record.action === 'pause') {
       const attempts = await client.query<{ id: string; turn_id: string; number: number }>(`
         UPDATE cosmos_attempts
@@ -1587,7 +1645,7 @@ export class PostgresSessionRepository implements SessionRepository {
       record.requestId,
     ])
 
-    const eventCount = 1 + canceledAttempts.length
+    const eventCount = 1 + canceledAttempts.length + canceledApprovals.length + canceledToolCalls.length
     const sequence = await client.query<{ first_sequence: string }>(`
       UPDATE cosmos_sessions
       SET last_event_sequence = last_event_sequence + $4
@@ -1647,6 +1705,119 @@ export class PostgresSessionRepository implements SessionRepository {
         record.actorId,
         record.actorKind,
         attempt.turn_id,
+        command.id,
+        record.requestId,
+        occurredAt,
+      ])
+    }
+    let nextSequence = firstSequence + canceledAttempts.length + 1
+    for (const approval of canceledApprovals) {
+      await client.query(`
+        INSERT INTO cosmos_session_events (
+          organization_id, space_id, session_id, event_id, sequence,
+          event_type, resource_type, resource_id, payload, actor_id,
+          actor_kind, turn_id, tool_call_id, approval_id, command_id,
+          request_id, occurred_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, 'approval.decided', 'approval', $6, $7::jsonb,
+          $8, $9, $10, $11, $6, $12, $13, $14
+        )
+      `, [
+        session.organizationId,
+        session.spaceId,
+        session.id,
+        this.createId(),
+        nextSequence++,
+        approval.id,
+        JSON.stringify({
+          approvalId: approval.id,
+          toolCallId: approval.tool_call_id,
+          recordedDecision: 'canceled',
+          status: 'canceled',
+          version: approval.version,
+        }),
+        record.actorId,
+        record.actorKind,
+        approval.turn_id,
+        approval.tool_call_id,
+        command.id,
+        record.requestId,
+        occurredAt,
+      ])
+      await client.query(`
+        INSERT INTO cosmos_outbox_events (
+          id, organization_id, space_id, session_id, aggregate_type,
+          aggregate_id, event_type, payload, occurred_at
+        ) VALUES ($1, $2, $3, $4, 'approval', $5, 'approval.decided', $6::jsonb, $7)
+      `, [
+        this.createId(), session.organizationId, session.spaceId, session.id,
+        approval.id, JSON.stringify({
+          sessionId: session.id,
+          toolCallId: approval.tool_call_id,
+          status: 'canceled',
+          version: approval.version,
+        }), occurredAt,
+      ])
+      await client.query(`
+        INSERT INTO cosmos_audit_events (
+          organization_id, audit_event_id, space_id, session_id, actor_id,
+          actor_kind, action, target_type, target_id, result, request_id,
+          idempotency_key_hash, policy_decision, policy_reason, before_state,
+          after_state, occurred_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, 'approval.decision', 'approval', $7,
+          'success', $8, $9, 'allow', $10, $11::jsonb, $12::jsonb, $13
+        )
+      `, [
+        session.organizationId,
+        this.createId(),
+        session.spaceId,
+        session.id,
+        record.actorId,
+        record.actorKind,
+        approval.id,
+        record.requestId,
+        idempotency.keyHash,
+        `parent_session_${record.action}_fences_pending_approval`,
+        JSON.stringify({ status: 'pending', version: approval.version - 1 }),
+        JSON.stringify({ status: 'canceled', version: approval.version }),
+        occurredAt,
+      ])
+    }
+    for (const toolCall of canceledToolCalls) {
+      await client.query(`
+        INSERT INTO cosmos_session_events (
+          organization_id, space_id, session_id, event_id, sequence,
+          event_type, resource_type, resource_id, payload, actor_id,
+          actor_kind, turn_id, attempt_id, tool_call_id, approval_id,
+          command_id, request_id, occurred_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, 'tool_call.updated', 'tool_call', $6, $7::jsonb,
+          $8, $9, $10, $11, $6, $12, $13, $14, $15
+        )
+      `, [
+        session.organizationId,
+        session.spaceId,
+        session.id,
+        this.createId(),
+        nextSequence++,
+        toolCall.id,
+        JSON.stringify({
+          toolCallId: toolCall.id,
+          turnId: toolCall.turn_id,
+          attemptId: toolCall.attempt_id,
+          toolName: toolCall.tool_name,
+          operation: toolCall.operation,
+          riskLevel: toolCall.risk_level,
+          status: 'canceled',
+          approvalId: toolCall.approval_id,
+          version: toolCall.version,
+        }),
+        record.actorId,
+        record.actorKind,
+        toolCall.turn_id,
+        toolCall.attempt_id,
+        toolCall.approval_id,
         command.id,
         record.requestId,
         occurredAt,

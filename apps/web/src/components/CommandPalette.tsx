@@ -21,7 +21,7 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import type { ArtifactDto } from '@cosmos/contracts'
+import type { ArtifactDto, SearchResultItemDto } from '@cosmos/contracts'
 import { usePreferences } from '../preferences'
 import type { Run } from '../types'
 import { IconButton } from './ui'
@@ -34,6 +34,7 @@ type CommandPaletteProps = {
   onClose: () => void
   onNewTask: () => void
   searchArtifacts?: (query: string, signal: AbortSignal) => Promise<ArtifactDto[]>
+  onSearch?: (query: string, signal: AbortSignal) => Promise<SearchResultItemDto[]>
 }
 
 type Command = {
@@ -53,21 +54,26 @@ export function CommandPalette({
   onClose,
   onNewTask,
   searchArtifacts,
+  onSearch,
 }: CommandPaletteProps) {
   const { locale } = usePreferences()
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
+  const [artifactResults, setArtifactResults] = useState<ArtifactDto[]>([])
+  const [globalSearchResults, setGlobalSearchResults] = useState<SearchResultItemDto[]>([])
   const dialogRef = useRef<HTMLElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const triggerRef = useRef<HTMLElement | null>(null)
   const copy = locale === 'zh'
-    ? { title: '搜索 Cosmos', placeholder: '查找页面、会话或运行命令…', navigation: '导航与命令', sessions: '会话', empty: '没有匹配结果', newSession: '新建会话', manual: '手动创建', open: '打开' }
-    : { title: 'Search Cosmos', placeholder: 'Find a page, session, or command…', navigation: 'Navigation and commands', sessions: 'Sessions', empty: 'No matching results', newSession: 'New session', manual: 'Create manually', open: 'Open' }
+    ? { title: '搜索 Cosmos', placeholder: '查找页面、会话或运行命令…', navigation: '导航与命令', sessions: '会话', empty: '没有匹配结果', newSession: '新建会话', manual: '手动创建', open: '打开', experts: '专家', artifacts: '产出物', environments: '环境', automations: '自动化' }
+    : { title: 'Search Cosmos', placeholder: 'Find a page, session, or command…', navigation: 'Navigation and commands', sessions: 'Sessions', empty: 'No matching results', newSession: 'New session', manual: 'Create manually', open: 'Open', experts: 'Experts', artifacts: 'Artifacts', environments: 'Environments', automations: 'Automations' }
   const artifactsTitle = locale === 'zh' ? '产出物' : 'Artifacts'
 
   const closePalette = useCallback(() => {
     setQuery('')
+    setArtifactResults([])
+    setGlobalSearchResults([])
     setActiveIndex(0)
     onClose()
   }, [onClose])
@@ -99,27 +105,27 @@ export function CommandPalette({
     { id: 'settings', label: locale === 'zh' ? '设置' : 'Settings', detail: locale === 'zh' ? '个人与组织' : 'Personal and organization', icon: Settings, keywords: 'settings preferences 设置', action: () => go('/settings') },
   ], [closePalette, copy.manual, copy.newSession, go, locale, onNewTask, prototypeNavigation, sessionCreationEnabled])
 
-  const [artifactResults, setArtifactResults] = useState<ArtifactDto[]>([])
   useEffect(() => {
-    if (!open || !searchArtifacts) return
+    if (!open) return
     const normalized = query.trim().toLocaleLowerCase()
+    if (normalized.length < 2) return
     const controller = new AbortController()
     const timer = window.setTimeout(() => {
-      if (normalized.length < 2) {
-        setArtifactResults([])
-        return
+      if (onSearch) {
+        onSearch(normalized, controller.signal).then((items) => {
+          if (!controller.signal.aborted) setGlobalSearchResults(items)
+        }, () => {})
+      } else if (searchArtifacts) {
+        searchArtifacts(normalized, controller.signal).then((items) => {
+          if (!controller.signal.aborted) setArtifactResults(items)
+        }, () => {})
       }
-      searchArtifacts(normalized, controller.signal).then((items) => {
-        if (!controller.signal.aborted) setArtifactResults(items)
-      }, () => {
-        /* Artifact search is best-effort inside the palette. */
-      })
-    }, 250)
+    }, 200)
     return () => {
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [open, query, searchArtifacts])
+  }, [onSearch, open, query, searchArtifacts])
 
   const artifactCommands = useMemo<Command[]>(() => artifactResults.slice(0, 8).map((artifact) => ({
     id: `artifact-${artifact.id}`,
@@ -129,6 +135,23 @@ export function CommandPalette({
     keywords: `${artifact.label} ${artifact.url} ${artifact.type}`,
     action: () => go(`/sessions/${artifact.sessionId}`),
   })), [artifactResults, go])
+
+  const globalSearchCommands = useMemo<Command[]>(() => globalSearchResults.map((item) => {
+    let icon = Bot
+    if (item.type === 'expert') icon = Sparkles
+    else if (item.type === 'artifact') icon = FolderGit2
+    else if (item.type === 'environment') icon = CloudCog
+    else if (item.type === 'automation') icon = Workflow
+
+    return {
+      id: `search-${item.type}-${item.id}`,
+      label: item.title,
+      detail: item.subtitle ?? item.type,
+      icon,
+      keywords: `${item.title} ${item.subtitle ?? ''} ${item.type}`,
+      action: () => go(item.url),
+    }
+  }), [globalSearchResults, go])
 
   const sessionCommands = useMemo<Command[]>(() => runs.slice(0, 12).map((run) => ({
     id: run.id,
@@ -140,18 +163,19 @@ export function CommandPalette({
   })), [go, runs])
 
   const normalizedQuery = query.trim().toLocaleLowerCase()
-  const { filteredNavigation, filteredSessions, filteredArtifacts } = useMemo(() => {
+  const { filteredNavigation, filteredSessions, filteredArtifacts, filteredSearchResults } = useMemo(() => {
     const matches = (command: Command) => !normalizedQuery
       || `${command.label} ${command.detail} ${command.keywords}`.toLocaleLowerCase().includes(normalizedQuery)
     return {
       filteredNavigation: navigationCommands.filter(matches),
       filteredSessions: sessionCommands.filter(matches),
       filteredArtifacts: normalizedQuery.length >= 2 ? artifactCommands.filter(matches) : [],
+      filteredSearchResults: globalSearchCommands,
     }
-  }, [artifactCommands, navigationCommands, normalizedQuery, sessionCommands])
+  }, [artifactCommands, globalSearchCommands, navigationCommands, normalizedQuery, sessionCommands])
   const commands = useMemo(
-    () => [...filteredNavigation, ...filteredSessions, ...filteredArtifacts],
-    [filteredArtifacts, filteredNavigation, filteredSessions],
+    () => [...filteredNavigation, ...filteredSearchResults, ...filteredSessions, ...filteredArtifacts],
+    [filteredArtifacts, filteredNavigation, filteredSearchResults, filteredSessions],
   )
   const safeActiveIndex = Math.min(activeIndex, Math.max(0, commands.length - 1))
 
@@ -239,7 +263,7 @@ export function CommandPalette({
           <IconButton icon={X} label={locale === 'zh' ? '关闭' : 'Close'} size="sm" onClick={closePalette} />
         </header>
         <div className="command-palette__results">
-          {commands.length ? <>{renderGroup(copy.navigation, filteredNavigation)}{renderGroup(copy.sessions, filteredSessions)}{renderGroup(artifactsTitle, filteredArtifacts)}</> : (
+          {commands.length ? <>{renderGroup(copy.navigation, filteredNavigation)}{renderGroup(locale === 'zh' ? '搜索结果' : 'Search Results', filteredSearchResults)}{renderGroup(copy.sessions, filteredSessions)}{renderGroup(artifactsTitle, filteredArtifacts)}</> : (
             <div className="command-palette__empty"><Search aria-hidden="true" /><span>{copy.empty}</span></div>
           )}
         </div>

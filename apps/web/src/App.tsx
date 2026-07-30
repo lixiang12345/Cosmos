@@ -55,6 +55,7 @@ import {
   deleteSessionArtifact,
   createSessionShare,
   revokeSessionShare,
+  searchCosmos,
   sendSessionMessage,
   startSession,
 } from './services/cosmosApi'
@@ -2061,6 +2062,11 @@ function CosmosApp() {
     })
   }
 
+  const handleGlobalSearch = useCallback((query: string, signal: AbortSignal) => {
+    if (demoMode) return Promise.resolve([])
+    return searchCosmos(organizationId, activeSpace.id, query, catalogAuth, signal)
+  }, [activeSpace.id, catalogAuth, demoMode, organizationId])
+
   return (
     <div className={`app-shell${sidebarCollapsed ? ' app-shell--sidebar-collapsed' : ''}`}>
       <Sidebar
@@ -2454,7 +2460,7 @@ function CosmosApp() {
         />
       ) : null}
 
-      <CommandPalette open={commandOpen} runs={scopedRuns} prototypeNavigation={demoMode} sessionCreationEnabled={sessionCreationEnabled} onClose={() => setCommandOpen(false)} onNewTask={() => openNewTask()} searchArtifacts={searchArtifacts} />
+      <CommandPalette open={commandOpen} runs={scopedRuns} prototypeNavigation={demoMode} sessionCreationEnabled={sessionCreationEnabled} onClose={() => setCommandOpen(false)} onNewTask={() => openNewTask()} searchArtifacts={searchArtifacts} onSearch={handleGlobalSearch} />
 
       {toast ? (
         <div className="toast" role="status">
